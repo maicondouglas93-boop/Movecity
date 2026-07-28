@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: uber-demo-backend
+    env: node
+    plan: free
+    rootDir: Backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        value: uber-production-secret-key-9999
+      - key: DB_CONNECT
+        value: mongodb+srv://sukumar:sukumar123@cluster0.b4pieja.mongodb.net/uberDemo?appName=Cluster0
+      - key: GOOGLE_MAPS_API
+        value: dummy-google-maps-api-key

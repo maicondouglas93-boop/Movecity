@@ -13,12 +13,11 @@ const transactionSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
-        enum: ['commission', 'recharge', 'withdraw', 'bonus', 'adjustment', 'ride_payment']
+        enum: ['commission', 'recharge', 'withdraw', 'payout', 'bonus', 'adjustment', 'ride_payment']
     },
     paymentMethod: {
         type: String,
-        required: true,
-        enum: ['cash', 'pix', 'wallet']
+        enum: ['cash', 'pix', 'wallet', 'card']
     },
     amount: {
         type: Number,
@@ -35,6 +34,12 @@ const transactionSchema = new mongoose.Schema({
     description: {
         type: String,
         required: true
+    },
+    reason: {
+        type: String, // Obrigatório para ajustes manuais
+    },
+    adminId: {
+        type: String // Registra o Admin que fez a movimentação manual
     },
     status: {
         type: String,

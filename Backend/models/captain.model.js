@@ -84,7 +84,16 @@ const captainSchema = new mongoose.Schema({
         keyType: { type: String, enum: ['cpf', 'celular', 'email', 'aleatoria'] },
         key: { type: String }
     },
-
+    bankDetails: {
+        bankName: { type: String },
+        bankAgency: { type: String },
+        bankAccount: { type: String },
+        accountType: { type: String, enum: ['corrente', 'poupanca'] }
+    },
+    canReceiveRides: {
+        type: Boolean,
+        default: true
+    },
     status: {
         type: String,
         enum: [ 'active', 'inactive' ],

@@ -4,7 +4,7 @@ const { getCache, setCache } = require('../cache/cache');
 module.exports.createUser = async ({
     firstname, lastname, email, password, profilePicture, cpf, phone
 }) => {
-    if (!firstname || !email || !password || !cpf || !phone) {
+    if (!firstname || !email || !password) {
         throw new Error('All fields are required');
     }
     const user = userModel.create({

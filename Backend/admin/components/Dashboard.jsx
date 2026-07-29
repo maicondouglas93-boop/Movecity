@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 
 const Dashboard = (props) => {
     const data = props.data || {};
-    const {
         ridesToday = 0,
         ridesWeek = 0,
         ridesMonth = 0,
@@ -10,14 +9,22 @@ const Dashboard = (props) => {
         onlineCaptains = 0,
         totalUsers = 0,
         totalRevenue = 0,
+        todayRevenue = 0,
+        weekRevenue = 0,
+        monthRevenue = 0,
+        ticketMedio = 0,
+        cancelledRidesToday = 0,
+        totalCommission = 0,
+        totalCreditsSold = 0,
+        totalPayoutPending = 0,
+        totalPayoutPaid = 0,
         platformCommission = 0,
         driverPayouts = 0,
         activeCaptainsList = [],
         activeRidesList = [],
         paymentsSummary = { completed: 0, pending: 0, refunded: 0 },
-        paymentMethods = { card: 0, cash: 0, upi: 0 },
+        paymentMethods = { card: 0, cash: 0, pix: 0 },
         vehicleBreakdown = { car: 0, moto: 0, auto: 0 }
-    } = data;
 
     useEffect(() => {
         // Carrega as dependências do Leaflet dinamicamente se necessário
@@ -143,7 +150,7 @@ const Dashboard = (props) => {
                         <span style={iconBadgeStyle('rgba(59, 130, 246, 0.1)', '#60a5fa')}>🚗</span>
                     </div>
                     <div style={cardValueStyle}>{ridesToday}</div>
-                    <div style={cardFooterStyle}>Semana: {ridesWeek} | Mês: {ridesMonth}</div>
+                    <div style={cardFooterStyle}>Canceladas: {cancelledRidesToday} | Semana: {ridesWeek}</div>
                 </div>
 
                 {/* Corridas em Andamento */}
@@ -255,12 +262,12 @@ const Dashboard = (props) => {
                 
                 {/* Revenue & Driver Payouts */}
                 <div style={panelStyle}>
-                    <h3 style={panelTitleStyle}>💰 Demonstrativo Financeiro (DRE)</h3>
+                    <h3 style={panelTitleStyle}>💰 Resumo Financeiro</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '20px' }}>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', backgroundColor: '#09090b', borderRadius: '16px', border: '1px solid #27272a' }}>
                             <div>
-                                <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: '700', letterSpacing: '0.05em' }}>RECEITA BRUTA (100%)</span>
+                                <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: '700', letterSpacing: '0.05em' }}>RECEITA HISTÓRICA</span>
                                 <div style={{ fontSize: '26px', fontWeight: '800', color: '#fafafa', marginTop: '4px' }}>
                                     {formatCurrency(totalRevenue)}
                                 </div>
@@ -268,47 +275,71 @@ const Dashboard = (props) => {
                             <span style={{ fontSize: '32px', filter: 'drop-shadow(0 0 10px rgba(255,255,255,0.1))' }}>💵</span>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderRadius: '16px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                            <div>
-                                <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: '700', letterSpacing: '0.05em' }}>COMISSÃO PLATAFORMA (20%)</span>
-                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#22c55e', marginTop: '4px' }}>
-                                    {formatCurrency(platformCommission)}
-                                </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: '700', letterSpacing: '0.05em' }}>RECEITA HOJE</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#22c55e', marginTop: '4px' }}>{formatCurrency(todayRevenue)}</div>
                             </div>
-                            <span style={{ fontSize: '32px', filter: 'drop-shadow(0 0 10px rgba(34,197,94,0.3))' }}>🏦</span>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#60a5fa', fontWeight: '700', letterSpacing: '0.05em' }}>TICKET MÉDIO (HOJE)</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#3b82f6', marginTop: '4px' }}>{formatCurrency(ticketMedio)}</div>
+                            </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '16px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                            <div>
-                                <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', letterSpacing: '0.05em' }}>REPASSE MOTORISTAS (80%)</span>
-                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#3b82f6', marginTop: '4px' }}>
-                                    {formatCurrency(driverPayouts)}
-                                </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(168, 85, 247, 0.05)', borderRadius: '12px', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: '700', letterSpacing: '0.05em' }}>RECEITA SEMANA</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#a855f7', marginTop: '4px' }}>{formatCurrency(weekRevenue)}</div>
                             </div>
-                            <span style={{ fontSize: '32px', filter: 'drop-shadow(0 0 10px rgba(59,130,246,0.3))' }}>💳</span>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(236, 72, 153, 0.05)', borderRadius: '12px', border: '1px solid rgba(236, 72, 153, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#f472b6', fontWeight: '700', letterSpacing: '0.05em' }}>RECEITA MÊS</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#ec4899', marginTop: '4px' }}>{formatCurrency(monthRevenue)}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#60a5fa', fontWeight: '700', letterSpacing: '0.05em' }}>COMISSÃO ARRECADADA</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#3b82f6', marginTop: '4px' }}>{formatCurrency(totalCommission)}</div>
+                            </div>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(139, 92, 246, 0.05)', borderRadius: '12px', border: '1px solid rgba(139, 92, 246, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#a78bfa', fontWeight: '700', letterSpacing: '0.05em' }}>CRÉDITOS VENDIDOS</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#8b5cf6', marginTop: '4px' }}>{formatCurrency(totalCreditsSold)}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '12px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#fbbf24', fontWeight: '700', letterSpacing: '0.05em' }}>REPASSE PENDENTE</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#f59e0b', marginTop: '4px' }}>{formatCurrency(totalPayoutPending)}</div>
+                            </div>
+                            <div style={{ padding: '16px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                                <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: '700', letterSpacing: '0.05em' }}>JÁ REPASSADO</span>
+                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#22c55e', marginTop: '4px' }}>{formatCurrency(totalPayoutPaid)}</div>
+                            </div>
                         </div>
 
                     </div>
                 </div>
 
-                {/* Payment Statuses Audit */}
+                {/* Payment Breakdown */}
                 <div style={panelStyle}>
-                    <h3 style={panelTitleStyle}>💳 Status dos Pagamentos</h3>
+                    <h3 style={panelTitleStyle}>💳 Formas de Pagamento</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '20px' }}>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderRadius: '16px', border: '1px solid rgba(34, 197, 94, 0.1)' }}>
-                            <span style={{ fontWeight: '600', color: '#4ade80' }}>✅ Concluídos (`completed`)</span>
-                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#22c55e' }}>{paymentsSummary.completed}</span>
+                            <span style={{ fontWeight: '600', color: '#4ade80' }}>💸 Dinheiro</span>
+                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#22c55e' }}>{paymentMethods.cash}</span>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '16px', border: '1px solid rgba(245, 158, 11, 0.1)' }}>
-                            <span style={{ fontWeight: '600', color: '#fbbf24' }}>⏳ Pendentes (`pending`)</span>
-                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#f59e0b' }}>{paymentsSummary.pending}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', backgroundColor: 'rgba(16, 185, 129, 0.05)', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
+                            <span style={{ fontWeight: '600', color: '#34d399' }}>💠 Pix</span>
+                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#10b981' }}>{paymentMethods.pix}</span>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', backgroundColor: 'rgba(239, 68, 68, 0.05)', borderRadius: '16px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-                            <span style={{ fontWeight: '600', color: '#f87171' }}>🔄 Estornos (`refunded`)</span>
-                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#ef4444' }}>{paymentsSummary.refunded}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '16px', border: '1px solid rgba(59, 130, 246, 0.1)' }}>
+                            <span style={{ fontWeight: '600', color: '#60a5fa' }}>💳 Cartão</span>
+                            <span style={{ fontSize: '22px', fontWeight: '800', color: '#3b82f6' }}>{paymentMethods.card}</span>
                         </div>
 
                     </div>

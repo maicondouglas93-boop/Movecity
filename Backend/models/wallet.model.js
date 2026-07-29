@@ -7,15 +7,19 @@ const walletSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    balance: {
-        type: Number,
-        default: 0
-    },
-    blockedBalance: {
+    creditBalance: {
         type: Number,
         default: 0
     },
     pendingBalance: {
+        type: Number,
+        default: 0
+    },
+    totalEarned: {
+        type: Number,
+        default: 0
+    },
+    totalCommissionPaid: {
         type: Number,
         default: 0
     }

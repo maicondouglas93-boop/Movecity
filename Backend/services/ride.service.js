@@ -4,8 +4,9 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { getCache, setCache } = require('../cache/cache');
 
-async function getFare(pickup, destination) {
+const PricingEngine = require('./pricingEngine.service');
 
+async function getFare(pickup, destination) {
     if (!pickup || !destination) {
         throw new Error('Pickup and destination are required');
     }
@@ -15,99 +16,106 @@ async function getFare(pickup, destination) {
     if (cached) return cached;
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
+    const distance = distanceTime.distance.value;
+    const time = distanceTime.duration.value;
 
-    const baseFare = {
-        auto: 30,
-        car: 50,
-        moto: 20
-    };
+    const VehicleCategory = require('../models/vehicleCategory.model');
+    const categories = await VehicleCategory.find({ isActive: true });
 
-    const perKmRate = {
-        auto: 10,
-        car: 15,
-        moto: 8
-    };
+    if (categories.length === 0) {
+        throw new Error("Nenhuma categoria de veículo ativa configurada.");
+    }
 
-    const perMinuteRate = {
-        auto: 2,
-        car: 3,
-        moto: 1.5
-    };
+    const fare = {};
+    const fareCard = {};
+    const fareBreakdownData = {};
 
-    const fare = {
-        auto: Math.round(baseFare.auto + ((distanceTime.distance.value / 1000) * perKmRate.auto) + ((distanceTime.duration.value / 60) * perMinuteRate.auto)),
-        car: Math.round(baseFare.car + ((distanceTime.distance.value / 1000) * perKmRate.car) + ((distanceTime.duration.value / 60) * perMinuteRate.car)),
-        moto: Math.round(baseFare.moto + ((distanceTime.distance.value / 1000) * perKmRate.moto) + ((distanceTime.duration.value / 60) * perMinuteRate.moto))
-    };
+    for (const cat of categories) {
+        // Simulação Dinheiro
+        const cashCalc = await PricingEngine.calculateFare({
+            distance,
+            time,
+            vehicleType: cat.name,
+            paymentMethod: 'cash'
+        });
+        fare[cat.name] = cashCalc.finalFare;
+        
+        // Salva breakdown do dinheiro para referência
+        fareBreakdownData[cat.name] = cashCalc.fareBreakdown;
 
-    const maxDistance = distanceTime.distance.value + 1000; // +1km extra for max price
-    const fareMax = {
-        auto: Math.round(baseFare.auto + ((maxDistance / 1000) * perKmRate.auto) + ((distanceTime.duration.value / 60) * perMinuteRate.auto)),
-        car: Math.round(baseFare.car + ((maxDistance / 1000) * perKmRate.car) + ((distanceTime.duration.value / 60) * perMinuteRate.car)),
-        moto: Math.round(baseFare.moto + ((maxDistance / 1000) * perKmRate.moto) + ((distanceTime.duration.value / 60) * perMinuteRate.moto))
-    };
+        // Simulação Cartão
+        const cardCalc = await PricingEngine.calculateFare({
+            distance,
+            time,
+            vehicleType: cat.name,
+            paymentMethod: 'card'
+        });
+        fareCard[cat.name] = cardCalc.finalFare;
+    }
 
     const result = {
         fare,
-        fareMax,
-        distance: distanceTime.distance.value,
-        maxDistance,
-        time: distanceTime.duration.value,
-        polyline: distanceTime.polyline // ensure we pass polyline
+        fareMax: fare, // Mocking max until dynamic range is implemented
+        fareCard,
+        fareCardMax: fareCard, // Mocking max
+        distance,
+        time,
+        polyline: distanceTime.polyline,
+        breakdown: fareBreakdownData
     };
 
-    setCache(cacheKey, result, 1800); // 30 minutes
-
+    setCache(cacheKey, result, 1800);
     return result;
-
-
 }
 
 module.exports.getFare = getFare;
 
-
 function getOtp(num) {
     function generateOtp(num) {
-        const otp = crypto.randomInt(Math.pow(10, num - 1), Math.pow(10, num)).toString();
-        return otp;
+        return crypto.randomInt(Math.pow(10, num - 1), Math.pow(10, num)).toString();
     }
     return generateOtp(num);
 }
 
-
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType
+    user, pickup, destination, vehicleType, paymentMethod = 'cash'
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
     }
 
-    const estimatedData = await getFare(pickup, destination);
-    const estimatedDistance = estimatedData.distance;
-    const estimatedTime = estimatedData.time;
-    
-    // Set fixed commission at 10%
-    const commissionPercent = 10;
-    const estimatedPrice = estimatedData.fare[vehicleType];
-    const estimatedPriceMax = estimatedData.fareMax[vehicleType];
-    const commissionAmount = Math.round(estimatedPrice * (commissionPercent / 100));
+    // Calcular rota e tempo real
+    const distanceTime = await mapService.getDistanceTime(pickup, destination);
+    const distance = distanceTime.distance.value;
+    const time = distanceTime.duration.value;
 
-    const ride = rideModel.create({
+    // Usar o Pricing Engine Oficial
+    const pricing = await PricingEngine.calculateFare({
+        distance,
+        time,
+        vehicleType,
+        paymentMethod
+    });
+
+    const ride = await rideModel.create({
         user,
         pickup,
         destination,
         otp: getOtp(6),
-        fare: estimatedPrice,
+        fare: pricing.finalFare,
+        paymentMethod,
         vehicleType,
         status: 'requested',
-        estimatedDistance,
-        estimatedTime,
-        estimatedPriceMin: estimatedPrice,
-        estimatedPriceMax: estimatedPriceMax,
-        commissionPercent,
-        commissionAmount,
-        distance: estimatedDistance,
-        duration: estimatedTime
+        estimatedDistance: distance,
+        estimatedTime: time,
+        estimatedPriceMin: pricing.finalFare,
+        estimatedPriceMax: pricing.finalFare,
+        commissionPercent: pricing.fareBreakdown.platformCommission > 0 
+            ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0, // Fallback fallback calculation
+        commissionAmount: pricing.commissionAmount,
+        fareBreakdown: pricing.fareBreakdown,
+        distance,
+        duration: time
     })
 
     return ride;
@@ -213,24 +221,30 @@ module.exports.endRide = async ({ rideId, captain }) => {
     }
 
     const actualDistance = ride.actualDistance || 0;
-    // Calculate elapsed time in seconds (or mock if not tracked properly, we can use updatedAt - createdAt)
-    // Actually we don't have start time explicitly stored, let's use updatedAt - createdAt for now, or just fallback to estimatedTime if it's too fast.
+    // Calculate elapsed time in seconds
     let actualTimeSeconds = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 1000);
     if (actualTimeSeconds < 60) actualTimeSeconds = ride.estimatedTime; // Sanity check
 
-    const baseFare = { auto: 30, car: 50, moto: 20 };
-    const perKmRate = { auto: 10, car: 15, moto: 8 };
-    const perMinuteRate = { auto: 2, car: 3, moto: 1.5 };
-    const vType = ride.vehicleType || 'car';
-
-    const calcPrice = Math.round(
-        baseFare[vType] + 
-        ((actualDistance / 1000) * perKmRate[vType]) + 
-        ((actualTimeSeconds / 60) * perMinuteRate[vType])
-    );
-    
-    // Fallback to estimated price if for some reason distance is 0 (GPS issues)
-    const finalPrice = actualDistance > 0 ? calcPrice : ride.fare;
+    let finalPrice = ride.fare;
+    if (actualDistance > 0) {
+        try {
+            const pricing = await PricingEngine.calculateFare({
+                distance: actualDistance,
+                time: actualTimeSeconds,
+                vehicleType: ride.vehicleType,
+                paymentMethod: ride.paymentMethod
+            });
+            finalPrice = pricing.finalFare;
+            
+            // Atualizar o breakdown real se a distância foi maior
+            await rideModel.findByIdAndUpdate(rideId, {
+                fareBreakdown: pricing.fareBreakdown,
+                commissionAmount: pricing.commissionAmount
+            });
+        } catch (e) {
+            console.error("Erro recalculando tarifa no final da corrida:", e);
+        }
+    }
     
     await rideModel.findOneAndUpdate({
         _id: rideId
@@ -245,7 +259,6 @@ module.exports.endRide = async ({ rideId, captain }) => {
     return updatedRide;
 }
 
-// Driver clicks "Pagamento Recebido" — deducts commission from wallet
 module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
@@ -264,32 +277,61 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
         throw new Error('Ride not finished yet');
     }
 
-    if (ride.paymentStatus === 'completed') {
+    if (ride.paymentStatus === 'paid') {
         throw new Error('Payment already confirmed');
     }
 
-    // Deduct commission from driver's credit wallet
     const walletService = require('./wallet.service');
-    await walletService.createTransaction({
-        captainId: captain._id,
-        rideId: ride._id,
-        type: 'commission',
-        paymentMethod: 'wallet',
-        amount: ride.commissionAmount,
-        description: `Comissão corrida #${ride._id.toString().slice(-6)} (${ride.commissionPercent}%)`
-    });
+    const finalFare = ride.finalPrice || ride.fare;
 
-    // Mark payment as completed
+    if (ride.paymentMethod === 'card') {
+        // Se for cartão, credita o valor líquido no pendingBalance do motorista.
+        // A plataforma processou via Asaas.
+        const driverNetEarnings = finalFare - ride.commissionAmount;
+
+        // Registra o ganho da corrida
+        await walletService.createTransaction({
+            captainId: captain._id,
+            rideId: ride._id,
+            type: 'ride_payment',
+            paymentMethod: 'card',
+            amount: driverNetEarnings,
+            description: `Repasse da Corrida #${ride._id.toString().slice(-6)} (Cartão)`
+        });
+        
+    } else {
+        // Se for dinheiro ou pix, motorista fica com o valor total e descontamos a comissão
+        await walletService.createTransaction({
+            captainId: captain._id,
+            rideId: ride._id,
+            type: 'ride_payment',
+            paymentMethod: ride.paymentMethod,
+            amount: finalFare,
+            description: `Corrida #${ride._id.toString().slice(-6)} (${ride.paymentMethod})`
+        });
+
+        // Deduz a comissão do creditBalance
+        await walletService.createTransaction({
+            captainId: captain._id,
+            rideId: ride._id,
+            type: 'commission',
+            paymentMethod: 'wallet',
+            amount: ride.commissionAmount,
+            description: `Comissão corrida #${ride._id.toString().slice(-6)} (${ride.commissionPercent}%)`
+        });
+    }
+
+    // Mark payment as paid
     await rideModel.findOneAndUpdate({
         _id: rideId
     }, {
-        paymentStatus: 'completed'
+        paymentStatus: 'paid'
     });
 
     // Update captain stats
     const captainModel = require('../models/captain.model');
     await captainModel.findByIdAndUpdate(captain._id, {
-        $inc: { totalRides: 1, earnings: ride.finalPrice || ride.fare }
+        $inc: { totalRides: 1, earnings: finalFare }
     });
 
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');

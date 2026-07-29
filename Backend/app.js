@@ -15,10 +15,13 @@ const rideRoutes = require('./routes/ride.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const chatRoutes = require('./routes/chat.routes');
+const webhookRoutes = require('./routes/webhook.routes');
 
 const { adminRouter } = require('./admin/admin.config');
 
-connectToDb();
+if (process.env.NODE_ENV !== 'test') {
+    connectToDb();
+}
 
 app.use('/admin', adminRouter);
 
@@ -104,6 +107,7 @@ app.use('/rides', rideRoutes);
 app.use('/uploads', uploadRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/chat', chatRoutes);
+app.use('/webhooks', webhookRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

@@ -74,19 +74,30 @@ const rideSchema = new mongoose.Schema({
     commissionAmount: {
         type: Number,
     },
+    fareBreakdown: {
+        type: Object,
+        description: "Detalhamento de todos os fatores de preço (base, tempo, distância, chuva, etc)"
+    },
 
     paymentID: {
         type: String,
     },
     paymentStatus: {
         type: String,
-        enum: [ 'pending', 'completed', 'refunded' ],
+        enum: [ 'pending', 'paid', 'failed', 'refunded' ],
         default: 'pending',
     },
     paymentMethod: {
         type: String,
-        enum: [ 'card', 'cash', 'upi', 'wallet', 'pix' ],
+        enum: [ 'card', 'cash', 'pix' ],
         default: 'cash',
+    },
+    paymentGateway: {
+        type: String,
+        default: 'asaas'
+    },
+    gatewayTransactionId: {
+        type: String
     },
     orderId: {
         type: String,

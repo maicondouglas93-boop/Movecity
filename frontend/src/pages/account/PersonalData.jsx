@@ -23,7 +23,7 @@ const PersonalData = () => {
     const { addToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
-    const [photoPreview, setPhotoPreview] = useState(user?.photo || null);
+    const [photoPreview, setPhotoPreview] = useState(user?.profilePicture || user?.photo || null);
 
     const { register, handleSubmit, formState: { errors }, reset } = useForm({
         resolver: zodResolver(personalDataSchema),
@@ -62,7 +62,7 @@ const PersonalData = () => {
                     birthDate: profileData?.birthDate ? new Date(profileData.birthDate).toISOString().split('T')[0] : '',
                     gender: profileData?.gender || ''
                 });
-                if(profileData?.photo) setPhotoPreview(profileData.photo);
+                if(profileData?.profilePicture || profileData?.photo) setPhotoPreview(profileData.profilePicture || profileData.photo);
             } catch (error) {
                 console.log("Using local context data, API not ready.");
             } finally {

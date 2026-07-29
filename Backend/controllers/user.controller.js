@@ -123,8 +123,12 @@ module.exports.googleLogin = async (req, res, next) => {
                 firstname,
                 lastname,
                 email,
-                password: hashedPassword
+                password: hashedPassword,
+                profilePicture: picture || ''
             });
+        } else if (picture && user.profilePicture !== picture) {
+            user.profilePicture = picture;
+            await user.save();
         }
 
         // Generate our JWT

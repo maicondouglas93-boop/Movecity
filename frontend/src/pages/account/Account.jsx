@@ -13,7 +13,11 @@ const Account = () => {
                 <div className="flex items-center gap-4">
                     <div className="relative">
                         <div className="h-16 w-16 bg-white rounded-full flex items-center justify-center overflow-hidden border-2 border-green-200 shadow-sm">
-                            <i className="ri-user-fill text-3xl text-green-500"></i>
+                            {user?.profilePicture ? (
+                                <img src={user.profilePicture} alt="Profile" className="h-full w-full object-cover" />
+                            ) : (
+                                <i className="ri-user-fill text-3xl text-green-500"></i>
+                            )}
                         </div>
                         <div className="absolute bottom-0 right-0 bg-green-500 rounded-full h-6 w-6 flex items-center justify-center shadow-sm cursor-pointer" onClick={() => navigate('/profile')}>
                             <i className="ri-pencil-fill text-xs text-white"></i>

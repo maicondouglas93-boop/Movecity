@@ -12,6 +12,8 @@ const UserSignup = () => {
   const [ password, setPassword ] = useState('')
   const [ firstName, setFirstName ] = useState('')
   const [ lastName, setLastName ] = useState('')
+  const [ cpf, setCpf ] = useState('')
+  const [ phone, setPhone ] = useState('')
 
   const navigate = useNavigate()
   const { user, setUser } = useContext(UserDataContext)
@@ -51,6 +53,8 @@ const UserSignup = () => {
         firstname: firstName,
         lastname: lastName
       },
+      cpf: cpf,
+      phone: phone,
       email: email,
       password: password
     }
@@ -72,6 +76,8 @@ const UserSignup = () => {
     setEmail('')
     setFirstName('')
     setLastName('')
+    setCpf('')
+    setPhone('')
     setPassword('')
   }
   return (
@@ -104,6 +110,30 @@ const UserSignup = () => {
                 value={lastName}
                 onChange={(e) => {
                   setLastName(e.target.value)
+                }}
+              />
+            </div>
+
+            <h3 className='text-lg font-medium mb-2 text-gray-800'>Seus Documentos e Contato</h3>
+            <div className='flex gap-4 mb-7'>
+              <input
+                required
+                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                type="text"
+                placeholder='CPF (apenas números)'
+                value={cpf}
+                onChange={(e) => {
+                  setCpf(e.target.value)
+                }}
+              />
+              <input
+                required
+                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                type="text"
+                placeholder='Celular (ex: +5511999999999)'
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value)
                 }}
               />
             </div>

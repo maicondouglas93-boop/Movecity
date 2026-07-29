@@ -327,10 +327,20 @@ module.exports.getCurrentRide = async ({ user }) => {
         throw new Error('User is required');
     }
 
-    const ride = await rideModel.findOne({
+    let ride = await rideModel.findOne({
         user,
         status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
     }).populate('user').populate('captain');
+
+    // Auto-expire stale 'requested' rides (older than 10 minutes)
+    if (ride && ride.status === 'requested') {
+        const diffInMinutes = (Date.now() - new Date(ride.createdAt).getTime()) / 60000;
+        if (diffInMinutes > 10) {
+            ride.status = 'cancelled';
+            await ride.save();
+            ride = null;
+        }
+    }
 
     return ride;
 }

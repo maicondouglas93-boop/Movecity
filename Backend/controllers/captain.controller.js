@@ -12,7 +12,7 @@ module.exports.registerCaptain = async (req, res, next) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { fullname, email, password, vehicle } = req.body;
+    const { fullname, email, password, cpf, birthDate, phone, cnh, pix, vehicle } = req.body;
 
     const isCaptainAlreadyExist = await captainModel.findOne({ email });
 
@@ -28,10 +28,23 @@ module.exports.registerCaptain = async (req, res, next) => {
         lastname: fullname.lastname,
         email,
         password: hashedPassword,
+        cpf,
+        birthDate,
+        phone,
+        marca: vehicle.marca,
+        modelo: vehicle.modelo,
+        ano: vehicle.ano,
         color: vehicle.color,
         plate: vehicle.plate,
         capacity: vehicle.capacity,
-        vehicleType: vehicle.vehicleType
+        vehicleType: vehicle.vehicleType,
+        cnhNumber: cnh.number,
+        cnhCategory: cnh.category,
+        cnhExpiration: cnh.expiration,
+        cnhUf: cnh.uf,
+        cnhEar: cnh.ear,
+        pixKeyType: pix.keyType,
+        pixKey: pix.key
     });
 
     const token = captain.generateAuthToken();

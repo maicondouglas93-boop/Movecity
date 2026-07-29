@@ -6,6 +6,7 @@ import LiveTracking from '../components/LiveTracking'
 import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets'
 import { useToast } from '../context/ToastContext'
+import RideChat from '../components/RideChat'
 
 const Riding = () => {
     const location = useLocation()
@@ -25,6 +26,8 @@ const Riding = () => {
     const [ loading, setLoading ] = useState(false)
     const [ paid, setPaid ] = useState(false)
     const [ error, setError ] = useState('')
+    const [ isChatOpen, setIsChatOpen ] = useState(false)
+    const [ unreadCount, setUnreadCount ] = useState(0)
 
     useEffect(() => {
         if (!user || !user._id) return;
@@ -54,9 +57,48 @@ const Riding = () => {
                 'Escolha sua forma de pagamento abaixo'
             )
         }
+        
+        const handleReceiveMessage = (msg) => {
+            if (!isChatOpen) {
+                setUnreadCount(prev => prev + 1);
+                addToast('Nova mensagem do motorista', 'info');
+                
+                // Play notification sound
+                try {
+                    const audio = new Audio('/sounds/new-ride.wav');
+                    audio.play().catch(e => console.log(e));
+                } catch (e) {}
+            }
+        }
+        
         socket.on('ride-ended', handleRideEnded)
-        return () => socket.off('ride-ended', handleRideEnded)
-    }, [socket, ride])
+        socket.on('receive-message', handleReceiveMessage)
+        
+        return () => {
+            socket.off('ride-ended', handleRideEnded)
+            socket.off('receive-message', handleReceiveMessage)
+        }
+    }, [socket, ride, isChatOpen, addToast])
+    
+    // Reset unread count when chat opens
+    useEffect(() => {
+        if (isChatOpen) setUnreadCount(0);
+    }, [isChatOpen])
+    
+    // Fetch initial unread count
+    useEffect(() => {
+        const fetchUnread = async () => {
+            try {
+                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${ride?._id}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (response.data.chat) {
+                    setUnreadCount(response.data.chat.unreadUser || 0);
+                }
+            } catch (err) {}
+        };
+        if (ride?._id) fetchUnread();
+    }, [ride])
 
     async function handlePay() {
         setError('')
@@ -98,9 +140,22 @@ const Riding = () => {
 
     return (
         <div className='h-screen relative'>
-            <Link to='/home' className='fixed right-2 top-2 h-10 w-10 bg-white flex items-center justify-center rounded-full z-10 shadow'>
-                <i className="text-lg font-medium ri-home-5-line"></i>
-            </Link>
+            <div className='fixed right-2 top-2 z-10 flex flex-col gap-2'>
+                <Link to='/home' className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow'>
+                    <i className="text-lg font-medium ri-home-5-line"></i>
+                </Link>
+                <button 
+                    onClick={() => setIsChatOpen(true)}
+                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow relative'
+                >
+                    <i className="text-lg font-medium ri-chat-3-line"></i>
+                    {unreadCount > 0 && (
+                        <span className='absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold'>
+                            {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                    )}
+                </button>
+            </div>
 
             <div className='h-1/2'>
                 <LiveTracking ride={ride} />
@@ -301,6 +356,13 @@ const Riding = () => {
                     </div>
                 </div>
             )}
+
+            <RideChat 
+                ride={ride} 
+                isOpen={isChatOpen} 
+                onClose={() => setIsChatOpen(false)} 
+                currentUserType="user" 
+            />
         </div>
     )
 }

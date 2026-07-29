@@ -99,6 +99,56 @@ function initializeSocket(server) {
             }
         });
 
+        // Chat events
+        socket.on('join-chat', (data) => {
+            const { rideId } = data;
+            if (rideId) {
+                socket.join(`chat_${rideId}`);
+            }
+        });
+
+        socket.on('leave-chat', (data) => {
+            const { rideId } = data;
+            if (rideId) {
+                socket.leave(`chat_${rideId}`);
+            }
+        });
+
+        socket.on('send-message', (data) => {
+            const { rideId, message } = data;
+            if (rideId) {
+                socket.to(`chat_${rideId}`).emit('receive-message', message);
+            }
+        });
+
+        socket.on('message-delivered', (data) => {
+            const { rideId, messageId } = data;
+            if (rideId) {
+                socket.to(`chat_${rideId}`).emit('message-delivered', { messageId });
+            }
+        });
+
+        socket.on('message-read', (data) => {
+            const { rideId, messageId } = data;
+            if (rideId) {
+                socket.to(`chat_${rideId}`).emit('message-read', { messageId });
+            }
+        });
+
+        socket.on('typing-start', (data) => {
+            const { rideId, senderType } = data;
+            if (rideId) {
+                socket.to(`chat_${rideId}`).emit('typing-start', { senderType });
+            }
+        });
+
+        socket.on('typing-stop', (data) => {
+            const { rideId, senderType } = data;
+            if (rideId) {
+                socket.to(`chat_${rideId}`).emit('typing-stop', { senderType });
+            }
+        });
+
         socket.on('disconnect', async () => {
             console.log(`Client disconnected: ${socket.id}`);
             await userModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });

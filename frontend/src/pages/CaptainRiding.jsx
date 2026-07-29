@@ -9,6 +9,7 @@ import { CaptainDataContext } from '../context/CapatainContext'
 import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets'
 import { useToast } from '../context/ToastContext'
+import RideChat from '../components/RideChat'
 
 const CaptainRiding = () => {
 
@@ -21,6 +22,8 @@ const CaptainRiding = () => {
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
     const { addToast } = useToast()
+    const [ isChatOpen, setIsChatOpen ] = useState(false)
+    const [ unreadCount, setUnreadCount ] = useState(0)
 
     const showBrowserNotification = (title, body) => {
         if ('Notification' in window && Notification.permission === 'granted') {
@@ -112,9 +115,47 @@ const CaptainRiding = () => {
             )
             setTimeout(() => navigate('/captain-home'), 3500)
         }
+        
+        const handleReceiveMessage = (msg) => {
+            if (!isChatOpen) {
+                setUnreadCount(prev => prev + 1);
+                addToast('Nova mensagem do passageiro', 'info');
+                
+                try {
+                    const audio = new Audio('/sounds/new-ride.wav');
+                    audio.play().catch(e => console.log(e));
+                } catch (e) {}
+            }
+        }
+        
         socket.on('payment-completed', handlePaymentCompleted)
-        return () => socket.off('payment-completed', handlePaymentCompleted)
-    }, [socket, navigate, rideData, addToast])
+        socket.on('receive-message', handleReceiveMessage)
+        
+        return () => {
+            socket.off('payment-completed', handlePaymentCompleted)
+            socket.off('receive-message', handleReceiveMessage)
+        }
+    }, [socket, navigate, rideData, addToast, isChatOpen])
+    
+    // Reset unread count when chat opens
+    useEffect(() => {
+        if (isChatOpen) setUnreadCount(0);
+    }, [isChatOpen])
+    
+    // Fetch initial unread count
+    useEffect(() => {
+        const fetchUnread = async () => {
+            try {
+                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+                });
+                if (response.data.chat) {
+                    setUnreadCount(response.data.chat.unreadCaptain || 0);
+                }
+            } catch (err) {}
+        };
+        if (rideData?._id) fetchUnread();
+    }, [rideData])
 
     /* ── Slide-up panel animation ── */
     useGSAP(() => {
@@ -143,12 +184,25 @@ const CaptainRiding = () => {
             {/* Top bar */}
             <div className='absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-4 pointer-events-none'>
                 <img className='w-20 pointer-events-auto drop-shadow-md' src="/movecity-logo.png" alt="MoveCity" />
-                <Link
-                    to='/captain-home'
-                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md pointer-events-auto'
-                >
-                    <i className="text-lg ri-home-5-line"></i>
-                </Link>
+                <div className='flex flex-col gap-2 pointer-events-auto'>
+                    <Link
+                        to='/captain-home'
+                        className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md pointer-events-auto'
+                    >
+                        <i className="text-lg ri-home-5-line"></i>
+                    </Link>
+                    <button 
+                        onClick={() => setIsChatOpen(true)}
+                        className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md relative pointer-events-auto'
+                    >
+                        <i className="text-lg font-medium ri-chat-3-line"></i>
+                        {unreadCount > 0 && (
+                            <span className='absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-sm'>
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </span>
+                        )}
+                    </button>
+                </div>
             </div>
 
             {/* Bottom HUD — tap to open FinishRide panel */}
@@ -212,6 +266,13 @@ const CaptainRiding = () => {
                     to   { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
+            
+            <RideChat 
+                ride={rideData} 
+                isOpen={isChatOpen} 
+                onClose={() => setIsChatOpen(false)} 
+                currentUserType="captain" 
+            />
         </div>
     )
 }

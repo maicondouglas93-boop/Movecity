@@ -56,6 +56,11 @@ const CaptainDetails = () => {
     const [loadingToggle, setLoadingToggle] = useState(false);
 
     const toggleOnline = async () => {
+        if (captain.approvalStatus !== 'aprovado') {
+            alert('Você não pode ficar online até que seu cadastro seja aprovado.');
+            return;
+        }
+        
         setLoadingToggle(true);
         try {
             const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/toggle-online`, {
@@ -88,15 +93,18 @@ const CaptainDetails = () => {
                 <div className='text-right'>
                     <button 
                         onClick={toggleOnline}
-                        disabled={loadingToggle}
+                        disabled={loadingToggle || captain.approvalStatus !== 'aprovado'}
+                        title={captain.approvalStatus !== 'aprovado' ? 'Aprovação pendente' : ''}
                         className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors ${
-                            isOnline 
+                            captain.approvalStatus !== 'aprovado'
+                            ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-60'
+                            : isOnline 
                             ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                             : 'bg-red-100 text-red-700 hover:bg-red-200'
                         }`}
                     >
-                        <div className={`h-2 w-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                        <span className='text-sm'>{isOnline ? 'Online' : 'Offline'}</span>
+                        <div className={`h-2 w-2 rounded-full ${captain.approvalStatus !== 'aprovado' ? 'bg-gray-400' : isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                        <span className='text-sm'>{captain.approvalStatus !== 'aprovado' ? 'Pendente' : isOnline ? 'Online' : 'Offline'}</span>
                     </button>
                 </div>
             </div>

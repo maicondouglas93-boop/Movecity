@@ -14,6 +14,7 @@ const mapsRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const chatRoutes = require('./routes/chat.routes');
 
 const { adminRouter } = require('./admin/admin.config');
 
@@ -102,6 +103,7 @@ app.use('/maps', mapsRoutes);
 app.use('/rides', rideRoutes);
 app.use('/uploads', uploadRoutes);
 app.use('/notifications', notificationRoutes);
+app.use('/chat', chatRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

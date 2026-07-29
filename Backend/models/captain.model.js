@@ -26,12 +26,23 @@ const captainSchema = new mongoose.Schema({
         required: true,
         select: false,
     },
+    cpf: {
+        type: String,
+        unique: true,
+        sparse: true,
+        match: [ /^\d{11}$/, 'Please enter a valid 11-digit CPF' ]
+    },
+    birthDate: {
+        type: Date
+    },
     socketId: {
         type: String,
     },
 
     phone: {
         type: String,
+        required: true,
+        match: [ /^\+\d{10,15}$/, 'Please enter a valid E.164 phone number (e.g. +5511999999999)' ]
     },
 
     isBlocked: {
@@ -41,8 +52,8 @@ const captainSchema = new mongoose.Schema({
 
     approvalStatus: {
         type: String,
-        enum: [ 'pending', 'approved', 'rejected' ],
-        default: 'approved',
+        enum: [ 'iniciado', 'documentos_enviados', 'em_analise', 'aprovado', 'reprovado', 'suspenso', 'bloqueado' ],
+        default: 'iniciado',
     },
 
     rating: {
@@ -56,9 +67,22 @@ const captainSchema = new mongoose.Schema({
     },
 
     documents: {
-        cnh: { type: String },
-        crlv: { type: String },
-        photo: { type: String }
+        cnhFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
+        cnhBack: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
+        crlv: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
+        vehicleFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
+        selfie: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } }
+    },
+    cnh: {
+        number: { type: String },
+        category: { type: String },
+        expiration: { type: Date },
+        uf: { type: String },
+        ear: { type: Boolean, default: false }
+    },
+    pix: {
+        keyType: { type: String, enum: ['cpf', 'celular', 'email', 'aleatoria'] },
+        key: { type: String }
     },
 
     status: {
@@ -90,6 +114,15 @@ const captainSchema = new mongoose.Schema({
     },
 
     vehicle: {
+        marca: {
+            type: String
+        },
+        modelo: {
+            type: String
+        },
+        ano: {
+            type: Number
+        },
         color: {
             type: String,
             required: true,

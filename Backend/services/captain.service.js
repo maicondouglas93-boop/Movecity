@@ -2,10 +2,13 @@ const captainModel = require('../models/captain.model');
 const { getCache, setCache } = require('../cache/cache');
 
 module.exports.createCaptain = async ({
-    firstname, lastname, email, password, color, plate, capacity, vehicleType
+    firstname, lastname, email, password, cpf, birthDate, phone, 
+    color, plate, capacity, vehicleType, marca, modelo, ano,
+    cnhNumber, cnhCategory, cnhExpiration, cnhUf, cnhEar,
+    pixKeyType, pixKey
 }) => {
-    if (!firstname || !email || !password || !color || !plate || !capacity || !vehicleType) {
-        throw new Error('All fields are required');
+    if (!firstname || !email || !password || !color || !plate || !capacity || !vehicleType || !cpf || !phone || !cnhNumber || !pixKey) {
+        throw new Error('Required fields are missing');
     }
     const captain = captainModel.create({
         fullname: {
@@ -14,7 +17,24 @@ module.exports.createCaptain = async ({
         },
         email,
         password,
+        cpf,
+        birthDate,
+        phone,
+        cnh: {
+            number: cnhNumber,
+            category: cnhCategory,
+            expiration: cnhExpiration,
+            uf: cnhUf,
+            ear: cnhEar
+        },
+        pix: {
+            keyType: pixKeyType,
+            key: pixKey
+        },
         vehicle: {
+            marca,
+            modelo,
+            ano,
             color,
             plate,
             capacity,

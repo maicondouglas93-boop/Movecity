@@ -11,7 +11,7 @@ module.exports.registerUser = async (req, res, next) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { fullname, email, password } = req.body;
+        const { fullname, email, password, cpf, phone } = req.body;
 
         const isUserAlready = await userModel.findOne({ email });
 
@@ -25,7 +25,9 @@ module.exports.registerUser = async (req, res, next) => {
             firstname: fullname.firstname,
             lastname: fullname.lastname,
             email,
-            password: hashedPassword
+            password: hashedPassword,
+            cpf,
+            phone
         });
 
         const token = user.generateAuthToken();

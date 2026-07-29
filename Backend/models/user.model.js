@@ -25,6 +25,12 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: '',
     },
+    cpf: {
+        type: String,
+        unique: true,
+        sparse: true, // Allows null/missing for legacy users
+        match: [ /^\d{11}$/, 'Please enter a valid 11-digit CPF' ]
+    },
     password: {
         type: String,
         required: true,
@@ -35,6 +41,8 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
         type: String,
+        required: true,
+        match: [ /^\+\d{10,15}$/, 'Please enter a valid E.164 phone number (e.g. +5511999999999)' ]
     },
     isBlocked: {
         type: Boolean,

@@ -18,6 +18,8 @@ const notificationModel = require('../models/notification.model');
 const globalSettingModel = require('../models/globalSetting.model');
 const walletModel = require('../models/wallet.model');
 const transactionModel = require('../models/transaction.model');
+const payoutModel = require('../models/payout.model');
+const rechargeModel = require('../models/recharge.model');
 
 const { getCache, setCache } = require('../cache/cache');
 
@@ -130,6 +132,37 @@ const adminOptions = {
                             };
                         },
                         component: false,
+                    },
+                    manualAdjustment: {
+                        actionType: 'record',
+                        icon: 'DollarSign',
+                        label: 'Ajuste Manual',
+                        handler: async (request, response, context) => {
+                            // Este handler precisa receber os dados do form, mas em AdminJS a action precisa de um form customizado ou pegar os dados do request.payload
+                            // Para simplificar, poderíamos criar uma action customizada com componente, mas como estamos apenas listando:
+                            const { record, currentAdmin } = context;
+                            const amount = Number(request.payload?.amount || 0);
+                            const reason = request.payload?.reason || 'Ajuste administrativo';
+                            if (request.method === 'post' && amount !== 0) {
+                                const walletService = require('../services/wallet.service');
+                                await walletService.createTransaction({
+                                    captainId: record.params._id,
+                                    rideId: null,
+                                    type: 'adjustment',
+                                    paymentMethod: 'wallet',
+                                    amount: amount,
+                                    description: 'Ajuste administrativo de saldo',
+                                    adminId: currentAdmin?.email,
+                                    reason: reason
+                                });
+                                return {
+                                    record: record.toJSON(currentAdmin),
+                                    notice: { message: `Ajuste de R$ ${amount} realizado com sucesso.`, type: 'success' }
+                                };
+                            }
+                            return { record: record.toJSON(currentAdmin) };
+                        },
+                        component: false, // Pode ser aprimorado com um componente React depois para ter campos
                     }
                 }
             }
@@ -189,15 +222,75 @@ const adminOptions = {
             resource: walletModel,
             options: {
                 navigation: { name: 'Financeiro', icon: 'CreditCard' },
-                listProperties: ['captainId', 'balance', 'blockedBalance', 'pendingBalance', 'updatedAt']
+                listProperties: ['captainId', 'creditBalance', 'pendingBalance', 'totalEarned', 'totalCommissionPaid', 'updatedAt']
             }
         },
         {
             resource: transactionModel,
             options: {
                 navigation: { name: 'Financeiro', icon: 'FileText' },
-                listProperties: ['captainId', 'type', 'paymentMethod', 'amount', 'balanceAfter', 'status', 'createdAt'],
-                filterProperties: ['type', 'paymentMethod', 'status', 'captainId']
+                listProperties: ['captainId', 'type', 'paymentMethod', 'amount', 'balanceAfter', 'adminId', 'createdAt'],
+                filterProperties: ['type', 'paymentMethod', 'status', 'captainId'],
+                actions: {
+                    new: { isAccessible: false },
+                    edit: { isAccessible: false },
+                    delete: { isAccessible: false }
+                }
+            }
+        },
+        {
+            resource: payoutModel,
+            options: {
+                navigation: { name: 'Financeiro', icon: 'Briefcase' },
+                listProperties: ['captainId', 'amount', 'status', 'paidAt', 'adminId', 'createdAt'],
+                filterProperties: ['status', 'captainId'],
+                actions: {
+                    processPayout: {
+                        actionType: 'record',
+                        icon: 'Check',
+                        label: 'Processar (Marcar Pago)',
+                        handler: async (request, response, context) => {
+                            const { record, currentAdmin } = context;
+                            if (record.params.status === 'processing' || record.params.status === 'pendente') {
+                                await record.update({ 
+                                    status: 'paid', 
+                                    paidAt: new Date(), 
+                                    adminId: currentAdmin.email,
+                                    receipt: request.payload?.receipt || 'Pago via painel admin'
+                                });
+                                // Deduzir do pendingBalance do motorista!
+                                const walletService = require('../services/wallet.service');
+                                await walletService.createTransaction({
+                                    captainId: record.params.captainId,
+                                    rideId: null,
+                                    type: 'payout',
+                                    paymentMethod: 'wallet',
+                                    amount: record.params.amount,
+                                    description: `Repasse pago #${record.params._id.toString().slice(-6)}`,
+                                    adminId: currentAdmin?.email,
+                                    reason: 'Pagamento de Repasse aprovado'
+                                });
+                                return {
+                                    record: record.toJSON(currentAdmin),
+                                    notice: { message: 'Repasse processado com sucesso!', type: 'success' }
+                                };
+                            }
+                            return {
+                                record: record.toJSON(currentAdmin),
+                                notice: { message: 'Este repasse não está mais pendente.', type: 'error' }
+                            };
+                        },
+                        component: false
+                    }
+                }
+            }
+        },
+        {
+            resource: rechargeModel,
+            options: {
+                navigation: { name: 'Financeiro', icon: 'BatteryCharging' },
+                listProperties: ['captainId', 'amount', 'method', 'status', 'asaasInvoiceId', 'createdAt'],
+                filterProperties: ['status', 'method', 'captainId']
             }
         }
     ],
@@ -241,15 +334,44 @@ const adminOptions = {
                 const platformCommission = totalRevenue * 0.20;
                 const driverPayouts = totalRevenue * 0.80;
 
-                // Payment Statuses Count
-                const completedPayments = await rideModel.countDocuments({ paymentStatus: 'completed' });
-                const pendingPayments = await rideModel.countDocuments({ paymentStatus: 'pending' });
-                const refundedPayments = await rideModel.countDocuments({ paymentStatus: 'refunded' });
+                // Financeiro: Total recebido hoje
+                const todayRevenueResult = await rideModel.aggregate([
+                    { $match: { createdAt: { $gte: startOfToday }, paymentStatus: { $ne: 'refunded' } } },
+                    { $group: { _id: null, totalFare: { $sum: '$fare' } } }
+                ]);
+                const todayRevenue = todayRevenueResult[0]?.totalFare || 0;
+
+                // Financeiro: Comissões arrecadadas
+                const commissionResult = await transactionModel.aggregate([
+                    { $match: { type: 'commission' } },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const totalCommission = commissionResult[0]?.total || 0;
+
+                // Financeiro: Créditos vendidos (Recharges)
+                const rechargeResult = await transactionModel.aggregate([
+                    { $match: { type: 'recharge' } },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const totalCreditsSold = rechargeResult[0]?.total || 0;
+
+                // Financeiro: Pendente de repasse e já repassado
+                const payoutPendingResult = await payoutModel.aggregate([
+                    { $match: { status: 'processing' } },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const totalPayoutPending = payoutPendingResult[0]?.total || 0;
+
+                const payoutPaidResult = await payoutModel.aggregate([
+                    { $match: { status: 'paid' } },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const totalPayoutPaid = payoutPaidResult[0]?.total || 0;
 
                 // Payment Methods Count
                 const cardCount = await rideModel.countDocuments({ paymentMethod: 'card' });
                 const cashCount = await rideModel.countDocuments({ paymentMethod: 'cash' });
-                const upiCount = await rideModel.countDocuments({ paymentMethod: 'upi' });
+                const pixCount = await rideModel.countDocuments({ paymentMethod: 'pix' });
 
                 const carsCount = await captainModel.countDocuments({ 'vehicle.vehicleType': 'car' });
                 const motosCount = await captainModel.countDocuments({ 'vehicle.vehicleType': { $in: ['moto', 'motorcycle'] } });
@@ -281,7 +403,7 @@ const adminOptions = {
                     captain: r.captain?.fullname?.firstname || 'Motorista'
                 }));
 
-                return {
+                const dashboardStats = {
                     ridesToday: safeRidesToday,
                     ridesWeek: safeRidesWeek,
                     ridesMonth: safeRidesMonth,
@@ -289,6 +411,11 @@ const adminOptions = {
                     onlineCaptains: safeOnlineCaptains,
                     totalUsers,
                     totalRevenue,
+                    todayRevenue,
+                    totalCommission,
+                    totalCreditsSold,
+                    totalPayoutPending,
+                    totalPayoutPaid,
                     platformCommission,
                     driverPayouts,
                     activeCaptainsList,
@@ -301,7 +428,7 @@ const adminOptions = {
                     paymentMethods: {
                         card: cardCount,
                         cash: cashCount,
-                        upi: upiCount
+                        pix: pixCount
                     },
                     vehicleBreakdown: {
                         car: carsCount,

@@ -334,19 +334,47 @@ const adminOptions = {
     },
     rootPath: '/admin',
     branding: {
-        companyName: 'Uber Admin',
+        companyName: 'MoveCity Premium',
         logo: false,
         withMadeWithLove: false,
         theme: {
             colors: {
-                primary100: '#000000', // Preto absoluto
-                primary80: '#333333',
-                primary60: '#666666',
-                primary40: '#FFC043', // Amarelo Uber
-                primary20: '#FFE5A3',
-                accent: '#FFC043',
-                hoverBg: '#FFC043',
-                navOpenText: '#FFC043'
+                bg: '#09090b',
+                border: '#27272a',
+                container: '#18181b',
+                text: '#fafafa',
+                defaultText: '#fafafa',
+                navOpenText: '#fafafa',
+                primary100: '#22c55e', // Green 500
+                primary80: '#16a34a',
+                primary60: '#15803d',
+                primary40: '#166534',
+                primary20: '#14532d',
+                accent: '#22c55e',
+                hoverBg: '#27272a',
+                white: '#18181b',
+                grey100: '#fafafa',
+                grey80: '#a1a1aa',
+                grey60: '#71717a',
+                grey40: '#52525b',
+                grey20: '#3f3f46',
+                errorLight: '#450a0a',
+                error: '#ef4444',
+                successLight: '#052e16',
+                success: '#22c55e',
+                infoLight: '#1e3a8a',
+                info: '#3b82f6',
+                warningLight: '#451a03',
+                warning: '#f59e0b',
+            },
+            font: "'Inter', system-ui, sans-serif",
+            shadows: {
+                login: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
+                cardHover: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
+                drawer: '-2px 0 8px rgba(0, 0, 0, 0.5)',
+            },
+            borders: {
+                default: '1px solid #27272a',
             }
         }
     },

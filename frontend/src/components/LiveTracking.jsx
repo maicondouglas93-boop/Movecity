@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react'
+import React, { useState, useEffect, useRef, useContext, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { SocketContext } from '../context/SocketContext'
@@ -14,8 +14,6 @@ L.Icon.Default.mergeOptions({
     iconUrl: markerIcon,
     shadowUrl: markerShadow,
 });
-
-const center = null;
 
 const vehicleIcons = {
     car: L.divIcon({
@@ -149,47 +147,62 @@ const LiveTracking = (props) => {
     
     const { socket } = useContext(SocketContext);
     
-    const [ currentPosition, setCurrentPosition ] = useState(center);
+    // Use ref for current position to avoid re-renders that destroy the map
+    const currentPositionRef = useRef(null);
+    const [hasPosition, setHasPosition] = useState(false);
+    
     const [ captainPosition, setCaptainPosition ] = useState(null);
     const [ pickupCoords, setPickupCoords ] = useState(null);
     const [ destinationCoords, setDestinationCoords ] = useState(null);
     const [ routeCoords, setRouteCoords ] = useState([]);
-    const [ etaInfo, setEtaInfo ] = useState(null);
     const [ isFollowing, setIsFollowing ] = useState(true);
     
     const prevCaptainPosRef = useRef(null);
     const hasFitBoundsRef = useRef(false);
     const onMapCenterChangeRef = useRef(props.onMapCenterChange);
+    const routeCoordsRef = useRef([]);
+
+    // Keep routeCoordsRef in sync
+    useEffect(() => {
+        routeCoordsRef.current = routeCoords;
+    }, [routeCoords]);
 
     useEffect(() => {
         onMapCenterChangeRef.current = props.onMapCenterChange;
     }, [props.onMapCenterChange]);
 
+    // GPS tracking — updates ref without causing re-render
     useEffect(() => {
+        const updatePosition = (lat, lng) => {
+            currentPositionRef.current = { lat, lng };
+            
+            // Update marker position directly (no re-render)
+            if (markerInstanceRef.current) {
+                markerInstanceRef.current.setLatLng([lat, lng]);
+            }
+            
+            // Signal that we have a position (only once, to trigger map init)
+            if (!hasPosition) {
+                setHasPosition(true);
+            }
+        };
+
         navigator.geolocation.getCurrentPosition((position) => {
-            const { latitude, longitude } = position.coords;
-            setCurrentPosition({
-                lat: latitude,
-                lng: longitude
-            });
+            updatePosition(position.coords.latitude, position.coords.longitude);
         }, (error) => {
             console.error('Error getting location:', error);
-            // Fallback para São Paulo se o GPS falhar
-            setCurrentPosition({ lat: -23.5505, lng: -46.6333 });
+            // Fallback
+            updatePosition(-23.5505, -46.6333);
         });
 
         const watchId = navigator.geolocation.watchPosition((position) => {
-            const { latitude, longitude } = position.coords;
-            setCurrentPosition({
-                lat: latitude,
-                lng: longitude
-            });
+            updatePosition(position.coords.latitude, position.coords.longitude);
         }, (error) => {
             console.error('Error watching location:', error);
         });
 
         return () => navigator.geolocation.clearWatch(watchId);
-    }, []);
+    }, []); // Only once
 
     // Initialize captain position from ride details if available
     useEffect(() => {
@@ -340,45 +353,50 @@ const LiveTracking = (props) => {
         fetchRoute();
     }, [pickupCoords, destinationCoords, props.ride?.status]);
 
-    // Initialize map
+    // ====== MAP INITIALIZATION — RUNS ONLY ONCE ======
     useEffect(() => {
-        if (currentPosition && mapRef.current && !mapInstanceRef.current) {
-            const map = L.map(mapRef.current, {
-                zoomControl: false
-            }).setView([currentPosition.lat, currentPosition.lng], 15);
+        // Wait until we have a position and the DOM element
+        if (!hasPosition || !mapRef.current || mapInstanceRef.current) return;
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
+        const pos = currentPositionRef.current;
+        if (!pos) return;
 
-            const marker = L.marker([currentPosition.lat, currentPosition.lng], { icon: userPositionIcon }).addTo(map);
+        const map = L.map(mapRef.current, {
+            zoomControl: false
+        }).setView([pos.lat, pos.lng], 15);
 
-            mapInstanceRef.current = map;
-            markerInstanceRef.current = marker;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
 
-            map.on('moveend', () => {
-                if (onMapCenterChangeRef.current) {
-                    const center = map.getCenter();
-                    onMapCenterChangeRef.current({ lat: center.lat, lng: center.lng });
-                }
-            });
+        const marker = L.marker([pos.lat, pos.lng], { icon: userPositionIcon }).addTo(map);
 
-            // Force invalidateSize to fix gray screen on initial render
-            setTimeout(() => {
-                if (mapInstanceRef.current) {
-                    mapInstanceRef.current.invalidateSize();
-                }
-            }, 300);
+        mapInstanceRef.current = map;
+        markerInstanceRef.current = marker;
 
-            // Disable follow mode on user drag/interaction
-            map.on('dragstart', () => {
-                setIsFollowing(false);
-            });
-            map.on('zoomstart', () => {
-                setIsFollowing(false);
-            });
-        }
+        map.on('moveend', () => {
+            if (onMapCenterChangeRef.current) {
+                const center = map.getCenter();
+                onMapCenterChangeRef.current({ lat: center.lat, lng: center.lng });
+            }
+        });
 
+        // Fix gray tiles on initial render
+        setTimeout(() => {
+            if (mapInstanceRef.current) {
+                mapInstanceRef.current.invalidateSize();
+            }
+        }, 300);
+
+        // Disable follow mode on user drag/interaction
+        map.on('dragstart', () => {
+            setIsFollowing(false);
+        });
+        map.on('zoomstart', () => {
+            setIsFollowing(false);
+        });
+
+        // Cleanup only on unmount
         return () => {
             if (mapInstanceRef.current) {
                 mapInstanceRef.current.remove();
@@ -390,35 +408,20 @@ const LiveTracking = (props) => {
                 routePolylineRef.current = null;
             }
         };
-    }, [currentPosition]);
-
-    // Reset fit bounds flag when a real GPS location is obtained for the first time
-    const [ isRealPosResolved, setIsRealPosResolved ] = useState(false);
-    useEffect(() => {
-        if (!isRealPosResolved && currentPosition) {
-            setIsRealPosResolved(true);
-            hasFitBoundsRef.current = false;
-            if (mapInstanceRef.current) {
-                mapInstanceRef.current.invalidateSize();
-            }
-        }
-    }, [currentPosition, isRealPosResolved]);
+    }, [hasPosition]); // Only when position first becomes available
 
     // Reset fit bounds flag when route or coordinates change
     useEffect(() => {
         hasFitBoundsRef.current = false;
-        if (mapInstanceRef.current) {
-            mapInstanceRef.current.invalidateSize();
-        }
     }, [pickupCoords, destinationCoords, routeCoords.length]);
 
     // Manual Re-center handler
-    const handleRecenter = () => {
+    const handleRecenter = useCallback(() => {
         if (!mapInstanceRef.current) return;
         mapInstanceRef.current.invalidateSize();
         const allCoords = [];
-        if (routeCoords.length > 0) {
-            allCoords.push(...routeCoords);
+        if (routeCoordsRef.current.length > 0) {
+            allCoords.push(...routeCoordsRef.current);
         }
         if (captainPosition && !isNaN(captainPosition.lat) && !isNaN(captainPosition.lng)) {
             allCoords.push([captainPosition.lat, captainPosition.lng]);
@@ -431,28 +434,25 @@ const LiveTracking = (props) => {
         }
         
         // Fallback to currentPosition only if no other coordinates exist
-        if (allCoords.length === 0 && currentPosition && !isNaN(currentPosition.lat) && !isNaN(currentPosition.lng)) {
-            allCoords.push([currentPosition.lat, currentPosition.lng]);
+        const pos = currentPositionRef.current;
+        if (allCoords.length === 0 && pos && !isNaN(pos.lat) && !isNaN(pos.lng)) {
+            allCoords.push([pos.lat, pos.lng]);
         }
 
         if (allCoords.length > 0) {
             try {
                 const bounds = L.latLngBounds(allCoords);
                 mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], animate: true });
-                setIsFollowing(true); // Re-enable follow mode on recenter
+                setIsFollowing(true);
             } catch (err) {
                 console.warn('Leaflet fitBounds error:', err);
             }
         }
-    };
+    }, [captainPosition, pickupCoords, destinationCoords]);
 
-    // Update markers and polyline
+    // Update markers and polyline when data changes
     useEffect(() => {
         if (!mapInstanceRef.current) return;
-
-        if (markerInstanceRef.current) {
-            markerInstanceRef.current.setLatLng([currentPosition.lat, currentPosition.lng]);
-        }
 
         if (pickupCoords) {
             if (pickupMarkerRef.current) {
@@ -520,8 +520,9 @@ const LiveTracking = (props) => {
                 }
                 
                 // Fallback to currentPosition only if no ride coordinates are set
-                if (boundsCoords.length === 0 && currentPosition && !isNaN(currentPosition.lat) && !isNaN(currentPosition.lng)) {
-                    boundsCoords.push([currentPosition.lat, currentPosition.lng]);
+                const pos = currentPositionRef.current;
+                if (boundsCoords.length === 0 && pos && !isNaN(pos.lat) && !isNaN(pos.lng)) {
+                    boundsCoords.push([pos.lat, pos.lng]);
                 }
                 
                 if (boundsCoords.length > 0) {
@@ -535,7 +536,7 @@ const LiveTracking = (props) => {
                 }
             }
         }
-    }, [currentPosition, pickupCoords, destinationCoords, routeCoords, captainPosition]);
+    }, [pickupCoords, destinationCoords, routeCoords, captainPosition]);
 
     // Update captain position marker smoothly with linear interpolation
     useEffect(() => {
@@ -576,14 +577,14 @@ const LiveTracking = (props) => {
                 captainMarkerInstanceRef.current.setLatLng([currentLat, currentLng]);
                 
                 // Auto pan if follow mode is active
-                if (isFollowing) {
+                if (isFollowing && mapInstanceRef.current) {
                     mapInstanceRef.current.panTo([currentLat, currentLng], { animate: false });
                 }
             }
 
             // Prune the route polyline smoothly on each animation frame
-            if (routePolylineRef.current && routeCoords.length > 0) {
-                const remainingRoute = getRemainingRoute(routeCoords, { lat: currentLat, lng: currentLng });
+            if (routePolylineRef.current && routeCoordsRef.current.length > 0) {
+                const remainingRoute = getRemainingRoute(routeCoordsRef.current, { lat: currentLat, lng: currentLng });
                 routePolylineRef.current.setLatLngs(remainingRoute);
             }
 
@@ -611,7 +612,7 @@ const LiveTracking = (props) => {
         ? calculateRouteDistance(getRemainingRoute(routeCoords, captainPosition)).toFixed(1)
         : null;
 
-    if (!currentPosition) {
+    if (!hasPosition) {
         return (
             <div className="w-full h-full flex items-center justify-center bg-gray-100">
                 <div className="flex flex-col items-center gap-2">

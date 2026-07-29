@@ -1,10 +1,10 @@
-import React, { useState, useContext, useEffect } from 'react'
+import React, { useState, useContext } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { UserDataContext } from '../context/UserContext'
 
 import { useToast } from '../context/ToastContext'
-import { getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { app } from '../firebase';
 
 const UserSignup = () => {
@@ -12,7 +12,6 @@ const UserSignup = () => {
   const [ password, setPassword ] = useState('')
   const [ firstName, setFirstName ] = useState('')
   const [ lastName, setLastName ] = useState('')
-  const [ userData, setUserData ] = useState({})
 
   const navigate = useNavigate()
   const { user, setUser } = useContext(UserDataContext)
@@ -21,33 +20,29 @@ const UserSignup = () => {
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
 
-  useEffect(() => {
-    const checkRedirect = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result) {
-          const user = result.user;
-          const idToken = await user.getIdToken();
-          
-          const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
-            idToken: idToken
-          })
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
 
-          if (response.status === 200 || response.status === 201) {
-            const data = response.data
-            setUser(data.user)
-            localStorage.setItem('token', data.token)
-            addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
-            navigate('/home')
-          }
-        }
-      } catch (error) {
-        console.error(error);
+      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
+        idToken: idToken
+      })
+
+      if (response.status === 200 || response.status === 201) {
+        const data = response.data
+        setUser(data.user)
+        localStorage.setItem('token', data.token)
+        addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
+        navigate('/home')
+      }
+    } catch (error) {
+      console.error('Google login error:', error);
+      if (error.code !== 'auth/popup-closed-by-user') {
         addToast('Erro ao realizar login com o Google', 'error');
       }
-    };
-    checkRedirect();
-  }, [auth, navigate, setUser, addToast]);
+    }
+  };
 
   const submitHandler = async (e) => {
     e.preventDefault()
@@ -150,7 +145,7 @@ const UserSignup = () => {
 
           <button
               type="button"
-              onClick={() => signInWithRedirect(auth, provider)}
+              onClick={handleGoogleLogin}
               className='bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold mb-5 rounded-xl px-4 py-3 w-full text-lg transition-colors flex items-center justify-center gap-3 shadow-sm'
           >
               <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className='w-6 h-6' />

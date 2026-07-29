@@ -2,15 +2,30 @@ import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { app } from '../firebase';
 import axios from 'axios';
 
-const messaging = getMessaging(app);
+let messaging = null;
+
+try {
+    messaging = getMessaging(app);
+} catch (error) {
+    console.warn('Firebase Messaging not supported in this environment:', error.message);
+}
 
 export const requestFCMToken = async () => {
+    if (!messaging) {
+        console.warn('Firebase Messaging is not available.');
+        return null;
+    }
+
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const currentToken = await getToken(messaging, { 
-                vapidKey: 'BOd912Gqg_pC--G3G-FfWJbA5x1tM-12x9vM12030' // Placeholder VAPID Key. (The user will need to replace this if using real push from console)
-            });
+            const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+            if (!vapidKey) {
+                console.warn('VAPID key not configured. Push notifications are disabled.');
+                return null;
+            }
+
+            const currentToken = await getToken(messaging, { vapidKey });
             if (currentToken) {
                 // Send token to backend
                 const token = localStorage.getItem('token') || localStorage.getItem('captain-token');
@@ -28,13 +43,16 @@ export const requestFCMToken = async () => {
             }
         }
     } catch (error) {
-        console.error('An error occurred while retrieving token. ', error);
+        console.warn('FCM token retrieval failed:', error.message);
     }
+    return null;
 };
 
 export const onMessageListener = () =>
     new Promise((resolve) => {
+        if (!messaging) return;
         onMessage(messaging, (payload) => {
             resolve(payload);
         });
     });
+

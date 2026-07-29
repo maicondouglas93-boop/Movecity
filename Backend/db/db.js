@@ -245,7 +245,7 @@ async function connectToDb() {
         }
     } catch (err) {
         if (process.env.NODE_ENV === 'production') {
-            console.error('Fatal Error: Unable to connect to MongoDB in production.');
+            console.error('Fatal Error: Unable to connect to MongoDB in production.', err.message);
             process.exit(1);
         }
         console.warn('Starting in-memory MongoDB fallback...');

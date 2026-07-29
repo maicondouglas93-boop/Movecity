@@ -20,6 +20,35 @@ const walletModel = require('../models/wallet.model');
 const transactionModel = require('../models/transaction.model');
 const payoutModel = require('../models/payout.model');
 const rechargeModel = require('../models/recharge.model');
+const tariffSettingModel = require('../models/tariffSetting.model');
+const vehicleCategoryModel = require('../models/vehicleCategory.model');
+const pricingRuleModel = require('../models/pricingRule.model');
+const tariffHistoryModel = require('../models/tariffHistory.model');
+
+const createAuditLog = async (response, request, context) => {
+    // Apenas rodar em requisições de mutação que deram certo
+    if (request.method !== 'get' && response.record && !response.record.errors) {
+        const action = context.action.name; // new, edit, delete
+        const entity = context.resource.id();
+        const adminEmail = context.currentAdmin?.email || 'unknown';
+        const ip = request.ip || 'unknown';
+        const browser = request.headers?.['user-agent'] || 'unknown';
+        
+        try {
+            await tariffHistoryModel.create({
+                admin: adminEmail,
+                ip: ip,
+                browser: browser,
+                action: action === 'new' ? 'create' : action === 'edit' ? 'update' : 'delete',
+                entity: entity,
+                newValue: response.record.params,
+            });
+        } catch(e) {
+            console.error("Erro ao salvar log de auditoria", e);
+        }
+    }
+    return response;
+};
 
 const { getCache, setCache } = require('../cache/cache');
 
@@ -292,6 +321,50 @@ const adminOptions = {
                 listProperties: ['captainId', 'amount', 'method', 'status', 'asaasInvoiceId', 'createdAt'],
                 filterProperties: ['status', 'method', 'captainId']
             }
+        },
+        {
+            resource: tariffSettingModel,
+            options: {
+                navigation: { name: 'Tarifas', icon: 'Settings' },
+                actions: {
+                    new: { isAccessible: false },
+                    delete: { isAccessible: false },
+                    edit: { after: [createAuditLog] }
+                }
+            }
+        },
+        {
+            resource: vehicleCategoryModel,
+            options: {
+                navigation: { name: 'Tarifas', icon: 'Truck' },
+                actions: {
+                    new: { after: [createAuditLog] },
+                    edit: { after: [createAuditLog] },
+                    delete: { after: [createAuditLog] }
+                }
+            }
+        },
+        {
+            resource: pricingRuleModel,
+            options: {
+                navigation: { name: 'Tarifas', icon: 'Sliders' },
+                actions: {
+                    new: { after: [createAuditLog] },
+                    edit: { after: [createAuditLog] },
+                    delete: { after: [createAuditLog] }
+                }
+            }
+        },
+        {
+            resource: tariffHistoryModel,
+            options: {
+                navigation: { name: 'Tarifas', icon: 'Clock' },
+                actions: {
+                    new: { isAccessible: false },
+                    edit: { isAccessible: false },
+                    delete: { isAccessible: false }
+                }
+            }
         }
     ],
     dashboard: {
@@ -334,12 +407,28 @@ const adminOptions = {
                 const platformCommission = totalRevenue * 0.20;
                 const driverPayouts = totalRevenue * 0.80;
 
-                // Financeiro: Total recebido hoje
+                // Financeiro: Total recebido hoje, semana e mês
                 const todayRevenueResult = await rideModel.aggregate([
                     { $match: { createdAt: { $gte: startOfToday }, paymentStatus: { $ne: 'refunded' } } },
-                    { $group: { _id: null, totalFare: { $sum: '$fare' } } }
+                    { $group: { _id: null, totalFare: { $sum: '$fare' }, count: { $sum: 1 }, avgFare: { $avg: '$fare' } } }
                 ]);
                 const todayRevenue = todayRevenueResult[0]?.totalFare || 0;
+                
+                const weekRevenueResult = await rideModel.aggregate([
+                    { $match: { createdAt: { $gte: startOfWeek }, paymentStatus: { $ne: 'refunded' } } },
+                    { $group: { _id: null, totalFare: { $sum: '$fare' } } }
+                ]);
+                const weekRevenue = weekRevenueResult[0]?.totalFare || 0;
+
+                const monthRevenueResult = await rideModel.aggregate([
+                    { $match: { createdAt: { $gte: startOfMonth }, paymentStatus: { $ne: 'refunded' } } },
+                    { $group: { _id: null, totalFare: { $sum: '$fare' } } }
+                ]);
+                const monthRevenue = monthRevenueResult[0]?.totalFare || 0;
+                
+                const ticketMedio = todayRevenueResult[0]?.avgFare || 0;
+                
+                const cancelledRidesToday = await rideModel.countDocuments({ status: 'cancelled', createdAt: { $gte: startOfToday } });
 
                 // Financeiro: Comissões arrecadadas
                 const commissionResult = await transactionModel.aggregate([
@@ -412,6 +501,10 @@ const adminOptions = {
                     totalUsers,
                     totalRevenue,
                     todayRevenue,
+                    weekRevenue,
+                    monthRevenue,
+                    ticketMedio,
+                    cancelledRidesToday,
                     totalCommission,
                     totalCreditsSold,
                     totalPayoutPending,
@@ -460,6 +553,10 @@ const adminOptions = {
         component: AdminJS.bundle('./components/Dashboard.jsx')
     },
     pages: {
+        'Simulador de Corridas': {
+            component: AdminJS.bundle('./components/FareSimulator.jsx'),
+            icon: 'Activity',
+        },
         'Relatórios': {
             component: AdminJS.bundle('./components/Reports.jsx'),
             icon: 'BarChart2',
@@ -627,6 +724,30 @@ adminRouter.get('/api/reports', async (req, res) => {
     } catch (error) {
         console.error("Error generating reports:", error);
         res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+adminRouter.post('/api/simulate-fare', async (req, res) => {
+    try {
+        const { distance, time, vehicleType, paymentMethod, couponCode } = req.body;
+        
+        if (!distance || !time || !vehicleType) {
+            return res.status(400).json({ error: "Faltam parâmetros obrigatórios" });
+        }
+
+        const PricingEngine = require('../services/pricingEngine.service');
+        const pricing = await PricingEngine.calculateFare({
+            distance: Number(distance),
+            time: Number(time),
+            vehicleType,
+            paymentMethod,
+            couponCode
+        });
+
+        res.json(pricing);
+    } catch (error) {
+        console.error("Error simulating fare:", error);
+        res.status(500).json({ error: error.message || "Internal Server Error" });
     }
 });
 

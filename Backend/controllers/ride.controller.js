@@ -1,7 +1,7 @@
 const rideService = require('../services/ride.service');
 const { validationResult } = require('express-validator');
 const mapService = require('../services/maps.service');
-const { sendMessageToSocketId } = require('../socket');
+const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom } = require('../socket');
 const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
@@ -37,12 +37,15 @@ module.exports.createRide = async (req, res) => {
         const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
 
         matchingCaptains.map(captain => {
+            // Put captain in a room for this specific ride
+            addSocketToRoom(captain.socketId, `ride_${ride._id}`);
+            
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
-            })
+            });
             notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() });
-        })
+        });
 
         // Invalidate dashboard and user history cache
         deleteCache('dashboard:today');
@@ -304,6 +307,45 @@ module.exports.getRideHistory = async (req, res) => {
         setCache(cacheKey, responseData, 300);
 
         return res.status(200).json(responseData);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports.getCurrentRide = async (req, res) => {
+    try {
+        const ride = await rideService.getCurrentRide({ user: req.user._id });
+        if (!ride) {
+            return res.status(404).json({ message: 'No active ride found' });
+        }
+        return res.status(200).json(ride);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports.cancelRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const ride = await rideService.cancelRide({ rideId, user: req.user._id });
+
+        // Notify all captains in the room that the ride was cancelled
+        sendMessageToRoom(`ride_${ride._id}`, {
+            event: 'ride-cancelled',
+            data: { rideId: ride._id }
+        });
+
+        // Invalidate dashboard and history cache
+        deleteCache('dashboard:today');
+        deleteByPrefix(`history:${req.user._id}`);
+
+        return res.status(200).json(ride);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

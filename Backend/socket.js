@@ -118,4 +118,21 @@ console.log(messageObject);
     }
 }
 
-module.exports = { initializeSocket, sendMessageToSocketId };
+const addSocketToRoom = (socketId, roomName) => {
+    if (io) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket) {
+            socket.join(roomName);
+        }
+    }
+}
+
+const sendMessageToRoom = (roomName, messageObject) => {
+    if (io) {
+        io.to(roomName).emit(messageObject.event, messageObject.data);
+    } else {
+        console.log('Socket.io not initialized.');
+    }
+}
+
+module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom };

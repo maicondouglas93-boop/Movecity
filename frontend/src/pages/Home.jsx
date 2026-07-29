@@ -144,12 +144,49 @@ const Home = () => {
     useEffect(() => {
         if (!user || !user._id) return;
 
+        const fetchCurrentRide = async () => {
+            try {
+                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/current`, {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.status === 200 && response.data) {
+                    const currentRide = response.data;
+                    setRide(currentRide);
+                    
+                    if (currentRide.status === 'requested') {
+                        setVehiclePanel(false);
+                        setConfirmRidePanel(false);
+                        setVehicleFound(true); // Restore searching state
+                        setWaitingForDriver(false);
+                    } else if (['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(currentRide.status)) {
+                        setVehiclePanel(false);
+                        setConfirmRidePanel(false);
+                        setVehicleFound(false);
+                        setWaitingForDriver(true); // Restore waiting state
+                    }
+                }
+            } catch (err) {
+                // If 404 or error, we just stay in idle state (clean)
+                if (err.response?.status === 404) {
+                    setVehicleFound(false);
+                    setWaitingForDriver(false);
+                }
+            }
+        };
+
         const handleConnect = () => {
             socket.emit("join", { userType: "user", userId: user._id })
+            fetchCurrentRide()
         }
 
         if (socket.connected) {
             handleConnect()
+        } else {
+            // Also fetch immediately on mount if not connected yet
+            fetchCurrentRide()
         }
 
         socket.on('connect', handleConnect)
@@ -407,7 +444,31 @@ const Home = () => {
             headers: {
                 Authorization: `Bearer ${localStorage.getItem('token')}`
             }
-        })
+        });
+        
+        setRide(response.data);
+    }
+
+    async function cancelRide() {
+        if (!ride || !ride._id) return;
+        
+        addToast('Cancelando corrida...', 'info');
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
+                rideId: ride._id
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            addToast('Corrida cancelada.', 'success');
+            setVehicleFound(false);
+            setRide(null);
+            setPickup('');
+            setDestination('');
+        } catch (err) {
+            addToast('Erro ao cancelar corrida.', 'error');
+        }
     }
 
     return (
@@ -581,6 +642,7 @@ const Home = () => {
                     destination={destination}
                     fare={fare}
                     vehicleType={vehicleType}
+                    cancelRide={cancelRide}
                     setVehicleFound={setVehicleFound} />
             </div>
             <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>

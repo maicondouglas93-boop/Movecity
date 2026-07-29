@@ -147,11 +147,22 @@ const CaptainHome = () => {
 
         socket.on('new-ride', handleNewRide)
 
+        const handleRideCancelled = (data) => {
+            if (ride && ride._id === data.rideId) {
+                setRidePopupPanel(false)
+                setRide(null)
+                addToast('A corrida foi cancelada pelo passageiro.', 'info')
+            }
+        }
+        
+        socket.on('ride-cancelled', handleRideCancelled)
+
         return () => {
-            if (locationInterval) clearInterval(locationInterval)
-            if (simulationInterval) clearInterval(simulationInterval)
+            if (locationInterval) clearInterval(locationInterval);
+            if (simulationInterval) clearInterval(simulationInterval);
             socket.off('connect', handleConnect)
             socket.off('new-ride', handleNewRide)
+            socket.off('ride-cancelled', handleRideCancelled)
         }
     }, [captain, ride])
 

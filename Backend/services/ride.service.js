@@ -322,3 +322,40 @@ module.exports.payRide = async ({ rideId, user }) => {
     return ride;
 }
 
+module.exports.getCurrentRide = async ({ user }) => {
+    if (!user) {
+        throw new Error('User is required');
+    }
+
+    const ride = await rideModel.findOne({
+        user,
+        status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
+    }).populate('user').populate('captain');
+
+    return ride;
+}
+
+module.exports.cancelRide = async ({ rideId, user }) => {
+    if (!rideId || !user) {
+        throw new Error('Ride id and user are required');
+    }
+
+    const ride = await rideModel.findOne({
+        _id: rideId,
+        user
+    });
+
+    if (!ride) {
+        throw new Error('Ride not found');
+    }
+
+    if (['started', 'ongoing', 'completed', 'cancelled'].includes(ride.status)) {
+        throw new Error('Ride cannot be cancelled at this stage');
+    }
+
+    ride.status = 'cancelled';
+    await ride.save();
+
+    return ride;
+}
+

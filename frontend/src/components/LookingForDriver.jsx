@@ -56,6 +56,13 @@ const LookingForDriver = (props) => {
                         </div>
                     </div>
                 </div>
+                
+                <button 
+                    onClick={props.cancelRide} 
+                    className='w-full mt-4 bg-red-100 text-red-600 font-semibold p-3 rounded-lg active:bg-red-200 transition-colors border border-red-200'
+                >
+                    Cancelar Corrida
+                </button>
             </div>
         </div>
     )

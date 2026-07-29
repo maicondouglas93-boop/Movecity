@@ -13,6 +13,17 @@ router.post('/create',
     rideController.createRide
 )
 
+router.get('/current',
+    authMiddleware.authUser,
+    rideController.getCurrentRide
+)
+
+router.post('/cancel',
+    authMiddleware.authUser,
+    body('rideId').isMongoId().withMessage('Invalid ride id'),
+    rideController.cancelRide
+)
+
 router.get('/get-fare',
     authMiddleware.authUser,
     query('pickup').isString().isLength({ min: 3 }).withMessage('Invalid pickup address'),

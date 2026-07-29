@@ -235,7 +235,7 @@ async function connectToDb() {
 
     try {
         if (process.env.DB_CONNECT && !process.env.DB_CONNECT.includes('127.0.0.1')) {
-            await mongoose.connect(process.env.DB_CONNECT, { serverSelectionTimeoutMS: 3000 });
+            await mongoose.connect(process.env.DB_CONNECT);
             console.log('Connected to Remote MongoDB');
         } else {
             if (process.env.NODE_ENV === 'production') {

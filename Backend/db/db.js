@@ -225,14 +225,29 @@ async function connectToDb() {
         console.warn('DNS setServers failed:', err.message);
     }
 
+    mongoose.connection.on('error', err => {
+        console.error('Mongoose connection error:', err);
+    });
+
+    mongoose.connection.once('open', () => {
+        console.log("MongoDB conectado");
+    });
+
     try {
         if (process.env.DB_CONNECT && !process.env.DB_CONNECT.includes('127.0.0.1')) {
             await mongoose.connect(process.env.DB_CONNECT, { serverSelectionTimeoutMS: 3000 });
             console.log('Connected to Remote MongoDB');
         } else {
+            if (process.env.NODE_ENV === 'production') {
+                throw new Error('A conexão com o banco de dados falhou e fallbacks não são permitidos em produção.');
+            }
             throw new Error('Local MongoDB requested, starting MongoMemoryServer fallback');
         }
     } catch (err) {
+        if (process.env.NODE_ENV === 'production') {
+            console.error('Fatal Error: Unable to connect to MongoDB in production.');
+            process.exit(1);
+        }
         console.warn('Starting in-memory MongoDB fallback...');
         const mongoServer = await MongoMemoryServer.create();
         const mongoUri = mongoServer.getUri();

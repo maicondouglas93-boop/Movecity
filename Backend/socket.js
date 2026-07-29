@@ -7,11 +7,17 @@ const mapService = require('./services/maps.service');
 let io;
 
 function initializeSocket(server) {
+    const allowedOrigins = [
+        "http://localhost:5173",
+        process.env.FRONTEND_URL
+    ];
+
     io = socketIo(server, {
-        transports: [ 'polling' ],
+        transports: [ 'websocket', 'polling' ],
         cors: {
-            origin: '*',
-            methods: [ 'GET', 'POST' ]
+            origin: allowedOrigins,
+            methods: [ 'GET', 'POST' ],
+            credentials: true
         }
     });
 

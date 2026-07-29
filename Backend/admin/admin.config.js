@@ -1,6 +1,12 @@
 const AdminJS = require('adminjs');
 const AdminJSExpress = require('@adminjs/express');
 const AdminJSMongoose = require('@adminjs/mongoose');
+const mongoose = require('mongoose');
+
+// FIX: Mongoose 8 removeu alguns métodos que o AdminJS v3 ainda usa internamente.
+// Criamos "alias" para os novos métodos do Mongoose 8 para o AdminJS funcionar perfeitamente.
+mongoose.Model.count = mongoose.Model.countDocuments;
+mongoose.Model.findOneAndRemove = mongoose.Model.findOneAndDelete;
 
 const userModel = require('../models/user.model');
 const captainModel = require('../models/captain.model');

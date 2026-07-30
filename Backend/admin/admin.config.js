@@ -759,7 +759,21 @@ const adminOptions = {
                 cpf: 'CPF',
                 amount: 'Valor',
                 type: 'Tipo',
-                paymentMethod: 'Forma de Pagamento'
+                paymentMethod: 'Forma de Pagamento',
+                _id: 'ID',
+                minDistanceIncluded: 'Distância Mín. Inclusa',
+                minTimeIncluded: 'Tempo Mín. Incluso',
+                maxFreeWaitTime: 'Espera Grátis Máxima',
+                perMinuteWaitFee: 'Taxa de Espera/Min',
+                cancellationFee: 'Taxa de Cancelamento',
+                roundingRule: 'Regra de Arredondamento',
+                autoTollCharge: 'Pedágio Automático',
+                baseFare: 'Tarifa Base',
+                perKmRate: 'Taxa por Km',
+                perMinuteRate: 'Taxa por Minuto',
+                minimumFare: 'Tarifa Mínima',
+                surgeMultiplier: 'Multiplicador Dinâmico',
+                category: 'Categoria'
             },
             buttons: {
                 login: 'Entrar',

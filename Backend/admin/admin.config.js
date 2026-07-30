@@ -24,6 +24,7 @@ const tariffSettingModel = require('../models/tariffSetting.model');
 const vehicleCategoryModel = require('../models/vehicleCategory.model');
 const pricingRuleModel = require('../models/pricingRule.model');
 const tariffHistoryModel = require('../models/tariffHistory.model');
+const adminUserModel = require('../models/adminUser.model');
 
 const createAuditLog = async (response, request, context) => {
     // Apenas rodar em requisições de mutação que deram certo
@@ -55,8 +56,31 @@ const { getCache, setCache } = require('../cache/cache');
 // Registra o adaptador Mongoose no AdminJS
 AdminJS.registerAdapter(AdminJSMongoose);
 
+const Components = {
+    ImagePreview: AdminJS.bundle('./components/ImagePreview.jsx'),
+    ManualAdjustment: AdminJS.bundle('./components/ManualAdjustment.jsx'),
+    ExportCSVBulk: AdminJS.bundle('./components/ExportCSVBulk.jsx')
+};
+
 const adminOptions = {
     resources: [
+        {
+            resource: adminUserModel,
+            options: {
+                id: 'Usuários Admin',
+                navigation: { name: 'Configuração', icon: 'Users' },
+                properties: {
+                    password: { isVisible: { list: false, filter: false, show: false, edit: true } }
+                },
+                actions: {
+                    list: { isAccessible: ({ currentAdmin }) => currentAdmin?.role === 'OWNER' },
+                    show: { isAccessible: ({ currentAdmin }) => currentAdmin?.role === 'OWNER' },
+                    new: { isAccessible: ({ currentAdmin }) => currentAdmin?.role === 'OWNER' },
+                    edit: { isAccessible: ({ currentAdmin }) => currentAdmin?.role === 'OWNER' },
+                    delete: { isAccessible: ({ currentAdmin }) => currentAdmin?.role === 'OWNER' }
+                }
+            }
+        },
         {
             resource: userModel,
             options: {
@@ -107,9 +131,18 @@ const adminOptions = {
                 properties: {
                     password: { isVisible: { list: false, filter: false, show: false, edit: true } },
                     cpf: { isVisible: { list: false, filter: true, show: true, edit: true } },
-                    'documents.cnhFront.url': { isVisible: { list: false, filter: false, show: true, edit: true } },
-                    'documents.cnhBack.url': { isVisible: { list: false, filter: false, show: true, edit: true } },
-                    'documents.crlv.url': { isVisible: { list: false, filter: false, show: true, edit: true } }
+                    'documents.cnhFront.url': { 
+                        isVisible: { list: false, filter: false, show: true, edit: true },
+                        components: { show: Components.ImagePreview }
+                    },
+                    'documents.cnhBack.url': { 
+                        isVisible: { list: false, filter: false, show: true, edit: true },
+                        components: { show: Components.ImagePreview }
+                    },
+                    'documents.crlv.url': { 
+                        isVisible: { list: false, filter: false, show: true, edit: true },
+                        components: { show: Components.ImagePreview }
+                    }
                 },
                 listProperties: ['fullname.firstname', 'phone', 'vehicle.plate', 'vehicle.modelo', 'vehicle.vehicleType', 'rating', 'earnings', 'status'],
                 actions: {
@@ -173,6 +206,7 @@ const adminOptions = {
                         actionType: 'record',
                         icon: 'DollarSign',
                         label: 'Ajuste Manual',
+                        component: Components.ManualAdjustment,
                         handler: async (request, response, context) => {
                             const { record, currentAdmin } = context;
                             const amount = Number(request.payload?.amount || 0);
@@ -186,7 +220,7 @@ const adminOptions = {
                                     paymentMethod: 'wallet',
                                     amount: amount,
                                     description: 'Ajuste administrativo de saldo',
-                                    adminId: currentAdmin?.email,
+                                    adminId: currentAdmin?.email || currentAdmin?.title,
                                     reason: reason
                                 });
                                 return {
@@ -195,8 +229,7 @@ const adminOptions = {
                                 };
                             }
                             return { record: record.toJSON(currentAdmin) };
-                        },
-                        component: false,
+                        }
                     }
                 }
             }
@@ -294,6 +327,15 @@ const adminOptions = {
                 listProperties: ['captainId', 'amount', 'status', 'paidAt', 'adminId', 'createdAt'],
                 filterProperties: ['status', 'captainId'],
                 actions: {
+                    exportCSV: {
+                        actionType: 'bulk',
+                        icon: 'Download',
+                        label: 'Exportar Lote (CSV)',
+                        component: Components.ExportCSVBulk,
+                        handler: async (request, response, context) => {
+                            return { records: context.records.map(r => r.toJSON(context.currentAdmin)) };
+                        }
+                    },
                     processPayout: {
                         actionType: 'record',
                         icon: 'Check',
@@ -637,6 +679,17 @@ const adminOptions = {
         language: 'pt-BR',
         availableLocales: ['pt-BR'],
         translations: {
+            components: {
+                Login: {
+                    welcomeHeader: 'MoveCity Premium',
+                    welcomeMessage: 'Bem-vindo ao painel de controle.',
+                    properties: {
+                        email: 'Endereço de E-mail',
+                        password: 'Senha de Acesso'
+                    },
+                    loginButton: 'Entrar no Sistema'
+                }
+            },
             labels: {
                 loginWelcome: 'Painel MoveCity',
                 Dashboard: 'Dashboard',
@@ -694,6 +747,20 @@ const adminOptions = {
                     }
                 }
             },
+            properties: {
+                email: 'E-mail',
+                password: 'Senha',
+                status: 'Status',
+                createdAt: 'Criado em',
+                updatedAt: 'Atualizado em',
+                'fullname.firstname': 'Nome',
+                'fullname.lastname': 'Sobrenome',
+                phone: 'Telefone',
+                cpf: 'CPF',
+                amount: 'Valor',
+                type: 'Tipo',
+                paymentMethod: 'Forma de Pagamento'
+            },
             buttons: {
                 login: 'Entrar',
                 filter: 'Filtrar',
@@ -709,16 +776,20 @@ const adminOptions = {
                 save: 'Salvar'
             },
             actions: {
-                new: 'Criar',
+                new: 'Adicionar Novo',
                 edit: 'Editar',
-                show: 'Detalhes',
+                show: 'Visualizar',
                 delete: 'Excluir',
-                list: 'Lista'
+                list: 'Ver Lista',
+                search: 'Pesquisar'
             },
             messages: {
-                successfullyDeleted: 'Excluído com sucesso',
-                successfullyUpdated: 'Atualizado com sucesso',
-                successfullyCreated: 'Criado com sucesso'
+                successfullyDeleted: 'Registro excluído com sucesso.',
+                successfullyUpdated: 'Registro atualizado com sucesso.',
+                successfullyCreated: 'Registro criado com sucesso.',
+                noRecordsInResource: 'Nenhum registro encontrado.',
+                noRecords: 'Nenhum registro',
+                confirmDelete: 'Tem certeza de que deseja excluir este registro?'
             }
         }
     }
@@ -726,15 +797,16 @@ const adminOptions = {
 
 const admin = new AdminJS(adminOptions);
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@uber.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123456';
-
 const adminRouter = AdminJSExpress.buildAuthenticatedRouter(
     admin,
     {
         authenticate: async (email, password) => {
-            if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-                return { email: ADMIN_EMAIL, role: 'admin' };
+            const adminUser = await adminUserModel.findOne({ email, active: true }).select('+password');
+            if (adminUser) {
+                const matched = await adminUser.comparePassword(password);
+                if (matched) {
+                    return { email: adminUser.email, role: adminUser.role, title: adminUser.name };
+                }
             }
             return false;
         },
@@ -806,6 +878,39 @@ adminRouter.get('/api/reports', async (req, res) => {
     }
 });
 
+adminRouter.get('/api/payouts/export', async (req, res) => {
+    try {
+        const ids = req.query.ids;
+        if (!ids) {
+            return res.status(400).send('No IDs provided');
+        }
+        
+        const idsArray = ids.split(',');
+        const payouts = await payoutModel.find({ _id: { $in: idsArray } }).populate('captainId');
+        
+        let csvContent = "Nome,CPF,Chave PIX,Valor,Status\n";
+        
+        payouts.forEach(p => {
+            const captain = p.captainId;
+            const name = captain?.fullname?.firstname ? `${captain.fullname.firstname} ${captain.fullname.lastname || ''}` : 'Desconhecido';
+            const cpf = captain?.cpf || 'Não informado';
+            const pix = captain?.pix?.key ? `${captain.pix.keyType}: ${captain.pix.key}` : 'Não informado';
+            const value = p.amount ? p.amount.toFixed(2) : '0.00';
+            const status = p.status;
+            
+            // Tratamento básico para vírgulas em strings (colocando entre aspas se necessário)
+            csvContent += `"${name}","${cpf}","${pix}","${value}","${status}"\n`;
+        });
+        
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=repasses.csv');
+        res.status(200).send(Buffer.from('\uFEFF' + csvContent, 'utf-8')); // \uFEFF ensures excel reads UTF-8 correctly
+    } catch(err) {
+        console.error(err);
+        res.status(500).send('Erro ao exportar CSV');
+    }
+});
+
 adminRouter.post('/api/simulate-fare', async (req, res) => {
     try {
         const { distance, time, vehicleType, paymentMethod, couponCode } = req.body;
@@ -827,6 +932,15 @@ adminRouter.post('/api/simulate-fare', async (req, res) => {
     } catch (error) {
         console.error("Error simulating fare:", error);
         res.status(500).json({ error: error.message || "Internal Server Error" });
+    }
+});
+
+adminRouter.get('/api/active-captains', async (req, res) => {
+    try {
+        const captains = await captainModel.find({ status: 'active' }, 'fullname location vehicle status phone');
+        res.json(captains);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

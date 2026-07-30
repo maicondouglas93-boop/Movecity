@@ -60,11 +60,13 @@ const adminOptions = {
         {
             resource: userModel,
             options: {
-                navigation: { name: 'Gerenciamento', icon: 'User' },
+                id: 'Passageiros',
+                navigation: { name: 'Operação', icon: 'User' },
                 properties: {
-                    password: { isVisible: { list: false, filter: false, show: false, edit: true } }
+                    password: { isVisible: { list: false, filter: false, show: false, edit: true } },
+                    cpf: { isVisible: { list: false, filter: true, show: true, edit: true } }
                 },
-                listProperties: ['fullname.firstname', 'fullname.lastname', 'email', 'phone', 'isBlocked', 'rating', 'createdAt'],
+                listProperties: ['fullname.firstname', 'phone', 'email', 'rating', 'createdAt', 'isBlocked'],
                 actions: {
                     block: {
                         actionType: 'record',
@@ -100,11 +102,16 @@ const adminOptions = {
         {
             resource: captainModel,
             options: {
-                navigation: { name: 'Gerenciamento', icon: 'Car' },
+                id: 'Motoristas',
+                navigation: { name: 'Operação', icon: 'Car' },
                 properties: {
-                    password: { isVisible: { list: false, filter: false, show: false, edit: true } }
+                    password: { isVisible: { list: false, filter: false, show: false, edit: true } },
+                    cpf: { isVisible: { list: false, filter: true, show: true, edit: true } },
+                    'documents.cnhFront.url': { isVisible: { list: false, filter: false, show: true, edit: true } },
+                    'documents.cnhBack.url': { isVisible: { list: false, filter: false, show: true, edit: true } },
+                    'documents.crlv.url': { isVisible: { list: false, filter: false, show: true, edit: true } }
                 },
-                listProperties: ['fullname.firstname', 'email', 'phone', 'approvalStatus', 'status', 'isBlocked', 'rating', 'earnings', 'vehicle.vehicleType'],
+                listProperties: ['fullname.firstname', 'phone', 'vehicle.plate', 'vehicle.modelo', 'vehicle.vehicleType', 'rating', 'earnings', 'status'],
                 actions: {
                     approve: {
                         actionType: 'record',
@@ -167,8 +174,6 @@ const adminOptions = {
                         icon: 'DollarSign',
                         label: 'Ajuste Manual',
                         handler: async (request, response, context) => {
-                            // Este handler precisa receber os dados do form, mas em AdminJS a action precisa de um form customizado ou pegar os dados do request.payload
-                            // Para simplificar, poderíamos criar uma action customizada com componente, mas como estamos apenas listando:
                             const { record, currentAdmin } = context;
                             const amount = Number(request.payload?.amount || 0);
                             const reason = request.payload?.reason || 'Ajuste administrativo';
@@ -191,7 +196,7 @@ const adminOptions = {
                             }
                             return { record: record.toJSON(currentAdmin) };
                         },
-                        component: false, // Pode ser aprimorado com um componente React depois para ter campos
+                        component: false,
                     }
                 }
             }
@@ -199,8 +204,9 @@ const adminOptions = {
         {
             resource: rideModel,
             options: {
-                navigation: { name: 'Operações', icon: 'MapPin' },
-                listProperties: ['user', 'captain', 'pickup', 'destination', 'fare', 'paymentStatus', 'paymentMethod', 'distance', 'duration', 'status', 'createdAt'],
+                id: 'Corridas',
+                navigation: { name: 'Operação', icon: 'MapPin' },
+                listProperties: ['user', 'captain', 'pickup', 'destination', 'fare', 'paymentMethod', 'status', 'createdAt'],
                 filterProperties: ['status', 'paymentStatus', 'paymentMethod', 'vehicleType', 'user', 'captain'],
                 properties: {
                     otp: { isVisible: { list: false, filter: false, show: true, edit: true } }
@@ -210,7 +216,8 @@ const adminOptions = {
         {
             resource: couponModel,
             options: {
-                navigation: { name: 'Marketing', icon: 'Tag' },
+                id: 'Cupons de Desconto',
+                navigation: { name: 'Configuração', icon: 'Tag' },
                 listProperties: ['code', 'discountPercent', 'maxDiscount', 'expirationDate', 'usageLimit', 'isActive', 'createdAt'],
                 filterProperties: ['code', 'isActive']
             }
@@ -218,6 +225,7 @@ const adminOptions = {
         {
             resource: reviewModel,
             options: {
+                id: 'Avaliações',
                 navigation: { name: 'Qualidade', icon: 'Star' },
                 listProperties: ['ride', 'user', 'captain', 'rating', 'comment', 'issueCategory', 'type', 'createdAt'],
                 filterProperties: ['rating', 'issueCategory', 'type', 'user', 'captain']
@@ -226,13 +234,21 @@ const adminOptions = {
         {
             resource: blacklistTokenModel,
             options: {
-                navigation: { name: 'Segurança', icon: 'Shield' }
+                navigation: { name: 'Segurança', icon: 'Shield' },
+                actions: {
+                    list: { isAccessible: false },
+                    show: { isAccessible: false },
+                    new: { isAccessible: false },
+                    edit: { isAccessible: false },
+                    delete: { isAccessible: false }
+                }
             }
         },
         {
             resource: notificationModel,
             options: {
-                navigation: { name: 'Central de Notificações', icon: 'Bell' },
+                id: 'Notificações',
+                navigation: { name: 'Operação', icon: 'Bell' },
                 listProperties: ['title', 'message', 'targetAudience', 'status', 'sentAt', 'createdAt'],
                 filterProperties: ['targetAudience', 'status']
             }
@@ -240,7 +256,8 @@ const adminOptions = {
         {
             resource: globalSettingModel,
             options: {
-                navigation: { name: 'Configurações', icon: 'Settings' },
+                id: 'Configurações Globais',
+                navigation: { name: 'Configuração', icon: 'Settings' },
                 actions: {
                     new: { isAccessible: false },
                     delete: { isAccessible: false }
@@ -250,6 +267,7 @@ const adminOptions = {
         {
             resource: walletModel,
             options: {
+                id: 'Carteiras',
                 navigation: { name: 'Financeiro', icon: 'CreditCard' },
                 listProperties: ['captainId', 'creditBalance', 'pendingBalance', 'totalEarned', 'totalCommissionPaid', 'updatedAt']
             }
@@ -257,6 +275,7 @@ const adminOptions = {
         {
             resource: transactionModel,
             options: {
+                id: 'Extrato de Transações',
                 navigation: { name: 'Financeiro', icon: 'FileText' },
                 listProperties: ['captainId', 'type', 'paymentMethod', 'amount', 'balanceAfter', 'adminId', 'createdAt'],
                 filterProperties: ['type', 'paymentMethod', 'status', 'captainId'],
@@ -270,6 +289,7 @@ const adminOptions = {
         {
             resource: payoutModel,
             options: {
+                id: 'Repasses Pendentes',
                 navigation: { name: 'Financeiro', icon: 'Briefcase' },
                 listProperties: ['captainId', 'amount', 'status', 'paidAt', 'adminId', 'createdAt'],
                 filterProperties: ['status', 'captainId'],
@@ -287,7 +307,6 @@ const adminOptions = {
                                     adminId: currentAdmin.email,
                                     receipt: request.payload?.receipt || 'Pago via painel admin'
                                 });
-                                // Deduzir do pendingBalance do motorista!
                                 const walletService = require('../services/wallet.service');
                                 await walletService.createTransaction({
                                     captainId: record.params.captainId,
@@ -317,6 +336,7 @@ const adminOptions = {
         {
             resource: rechargeModel,
             options: {
+                id: 'Recargas Pix',
                 navigation: { name: 'Financeiro', icon: 'BatteryCharging' },
                 listProperties: ['captainId', 'amount', 'method', 'status', 'asaasInvoiceId', 'createdAt'],
                 filterProperties: ['status', 'method', 'captainId']
@@ -325,7 +345,8 @@ const adminOptions = {
         {
             resource: tariffSettingModel,
             options: {
-                navigation: { name: 'Tarifas', icon: 'Settings' },
+                id: 'Config. Tarifárias',
+                navigation: { name: 'Configuração', icon: 'Settings' },
                 actions: {
                     new: { isAccessible: false },
                     delete: { isAccessible: false },
@@ -336,7 +357,8 @@ const adminOptions = {
         {
             resource: vehicleCategoryModel,
             options: {
-                navigation: { name: 'Tarifas', icon: 'Truck' },
+                id: 'Categorias de Veículos',
+                navigation: { name: 'Configuração', icon: 'Truck' },
                 actions: {
                     new: { after: [createAuditLog] },
                     edit: { after: [createAuditLog] },
@@ -347,7 +369,8 @@ const adminOptions = {
         {
             resource: pricingRuleModel,
             options: {
-                navigation: { name: 'Tarifas', icon: 'Sliders' },
+                id: 'Regras Dinâmicas',
+                navigation: { name: 'Configuração', icon: 'Sliders' },
                 actions: {
                     new: { after: [createAuditLog] },
                     edit: { after: [createAuditLog] },
@@ -358,8 +381,10 @@ const adminOptions = {
         {
             resource: tariffHistoryModel,
             options: {
-                navigation: { name: 'Tarifas', icon: 'Clock' },
+                navigation: { name: 'Configuração', icon: 'Clock' },
                 actions: {
+                    list: { isAccessible: false },
+                    show: { isAccessible: false },
                     new: { isAccessible: false },
                     edit: { isAccessible: false },
                     delete: { isAccessible: false }
@@ -610,10 +635,64 @@ const adminOptions = {
     },
     locale: {
         language: 'pt-BR',
+        availableLocales: ['pt-BR'],
         translations: {
             labels: {
-                loginWelcome: 'Painel do Administrador',
-                Dashboard: 'Painel Geral'
+                loginWelcome: 'Painel MoveCity',
+                Dashboard: 'Dashboard',
+                'Passageiros': 'Passageiros',
+                'Motoristas': 'Motoristas',
+                'Corridas': 'Corridas',
+                'Cupons de Desconto': 'Cupons de Desconto',
+                'Avaliações': 'Avaliações',
+                'Notificações': 'Notificações',
+                'Configurações Globais': 'Configurações Globais',
+                'Carteiras': 'Saldos das Carteiras',
+                'Extrato de Transações': 'Extrato de Transações',
+                'Repasses Pendentes': 'Repasses Pendentes',
+                'Recargas Pix': 'Recargas Pix',
+                'Config. Tarifárias': 'Config. Tarifárias',
+                'Categorias de Veículos': 'Categorias de Veículos',
+                'Regras Dinâmicas': 'Regras Dinâmicas'
+            },
+            resources: {
+                Passageiros: {
+                    properties: {
+                        'fullname.firstname': 'Nome',
+                        phone: 'Telefone',
+                        email: 'E-mail',
+                        rating: 'Nota (0-5)',
+                        createdAt: 'Data de Cadastro',
+                        isBlocked: 'Bloqueado?'
+                    }
+                },
+                Motoristas: {
+                    properties: {
+                        'fullname.firstname': 'Nome',
+                        phone: 'Telefone',
+                        'vehicle.plate': 'Placa',
+                        'vehicle.modelo': 'Modelo',
+                        'vehicle.vehicleType': 'Categoria',
+                        rating: 'Nota (0-5)',
+                        earnings: 'Saldo',
+                        status: 'Status (Online/Offline)',
+                        'documents.cnhFront.url': 'CNH (Frente)',
+                        'documents.cnhBack.url': 'CNH (Verso)',
+                        'documents.crlv.url': 'CRLV'
+                    }
+                },
+                Corridas: {
+                    properties: {
+                        user: 'Passageiro',
+                        captain: 'Motorista',
+                        pickup: 'Origem',
+                        destination: 'Destino',
+                        fare: 'Valor (R$)',
+                        paymentMethod: 'Pagamento',
+                        status: 'Status da Corrida',
+                        createdAt: 'Data/Hora'
+                    }
+                }
             },
             buttons: {
                 login: 'Entrar',
@@ -624,7 +703,7 @@ const adminOptions = {
                 createFirstRecord: 'Criar Registro',
                 list: 'Lista',
                 edit: 'Editar',
-                show: 'Ver',
+                show: 'Detalhes',
                 delete: 'Excluir',
                 new: 'Criar',
                 save: 'Salvar'

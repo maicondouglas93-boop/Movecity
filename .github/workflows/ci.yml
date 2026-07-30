@@ -1,0 +1,44 @@
+name: CI/CD Pipeline - MoveCity
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install Backend Dependencies
+      working-directory: ./Backend
+      run: npm install
+
+    - name: Run Backend Tests
+      working-directory: ./Backend
+      run: npm run test
+
+    - name: Install Frontend Dependencies
+      working-directory: ./admin-frontend
+      run: npm install
+
+    - name: Run Frontend Tests (Unit & Integration)
+      working-directory: ./admin-frontend
+      run: npm run test --run
+
+    - name: Install Playwright Browsers
+      working-directory: ./admin-frontend
+      run: npx playwright install --with-deps
+
+    - name: Run Playwright E2E Tests
+      working-directory: ./admin-frontend
+      run: npx playwright test

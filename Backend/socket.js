@@ -32,6 +32,8 @@ function initializeSocket(server) {
                 await userModel.findByIdAndUpdate(userId, { socketId: socket.id });
             } else if (userType === 'captain') {
                 await captainModel.findByIdAndUpdate(userId, { socketId: socket.id });
+            } else if (userType === 'admin') {
+                socket.join('admin_room');
             }
         });
 
@@ -101,6 +103,12 @@ function initializeSocket(server) {
                     actualDistance: currentDistance
                 });
             }
+
+            io.to('admin_room').emit('admin-captain-location-updated', {
+                captainId: userId,
+                ltd: location.ltd,
+                lng: location.lng,
+            });
         });
 
         // Chat events

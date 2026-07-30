@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const adminUserSchema = new mongoose.Schema({
     name: {
@@ -21,8 +22,12 @@ const adminUserSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['OWNER', 'FINANCE', 'SUPPORT', 'OPERATIONS'],
-        default: 'SUPPORT',
+        enum: ['super_admin', 'financeiro', 'suporte', 'operador', 'OWNER'],
+        default: 'suporte',
+    },
+    refreshToken: {
+        type: String,
+        select: false,
     },
     active: {
         type: Boolean,
@@ -45,6 +50,16 @@ adminUserSchema.pre('save', async function(next) {
 
 adminUserSchema.methods.comparePassword = async function(candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
+};
+
+adminUserSchema.methods.generateAuthToken = function() {
+    const token = jwt.sign({ _id: this._id, role: this.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    return token;
+};
+
+adminUserSchema.methods.generateRefreshToken = function() {
+    const token = jwt.sign({ _id: this._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    return token;
 };
 
 const adminUserModel = mongoose.model('AdminUser', adminUserSchema);

@@ -1,0 +1,404 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '../services/api';
+import { Save, Copy, RotateCcw, CalendarClock, Beaker, FileSearch } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+
+import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
+import TariffHistory from '../components/TariffHistory';
+import TariffSchedulerModal from '../components/TariffSchedulerModal';
+import TariffComparisonTable from '../components/TariffComparisonTable';
+
+const fetchGlobalTariffs = async () => {
+  const { data } = await api.get('/admin/tariffs');
+  return data;
+};
+
+const fetchVehicleCategories = async () => {
+  const { data } = await api.get('/admin/vehicle-categories');
+  return data;
+};
+
+export default function Tariffs() {
+  const [activeTab, setActiveTab] = useState('general');
+  const [testMode, setTestMode] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: globalSettings, isLoading: loadingGlobal } = useQuery({
+    queryKey: ['globalTariffs'],
+    queryFn: fetchGlobalTariffs
+  });
+
+  const { data: categories, isLoading: loadingCategories } = useQuery({
+    queryKey: ['vehicleCategories'],
+    queryFn: fetchVehicleCategories
+  });
+
+  if (loadingGlobal || loadingCategories) return <div className="text-text-muted">Carregando motor de precificação...</div>;
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Motor de Precificação Avançado</h1>
+          <p className="text-text-muted mt-1">Gerencie taxas, realize agendamentos e simule o faturamento.</p>
+        </div>
+        
+        {/* Test Mode Toggle */}
+        <label className={`flex items-center gap-2 px-4 py-2 rounded-full cursor-pointer transition-colors border ${testMode ? 'bg-warning/20 border-warning text-warning' : 'bg-surface border-border text-text-muted hover:text-text'}`}>
+          <Beaker className="w-4 h-4" />
+          <span className="text-sm font-medium">Modo Teste</span>
+          <input 
+            type="checkbox" 
+            checked={testMode}
+            onChange={(e) => setTestMode(e.target.checked)} 
+            className="hidden" 
+          />
+        </label>
+      </div>
+      
+      {/* Tabs */}
+      <div className="block md:hidden">
+        <select 
+          value={activeTab} 
+          onChange={(e) => setActiveTab(e.target.value)}
+          className="w-full bg-surface border border-border rounded-lg px-4 py-3 text-text font-medium outline-none"
+        >
+          <option value="general">Configurações Globais</option>
+          <option value="comparison">Tabela Comparativa</option>
+          {categories?.map(cat => (
+            <option key={cat._id} value={cat._id}>{cat.displayName}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="hidden md:flex border-b border-border overflow-x-auto no-scrollbar">
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'general' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
+        >
+          Globais
+        </button>
+        <button
+          onClick={() => setActiveTab('comparison')}
+          className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'comparison' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
+        >
+          Comparativo
+        </button>
+        {categories?.map(cat => (
+          <button
+            key={cat._id}
+            onClick={() => setActiveTab(cat._id)}
+            className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 flex items-center gap-2 ${activeTab === cat._id ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
+          >
+            {cat.displayName}
+            {!cat.isActive && <span className="w-2 h-2 rounded-full bg-danger"></span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="mt-6">
+        {activeTab === 'general' && globalSettings && (
+          <GlobalSettingsCard settings={globalSettings} queryClient={queryClient} testMode={testMode} />
+        )}
+
+        {activeTab === 'comparison' && categories && (
+          <TariffComparisonTable categories={categories} />
+        )}
+
+        {activeTab !== 'general' && activeTab !== 'comparison' && categories && (
+          <div className="mt-6">
+            <CategorySettingsCard 
+              key={activeTab}
+              category={categories.find(c => c._id === activeTab)} 
+              queryClient={queryClient} 
+              testMode={testMode}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GlobalSettingsCard({ settings, queryClient, testMode }) {
+  const { register, handleSubmit, reset, formState: { isSubmitting, isDirty } } = useForm({
+    defaultValues: {
+      cancellationFee: settings.cancellationFee,
+      perMinuteWaitFee: settings.perMinuteWaitFee,
+      maxFreeWaitTime: settings.maxFreeWaitTime,
+      dynamicPricingStatus: settings.dynamicPricingStatus,
+      currentMultiplier: settings.currentMultiplier,
+      manualRainFee: settings.manualRainFee
+    }
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await api.put('/admin/settings/tariffs', data);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['globalTariffs']);
+      alert('Configurações globais atualizadas com sucesso!');
+    }
+  });
+
+  return (
+    <form onSubmit={handleSubmit(updateMutation.mutate)} className="bg-surface rounded-xl border border-border overflow-hidden">
+      <div className="bg-background/50 border-b border-border p-4">
+        <h3 className="font-semibold text-lg">Taxas e Regras Globais</h3>
+      </div>
+      
+      <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cancelamento (R$)</label>
+          <input type="number" step="0.01" min="0" {...register('cancellationFee')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Tempo de Espera Grátis (segundos)</label>
+          <input type="number" min="0" {...register('maxFreeWaitTime')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Taxa Extra de Espera (R$/min)</label>
+          <input type="number" step="0.01" min="0" {...register('perMinuteWaitFee')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Status Dinâmico Global</label>
+          <select {...register('dynamicPricingStatus')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
+            <option value="off">Desligado</option>
+            <option value="manual">Manual</option>
+            <option value="auto">Automático</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador Global</label>
+          <input type="number" step="0.1" min="1" {...register('currentMultiplier')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div className="flex items-center mt-6">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" {...register('manualRainFee')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
+            <span className="text-sm font-medium text-text">Ativar Taxa de Chuva Global</span>
+          </label>
+        </div>
+      </div>
+      
+      <div className="bg-background/50 border-t border-border p-4 flex justify-end gap-3">
+        <button type="button" onClick={() => reset()} disabled={!isDirty} className="flex items-center gap-2 text-text-muted hover:text-text px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+          <RotateCcw className="w-4 h-4" />
+          Restaurar
+        </button>
+        <button type="submit" disabled={!isDirty || isSubmitting || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+          <Save className="w-4 h-4" />
+          {isSubmitting ? 'Salvando...' : 'Salvar Alterações'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CategorySettingsCard({ category, queryClient, testMode }) {
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  
+  const { register, handleSubmit, watch, reset, getValues, formState: { isSubmitting, isDirty } } = useForm({
+    defaultValues: {
+      baseFare: category.baseFare,
+      perKmRate: category.perKmRate,
+      perMinuteRate: category.perMinuteRate,
+      minFare: category.minFare,
+      dynamicMultiplier: category.dynamicMultiplier || 1.0,
+      rainFeeMultiplier: category.rainFeeMultiplier || 1.0,
+      isActive: category.isActive
+    }
+  });
+  
+  const isActive = watch('isActive');
+  const liveValues = watch();
+
+  const updateMutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await api.put(`/admin/vehicle-categories/${category._id}/tariffs`, data);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['vehicleCategories']);
+      queryClient.invalidateQueries(['tariffHistory']);
+      alert(`Tarifas da categoria ${category.displayName} atualizadas!`);
+      setPreviewOpen(false);
+      reset(getValues()); // resets isDirty state
+    }
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post(`/admin/vehicle-categories/${category._id}/duplicate`);
+      return res.data;
+    },
+    onSuccess: (newCat) => {
+      queryClient.invalidateQueries(['vehicleCategories']);
+      alert(`Categoria duplicada como: ${newCat.displayName}`);
+    }
+  });
+
+  const onPreviewSubmit = (e) => {
+    e.preventDefault();
+    setPreviewOpen(true);
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 xl:col-span-2 space-y-6">
+          <form onSubmit={onPreviewSubmit} className="bg-surface rounded-xl border border-border overflow-hidden flex flex-col">
+            <div className="bg-background/50 border-b border-border p-4 flex flex-wrap gap-4 justify-between items-center">
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold text-lg">{category.displayName}</h3>
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    if(confirm(`Tem certeza que deseja duplicar a categoria ${category.displayName}?`)) {
+                      duplicateMutation.mutate();
+                    }
+                  }}
+                  title="Duplicar Categoria"
+                  className="p-1.5 bg-background border border-border rounded-lg text-text-muted hover:text-text transition-colors"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-background border border-border px-3 py-1.5 rounded-full">
+                <span className="text-sm font-medium">{isActive ? 'Ativo' : 'Inativo'}</span>
+                <input type="checkbox" {...register('isActive')} className="hidden" />
+                <div className={`w-8 h-4 rounded-full transition-colors relative ${isActive ? 'bg-primary' : 'bg-border'}`}>
+                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-surface transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                </div>
+              </label>
+            </div>
+            
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1">
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Base (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('baseFare', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Preço por Km (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('perKmRate', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Preço por Minuto (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('perMinuteRate', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Mínima (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('minFare', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador de Demanda</label>
+                <input type="number" step="0.1" min="1" {...register('dynamicMultiplier', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador de Chuva</label>
+                <input type="number" step="0.1" min="1" {...register('rainFeeMultiplier', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+            </div>
+            
+            <div className="bg-background/50 border-t border-border p-4 flex flex-wrap gap-3 justify-end items-center mt-auto">
+              <button 
+                type="button" 
+                onClick={() => reset()} 
+                disabled={!isDirty} 
+                className="flex items-center gap-2 text-text-muted hover:text-text px-3 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Restaurar
+              </button>
+              
+              <button 
+                type="button" 
+                onClick={() => setSchedulerOpen(true)}
+                disabled={!isDirty || testMode} 
+                className="flex items-center gap-2 bg-background border border-border hover:bg-surface text-text px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                <CalendarClock className="w-4 h-4" />
+                Agendar
+              </button>
+              
+              <button 
+                type="submit" 
+                disabled={!isDirty || isSubmitting || testMode} 
+                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                <FileSearch className="w-4 h-4" />
+                {testMode ? 'Modo Teste Ativo' : 'Revisar & Salvar'}
+              </button>
+            </div>
+          </form>
+
+          {/* Histórico */}
+          <TariffHistory categoryId={category._id} categoryName={category.displayName} />
+        </div>
+        
+        <div className="lg:col-span-1 xl:col-span-1">
+          <TariffAdvancedSimulator values={liveValues} platformCommission={15} />
+        </div>
+      </div>
+
+      <TariffSchedulerModal 
+        isOpen={schedulerOpen} 
+        onClose={() => setSchedulerOpen(false)} 
+        categoryId={category._id} 
+        categoryName={category.displayName}
+        pendingChanges={liveValues}
+      />
+
+      {/* Preview Modal */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-surface rounded-xl border border-border w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-border bg-background/50">
+              <h2 className="font-semibold text-lg text-text">Confirmação de Alteração</h2>
+              <p className="text-sm text-text-muted">Revise as mudanças antes de aplicar as novas tarifas.</p>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-3">
+              {Object.keys(liveValues).map(key => {
+                if(liveValues[key] !== category[key]) {
+                  return (
+                    <div key={key} className="flex justify-between items-center bg-background border border-border p-3 rounded-lg text-sm">
+                      <span className="font-medium text-text-muted capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="line-through text-danger opacity-80">{String(category[key])}</span>
+                        <span className="text-text-muted">→</span>
+                        <span className="text-success font-bold text-base">{String(liveValues[key])}</span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+            <div className="p-5 border-t border-border flex justify-end gap-3 bg-background/50 mt-auto">
+              <button 
+                type="button" 
+                onClick={() => setPreviewOpen(false)} 
+                className="px-4 py-2 text-text-muted hover:text-text font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                onClick={() => updateMutation.mutate(liveValues)}
+                disabled={isSubmitting}
+                className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                {isSubmitting ? 'Aplicando...' : 'Aplicar Tarifas'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

@@ -385,10 +385,15 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
         paymentStatus: 'paid'
     });
 
-    // Update captain stats
     const captainModel = require('../models/captain.model');
     await captainModel.findByIdAndUpdate(captain._id, {
         $inc: { totalRides: 1, earnings: finalFare }
+    });
+
+    // Update User CRM fields
+    await userModel.findByIdAndUpdate(ride.user._id, {
+        $inc: { totalRides: 1, totalSpent: finalFare, totalDistance: ride.distance || 0 },
+        $set: { lastRideAt: new Date() }
     });
 
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');

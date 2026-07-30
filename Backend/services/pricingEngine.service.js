@@ -98,16 +98,23 @@ class PricingEngine {
         }
 
         // 5. Aplicar Dynamic Pricing
+        let globalMult = 1.0;
         if (tariffSetting.dynamicPricingStatus === 'manual' || tariffSetting.dynamicPricingStatus === 'auto') {
-            let mult = tariffSetting.currentMultiplier || 1.0;
+            globalMult = tariffSetting.currentMultiplier || 1.0;
             
-            // Garantir os limites
-            if (mult < (tariffSetting.minMultiplier || 1.0)) mult = tariffSetting.minMultiplier;
-            if (mult > (tariffSetting.maxMultiplier || 3.0)) mult = tariffSetting.maxMultiplier;
-
-            breakdown.dynamicMultiplier = mult;
-            subtotal = subtotal * mult;
+            // Garantir os limites globais
+            if (globalMult < (tariffSetting.minMultiplier || 1.0)) globalMult = tariffSetting.minMultiplier;
+            if (globalMult > (tariffSetting.maxMultiplier || 3.0)) globalMult = tariffSetting.maxMultiplier;
         }
+
+        // Multiplicador da categoria de veículo
+        const categoryMult = category.dynamicMultiplier || 1.0;
+        const categoryRainMult = (tariffSetting.manualRainFee || tariffSetting.automaticRainFee) ? (category.rainFeeMultiplier || 1.0) : 1.0;
+
+        const finalMultiplier = globalMult * categoryMult * categoryRainMult;
+
+        breakdown.dynamicMultiplier = finalMultiplier;
+        subtotal = subtotal * finalMultiplier;
 
         // 6. Fee de Cartão (Apenas sobre o subtotal atual)
         if (paymentMethod === 'card') {

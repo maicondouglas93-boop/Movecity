@@ -17,16 +17,11 @@ const notificationRoutes = require('./routes/notification.routes');
 const chatRoutes = require('./routes/chat.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 
-const { adminRouter } = require('./admin/admin.config');
-
-if (process.env.NODE_ENV !== 'test') {
-    connectToDb();
-}
-
-app.use('/admin', adminRouter);
+const adminRoutes = require('./routes/admin.routes');
 
 const allowedOrigins = [
     "http://localhost:5173",
+    "http://localhost:5174",
     process.env.FRONTEND_URL
 ];
 
@@ -48,16 +43,44 @@ const limiter = rateLimit({
     max: 1000, // limite de requests por IP
     message: "Muitas requisições deste IP, tente novamente mais tarde."
 });
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 5, // max 5 tentativas
+    message: { message: "Muitas tentativas de login. Tente novamente em 15 minutos." }
+});
+
 app.use(limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+if (process.env.NODE_ENV !== 'test') {
+    connectToDb();
+}
+
+app.use('/api/admin', adminRoutes);
 
 app.get('/', (req, res) => {
     res.send('Hello World');
 });
 
 const mongoose = require('mongoose');
+
+app.get('/api/health', (req, res) => {
+    const memory = process.memoryUsage();
+    res.status(200).json({
+        status: 'OK',
+        uptime: process.uptime(),
+        memory: {
+            rss: `${Math.round(memory.rss / 1024 / 1024)} MB`,
+            heapTotal: `${Math.round(memory.heapTotal / 1024 / 1024)} MB`,
+            heapUsed: `${Math.round(memory.heapUsed / 1024 / 1024)} MB`
+        },
+        databaseState: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        timestamp: new Date().toISOString()
+    });
+});
 app.get('/db-test', async (req, res) => {
     const rawUri = process.env.DB_CONNECT || '';
     let maskedUri = 'undefined';

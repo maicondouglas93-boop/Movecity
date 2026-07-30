@@ -22,7 +22,12 @@ const tariffHistorySchema = new mongoose.Schema({
     entity: {
         type: String,
         required: true,
-        description: "Model afetado (ex: VehicleCategory, PricingRule)"
+        description: "Model afetado (ex: VehicleCategory, TariffSetting)"
+    },
+    categoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'vehicleCategory',
+        description: "ID da categoria, caso aplicável"
     },
     oldValue: {
         type: mongoose.Schema.Types.Mixed

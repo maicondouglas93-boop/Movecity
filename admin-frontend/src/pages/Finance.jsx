@@ -1,0 +1,535 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '../services/api';
+import { 
+  Search, CheckCircle, XCircle, MoreVertical, FileText, Lock, ShieldAlert,
+  Wallet, ArrowUpRight, ArrowDownRight, Clock, Building, Download, Square, CheckSquare, X
+} from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+
+const statusColors = {
+  requested: 'bg-border text-text',
+  in_analysis: 'bg-warning/10 text-warning border-warning/20',
+  approved: 'bg-primary/10 text-primary border-primary/20',
+  processing: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+  paid: 'bg-green-500/10 text-green-500 border-green-500/20',
+  rejected: 'bg-danger/10 text-danger border-danger/20',
+};
+
+const statusNames = {
+  requested: 'Solicitado',
+  in_analysis: 'Em Análise',
+  approved: 'Aprovado',
+  processing: 'Processando',
+  paid: 'Pago',
+  rejected: 'Rejeitado',
+};
+
+export default function Finance() {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({ period: 'all', status: '', search: '' });
+  const [searchInput, setSearchInput] = useState('');
+  const [selectedPayouts, setSelectedPayouts] = useState([]);
+  const [activePayoutDrawer, setActivePayoutDrawer] = useState(null);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['payouts', page, filters],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page, limit: 15, ...filters });
+      const { data } = await api.get(`/admin/payouts?${params.toString()}`);
+      return data;
+    },
+    keepPreviousData: true
+  });
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setFilters(prev => ({ ...prev, search: searchInput }));
+    setPage(1);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedPayouts.length === data?.payouts?.length) {
+      setSelectedPayouts([]);
+    } else {
+      setSelectedPayouts(data?.payouts?.map(p => p._id) || []);
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedPayouts(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+  };
+
+  const bulkApproveMutation = useMutation({
+    mutationFn: async (payoutIds) => {
+      const { data } = await api.post(`/admin/payouts/bulk-approve`, { payoutIds });
+      return data;
+    },
+    onSuccess: (res) => {
+      alert(`Sucesso! ${res.approvedCount} repasses foram aprovados.`);
+      setSelectedPayouts([]);
+      queryClient.invalidateQueries(['payouts']);
+    },
+    onError: (err) => {
+      alert(`Erro: ${err.response?.data?.message || err.message}`);
+    }
+  });
+
+  const exportCSV = () => {
+    if (!data?.payouts) return;
+    const items = selectedPayouts.length > 0 ? data.payouts.filter(p => selectedPayouts.includes(p._id)) : data.payouts;
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + "ID,Motorista,Valor,ChavePix,Status,Data\n"
+      + items.map(p => `${p._id},${p.captainId?.fullname?.firstname},${p.amount},${p.captainId?.pixKey},${p.status},${new Date(p.createdAt).toISOString()}`).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `financeiro_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Mock data for the chart
+  const chartData = [
+    { name: 'Seg', valor: 400 },
+    { name: 'Ter', valor: 300 },
+    { name: 'Qua', valor: 600 },
+    { name: 'Qui', valor: 800 },
+    { name: 'Sex', valor: 500 },
+    { name: 'Sáb', valor: 900 },
+    { name: 'Dom', valor: 1200 },
+  ];
+
+  return (
+    <div className="flex h-[calc(100vh-6rem)] overflow-hidden bg-background">
+      <div className="flex flex-col flex-1 w-full transition-all duration-300">
+        
+        {/* Header & Dashboard Stats */}
+        <div className="p-6 border-b border-border space-y-6 flex-shrink-0 bg-surface overflow-y-auto max-h-[50vh]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Centro Financeiro</h1>
+              <p className="text-sm text-text-muted mt-1">Conciliação, auditoria e aprovação de saques.</p>
+            </div>
+          </div>
+
+          {/* Quick Stats Summary */}
+          {data?.summary && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                <div className="flex items-center gap-2 mb-2 text-text-muted"><Wallet className="w-4 h-4"/><p className="text-sm font-medium">Saldo Plataforma</p></div>
+                <p className="text-2xl font-bold">{data.summary.platformBalance !== null ? `R$ ${data.summary.platformBalance}` : 'Não disponível'}</p>
+                <p className="text-xs text-text-muted mt-1">Acumulado líquido</p>
+              </div>
+              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                <div className="flex items-center gap-2 mb-2 text-warning"><Clock className="w-4 h-4"/><p className="text-sm font-medium">Saídas Previstas</p></div>
+                <p className="text-2xl font-bold">R$ {data.summary.pendingAmount?.toFixed(2) || '0.00'}</p>
+                <p className="text-xs text-text-muted mt-1">Repasses pendentes</p>
+              </div>
+              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos Hoje</p></div>
+                <p className="text-2xl font-bold">R$ {data.summary.paidToday?.toFixed(2) || '0.00'}</p>
+                <p className="text-xs text-text-muted mt-1">Volume liberado hoje</p>
+              </div>
+              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos no Mês</p></div>
+                <p className="text-2xl font-bold">R$ {data.summary.paidMonth?.toFixed(2) || '0.00'}</p>
+                <p className="text-xs text-text-muted mt-1">Total do mês</p>
+              </div>
+              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                <div className="flex items-center gap-2 mb-2 text-danger"><XCircle className="w-4 h-4"/><p className="text-sm font-medium">Rejeitados</p></div>
+                <p className="text-2xl font-bold">{data.summary.rejectedCount || 0}</p>
+                <p className="text-xs text-text-muted mt-1">Solicitações com erro</p>
+              </div>
+            </div>
+          )}
+
+          {/* Optional Chart */}
+          <div className="h-32 w-full mt-4 bg-background border border-border rounded-xl p-2 hidden md:block">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorValor" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                <Tooltip contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }} itemStyle={{ color: '#fff' }} />
+                <Area type="monotone" dataKey="valor" stroke="#3b82f6" fillOpacity={1} fill="url(#colorValor)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Filters Bar */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <form onSubmit={handleSearch} className="relative flex-1 min-w-[200px]">
+              <input
+                type="text"
+                placeholder="Buscar (Motorista, Chave)..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-sm focus:border-primary focus:outline-none"
+              />
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-text-muted" />
+            </form>
+            
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.period} onChange={e => { setFilters(f => ({ ...f, period: e.target.value })); setPage(1); }}>
+              <option value="all">Todo o período</option>
+              <option value="today">Hoje</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+            </select>
+            
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.status} onChange={e => { setFilters(f => ({ ...f, status: e.target.value })); setPage(1); }}>
+              <option value="">Status (Todos)</option>
+              <option value="requested">Solicitado</option>
+              <option value="in_analysis">Em Análise</option>
+              <option value="approved">Aprovado</option>
+              <option value="paid">Pago</option>
+              <option value="rejected">Rejeitado</option>
+            </select>
+          </div>
+
+          {/* Bulk Actions */}
+          {selectedPayouts.length > 0 && (
+            <div className="flex items-center gap-3 p-3 bg-primary/10 border border-primary/20 rounded-lg animate-fade-in">
+              <span className="text-sm font-medium text-primary">{selectedPayouts.length} selecionados</span>
+              <div className="h-4 w-px bg-primary/20"></div>
+              <button 
+                onClick={() => { if(window.confirm(`Aprovar e processar ${selectedPayouts.length} repasses selecionados?`)) bulkApproveMutation.mutate(selectedPayouts); }}
+                className="text-sm px-3 py-1 bg-primary text-background rounded font-medium flex items-center gap-2 hover:bg-primary/90"
+              >
+                <CheckCircle className="w-4 h-4" /> Aprovar Selecionados
+              </button>
+              <button onClick={exportCSV} className="text-sm px-3 py-1 bg-background rounded border border-border flex items-center gap-2 hover:bg-background/80">
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* List / Table */}
+        <div className="flex-1 overflow-auto bg-background">
+          <table className="w-full text-left text-sm whitespace-nowrap">
+            <thead className="bg-surface sticky top-0 border-b border-border text-text-muted z-10">
+              <tr>
+                <th className="px-4 py-3 w-10 text-center">
+                  <button onClick={toggleSelectAll}>
+                    {selectedPayouts.length > 0 && selectedPayouts.length === data?.payouts?.length ? 
+                      <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
+                <th className="px-4 py-3 font-medium">Data / ID</th>
+                <th className="px-4 py-3 font-medium">Motorista / Chave Pix</th>
+                <th className="px-4 py-3 font-medium">Valor</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {isLoading ? (
+                <tr><td colSpan="6" className="px-6 py-8 text-center text-text-muted">Carregando...</td></tr>
+              ) : data?.payouts?.length === 0 ? (
+                <tr><td colSpan="6" className="px-6 py-8 text-center text-text-muted">Nenhum repasse encontrado.</td></tr>
+              ) : (
+                data?.payouts?.map((payout) => {
+                  const isSelected = selectedPayouts.includes(payout._id);
+                  return (
+                    <tr key={payout._id} onClick={() => setActivePayoutDrawer(payout)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => toggleSelect(payout._id)}>
+                          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-4">
+                         <p className="text-text font-medium">{new Date(payout.createdAt).toLocaleDateString()} {new Date(payout.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                         <p className="text-xs text-text-muted mt-0.5">#{payout._id.substring(18).toUpperCase()}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                           <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center flex-shrink-0 text-xs font-bold text-text-muted uppercase">
+                              {payout.captainId?.fullname?.firstname?.charAt(0) || '?'}
+                           </div>
+                           <div>
+                              <p className="font-medium text-text">{payout.captainId?.fullname?.firstname} {payout.captainId?.fullname?.lastname}</p>
+                              <p className="text-xs text-text-muted mt-0.5 font-mono">{payout.captainId?.pixKey || 'Chave não informada'}</p>
+                           </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="font-bold text-text">R$ {payout.amount?.toFixed(2) || '0.00'}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[payout.status] || 'bg-background'}`}>
+                           {statusNames[payout.status] || payout.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => setActivePayoutDrawer(payout)} className="p-1.5 hover:bg-background border border-transparent hover:border-border rounded transition-colors text-text-muted">
+                           <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        {/* Pagination */}
+        {data?.pages > 1 && (
+          <div className="px-6 py-4 bg-surface border-t border-border flex items-center justify-between flex-shrink-0">
+            <span className="text-sm text-text-muted">Página {page} de {data.pages} (Total: {data.total})</span>
+            <div className="flex gap-2">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 bg-background border border-border rounded text-sm hover:bg-background/80 disabled:opacity-50">Anterior</button>
+              <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} className="px-3 py-1 bg-background border border-border rounded text-sm hover:bg-background/80 disabled:opacity-50">Próxima</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* CRM DRAWER */}
+      {activePayoutDrawer && (
+        <PayoutDrawer payoutId={activePayoutDrawer._id} onClose={() => setActivePayoutDrawer(null)} />
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// DRAWER COMPONENT
+// ==========================================
+
+function PayoutDrawer({ payoutId, onClose }) {
+  const queryClient = useQueryClient();
+  
+  const { data, isLoading } = useQuery({
+    queryKey: ['payout-details', payoutId],
+    queryFn: async () => {
+      const res = await api.get(`/admin/payouts/${payoutId}`);
+      return res.data;
+    }
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id) => api.put(`/admin/payouts/${id}/approve`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['payouts']);
+      queryClient.invalidateQueries(['payout-details', payoutId]);
+      alert("Pagamento aprovado e processado.");
+    },
+    onError: (err) => alert(`Erro: ${err.response?.data?.message || err.message}`)
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ id, reason }) => api.put(`/admin/payouts/${id}/reject`, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['payouts']);
+      queryClient.invalidateQueries(['payout-details', payoutId]);
+      alert("Solicitação rejeitada com sucesso.");
+    },
+    onError: (err) => alert(`Erro: ${err.response?.data?.message || err.message}`)
+  });
+
+  if (isLoading) {
+    return (
+      <>
+        <div className="fixed inset-0 bg-black/50 z-[2000]" onClick={onClose} />
+        <div className="fixed inset-y-0 right-0 w-[500px] bg-surface z-[2001] flex items-center justify-center">
+          <p className="text-text-muted">Carregando detalhes...</p>
+        </div>
+      </>
+    )
+  }
+
+  const payout = data?.payout;
+  const logs = data?.logs || [];
+  const captain = payout?.captainId;
+
+  const handleApprove = () => {
+    if(window.confirm("Aprovar este repasse? O saldo do motorista será debitado.")) {
+      approveMutation.mutate(payout._id);
+    }
+  };
+
+  const handleReject = () => {
+    const reason = window.prompt("Motivo da rejeição (Obrigatório):");
+    if (reason) {
+      rejectMutation.mutate({ id: payout._id, reason });
+    }
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 z-[2000] transition-opacity" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface border-l border-border shadow-2xl z-[2001] flex flex-col animate-slide-in">
+        
+        {/* Header */}
+        <div className="flex-shrink-0 border-b border-border bg-background p-4 flex items-center justify-between">
+           <div>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                Solicitação #{payout._id.substring(18).toUpperCase()}
+                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${statusColors[payout.status] || 'bg-background'}`}>
+                   {statusNames[payout.status] || payout.status}
+                </span>
+              </h2>
+              <p className="text-sm text-text-muted mt-1">{new Date(payout.createdAt).toLocaleString()}</p>
+           </div>
+           <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* Action Bar */}
+        {!['paid', 'rejected'].includes(payout.status) && (
+          <div className="bg-surface border-b border-border p-4 flex gap-3">
+             <button onClick={handleApprove} className="flex-1 py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2">
+                <CheckCircle className="w-5 h-5" /> Aprovar e Pagar
+             </button>
+             <button onClick={handleReject} className="flex-1 py-2 bg-danger/10 text-danger border border-danger/20 font-medium rounded hover:bg-danger/20 transition-colors flex justify-center items-center gap-2">
+                <XCircle className="w-5 h-5" /> Rejeitar
+             </button>
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-background/50">
+           
+           {/* Alertas */}
+           {captain?.isBlocked && (
+             <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg flex items-start gap-3">
+               <ShieldAlert className="w-5 h-5 text-danger mt-0.5" />
+               <div><p className="text-sm font-bold text-danger">Motorista Bloqueado</p><p className="text-xs text-danger/80">Você não pode aprovar pagamentos para motoristas bloqueados.</p></div>
+             </div>
+           )}
+
+           {/* Conferência Financeira */}
+           <div className="bg-surface rounded-xl border border-border overflow-hidden">
+              <div className="p-4 border-b border-border bg-background/50"><h3 className="text-sm font-bold uppercase tracking-wider text-text">Conferência Financeira</h3></div>
+              <div className="p-4 grid grid-cols-2 gap-4">
+                 <div>
+                    <p className="text-xs text-text-muted mb-1">Saldo Atual do Motorista</p>
+                    <p className="text-lg font-bold">R$ {captain?.earnings?.toFixed(2) || '0.00'}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-text-muted mb-1">Valor Solicitado</p>
+                    <p className="text-lg font-bold text-primary">R$ {payout.amount?.toFixed(2) || '0.00'}</p>
+                 </div>
+                 <div className="col-span-2 pt-4 border-t border-border mt-2">
+                    <p className="text-xs text-text-muted mb-1">Saldo Restante (Pós-Pagamento)</p>
+                    <p className="text-lg font-bold">R$ {((captain?.earnings || 0) - payout.amount).toFixed(2)}</p>
+                 </div>
+              </div>
+           </div>
+
+           {/* Detalhes de Pagamento & Gateway */}
+           <div className="bg-surface rounded-xl border border-border p-4 space-y-4">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Building className="w-4 h-4"/> Detalhes do Recebedor</h3>
+              <div className="space-y-2">
+                 <div className="flex justify-between"><span className="text-sm text-text-muted">Nome</span><span className="text-sm font-medium">{captain?.fullname?.firstname} {captain?.fullname?.lastname}</span></div>
+                 <div className="flex justify-between"><span className="text-sm text-text-muted">Chave Pix</span><span className="text-sm font-medium font-mono">{captain?.pixKey || 'Não cadastrada'}</span></div>
+                 <div className="flex justify-between"><span className="text-sm text-text-muted">Gateway</span><span className="text-sm font-medium uppercase">{payout.gateway || 'MANUAL'}</span></div>
+                 {payout.transactionId && <div className="flex justify-between"><span className="text-sm text-text-muted">ID Transação</span><span className="text-sm font-medium text-primary">{payout.transactionId}</span></div>}
+              </div>
+           </div>
+
+           {/* Motivo de Rejeição */}
+           {payout.reason && (
+              <div className="bg-danger/5 border border-danger/20 rounded-xl p-4">
+                 <p className="text-xs font-bold uppercase text-danger mb-1">Motivo da Rejeição</p>
+                 <p className="text-sm text-text">{payout.reason}</p>
+              </div>
+           )}
+
+           {/* Timeline (Auditoria) */}
+           <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Timeline de Auditoria</h3>
+              <div className="relative pl-4 space-y-4">
+                 <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-border"></div>
+                 {/* Item 1: Request */}
+                 <div className="relative">
+                    <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-border z-10"></div>
+                    <div className="pl-4">
+                       <p className="text-sm font-medium text-text">Solicitação de Saque</p>
+                       <p className="text-xs text-text-muted">{new Date(payout.createdAt).toLocaleString()}</p>
+                    </div>
+                 </div>
+                 {/* Logs */}
+                 {logs.map((log) => (
+                    <div key={log._id} className="relative">
+                       <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-primary z-10 border border-surface"></div>
+                       <div className="pl-4">
+                          <p className="text-sm font-medium text-primary capitalize">{log.action.replace(/_/g, ' ')}</p>
+                          <p className="text-xs text-text-muted">{new Date(log.createdAt).toLocaleString()}</p>
+                          <p className="text-xs text-text mt-1 italic">{log.reason}</p>
+                          <p className="text-[10px] text-text-muted mt-0.5">Por {log.adminName}</p>
+                       </div>
+                    </div>
+                 ))}
+                 {/* Item: Final */}
+                 {payout.status === 'paid' && (
+                    <div className="relative">
+                       <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-green-500 z-10 border border-surface"></div>
+                       <div className="pl-4">
+                          <p className="text-sm font-medium text-green-500">Repasse Finalizado</p>
+                          <p className="text-xs text-text-muted">{new Date(payout.paidAt).toLocaleString()}</p>
+                       </div>
+                    </div>
+                 )}
+              </div>
+           </div>
+
+           {/* Captain Financial History Preview */}
+           <CaptainFinancialHistory captainId={captain?._id} />
+
+        </div>
+      </div>
+    </>
+  )
+}
+
+function CaptainFinancialHistory({ captainId }) {
+  const { data: history, isLoading } = useQuery({
+    queryKey: ['captain-financial-history', captainId],
+    queryFn: async () => {
+      if(!captainId) return [];
+      const res = await api.get(`/admin/captains/${captainId}/financial-history`);
+      return res.data;
+    },
+    enabled: !!captainId
+  });
+
+  if (isLoading) return <p className="text-xs text-text-muted">Carregando extrato...</p>;
+  if (!history || history.length === 0) return null;
+
+  return (
+    <div className="pt-6 border-t border-border">
+       <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Últimos Movimentos (Extrato)</h3>
+       <div className="space-y-2">
+          {history.map((item, i) => (
+             <div key={i} className="flex items-center justify-between p-3 bg-surface border border-border rounded-lg">
+                <div className="flex items-center gap-3">
+                   {item.type === 'ride' ? <ArrowDownRight className="w-4 h-4 text-green-500"/> : <ArrowUpRight className="w-4 h-4 text-danger"/>}
+                   <div>
+                      <p className="text-sm font-medium">{item.label}</p>
+                      <p className="text-xs text-text-muted">{new Date(item.date).toLocaleString()}</p>
+                   </div>
+                </div>
+                <div className="text-right">
+                   <p className={`text-sm font-bold ${item.amount > 0 ? 'text-green-500' : 'text-danger'}`}>
+                     {item.amount > 0 ? '+' : ''}R$ {item.amount.toFixed(2)}
+                   </p>
+                   {item.commission && <p className="text-[10px] text-text-muted">- R$ {item.commission.toFixed(2)} taxa</p>}
+                </div>
+             </div>
+          ))}
+       </div>
+    </div>
+  )
+}

@@ -54,7 +54,44 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 5.0,
     },
+    // CRM Fields (Denormalized)
+    totalRides: {
+        type: Number,
+        default: 0,
+    },
+    totalSpent: {
+        type: Number,
+        default: 0,
+    },
+    totalDistance: {
+        type: Number,
+        default: 0,
+    },
+    lastRideAt: {
+        type: Date,
+    },
+    city: {
+        type: String,
+        default: '',
+    },
+    tags: [{
+        type: String,
+    }],
+    observations: [{
+        adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser' },
+        adminName: String,
+        text: String,
+        createdAt: { type: Date, default: Date.now }
+    }],
 }, { timestamps: true });
+
+// Indexes for performance
+userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
+userSchema.index({ createdAt: -1 });
+userSchema.index({ isBlocked: 1 });
+userSchema.index({ city: 1 });
+userSchema.index({ totalRides: -1 });
 
 userSchema.methods.generateAuthToken = function () {
     const token = jwt.sign({ _id: this._id }, process.env.JWT_SECRET, { expiresIn: '24h' });

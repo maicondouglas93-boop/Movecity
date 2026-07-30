@@ -43,6 +43,16 @@ const vehicleCategorySchema = new mongoose.Schema({
     isActive: {
         type: Boolean,
         default: true
+    },
+    dynamicMultiplier: {
+        type: Number,
+        default: 1.0,
+        description: "Multiplicador dinâmico de tarifa para esta categoria (ex: chuva, alta demanda)"
+    },
+    rainFeeMultiplier: {
+        type: Number,
+        default: 1.0,
+        description: "Multiplicador específico de chuva para esta categoria"
     }
 }, { timestamps: true });
 

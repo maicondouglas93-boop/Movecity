@@ -92,6 +92,15 @@ const destinationIcon = L.divIcon({
     iconAnchor: [14, 28],
 });
 
+const sanitizeCoord = (lat, lng) => {
+    if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
+    if (lng === null || lng === undefined || lng === '' || isNaN(Number(lng))) return null;
+    const nLat = Number(lat);
+    const nLng = Number(lng);
+    if (nLat < -90 || nLat > 90 || nLng < -180 || nLng > 180) return null;
+    return { lat: nLat, lng: nLng };
+};
+
 const getRemainingRoute = (route, position) => {
     if (!route || route.length === 0) return [];
     if (!position || isNaN(position.lat) || isNaN(position.lng)) return route;
@@ -263,29 +272,37 @@ const LiveTracking = (props) => {
 
             try {
                 if (activePickup) {
-                    if (typeof activePickup === 'object' && activePickup.lat && activePickup.lng) {
-                        setPickupCoords({ lat: activePickup.lat, lng: activePickup.lng });
-                    } else if (typeof activePickup === 'string' && activePickup.length >= 3) {
-                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(activePickup)}`, {
+                    const parsed = typeof activePickup === 'object' ? activePickup : { address: activePickup };
+                    const coord = sanitizeCoord(parsed.lat, parsed.lng);
+                    
+                    if (coord) {
+                        setPickupCoords(coord);
+                    } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
+                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(parsed.address)}`, {
                             headers: { Authorization: `Bearer ${token}` }
                         });
                         const data = await response.json();
-                        if (data.ltd && data.lng) {
-                            setPickupCoords({ lat: data.ltd, lng: data.lng });
+                        const fetchedCoord = sanitizeCoord(data.ltd, data.lng);
+                        if (fetchedCoord) {
+                            setPickupCoords(fetchedCoord);
                         }
                     }
                 }
                 
                 if (activeDestination) {
-                    if (typeof activeDestination === 'object' && activeDestination.lat && activeDestination.lng) {
-                        setDestinationCoords({ lat: activeDestination.lat, lng: activeDestination.lng });
-                    } else if (typeof activeDestination === 'string' && activeDestination.length >= 3) {
-                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(activeDestination)}`, {
+                    const parsed = typeof activeDestination === 'object' ? activeDestination : { address: activeDestination };
+                    const coord = sanitizeCoord(parsed.lat, parsed.lng);
+                    
+                    if (coord) {
+                        setDestinationCoords(coord);
+                    } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
+                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(parsed.address)}`, {
                             headers: { Authorization: `Bearer ${token}` }
                         });
                         const data = await response.json();
-                        if (data.ltd && data.lng) {
-                            setDestinationCoords({ lat: data.ltd, lng: data.lng });
+                        const fetchedCoord = sanitizeCoord(data.ltd, data.lng);
+                        if (fetchedCoord) {
+                            setDestinationCoords(fetchedCoord);
                         }
                     }
                 }
@@ -415,7 +432,6 @@ const LiveTracking = (props) => {
         hasFitBoundsRef.current = false;
     }, [pickupCoords, destinationCoords, routeCoords.length]);
 
-    // Manual Re-center handler
     const handleRecenter = useCallback(() => {
         if (!mapInstanceRef.current) return;
         mapInstanceRef.current.invalidateSize();
@@ -423,20 +439,21 @@ const LiveTracking = (props) => {
         if (routeCoordsRef.current.length > 0) {
             allCoords.push(...routeCoordsRef.current);
         }
-        if (captainPosition && !isNaN(captainPosition.lat) && !isNaN(captainPosition.lng)) {
-            allCoords.push([captainPosition.lat, captainPosition.lng]);
-        }
-        if (pickupCoords && !isNaN(pickupCoords.lat) && !isNaN(pickupCoords.lng)) {
-            allCoords.push([pickupCoords.lat, pickupCoords.lng]);
-        }
-        if (destinationCoords && !isNaN(destinationCoords.lat) && !isNaN(destinationCoords.lng)) {
-            allCoords.push([destinationCoords.lat, destinationCoords.lng]);
-        }
+        
+        const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
+        if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
+        
+        const pickCoord = sanitizeCoord(pickupCoords?.lat, pickupCoords?.lng);
+        if (pickCoord) allCoords.push([pickCoord.lat, pickCoord.lng]);
+        
+        const destCoord = sanitizeCoord(destinationCoords?.lat, destinationCoords?.lng);
+        if (destCoord) allCoords.push([destCoord.lat, destCoord.lng]);
         
         // Fallback to currentPosition only if no other coordinates exist
         const pos = currentPositionRef.current;
-        if (allCoords.length === 0 && pos && !isNaN(pos.lat) && !isNaN(pos.lng)) {
-            allCoords.push([pos.lat, pos.lng]);
+        const curCoord = sanitizeCoord(pos?.lat, pos?.lng);
+        if (allCoords.length === 0 && curCoord) {
+            allCoords.push([curCoord.lat, curCoord.lng]);
         }
 
         if (allCoords.length > 0) {
@@ -493,9 +510,8 @@ const LiveTracking = (props) => {
             // Fit map bounds once
             if (!hasFitBoundsRef.current) {
                 const allCoords = [...routeCoords];
-                if (captainPosition && !isNaN(captainPosition.lat) && !isNaN(captainPosition.lng)) {
-                    allCoords.push([captainPosition.lat, captainPosition.lng]);
-                }
+                const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
+                if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
                 
                 try {
                     const bounds = L.latLngBounds(allCoords);
@@ -509,20 +525,20 @@ const LiveTracking = (props) => {
             // Fit default bounds once
             if (!hasFitBoundsRef.current) {
                 const boundsCoords = [];
-                if (pickupCoords && !isNaN(pickupCoords.lat) && !isNaN(pickupCoords.lng)) {
-                    boundsCoords.push([pickupCoords.lat, pickupCoords.lng]);
-                }
-                if (destinationCoords && !isNaN(destinationCoords.lat) && !isNaN(destinationCoords.lng)) {
-                    boundsCoords.push([destinationCoords.lat, destinationCoords.lng]);
-                }
-                if (captainPosition && !isNaN(captainPosition.lat) && !isNaN(captainPosition.lng)) {
-                    boundsCoords.push([captainPosition.lat, captainPosition.lng]);
-                }
+                const pickCoord = sanitizeCoord(pickupCoords?.lat, pickupCoords?.lng);
+                if (pickCoord) boundsCoords.push([pickCoord.lat, pickCoord.lng]);
+                
+                const destCoord = sanitizeCoord(destinationCoords?.lat, destinationCoords?.lng);
+                if (destCoord) boundsCoords.push([destCoord.lat, destCoord.lng]);
+                
+                const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
+                if (capCoord) boundsCoords.push([capCoord.lat, capCoord.lng]);
                 
                 // Fallback to currentPosition only if no ride coordinates are set
                 const pos = currentPositionRef.current;
-                if (boundsCoords.length === 0 && pos && !isNaN(pos.lat) && !isNaN(pos.lng)) {
-                    boundsCoords.push([pos.lat, pos.lng]);
+                const curCoord = sanitizeCoord(pos?.lat, pos?.lng);
+                if (boundsCoords.length === 0 && curCoord) {
+                    boundsCoords.push([curCoord.lat, curCoord.lng]);
                 }
                 
                 if (boundsCoords.length > 0) {

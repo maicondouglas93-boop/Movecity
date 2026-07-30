@@ -6,6 +6,8 @@ import 'remixicon/fonts/remixicon.css'
 import LocationSearchPanel from '../components/LocationSearchPanel';
 import VehiclePanel from '../components/VehiclePanel';
 import ConfirmRide from '../components/ConfirmRide';
+import OptionalsPanel from '../components/OptionalsPanel';
+import PaymentOptionsPanel from '../components/PaymentOptionsPanel';
 import LookingForDriver from '../components/LookingForDriver';
 import WaitingForDriver from '../components/WaitingForDriver';
 import { SocketContext } from '../context/SocketContext';
@@ -39,6 +41,16 @@ const Home = () => {
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
     const [ ride, setRide ] = useState(null)
+    
+    const optionalsPanelRef = useRef(null)
+    const paymentPanelRef = useRef(null)
+    const [ optionalsPanel, setOptionalsPanel ] = useState(false)
+    const [ paymentPanel, setPaymentPanel ] = useState(false)
+    const [ paymentMethod, setPaymentMethod ] = useState('pix')
+    const [ useWalletBalance, setUseWalletBalance ] = useState(false)
+    const [ optionals, setOptionals ] = useState([])
+    const [ observation, setObservation ] = useState('')
+    const [ requestFemaleDriver, setRequestFemaleDriver ] = useState(false)
 
     const [ isSelectingOnMap, setIsSelectingOnMap ] = useState(false)
     const [ mapSelectionCoords, setMapSelectionCoords ] = useState(null)
@@ -409,6 +421,38 @@ const Home = () => {
         }
     }, [ waitingForDriver ])
 
+    useGSAP(function () {
+        if (optionalsPanel) {
+            optionalsPanelRef.current.classList.remove('invisible')
+            gsap.to(optionalsPanelRef.current, {
+                transform: 'translateY(0)',
+                duration: 0.3
+            })
+        } else {
+            gsap.to(optionalsPanelRef.current, {
+                transform: 'translateY(100%)',
+                duration: 0.3,
+                onComplete: () => optionalsPanelRef.current?.classList.add('invisible')
+            })
+        }
+    }, [ optionalsPanel ])
+
+    useGSAP(function () {
+        if (paymentPanel) {
+            paymentPanelRef.current.classList.remove('invisible')
+            gsap.to(paymentPanelRef.current, {
+                transform: 'translateY(0)',
+                duration: 0.3
+            })
+        } else {
+            gsap.to(paymentPanelRef.current, {
+                transform: 'translateY(100%)',
+                duration: 0.3,
+                onComplete: () => paymentPanelRef.current?.classList.add('invisible')
+            })
+        }
+    }, [ paymentPanel ])
+
 
     async function findTrip() {
         setVehiclePanel(true)
@@ -439,7 +483,12 @@ const Home = () => {
         const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
             pickup: pickupStr,
             destination: destStr,
-            vehicleType
+            vehicleType,
+            paymentMethod,
+            useWalletBalance,
+            optionals,
+            observation,
+            requestFemaleDriver
         }, {
             headers: {
                 Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -633,7 +682,30 @@ const Home = () => {
                     destination={destination}
                     fare={fare}
                     vehicleType={vehicleType}
-                    setConfirmRidePanel={setConfirmRidePanel} setVehicleFound={setVehicleFound} />
+                    setConfirmRidePanel={setConfirmRidePanel} 
+                    setVehicleFound={setVehicleFound} 
+                    setOptionalsPanel={setOptionalsPanel}
+                    setPaymentPanel={setPaymentPanel}
+                    paymentMethod={paymentMethod}
+                />
+            </div>
+            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+                <OptionalsPanel
+                    setOptionalsPanel={setOptionalsPanel}
+                    setOptionals={setOptionals}
+                    setObservation={setObservation}
+                    setRequestFemaleDriver={setRequestFemaleDriver}
+                />
+            </div>
+            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+                <PaymentOptionsPanel
+                    setPaymentPanel={setPaymentPanel}
+                    paymentMethod={paymentMethod}
+                    setPaymentMethod={setPaymentMethod}
+                    useWalletBalance={useWalletBalance}
+                    setUseWalletBalance={setUseWalletBalance}
+                    walletBalance={user?.walletBalance}
+                />
             </div>
             <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
                 <LookingForDriver
@@ -654,7 +726,7 @@ const Home = () => {
             </div>
 
             {/* Bottom Navigation */}
-            {!(panelOpen || vehiclePanel || confirmRidePanel || vehicleFound || waitingForDriver || isSelectingOnMap || schedulePanelOpen) && (
+            {!(panelOpen || vehiclePanel || confirmRidePanel || optionalsPanel || paymentPanel || vehicleFound || waitingForDriver || isSelectingOnMap || schedulePanelOpen) && (
                 <Header />
             )}
 

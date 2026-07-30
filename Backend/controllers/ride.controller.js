@@ -13,13 +13,23 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { userId, pickup, destination, vehicleType } = req.body;
+    const { userId, pickup, destination, vehicleType, paymentMethod, optionals, observation, useWalletBalance, requestFemaleDriver } = req.body;
 
     try {
         if (!req.user || !req.user._id) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
-        const ride = await rideService.createRide({ user: req.user._id, pickup, destination, vehicleType });
+        const ride = await rideService.createRide({ 
+            user: req.user._id, 
+            pickup, 
+            destination, 
+            vehicleType,
+            paymentMethod,
+            optionals,
+            observation,
+            useWalletBalance,
+            requestFemaleDriver
+        });
 
         const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
 

@@ -12,7 +12,6 @@ const userSchema = new mongoose.Schema({
         },
         lastname: {
             type: String,
-            minlength: [ 3, 'Last name must be at least 3 characters long' ],
         }
     },
     email: {
@@ -24,6 +23,10 @@ const userSchema = new mongoose.Schema({
     profilePicture: {
         type: String,
         default: '',
+    },
+    walletBalance: {
+        type: Number,
+        default: 0,
     },
     cpf: {
         type: String,

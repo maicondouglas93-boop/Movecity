@@ -114,8 +114,14 @@ module.exports.googleLogin = async (req, res, next) => {
 
         if (!user) {
             const nameParts = name ? name.split(' ') : ['Google', 'User'];
-            const firstname = nameParts[0];
-            const lastname = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+            
+            let firstname = nameParts[0] ? nameParts[0].trim() : 'Google';
+            if (firstname.length < 3) firstname = firstname.padEnd(3, ' ');
+
+            let lastname = nameParts.length > 1 ? nameParts.slice(1).join(' ').trim() : 'User';
+            if (!lastname || lastname.length < 3) {
+                lastname = (lastname || 'User').padEnd(3, ' ');
+            }
             
             // Random password since they authenticate via Google
             const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);

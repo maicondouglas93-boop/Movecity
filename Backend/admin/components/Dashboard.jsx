@@ -26,6 +26,9 @@ const Dashboard = (props) => {
         paymentMethods = { card: 0, cash: 0, pix: 0 },
         vehicleBreakdown = { car: 0, moto: 0, auto: 0 }
 
+    const [liveCaptains, setLiveCaptains] = React.useState(activeCaptainsList);
+    const [mapInitialized, setMapInitialized] = React.useState(false);
+
     useEffect(() => {
         // Carrega as dependências do Leaflet dinamicamente se necessário
         if (!window.L) {
@@ -36,14 +39,47 @@ const Dashboard = (props) => {
 
             const script = document.createElement('script');
             script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-            script.onload = () => initMap();
+            script.onload = () => setMapInitialized(true);
             document.head.appendChild(script);
         } else {
-            initMap();
+            setMapInitialized(true);
         }
-    }, [activeCaptainsList, activeRidesList]);
+    }, []);
 
-    const initMap = () => {
+    useEffect(() => {
+        if (mapInitialized) {
+            initMap(liveCaptains);
+        }
+    }, [mapInitialized, liveCaptains]);
+
+    useEffect(() => {
+        // Polling para motoristas online em tempo real
+        const fetchCaptains = async () => {
+            try {
+                const res = await fetch('/admin/api/active-captains');
+                const data = await res.json();
+                
+                // Mapeia para o formato que o mapa espera
+                const formatted = data.map(c => ({
+                    id: c._id,
+                    name: `${c.fullname?.firstname || ''} ${c.fullname?.lastname || ''}`.trim(),
+                    phone: c.phone,
+                    vehicleType: c.vehicle?.vehicleType || 'car',
+                    plate: c.vehicle?.plate || '',
+                    ltd: c.location?.ltd || -23.55052,
+                    lng: c.location?.lng || -46.633308
+                }));
+                setLiveCaptains(formatted);
+            } catch (err) {
+                console.error("Erro ao buscar motoristas ativos", err);
+            }
+        };
+
+        const interval = setInterval(fetchCaptains, 10000); // atualiza a cada 10 segundos
+        return () => clearInterval(interval);
+    }, []);
+
+    const initMap = (captainsData) => {
         if (!window.L || !document.getElementById('admin-live-map')) return;
 
         // Evita re-inicialização duplicada do Leaflet
@@ -59,7 +95,7 @@ const Dashboard = (props) => {
         }).addTo(map);
 
         // Marcadores de Motoristas Online (Active Captains)
-        activeCaptainsList.forEach(captain => {
+        captainsData.forEach(captain => {
             const lat = captain.ltd || -23.55052;
             const lng = captain.lng || -46.633308;
             
@@ -169,8 +205,8 @@ const Dashboard = (props) => {
                         <span style={cardTitleStyle}>Motoristas Online</span>
                         <span style={iconBadgeStyle('rgba(34, 197, 94, 0.1)', '#4ade80')}>👨‍✈️</span>
                     </div>
-                    <div style={cardValueStyle}>{onlineCaptains}</div>
-                    <div style={cardFooterStyle}>Captains com GPS ativo</div>
+                    <div style={cardValueStyle}>{liveCaptains.length}</div>
+                    <div style={cardFooterStyle}>Captains com GPS ativo (Atualizado Ao Vivo)</div>
                 </div>
 
                 {/* Passageiros Registrados */}
@@ -212,12 +248,12 @@ const Dashboard = (props) => {
                 
                 {/* Active Drivers List */}
                 <div style={panelStyle}>
-                    <h3 style={panelTitleStyle}>👨‍✈️ Motoristas Conectados ({activeCaptainsList.length})</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px' }}>
-                        {activeCaptainsList.length === 0 ? (
+                    <h3 style={panelTitleStyle}>👨‍✈️ Motoristas Conectados ({liveCaptains.length})</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px', maxHeight: '400px', overflowY: 'auto' }}>
+                        {liveCaptains.length === 0 ? (
                             <p style={{ color: '#71717a', fontSize: '14px' }}>Nenhum motorista online no momento.</p>
                         ) : (
-                            activeCaptainsList.map(c => (
+                            liveCaptains.map(c => (
                                 <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', backgroundColor: '#09090b', borderRadius: '12px', border: '1px solid #27272a', transition: 'all 0.2s', cursor: 'default' }}>
                                     <div>
                                         <div style={{ fontWeight: '700', fontSize: '14px', color: '#fafafa' }}>{c.name}</div>

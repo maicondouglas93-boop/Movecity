@@ -1,4 +1,6 @@
 const rideModel = require('../models/ride.model');
+const userModel = require('../models/user.model');
+const paymentModel = require('../models/payment.model');
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
@@ -78,7 +80,7 @@ function getOtp(num) {
 }
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, paymentMethod = 'cash'
+    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
@@ -94,8 +96,48 @@ module.exports.createRide = async ({
         distance,
         time,
         vehicleType,
-        paymentMethod
+        paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod // Use a fallback method for calculation if carteira
     });
+
+    // Calcular opcionais
+    const optionalPrices = {
+        'porta_malas': 0,
+        'aceita_animais': 3,
+        'aceita_encomendas': 5,
+        'adaptado_cadeirante': 0,
+        'disposicao_passageiro': 15
+    };
+    
+    let optionalsTotal = 0;
+    const processedOptionals = [];
+    if (Array.isArray(optionals)) {
+        optionals.forEach(opt => {
+            const type = typeof opt === 'string' ? opt : opt.type;
+            const price = optionalPrices[type] || 0;
+            optionalsTotal += price;
+            processedOptionals.push({ type, price });
+        });
+    }
+
+    let finalPrice = pricing.finalFare + optionalsTotal;
+    let walletAmountUsed = 0;
+
+    if (useWalletBalance) {
+        const userData = await userModel.findById(user);
+        if (userData && userData.walletBalance > 0) {
+            if (userData.walletBalance >= finalPrice) {
+                walletAmountUsed = finalPrice;
+                paymentMethod = 'carteira'; // Fully paid with wallet
+            } else {
+                walletAmountUsed = userData.walletBalance;
+            }
+            userData.walletBalance -= walletAmountUsed;
+            await userData.save();
+        }
+    }
+
+    // Amount to be paid via normal method
+    const paymentAmount = finalPrice - walletAmountUsed;
 
     const ride = await rideModel.create({
         user,
@@ -103,7 +145,12 @@ module.exports.createRide = async ({
         destination,
         otp: getOtp(6),
         fare: pricing.finalFare,
+        finalPrice: finalPrice,
+        walletAmountUsed,
         paymentMethod,
+        optionals: processedOptionals,
+        observation,
+        requestFemaleDriver,
         vehicleType,
         status: 'requested',
         estimatedDistance: distance,
@@ -111,12 +158,22 @@ module.exports.createRide = async ({
         estimatedPriceMin: pricing.finalFare,
         estimatedPriceMax: pricing.finalFare,
         commissionPercent: pricing.fareBreakdown.platformCommission > 0 
-            ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0, // Fallback fallback calculation
+            ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0,
         commissionAmount: pricing.commissionAmount,
         fareBreakdown: pricing.fareBreakdown,
         distance,
         duration: time
-    })
+    });
+
+    if (paymentAmount > 0 || walletAmountUsed > 0) {
+        await paymentModel.create({
+            rideId: ride._id,
+            userId: user,
+            amount: finalPrice,
+            method: paymentMethod,
+            status: paymentMethod === 'carteira' ? 'approved' : 'pending'
+        });
+    }
 
     return ride;
 }

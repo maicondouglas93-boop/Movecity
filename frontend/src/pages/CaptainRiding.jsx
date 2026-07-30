@@ -10,6 +10,9 @@ import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets'
 import { useToast } from '../context/ToastContext'
 import RideChat from '../components/RideChat'
+import { useWakeLock } from '../hooks/useWakeLock'
+import { db } from '../db/db'
+import * as Sentry from '@sentry/react'
 
 const CaptainRiding = () => {
 
@@ -33,6 +36,11 @@ const CaptainRiding = () => {
             })
         }
     }
+
+    const { requestLock } = useWakeLock();
+    useEffect(() => {
+        requestLock();
+    }, [requestLock]);
 
     /* ── Location simulation: captain moves from pickup → destination ── */
     useEffect(() => {
@@ -80,15 +88,26 @@ const CaptainRiding = () => {
                         }
                         lat = lat + (dc.ltd - lat) * 0.08;
                         lng = lng + (dc.lng - lng) * 0.08;
-                        socket.emit('update-location-captain', {
-                            userId: captain._id,
-                            location: { ltd: lat, lng: lng }
-                        });
+                        
+                        if (socket.connected) {
+                            socket.emit('update-location-captain', {
+                                userId: captain._id,
+                                location: { ltd: lat, lng: lng }
+                            });
+                        } else {
+                            db.driverLocations.add({
+                                userId: captain._id,
+                                lat: lat,
+                                lng: lng,
+                                timestamp: Date.now()
+                            }).catch(e => console.error(e));
+                        }
                         step++;
                     }, 2000);
                 }
             } catch (err) {
                 console.error('Simulation error in CaptainRiding:', err);
+                Sentry.captureException(err, { tags: { issue: 'gps_error' } });
             }
         };
 

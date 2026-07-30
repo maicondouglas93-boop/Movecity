@@ -13,6 +13,9 @@ import LiveTracking from '../components/LiveTracking'
 import { useToast } from '../context/ToastContext'
 import CaptainHeader from '../components/CaptainHeader'
 import { requestFCMToken } from '../services/fcm'
+import { useWakeLock } from '../hooks/useWakeLock'
+import { db } from '../db/db'
+import * as Sentry from '@sentry/react'
 
 const CaptainHome = () => {
 
@@ -40,6 +43,11 @@ const CaptainHome = () => {
         setupFCM();
     }, [])
 
+    const { requestLock } = useWakeLock();
+    useEffect(() => {
+        requestLock();
+    }, [requestLock]);
+
     useEffect(() => {
         if (!captain || !captain._id) return;
 
@@ -62,15 +70,28 @@ const CaptainHome = () => {
         const updateLocation = () => {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(position => {
-                    socket.emit('update-location-captain', {
-                        userId: captain._id,
-                        location: {
-                            ltd: position.coords.latitude,
-                            lng: position.coords.longitude
-                        }
-                    })
-                }, () => {
-                    console.error('Falha ao obter localização do GPS');
+                    const loc = {
+                        ltd: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    
+                    if (socket.connected) {
+                        socket.emit('update-location-captain', {
+                            userId: captain._id,
+                            location: loc
+                        });
+                    } else {
+                        // Persist to Dexie for offline sync
+                        db.driverLocations.add({
+                            userId: captain._id,
+                            lat: loc.ltd,
+                            lng: loc.lng,
+                            timestamp: Date.now()
+                        }).catch(e => console.error(e));
+                    }
+                }, (error) => {
+                    console.error('Falha ao obter localização do GPS', error);
+                    Sentry.captureException(error, { tags: { issue: 'gps_error' } });
                 })
             }
         }
@@ -168,25 +189,41 @@ const CaptainHome = () => {
 
 
     async function confirmRide() {
+        try {
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm`, {
+                rideId: ride._id,
+                captainId: captain._id,
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                }
+            })
 
-        const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm`, {
-
-            rideId: ride._id,
-            captainId: captain._id,
-
-        }, {
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+            if (response.data) {
+                setRide(response.data)
             }
-        })
-
-        // Update ride state with full confirmed data (includes OTP for captain)
-        if (response.data) {
-            setRide(response.data)
+            setRidePopupPanel(false)
+            setConfirmRidePopupPanel(true)
+        } catch (err) {
+            console.error('Confirm ride error:', err);
+            if (!navigator.onLine || err.message === 'Network Error') {
+                db.offlineActions.add({
+                    type: 'accept-ride',
+                    rideId: ride._id,
+                    payload: { rideId: ride._id, captainId: captain._id },
+                    timestamp: Date.now()
+                }).catch(e => console.error(e));
+                
+                // Optimistic UI updates
+                const optimisticRide = { ...ride, status: 'accepted', captain };
+                setRide(optimisticRide);
+                setRidePopupPanel(false)
+                setConfirmRidePopupPanel(true)
+            } else {
+                addToast('Falha ao confirmar corrida. Pode já ter sido aceita.', 'error');
+                Sentry.captureException(err, { tags: { issue: 'api_error' } });
+            }
         }
-        setRidePopupPanel(false)
-        setConfirmRidePopupPanel(true)
-
     }
 
 

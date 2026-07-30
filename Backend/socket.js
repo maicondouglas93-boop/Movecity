@@ -47,6 +47,10 @@ function initializeSocket(server) {
                 location: {
                     ltd: location.ltd,
                     lng: location.lng
+                },
+                locationGeoJSON: {
+                    type: 'Point',
+                    coordinates: [location.lng, location.ltd]
                 }
             });
 

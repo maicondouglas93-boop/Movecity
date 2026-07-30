@@ -89,8 +89,25 @@ const rideSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: [ 'card', 'cash', 'pix' ],
+        enum: [ 'card', 'cash', 'pix', 'carteira' ],
         default: 'cash',
+    },
+    walletAmountUsed: {
+        type: Number,
+        default: 0
+    },
+    optionals: [{
+        type: {
+            type: String
+        },
+        price: Number
+    }],
+    observation: {
+        type: String
+    },
+    requestFemaleDriver: {
+        type: Boolean,
+        default: false
     },
     paymentGateway: {
         type: String,
@@ -112,5 +129,11 @@ const rideSchema = new mongoose.Schema({
         required: true,
     },
 }, { timestamps: true });
+
+// Índices de Performance
+rideSchema.index({ status: 1 });
+rideSchema.index({ captain: 1 });
+rideSchema.index({ user: 1 });
+rideSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('ride', rideSchema);

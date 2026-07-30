@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react'
+import React, { useState, useContext, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { UserDataContext } from '../context/UserContext'
 import { useNavigate } from 'react-router-dom'
@@ -15,6 +15,12 @@ const UserLogin = () => {
   const { user, setUser } = useContext(UserDataContext)
   const navigate = useNavigate()
   const { addToast } = useToast()
+
+  useEffect(() => {
+    if (localStorage.getItem('token')) {
+      navigate('/home')
+    }
+  }, [navigate])
 
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
@@ -38,7 +44,8 @@ const UserLogin = () => {
     } catch (error) {
       console.error('Google login error:', error);
       if (error.code !== 'auth/popup-closed-by-user') {
-        addToast('Erro ao realizar login com o Google', 'error');
+        const backendError = error.response?.data?.error || error.response?.data?.message || error.message;
+        addToast(`Erro no Google: ${backendError}`, 'error');
       }
     }
   };

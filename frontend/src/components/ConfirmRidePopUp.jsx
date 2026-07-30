@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { db } from '../db/db'
+import * as Sentry from '@sentry/react'
 
 const ConfirmRidePopUp = (props) => {
     const [otp, setOtp] = useState('')
@@ -23,7 +25,18 @@ const ConfirmRidePopUp = (props) => {
             setRideStatus(status)
         } catch (err) {
             console.error('Update status error:', err)
-            setError('Failed to update status')
+            if (!navigator.onLine || err.message === 'Network Error') {
+                db.offlineActions.add({
+                    type: 'update-ride-status',
+                    rideId: props.ride._id,
+                    payload: { rideId: props.ride._id, status },
+                    timestamp: Date.now()
+                }).catch(e => console.error(e));
+                setRideStatus(status); // optimistic
+            } else {
+                setError('Failed to update status')
+                Sentry.captureException(err, { tags: { issue: 'api_error' } });
+            }
         } finally {
             setLoading(false)
         }
@@ -53,7 +66,20 @@ const ConfirmRidePopUp = (props) => {
                 navigate('/captain-riding', { state: { ride: response.data } })
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Invalid OTP. Please try again.')
+            if (!navigator.onLine || err.message === 'Network Error') {
+                db.offlineActions.add({
+                    type: 'start-ride',
+                    rideId: props.ride._id,
+                    payload: { rideId: props.ride._id, otp: otp },
+                    timestamp: Date.now()
+                }).catch(e => console.error(e));
+                props.setConfirmRidePopupPanel(false)
+                props.setRidePopupPanel(false)
+                navigate('/captain-riding', { state: { ride: props.ride } }) // Optimistic
+            } else {
+                setError(err.response?.data?.message || 'Invalid OTP. Please try again.')
+                Sentry.captureException(err, { tags: { issue: 'api_error' } });
+            }
         } finally {
             setLoading(false)
         }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
@@ -14,6 +14,12 @@ const Captainlogin = () => {
   const { captain, setCaptain } = React.useContext(CaptainDataContext)
   const navigate = useNavigate()
   const { addToast } = useToast()
+
+  useEffect(() => {
+    if (localStorage.getItem('captain-token')) {
+      navigate('/captain-home')
+    }
+  }, [navigate])
 
   const submitHandler = async (e) => {
     e.preventDefault();

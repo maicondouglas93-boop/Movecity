@@ -1,0 +1,36 @@
+const mongoose = require('mongoose');
+
+const paymentSchema = new mongoose.Schema({
+    rideId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ride',
+        required: true
+    },
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'user',
+        required: true
+    },
+    amount: {
+        type: Number,
+        required: true
+    },
+    method: {
+        type: String,
+        enum: ['pix', 'cash', 'card', 'carteira'],
+        required: true
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'approved', 'failed', 'refunded'],
+        default: 'pending'
+    },
+    gatewayTransactionId: {
+        type: String
+    },
+    gateway: {
+        type: String
+    }
+}, { timestamps: true });
+
+module.exports = mongoose.model('payment', paymentSchema);

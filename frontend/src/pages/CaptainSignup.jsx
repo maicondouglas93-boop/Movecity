@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { CaptainDataContext } from '../context/CapatainContext'
 import { useNavigate } from 'react-router-dom'
@@ -8,6 +8,12 @@ import { useToast } from '../context/ToastContext'
 const CaptainSignup = () => {
 
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (localStorage.getItem('captain-token')) {
+      navigate('/captain-home')
+    }
+  }, [navigate])
 
   // Pessoais
   const [ firstName, setFirstName ] = useState('')

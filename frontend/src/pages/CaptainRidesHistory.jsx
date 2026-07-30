@@ -1,33 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import CaptainHeader from '../components/CaptainHeader';
 
 const CaptainRidesHistory = () => {
-    const [rides, setRides] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchRides = async () => {
-            try {
-                const token = localStorage.getItem('captain-token');
-                // Temporarily using user history endpoint structure if captain one is not ready, or a dedicated captain one
-                // assuming we created a similar one or we just show a placeholder list
-                // Since we didn't create a specific captain history route, I will render a placeholder message or use existing data if available.
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-history`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                }).catch(() => null);
-
-                if (response && response.data) {
-                    setRides(response.data.rides || []);
-                }
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchRides();
-    }, []);
+    const { data: rides = [], isLoading: loading } = useQuery({
+        queryKey: ['captainHistory'],
+        queryFn: async () => {
+            const token = localStorage.getItem('captain-token');
+            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-history`, {
+                headers: { Authorization: `Bearer ${token}` }
+            }).catch(() => null);
+            return response?.data?.rides || [];
+        }
+    });
 
     if (loading) return <div className="h-screen flex items-center justify-center">Carregando...</div>;
 

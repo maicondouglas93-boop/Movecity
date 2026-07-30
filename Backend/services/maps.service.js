@@ -69,9 +69,10 @@ module.exports.getAddressCoordinate = async (address) => {
         }
     } catch (error) {
         console.warn("Geocoding failed. Returning mock coordinates.", error.message);
+        // Fallback for demo: São Paulo (Brazil) instead of Mumbai
         return {
-            ltd: 19.0760 + (address.length % 10) * 0.01,
-            lng: 72.8777 + (address.length % 7) * 0.01
+            ltd: -23.5505 + (address.length % 10) * 0.001,
+            lng: -46.6333 + (address.length % 7) * 0.001
         };
     }
 }
@@ -285,23 +286,26 @@ module.exports.getCaptainsInTheRadius = async (ltd, lng, radius) => {
     const cached = getCache(cacheKey);
     if (cached) return cached;
 
-    const captains = await captainModel.find({ socketId: { $exists: true, $ne: null } });
+    // Converte o raio de KM para Radianos (dividindo pelo raio da Terra, 6378.1 km)
+    const radiusInRadians = radius / 6378.1;
 
-    if (!captains.length) {
-        setCache(cacheKey, [], 10);
-        return [];
-    }
-
-    const nearby = captains.filter(captain => {
-        if (!captain.location || captain.location.ltd == null || captain.location.lng == null) {
-            // If captain has no location yet, include them anyway so new installs work
-            return true;
+    // Busca os motoristas online e que estão próximos usando GeoJSON
+    const captains = await captainModel.find({
+        socketId: { $exists: true, $ne: null },
+        status: 'active',
+        isOnline: true,
+        canReceiveRides: true,
+        locationGeoJSON: {
+            $nearSphere: {
+                $geometry: {
+                    type: "Point",
+                    coordinates: [lng, ltd]
+                },
+                $maxDistance: radius * 1000 // metros
+            }
         }
-        const dist = haversineKm(ltd, lng, captain.location.ltd, captain.location.lng);
-        return dist <= radius;
-    });
+    }).limit(20);
 
-    const result = nearby.length ? nearby : captains;
-    setCache(cacheKey, result, 10);
-    return result;
+    setCache(cacheKey, captains, 10);
+    return captains;
 }

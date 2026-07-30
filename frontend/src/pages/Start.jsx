@@ -1,8 +1,20 @@
 
-import React from 'react'
-import { Link } from 'react-router-dom'
+import React, { useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 
 const Start = () => {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    const captainToken = localStorage.getItem('captain-token')
+    if (token) {
+      navigate('/home')
+    } else if (captainToken) {
+      navigate('/captain-home')
+    }
+  }, [navigate])
+
   return (
     <div>
       <div className='bg-cover bg-center bg-[url(/movecity-cover.jpg)] md:bg-none md:bg-white h-screen flex flex-col w-full pb-8 px-6'>

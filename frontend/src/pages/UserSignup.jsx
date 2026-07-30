@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react'
+import React, { useState, useContext, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { UserDataContext } from '../context/UserContext'
@@ -18,6 +18,12 @@ const UserSignup = () => {
   const navigate = useNavigate()
   const { user, setUser } = useContext(UserDataContext)
   const { addToast } = useToast()
+
+  useEffect(() => {
+    if (localStorage.getItem('token')) {
+      navigate('/home')
+    }
+  }, [navigate])
 
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();

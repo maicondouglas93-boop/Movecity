@@ -162,6 +162,17 @@ const captainSchema = new mongoose.Schema({
             type: Number,
         }
     },
+    locationGeoJSON: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            default: [0, 0] // Default for the ocean off Africa, updated on real location
+        }
+    },
     rating: {
         type: Number,
         default: 5.0,
@@ -179,6 +190,13 @@ const captainSchema = new mongoose.Schema({
         default: 0,
     }
 }, { timestamps: true });
+
+// Índices de Performance e Geolocalização
+captainSchema.index({ status: 1 });
+captainSchema.index({ isOnline: 1 });
+captainSchema.index({ canReceiveRides: 1 });
+captainSchema.index({ locationGeoJSON: '2dsphere' });
+
 
 
 captainSchema.methods.generateAuthToken = function () {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CaptainDataContext } from '../context/CapatainContext'
 import { SocketContext } from '../context/SocketContext'
 import CaptainHeader from '../components/CaptainHeader'
@@ -11,42 +12,36 @@ const CaptainWallet = () => {
     const { socket } = useContext(SocketContext)
     const { addToast } = useToast()
 
-    const [wallet, setWallet] = useState(null)
-    const [transactions, setTransactions] = useState([])
-    const [loading, setLoading] = useState(true)
+    const queryClient = useQueryClient();
 
-    // Recharge modal states
-    const [showRechargeModal, setShowRechargeModal] = useState(false)
-    const [rechargeAmount, setRechargeAmount] = useState('')
-    const [showQRCode, setShowQRCode] = useState(false)
-    const [recharging, setRecharging] = useState(false)
-
-    const fetchData = async () => {
-        try {
+    // Queries
+    const { data: walletData, isLoading: walletLoading } = useQuery({
+        queryKey: ['captainWallet'],
+        queryFn: async () => {
             const token = localStorage.getItem('captain-token')
-            const [walletRes, transRes] = await Promise.all([
-                axios.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } }),
-                axios.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
-            ])
-            setWallet(walletRes.data.wallet)
-            setTransactions(transRes.data.transactions)
-        } catch (err) {
-            console.error('Error fetching wallet data:', err)
-        } finally {
-            setLoading(false)
+            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } })
+            return res.data.wallet
         }
-    }
+    })
 
+    const { data: transactionsData, isLoading: transLoading } = useQuery({
+        queryKey: ['captainTransactions'],
+        queryFn: async () => {
+            const token = localStorage.getItem('captain-token')
+            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+            return res.data.transactions
+        }
+    })
+
+    const loading = walletLoading || transLoading;
+    const wallet = walletData;
+    const transactions = transactionsData || [];
+
+    // Socket invalidation
     useEffect(() => {
-        fetchData()
-
-        const handleWalletUpdated = (data) => {
-            if (data.wallet) setWallet(data.wallet)
-            if (data.transaction) {
-                setTransactions(prev => [data.transaction, ...prev])
-            } else {
-                fetchData() // fallback
-            }
+        const handleWalletUpdated = () => {
+            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
+            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
         }
 
         if (socket) {
@@ -56,33 +51,34 @@ const CaptainWallet = () => {
         return () => {
             if (socket) socket.off('wallet-updated', handleWalletUpdated)
         }
-    }, [socket])
+    }, [socket, queryClient])
+
+    // Mutations
+    const rechargeMutation = useMutation({
+        mutationFn: async (amount) => {
+            const token = localStorage.getItem('captain-token')
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/recharge`, { amount }, { headers: { Authorization: `Bearer ${token}` } })
+        },
+        onSuccess: () => {
+            addToast('Recarga efetuada com sucesso!', 'success')
+            setShowRechargeModal(false)
+            setShowQRCode(false)
+            setRechargeAmount('')
+            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
+            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
+        },
+        onError: (err) => {
+            console.error(err)
+            addToast('Erro ao realizar recarga.', 'error')
+        }
+    })
 
     const handleRechargeSimulate = async () => {
         if (!rechargeAmount || isNaN(rechargeAmount) || parseFloat(rechargeAmount) <= 0) {
             addToast('Insira um valor válido para recarga.', 'error')
             return
         }
-
-        setRecharging(true)
-        try {
-            const token = localStorage.getItem('captain-token')
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/recharge`, {
-                amount: parseFloat(rechargeAmount)
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
-            })
-            addToast('Recarga efetuada com sucesso!', 'success')
-            setShowRechargeModal(false)
-            setShowQRCode(false)
-            setRechargeAmount('')
-            fetchData() // Atualiza após recarga
-        } catch (err) {
-            console.error(err)
-            addToast('Erro ao realizar recarga.', 'error')
-        } finally {
-            setRecharging(false)
-        }
+        rechargeMutation.mutate(parseFloat(rechargeAmount))
     }
 
     // Novos saldos
@@ -273,7 +269,7 @@ const CaptainWallet = () => {
                                     disabled={recharging}
                                     className='w-full bg-black text-white font-bold py-4 rounded-xl flex justify-center items-center gap-2 shadow-lg hover:bg-gray-800 transition-all'
                                 >
-                                    {recharging ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div> : 'Simular Pagamento Pago'}
+                                    {rechargeMutation.isPending ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div> : 'Simular Pagamento Pago'}
                                 </button>
                             </div>
                         )}

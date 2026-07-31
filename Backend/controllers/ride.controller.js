@@ -8,8 +8,11 @@ const notificationService = require('../services/notification.service');
 
 
 module.exports.createRide = async (req, res) => {
+    console.log(`[AUDIT] /rides/create HIT. Body:`, req.body);
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.log(`[AUDIT] /rides/create Validation Errors:`, errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -31,18 +34,35 @@ module.exports.createRide = async (req, res) => {
             requestFemaleDriver
         });
 
-        const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
+        const TRACE_ID = `Ride:${ride._id}`;
+        console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
-        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, 2);
+        const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
+        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, 50000, TRACE_ID);
+        
+        console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
+        console.log(`[AUDIT][${TRACE_ID}] Captains no raio inicial:`, captainsInRadius.length);
 
         // Filter captains by matching vehicle type
         const matchingCaptains = captainsInRadius.filter(captain => {
-            if (!captain.vehicle || !captain.vehicle.vehicleType) return false;
+            if (!captain.vehicle || !captain.vehicle.vehicleType) {
+                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Sem veículo definido)`);
+                return false;
+            }
             const capType = captain.vehicle.vehicleType;
-            return capType === vehicleType || 
+            const isMatch = capType === vehicleType || 
                    (vehicleType === 'moto' && capType === 'motorcycle') ||
                    (vehicleType === 'motorcycle' && capType === 'moto');
+                   
+            if (!isMatch) {
+                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
+            } else {
+                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} aprovado para receber!`);
+            }
+            return isMatch;
         });
+
+        console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
 
         const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
 
@@ -50,11 +70,12 @@ module.exports.createRide = async (req, res) => {
             // Put captain in a room for this specific ride
             addSocketToRoom(captain.socketId, `ride_${ride._id}`);
             
+            console.log(`[AUDIT][${TRACE_ID}] Emitindo 'new-ride' para socketId ${captain.socketId} (Captain: ${captain._id})`);
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
             });
-            notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() });
+            notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID);
         });
 
         // Invalidate dashboard and user history cache
@@ -64,8 +85,7 @@ module.exports.createRide = async (req, res) => {
         res.status(201).json(ride);
 
     } catch (err) {
-
-        console.log(err);
+        console.error(`[AUDIT] Erro crítico no createRide:`, err);
         return res.status(500).json({ message: err.message });
     }
 
@@ -128,7 +148,10 @@ module.exports.acceptRide = async (req, res) => {
     const { id: rideId } = req.params;
 
     try {
+        const TRACE_ID = `Ride:${rideId}`;
+        console.log(`[AUDIT][${TRACE_ID}] Captain ${req.captain._id} tentando aceitar a corrida.`);
         const ride = await rideService.acceptRideAtomic({ rideId, captain: req.captain });
+        console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${req.captain._id}.`);
 
         sendMessageToSocketId(ride.user.socketId, {
             event: 'ride-confirmed',
@@ -152,7 +175,8 @@ module.exports.acceptRide = async (req, res) => {
 
         return res.status(200).json(rideForCaptain);
     } catch (err) {
-        console.error(err);
+        const TRACE_ID = `Ride:${rideId}`;
+        console.error(`[AUDIT][${TRACE_ID}] Falha ao aceitar corrida (Concorrência ou Erro):`, err.message);
         if (err.message === 'RIDE_ALREADY_ACCEPTED') {
             return res.status(409).json({ message: 'Corrida já aceita por outro motorista' });
         }

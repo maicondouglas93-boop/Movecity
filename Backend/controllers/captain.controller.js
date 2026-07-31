@@ -162,12 +162,12 @@ module.exports.toggleOnline = async (req, res, next) => {
         if (isOnline) {
             const walletService = require('../services/wallet.service');
             const wallet = await walletService.getWallet(req.captain._id);
-            if (wallet.balance < 0) {
+            if (wallet.creditBalance < 0) {
                 return res.status(403).json({ message: 'Inadimplente. Saldo negativo não permite ficar online. Recarregue a carteira.' });
             }
         }
 
-        const captain = await captainModel.findByIdAndUpdate(req.captain._id, { isOnline }, { new: true });
+        const captain = await captainModel.findByIdAndUpdate(req.captain._id, { isOnline, status: isOnline ? 'active' : 'inactive' }, { new: true });
         
         deleteByPrefix(`profile:captain:${req.captain._id}`);
         deleteByPrefix(`drivers:`); // clear drivers cache since online status changed
@@ -215,8 +215,8 @@ module.exports.getSummary = async (req, res, next) => {
             ridesToday: todaysRides.length,
             earnings: parseFloat(earnings.toFixed(2)),
             commissions: parseFloat(commissions.toFixed(2)),
-            walletBalance: wallet.balance,
-            walletBlocked: wallet.blockedBalance || 0,
+            walletBalance: wallet.creditBalance,
+            walletBlocked: wallet.pendingBalance || 0,
             onlineTime: "05:32", // Mocked or calculated if we store session time
             rating: req.captain.rating || 5.0,
             acceptanceRate: req.captain.acceptanceRate || 100,

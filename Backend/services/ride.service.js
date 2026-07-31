@@ -255,7 +255,7 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Ride not found');
     }
 
-    if (ride.status !== 'accepted') {
+    if (!['accepted', 'going_to_pickup', 'arrived'].includes(ride.status)) {
         throw new Error('Ride not accepted');
     }
 

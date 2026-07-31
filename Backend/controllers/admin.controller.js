@@ -480,6 +480,17 @@ module.exports.getCaptainWallet = async (req, res, next) => {
     }
 };
 
+module.exports.adjustCaptainWallet = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { amount, type, reason } = req.body;
+        const result = await adminService.adjustCaptainWallet(id, amount, type, reason, req.admin, req.ip);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports.getCaptainTimeline = async (req, res, next) => {
     try {
         const { id } = req.params;

@@ -32,14 +32,10 @@ const CaptainHome = () => {
     const { locationRef } = useContext(LocationContext)
     const { addToast } = useToast()
 
-    // Request browser notification permission on mount
     useEffect(() => {
         const setupFCM = async () => {
-            if ('Notification' in window) {
-                const permission = await Notification.requestPermission()
-                if (permission === 'granted') {
-                    await requestFCMToken();
-                }
+            if ('Notification' in window && Notification.permission === 'granted') {
+                await requestFCMToken();
             }
         };
         setupFCM();
@@ -50,6 +46,11 @@ const CaptainHome = () => {
         requestLock();
     }, [requestLock]);
 
+    // Ref para acessar o ride atual dentro de handlers sem precisar re-subscrever
+    const rideRef = useRef(ride)
+    useEffect(() => { rideRef.current = ride }, [ride])
+
+    // --- Efeito 1: conexão e listeners do socket (só depende do captain) ---
     useEffect(() => {
         if (!captain || !captain._id) return;
 
@@ -63,33 +64,96 @@ const CaptainHome = () => {
         if (socket.connected) {
             handleConnect()
         }
-
         socket.on('connect', handleConnect)
+
+        const handleNewRide = (data) => {
+            const TRACE_ID = `Ride:${data._id}`;
+            console.log(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
+
+            setRide(data)
+            setRidePopupPanel(true)
+            console.log(`[AUDIT][${TRACE_ID}] Modal RidePopUp ativado.`);
+
+            try {
+                const audio = new Audio('/sounds/new-ride.wav');
+                audio.play().then(() => {
+                    console.log(`[AUDIT][${TRACE_ID}] Som de notificação tocado com sucesso.`);
+                }).catch(e => {
+                    console.warn(`[AUDIT][${TRACE_ID}] Falha ao tocar som (Autoplay bloqueado?):`, e);
+                });
+                
+                if (navigator.vibrate) {
+                    navigator.vibrate([500, 200, 500]);
+                    console.log(`[AUDIT][${TRACE_ID}] Vibração acionada.`);
+                }
+            } catch (err) {
+                console.error(`[AUDIT][${TRACE_ID}] Erro nas APIs de mídia:`, err);
+            }
+
+            addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('Nova Solicitação de Corrida! 🚗', {
+                    body: `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`,
+                    icon: '/movecity-icon.jpg'
+                })
+                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
+            } else {
+                console.log(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
+            }
+        }
+
+        const handleRideCancelled = (data) => {
+            if (rideRef.current && rideRef.current._id === data.rideId) {
+                setRidePopupPanel(false)
+                setRide(null)
+                addToast('A corrida foi cancelada pelo passageiro.', 'info')
+            }
+        }
+
+        socket.on('new-ride', handleNewRide)
+        socket.on('ride-cancelled', handleRideCancelled)
+
+        return () => {
+            socket.off('connect', handleConnect)
+            socket.off('new-ride', handleNewRide)
+            socket.off('ride-cancelled', handleRideCancelled)
+        }
+    }, [captain, socket])
+
+    // --- Efeito 2: atualização/simulação de localização (depende do status do ride) ---
+    const OFFSET_DEG = 0.01
+    const INTERPOLATION_FACTOR = 0.12
+    const SIMULATION_STEPS = 40
+    const SIMULATION_INTERVAL_MS = 2000
+    const REAL_LOCATION_INTERVAL_MS = 10000
+
+    useEffect(() => {
+        if (!captain || !captain._id) return;
 
         let locationInterval;
         let simulationInterval;
+        let cancelled = false;
 
         const updateLocation = () => {
             const loc = locationRef.current;
-            if (loc) {
-                if (socket.connected) {
-                    socket.emit('update-location-captain', {
-                        userId: captain._id,
-                        location: { ltd: loc.lat, lng: loc.lng }
-                    });
-                } else {
-                    // Persist to Dexie for offline sync
-                    db.driverLocations.add({
-                        userId: captain._id,
-                        lat: loc.lat,
-                        lng: loc.lng,
-                        timestamp: Date.now()
-                    }).catch(e => console.error(e));
-                }
+            if (!loc) return;
+
+            if (socket.connected) {
+                socket.emit('update-location-captain', {
+                    userId: captain._id,
+                    location: { ltd: loc.lat, lng: loc.lng }
+                });
+            } else {
+                db.driverLocations.add({
+                    userId: captain._id,
+                    lat: loc.lat,
+                    lng: loc.lng,
+                    timestamp: Date.now()
+                }).catch(e => console.error(e));
             }
         };
 
-        // If ride is confirmed, simulate captain moving towards the pickup location
         if (ride && ride.status === 'accepted') {
             const fetchPickupAndSimulate = async () => {
                 try {
@@ -99,29 +163,26 @@ const CaptainHome = () => {
                         headers: { Authorization: `Bearer ${token}` }
                     });
                     const pickupCoords = response.data;
-                    if (pickupCoords && pickupCoords.ltd && pickupCoords.lng) {
-                        // Start offset by ~1.2km away
-                        let currentLat = pickupCoords.ltd + 0.01;
-                        let currentLng = pickupCoords.lng + 0.01;
-                        let step = 0;
-                        const totalSteps = 40;
+                    if (cancelled || !pickupCoords?.ltd || !pickupCoords?.lng) return;
 
-                        simulationInterval = setInterval(() => {
-                            if (step >= totalSteps) {
-                                clearInterval(simulationInterval);
-                                return;
-                            }
-                            // Interpolate towards pickup
-                            currentLat = currentLat + (pickupCoords.ltd - currentLat) * 0.12;
-                            currentLng = currentLng + (pickupCoords.lng - currentLng) * 0.12;
+                    let currentLat = pickupCoords.ltd + OFFSET_DEG;
+                    let currentLng = pickupCoords.lng + OFFSET_DEG;
+                    let step = 0;
 
-                            socket.emit('update-location-captain', {
-                                userId: captain._id,
-                                location: { ltd: currentLat, lng: currentLng }
-                            });
-                            step++;
-                        }, 2000);
-                    }
+                    simulationInterval = setInterval(() => {
+                        if (step >= SIMULATION_STEPS) {
+                            clearInterval(simulationInterval);
+                            return;
+                        }
+                        currentLat += (pickupCoords.ltd - currentLat) * INTERPOLATION_FACTOR;
+                        currentLng += (pickupCoords.lng - currentLng) * INTERPOLATION_FACTOR;
+
+                        socket.emit('update-location-captain', {
+                            userId: captain._id,
+                            location: { ltd: currentLat, lng: currentLng }
+                        });
+                        step++;
+                    }, SIMULATION_INTERVAL_MS);
                 } catch (err) {
                     console.error('Simulation error:', err);
                     updateLocation();
@@ -129,56 +190,16 @@ const CaptainHome = () => {
             };
             fetchPickupAndSimulate();
         } else {
-            locationInterval = setInterval(updateLocation, 10000)
+            locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
             updateLocation()
         }
 
-        const handleNewRide = (data) => {
-            setRide(data)
-            setRidePopupPanel(true)
-            
-            // Audio and Vibration
-            try {
-                const audio = new Audio('/sounds/new-ride.wav');
-                audio.play().catch(e => console.log('Audio autoplay prevented:', e));
-                if (navigator.vibrate) {
-                    navigator.vibrate([500, 200, 500]);
-                }
-            } catch (err) {
-                console.error(err);
-            }
-
-            // In-app toast
-            addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
-            // Browser push notification (Local fallback, even though FCM will handle background)
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('Nova Solicitação de Corrida! 🚗', {
-                    body: `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`,
-                    icon: '/movecity-icon.jpg'
-                })
-            }
-        }
-
-        socket.on('new-ride', handleNewRide)
-
-        const handleRideCancelled = (data) => {
-            if (ride && ride._id === data.rideId) {
-                setRidePopupPanel(false)
-                setRide(null)
-                addToast('A corrida foi cancelada pelo passageiro.', 'info')
-            }
-        }
-        
-        socket.on('ride-cancelled', handleRideCancelled)
-
         return () => {
+            cancelled = true;
             if (locationInterval) clearInterval(locationInterval);
             if (simulationInterval) clearInterval(simulationInterval);
-            socket.off('connect', handleConnect)
-            socket.off('new-ride', handleNewRide)
-            socket.off('ride-cancelled', handleRideCancelled)
         }
-    }, [captain, ride])
+    }, [captain, socket, ride?.status, ride?.pickup])
 
 
     async function confirmRide() {
@@ -199,7 +220,7 @@ const CaptainHome = () => {
             setConfirmRidePopupPanel(true)
         } catch (err) {
             console.error('Confirm ride error:', err);
-            if (!navigator.onLine || err.message === 'Network Error') {
+            if (!navigator.onLine || err.code === 'ERR_NETWORK') {
                 db.offlineActions.add({
                     type: 'accept-ride',
                     rideId: ride._id,
@@ -245,13 +266,12 @@ const CaptainHome = () => {
     }, [ confirmRidePopupPanel ])
 
     return (
-        <div className='h-screen'>
+        <div className='h-screen flex flex-col overflow-hidden bg-gray-50'>
 
-
-            <div className='h-3/5'>
-                <LiveTracking ride={ride} />
+            <div className='h-[40vh] relative shadow-sm z-10'>
+                <LiveTracking ride={ride} showSearchRadius={true} />
             </div>
-            <div className='h-2/5 p-6 overflow-y-auto pb-24'>
+            <div className='h-[60vh] p-4 overflow-y-auto pb-24'>
                 <CaptainDetails />
             </div>
             <div ref={ridePopupPanelRef} className='fixed w-full z-[70] bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>

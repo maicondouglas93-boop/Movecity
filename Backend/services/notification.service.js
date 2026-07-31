@@ -6,8 +6,25 @@ const userModel = require('../models/user.model');
 const captainModel = require('../models/captain.model');
 const cron = require('node-cron');
 
-const sendPush = async (tokens, payload) => {
-    if (!tokens || tokens.length === 0) return;
+const sendPush = async (tokens, payload, traceId = '[AUDIT]') => {
+    if (!tokens || tokens.length === 0) {
+        console.log(`${traceId} Envio de Push abortado: Nenhum token fornecido.`);
+        return;
+    }
+    
+    // Check for empty tokens
+    const validTokens = tokens.filter(t => t && t.trim() !== '');
+    if (validTokens.length !== tokens.length) {
+        console.log(`${traceId} Aviso: ${tokens.length - validTokens.length} tokens vazios foram filtrados.`);
+    }
+
+    if (validTokens.length === 0) {
+        console.log(`${traceId} Envio de Push abortado: Apenas tokens vazios encontrados.`);
+        return;
+    }
+
+    console.log(`${traceId} Preparando Push para ${validTokens.length} tokens válidos. Payload title: ${payload.title}`);
+
     try {
         const message = {
             notification: {
@@ -15,7 +32,7 @@ const sendPush = async (tokens, payload) => {
                 body: payload.message
             },
             data: payload.data || {},
-            tokens: tokens
+            tokens: validTokens
         };
         
         if (payload.webpush) {
@@ -23,9 +40,17 @@ const sendPush = async (tokens, payload) => {
         }
 
         const response = await getMessaging().sendEachForMulticast(message);
-        console.log('Firebase Push enviado:', response.successCount, 'sucesso,', response.failureCount, 'falhas');
+        console.log(`${traceId} Firebase Push enviado: ${response.successCount} sucesso(s), ${response.failureCount} falha(s)`);
+        
+        if (response.failureCount > 0) {
+            response.responses.forEach((resp, idx) => {
+                if (!resp.success) {
+                    console.log(`${traceId} Falha no envio para token [${validTokens[idx]}]: ${resp.error.message}`);
+                }
+            });
+        }
     } catch (error) {
-        console.error('Erro ao enviar Push Notification:', error);
+        console.error(`${traceId} Erro fatal ao enviar Push Notification:`, error);
     }
 }
 
@@ -41,19 +66,22 @@ const sendToUser = async (userId, title, message, type, data = {}) => {
     await sendPush(tokens, { title, message, data });
 }
 
-const sendToCaptain = async (captainId, title, message, type, data = {}, options = {}) => {
+const sendToCaptain = async (captainId, title, message, type, data = {}, options = {}, traceId = '[AUDIT]') => {
     // Save to DB
     await Notification.create({ captainId, title, message, type, status: 'sent', sentAt: new Date(), targetAudience: 'specific' });
 
+    console.log(`${traceId} Buscando tokens FCM para Captain ${captainId}...`);
     // Get Tokens
     const captainTokens = await NotificationToken.find({ captainId });
     const tokens = captainTokens.map(t => t.token);
 
+    console.log(`${traceId} Encontrados ${tokens.length} tokens no banco para Captain ${captainId}.`);
+
     // Send Push
-    await sendPush(tokens, { title, message, data, ...options });
+    await sendPush(tokens, { title, message, data, ...options }, traceId);
 }
 
-module.exports.sendNewRide = async (captainId, data) => {
+module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
     const title = 'Nova Corrida Disponível!';
     const message = 'Há um passageiro solicitando uma corrida perto de você.';
     
@@ -76,7 +104,7 @@ module.exports.sendNewRide = async (captainId, data) => {
         }
     };
 
-    await sendToCaptain(captainId, title, message, 'NEW_RIDE', data, options);
+    await sendToCaptain(captainId, title, message, 'NEW_RIDE', data, options, traceId);
 }
 
 module.exports.sendRideAccepted = async (userId, data) => {

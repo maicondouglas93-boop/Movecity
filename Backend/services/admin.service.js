@@ -521,14 +521,69 @@ module.exports.getCaptainRecentRides = async (captainId) => {
 
 module.exports.getCaptainWallet = async (captainId) => {
     const captain = await captainModel.findById(captainId).select('earnings');
-    // Mocks for now, real implementation would sum transactions
+    
+    // Fetch last 10 transactions
+    const transactions = await transactionModel.find({ captainId })
+        .sort({ createdAt: -1 })
+        .limit(10);
+        
     const wallet = {
         balance: captain.earnings || 0,
         pending: 0,
         commissions: 0,
-        lastRecharge: new Date().toISOString()
+        lastRecharge: new Date().toISOString(),
+        transactions
     };
     return wallet;
+};
+
+module.exports.adjustCaptainWallet = async (captainId, amount, type, reason, admin, ip) => {
+    if (!amount || amount <= 0) throw new Error('O valor deve ser maior que zero');
+    if (!reason) throw new Error('O motivo é obrigatório');
+    if (!['credit', 'debit'].includes(type)) throw new Error('Tipo de operação inválido');
+
+    if (amount > 10000) throw new Error('Valor acima do limite permitido para ajuste manual (R$ 10.000)');
+
+    const captain = await captainModel.findById(captainId);
+    if (!captain) throw new Error('Motorista não encontrado');
+
+    const balanceBefore = captain.earnings || 0;
+    const adjustmentAmount = type === 'credit' ? Number(amount) : -Number(amount);
+    const balanceAfter = balanceBefore + adjustmentAmount;
+
+    // Update balance
+    await captainModel.updateOne(
+        { _id: captain._id },
+        { $set: { earnings: balanceAfter } }
+    );
+
+    // Register transaction
+    const transaction = await transactionModel.create({
+        captainId: captain._id,
+        type: 'adjustment',
+        paymentMethod: 'wallet',
+        amount: adjustmentAmount, // positive or negative
+        balanceBefore,
+        balanceAfter,
+        description: `Ajuste manual: ${type === 'credit' ? 'Crédito' : 'Débito'}`,
+        reason,
+        adminId: admin.name || admin.email,
+        status: 'completed'
+    });
+
+    // Audit log
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'MANUAL_WALLET_ADJUSTMENT',
+        targetId: captain._id.toString(),
+        targetModel: 'Captain',
+        reason: `Ajuste de R$ ${adjustmentAmount.toFixed(2)}. Motivo: ${reason}`,
+        newValue: { amount: adjustmentAmount, balanceBefore, balanceAfter, type, transactionId: transaction._id.toString() },
+        ipAddress: ip || '0.0.0.0'
+    });
+
+    return { success: true, balanceAfter, transaction };
 };
 
 module.exports.getCaptainTimeline = async (captainId) => {

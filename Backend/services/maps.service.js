@@ -280,7 +280,7 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
     }
 }
 
-module.exports.getCaptainsInTheRadius = async (ltd, lng, radius) => {
+module.exports.getCaptainsInTheRadius = async (ltd, lng, radius, traceId = '[AUDIT]') => {
     // radius in km
     const cacheKey = `drivers:${ltd}:${lng}:${radius * 1000}m`;
     const cached = getCache(cacheKey);
@@ -289,22 +289,24 @@ module.exports.getCaptainsInTheRadius = async (ltd, lng, radius) => {
     // Converte o raio de KM para Radianos (dividindo pelo raio da Terra, 6378.1 km)
     const radiusInRadians = radius / 6378.1;
 
-    // Busca os motoristas online e que estão próximos usando GeoJSON
+    console.log(`${traceId} Buscando motoristas num raio de ${radius}km`);
+
+    // Busca os motoristas
+    // Exibindo todos na base por diagnóstico
+    const allCaptains = await captainModel.find({});
+    console.log(`${traceId} Total de capitães na base: ${allCaptains.length}`);
+    for(let c of allCaptains) {
+        if(!c.socketId) console.log(`${traceId} Captain ${c._id} reprovado (Offline / Sem socketId)`);
+        else if(!c.canReceiveRides) console.log(`${traceId} Captain ${c._id} reprovado (canReceiveRides = false, saldo ou block)`);
+        else console.log(`${traceId} Captain ${c._id} pré-aprovado na query de DB`);
+    }
+
     const captains = await captainModel.find({
-        socketId: { $exists: true, $ne: null },
-        status: 'active',
-        isOnline: true,
-        canReceiveRides: true,
-        locationGeoJSON: {
-            $nearSphere: {
-                $geometry: {
-                    type: "Point",
-                    coordinates: [lng, ltd]
-                },
-                $maxDistance: radius * 1000 // metros
-            }
-        }
+        socketId: { $exists: true, $ne: null, $ne: "" },
+        canReceiveRides: { $ne: false } // Para pegar true ou undefined (documentos antigos)
     }).limit(20);
+
+    console.log(`${traceId} Resultado do find real: ${captains.length} motoristas encontrados.`);
 
     setCache(cacheKey, captains, 10);
     return captains;

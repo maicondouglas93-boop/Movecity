@@ -47,6 +47,7 @@ router.get('/captains/:id/documents', authAdmin, adminController.getCaptainDocum
 router.put('/captains/:id/documents/:docType', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainDocument);
 router.get('/captains/:id/recent-rides', authAdmin, adminController.getCaptainRecentRides);
 router.get('/captains/:id/wallet', authAdmin, adminController.getCaptainWallet);
+router.post('/captains/:id/wallet/adjust', authAdmin, authorizeRoles('super_admin', 'financeiro', 'operador'), adminController.adjustCaptainWallet);
 router.get('/captains/:id/timeline', authAdmin, adminController.getCaptainTimeline);
 
 // Rides

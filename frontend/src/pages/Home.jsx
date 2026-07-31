@@ -469,22 +469,31 @@ const Home = () => {
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
         const destStr = typeof destination === 'object' ? `${destination.address} (${destination.lat}, ${destination.lng})` : destination;
 
-        const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
-            pickup: pickupStr,
-            destination: destStr,
-            vehicleType,
-            paymentMethod,
-            useWalletBalance,
-            optionals,
-            observation,
-            requestFemaleDriver
-        }, {
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        });
-        
-        setRide(response.data);
+        console.log(`[AUDIT] Passageiro iniciando request para criar corrida. Pickup: ${pickupStr}, Dest: ${destStr}, Vehicle: ${vehicleType}`);
+
+        try {
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
+                pickup: pickupStr,
+                destination: destStr,
+                vehicleType,
+                paymentMethod,
+                useWalletBalance,
+                optionals,
+                observation,
+                requestFemaleDriver
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            
+            const TRACE_ID = `Ride:${response.data._id}`;
+            console.log(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
+            
+            setRide(response.data);
+        } catch (err) {
+            console.error(`[AUDIT] Falha na criação da corrida pelo passageiro:`, err);
+        }
     }
 
     async function cancelRide() {

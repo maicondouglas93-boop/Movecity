@@ -7,8 +7,17 @@ const api = axios.create({
 
 // Interceptor de Requisição: Injeta o token se existir
 api.interceptors.request.use((config) => {
-    // Tenta pegar o token do passageiro ou motorista
-    const token = localStorage.getItem('token') || localStorage.getItem('captain-token');
+    // Escolhe o token com base na rota para evitar conflitos em testes na mesma máquina
+    let token = null;
+    const url = config.url || '';
+    if (url.includes('/captains')) {
+        token = localStorage.getItem('captain-token');
+    } else if (url.includes('/users')) {
+        token = localStorage.getItem('token');
+    } else {
+        token = localStorage.getItem('token') || localStorage.getItem('captain-token');
+    }
+
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
@@ -22,14 +31,19 @@ api.interceptors.response.use((response) => {
     return response;
 }, (error) => {
     if (error.response && error.response.status === 401) {
-        // Se a resposta for 401 Unauthorized, o token expirou ou é inválido.
         console.warn('Sessão expirada. Removendo tokens e redirecionando.');
-        localStorage.removeItem('token');
-        localStorage.removeItem('captain-token');
-        
-        // Redireciona para login (opcionalmente pode ser feito via roteador do React
-        // mas window.location garante que o estado da memória seja limpo)
-        window.location.href = '/login';
+        const url = error.config?.url || '';
+        if (url.includes('/captains')) {
+            localStorage.removeItem('captain-token');
+            window.location.href = '/captain-login';
+        } else if (url.includes('/users')) {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        } else {
+            localStorage.removeItem('token');
+            localStorage.removeItem('captain-token');
+            window.location.href = '/login';
+        }
     }
     return Promise.reject(error);
 });

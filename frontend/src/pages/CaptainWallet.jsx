@@ -14,6 +14,11 @@ const CaptainWallet = () => {
 
     const queryClient = useQueryClient();
 
+    const [showRechargeModal, setShowRechargeModal] = useState(false);
+    const [showQRCode, setShowQRCode] = useState(false);
+    const [rechargeAmount, setRechargeAmount] = useState('');
+    const [recharging, setRecharging] = useState(false);
+
     // Queries
     const { data: walletData, isLoading: walletLoading } = useQuery({
         queryKey: ['captainWallet'],

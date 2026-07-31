@@ -620,21 +620,69 @@ function TabRides({ captainId }) {
   )
 }
 
-function TabFinance({ captainId }) {
+function TabFinance({ captainId, captainName }) {
+  const queryClient = useQueryClient();
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState('');
+  const [adjustType, setAdjustType] = useState('credit');
+  const [adjustReason, setAdjustReason] = useState('');
+
   const { data: wallet, isLoading } = useQuery({
     queryKey: ['captain-wallet', captainId],
     queryFn: async () => { const { data } = await api.get(`/admin/captains/${captainId}/wallet`); return data; }
   });
+
+  const adjustMutation = useMutation({
+    mutationFn: (data) => api.post(`/admin/captains/${captainId}/wallet/adjust`, data),
+    onSuccess: (res) => {
+      queryClient.setQueryData(['captain-wallet', captainId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          balance: res.data.balanceAfter,
+          transactions: [res.data.transaction, ...(old.transactions || [])]
+        };
+      });
+      alert('Saldo atualizado com sucesso!');
+      setShowAdjustModal(false);
+      setAdjustAmount('');
+      setAdjustReason('');
+    },
+    onError: (err) => {
+      alert(err.response?.data?.message || 'Erro ao ajustar saldo');
+    }
+  });
+
+  const handleAdjust = (e) => {
+    e.preventDefault();
+    if (!adjustAmount || Number(adjustAmount) <= 0) return alert('Insira um valor válido');
+    if (!adjustReason) return alert('Insira o motivo');
+
+    const amount = Number(adjustAmount);
+    if (amount > 10000) return alert('O valor excede o limite (R$ 10.000)');
+
+    const confirmMsg = `Você está adicionando um ${adjustType === 'credit' ? 'Crédito' : 'Débito'} de R$ ${amount.toFixed(2)} ao motorista ${captainName || ''}.\n\nMotivo: ${adjustReason}\n\nConfirmar?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    adjustMutation.mutate({ amount, type: adjustType, reason: adjustReason });
+  };
 
   if (isLoading) return <div className="p-6 text-center text-text-muted">Carregando dados financeiros...</div>;
 
   return (
     <div className="space-y-6">
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-surface p-6 rounded-xl border border-border flex flex-col items-center justify-center text-center">
+          <div className="bg-surface p-6 rounded-xl border border-border flex flex-col items-center justify-center text-center relative">
              <p className="text-sm font-bold uppercase tracking-wider text-text-muted mb-2">Saldo Atual</p>
              <p className={`text-4xl font-bold ${wallet?.balance < 0 ? 'text-danger' : 'text-primary'}`}>R$ {wallet?.balance?.toFixed(2) || '0.00'}</p>
              {wallet?.balance < 0 && <p className="text-xs text-danger mt-2 bg-danger/10 px-3 py-1 rounded">Devendo à Plataforma</p>}
+             
+             <button 
+                onClick={() => setShowAdjustModal(true)}
+                className="mt-4 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 transition-colors border border-primary/20 rounded-lg text-sm font-semibold flex items-center gap-2"
+             >
+                <Activity className="w-4 h-4"/> Ajuste Manual
+             </button>
           </div>
           <div className="bg-surface p-5 rounded-xl border border-border space-y-4">
              <div className="flex justify-between items-center">
@@ -651,6 +699,74 @@ function TabFinance({ captainId }) {
              </div>
           </div>
        </div>
+
+       {/* Transaction History */}
+       <div className="bg-surface rounded-xl border border-border overflow-hidden">
+         <div className="p-4 border-b border-border bg-background/50">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted flex items-center gap-2"><History className="w-4 h-4"/> Histórico de Transações</h3>
+         </div>
+         <div className="divide-y divide-border">
+            {!wallet?.transactions || wallet.transactions.length === 0 ? (
+               <div className="p-6 text-center text-text-muted">Nenhuma transação recente.</div>
+            ) : (
+               wallet.transactions.map((tx) => (
+                  <div key={tx._id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-background/30 transition-colors">
+                     <div>
+                        <div className="flex items-center gap-2 mb-1">
+                           <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${tx.type === 'adjustment' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-background border-border text-text-muted'}`}>
+                              {tx.type === 'adjustment' ? 'Ajuste Manual' : tx.type}
+                           </span>
+                           <span className="text-xs text-text-muted">{new Date(tx.createdAt).toLocaleString()}</span>
+                        </div>
+                        <p className="text-sm text-text font-medium">{tx.description || tx.reason}</p>
+                        {tx.adminId && <p className="text-xs text-text-muted mt-1">Admin: {tx.adminId}</p>}
+                     </div>
+                     <div className="text-left md:text-right">
+                        <p className={`font-bold ${tx.amount > 0 ? 'text-primary' : 'text-danger'}`}>
+                           {tx.amount > 0 ? '+' : ''}{tx.amount?.toFixed(2)}
+                        </p>
+                        <p className="text-xs text-text-muted mt-1">Saldo após: R$ {tx.balanceAfter?.toFixed(2)}</p>
+                     </div>
+                  </div>
+               ))
+            )}
+         </div>
+       </div>
+
+       {/* Modal de Ajuste */}
+       {showAdjustModal && (
+         <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+            <div className="bg-surface w-full max-w-md rounded-2xl border border-border shadow-2xl flex flex-col">
+               <div className="p-4 border-b border-border flex justify-between items-center bg-background/50 rounded-t-2xl">
+                  <h3 className="font-bold">Ajuste Manual de Saldo</h3>
+                  <button onClick={() => setShowAdjustModal(false)} className="text-text-muted hover:text-text"><X className="w-5 h-5"/></button>
+               </div>
+               <form onSubmit={handleAdjust} className="p-6 space-y-4">
+                  <div className="grid grid-cols-2 gap-2">
+                     <button type="button" onClick={() => setAdjustType('credit')} className={`py-2 px-4 rounded border text-sm font-bold flex justify-center items-center gap-2 transition-colors ${adjustType === 'credit' ? 'bg-primary/10 border-primary text-primary' : 'bg-background border-border text-text-muted'}`}>
+                        + Crédito
+                     </button>
+                     <button type="button" onClick={() => setAdjustType('debit')} className={`py-2 px-4 rounded border text-sm font-bold flex justify-center items-center gap-2 transition-colors ${adjustType === 'debit' ? 'bg-danger/10 border-danger text-danger' : 'bg-background border-border text-text-muted'}`}>
+                        - Débito
+                     </button>
+                  </div>
+                  <div>
+                     <label className="block text-xs font-medium text-text-muted mb-1">Valor (R$)</label>
+                     <input type="number" step="0.01" min="0.01" max="10000" value={adjustAmount} onChange={e => setAdjustAmount(e.target.value)} placeholder="0.00" className="w-full bg-background border border-border rounded-lg px-4 py-2 text-lg font-bold text-text focus:outline-none focus:border-primary" required />
+                  </div>
+                  <div>
+                     <label className="block text-xs font-medium text-text-muted mb-1">Motivo / Justificativa</label>
+                     <textarea value={adjustReason} onChange={e => setAdjustReason(e.target.value)} placeholder="Ex: Correção de pagamento, bonificação..." className="w-full bg-background border border-border rounded-lg px-4 py-2 text-sm text-text focus:outline-none focus:border-primary min-h-[80px]" required></textarea>
+                  </div>
+                  <div className="pt-2">
+                     <button type="submit" disabled={adjustMutation.isPending} className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
+                        {adjustMutation.isPending ? 'Processando...' : 'Confirmar Ajuste'}
+                     </button>
+                  </div>
+               </form>
+            </div>
+         </div>
+       )}
     </div>
   )
 }

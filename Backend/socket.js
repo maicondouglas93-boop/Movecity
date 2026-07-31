@@ -22,16 +22,18 @@ function initializeSocket(server) {
     });
 
     io.on('connection', (socket) => {
-        console.log(`Client connected: ${socket.id}`);
-
+        console.log(`[AUDIT] Client connected: ${socket.id}`);
 
         socket.on('join', async (data) => {
             const { userId, userType } = data;
+            console.log(`[AUDIT] User ${userId} (${userType}) solicitou JOIN no socket ${socket.id}`);
 
             if (userType === 'user') {
                 await userModel.findByIdAndUpdate(userId, { socketId: socket.id });
+                console.log(`[AUDIT] User ${userId} atualizou socketId para ${socket.id}`);
             } else if (userType === 'captain') {
                 await captainModel.findByIdAndUpdate(userId, { socketId: socket.id });
+                console.log(`[AUDIT] Captain ${userId} atualizou socketId para ${socket.id}`);
             } else if (userType === 'admin') {
                 socket.join('admin_room');
             }
@@ -162,7 +164,7 @@ function initializeSocket(server) {
         });
 
         socket.on('disconnect', async () => {
-            console.log(`Client disconnected: ${socket.id}`);
+            console.log(`[AUDIT] Client disconnected: ${socket.id}`);
             await userModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
             await captainModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
         });
@@ -170,21 +172,24 @@ function initializeSocket(server) {
 }
 
 const sendMessageToSocketId = (socketId, messageObject) => {
-
-console.log(messageObject);
+    console.log(`[AUDIT] Socket emit '${messageObject.event}' para socketId: ${socketId}`);
 
     if (io) {
         io.to(socketId).emit(messageObject.event, messageObject.data);
     } else {
-        console.log('Socket.io not initialized.');
+        console.log('[AUDIT] ERROR: Socket.io not initialized.');
     }
 }
 
 const addSocketToRoom = (socketId, roomName) => {
+    console.log(`[AUDIT] Adicionando socketId ${socketId} à sala ${roomName}`);
     if (io) {
         const socket = io.sockets.sockets.get(socketId);
         if (socket) {
             socket.join(roomName);
+            console.log(`[AUDIT] socketId ${socketId} entrou na sala ${roomName} com sucesso`);
+        } else {
+            console.log(`[AUDIT] ERROR: Socket ${socketId} não encontrado no momento do JOIN na sala ${roomName}`);
         }
     }
 }

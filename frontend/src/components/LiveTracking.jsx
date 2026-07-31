@@ -154,6 +154,7 @@ const LiveTracking = (props) => {
     const pickupMarkerRef = useRef(null);
     const destinationMarkerRef = useRef(null);
     const routePolylineRef = useRef(null);
+    const radiusCircleRef = useRef(null);
     
     const { socket } = useContext(SocketContext);
     const { userLocation } = useContext(LocationContext);
@@ -410,6 +411,10 @@ const LiveTracking = (props) => {
                 pickupMarkerRef.current = null;
                 destinationMarkerRef.current = null;
                 routePolylineRef.current = null;
+                if (radiusCircleRef.current) {
+                    mapInstanceRef.current.removeLayer(radiusCircleRef.current);
+                    radiusCircleRef.current = null;
+                }
             }
         };
     }, [hasPosition]); // Only when position first becomes available
@@ -579,6 +584,21 @@ const LiveTracking = (props) => {
             if (captainMarkerInstanceRef.current) {
                 captainMarkerInstanceRef.current.setLatLng([currentLat, currentLng]);
                 
+                if (props.showSearchRadius && mapInstanceRef.current) {
+                    if (!radiusCircleRef.current) {
+                        radiusCircleRef.current = L.circle([currentLat, currentLng], {
+                            color: '#3b82f6', // Tailwind blue-500
+                            fillColor: '#3b82f6',
+                            fillOpacity: 0.08,
+                            radius: 3000, // 3km radius
+                            weight: 1.5,
+                            dashArray: '5, 5'
+                        }).addTo(mapInstanceRef.current);
+                    } else {
+                        radiusCircleRef.current.setLatLng([currentLat, currentLng]);
+                    }
+                }
+
                 // Auto pan if follow mode is active
                 if (isFollowing && mapInstanceRef.current) {
                     mapInstanceRef.current.panTo([currentLat, currentLng], { animate: false });

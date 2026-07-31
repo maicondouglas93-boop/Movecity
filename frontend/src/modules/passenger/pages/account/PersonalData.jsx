@@ -4,8 +4,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import axios from 'axios';
-import { UserDataContext } from '../../context/UserContext';
-import { useToast } from '../../context/ToastContext';
+import { UserDataContext } from '@/contexts/UserContext';
+import { useToast } from '@/contexts/ToastContext';
 
 const personalDataSchema = z.object({
     firstname: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),

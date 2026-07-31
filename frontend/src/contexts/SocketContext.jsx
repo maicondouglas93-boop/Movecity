@@ -5,7 +5,7 @@ import { io } from 'socket.io-client';
 export const SocketContext = createContext();
 
 import * as Sentry from '@sentry/react';
-import { db } from '../db/db';
+import { db } from '@/services/db';
 
 const socket = io(`${import.meta.env.VITE_BASE_URL}`, {
     transports: [ 'polling' ]

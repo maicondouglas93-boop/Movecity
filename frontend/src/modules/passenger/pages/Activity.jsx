@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import Header from '../components/Header';
-import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets';
+import Header from '@/modules/passenger/components/Header';
+import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets';
 
 const Activity = () => {
     const [rides, setRides] = useState([]);

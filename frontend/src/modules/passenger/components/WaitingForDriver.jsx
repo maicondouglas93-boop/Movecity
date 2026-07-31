@@ -1,5 +1,5 @@
 import React from 'react'
-import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets'
+import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 
 const WaitingForDriver = (props) => {
     const extractTitle = (addressStr) => {

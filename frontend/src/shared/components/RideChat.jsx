@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
-import { SocketContext } from '../context/SocketContext';
+import { SocketContext } from '@/contexts/SocketContext';
 
 const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
     const { socket } = useContext(SocketContext);

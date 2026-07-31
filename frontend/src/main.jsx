@@ -1,12 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.jsx'
+import App from '@/App'
 import { BrowserRouter } from 'react-router-dom';
-import UserContext from './context/UserContext.jsx';
-import CaptainContext from './context/CapatainContext.jsx';
-import SocketProvider from './context/SocketContext.jsx';
-import { LocationProvider } from './context/LocationContext.jsx';
+import UserContext from '@/contexts/UserContext';
+import CaptainContext from '@/contexts/CaptainContext';
+import SocketProvider from '@/contexts/SocketContext';
+import { LocationProvider } from '@/contexts/LocationContext';
 
 import * as Sentry from "@sentry/react";
 
@@ -25,7 +25,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient } from './lib/queryClient';
+import { queryClient } from '@/services/queryClient';
 
 createRoot(document.getElementById('root')).render(
 

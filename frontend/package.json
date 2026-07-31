@@ -13,6 +13,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@googlemaps/js-api-loader": "^2.1.1",
     "@gsap/react": "^2.1.1",
     "@hookform/resolvers": "^5.5.7",
     "@sentry/react": "^10.69.0",

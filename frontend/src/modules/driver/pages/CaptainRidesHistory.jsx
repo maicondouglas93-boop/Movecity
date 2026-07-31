@@ -1,7 +1,7 @@
 import React from 'react';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import CaptainHeader from '../components/CaptainHeader';
+import CaptainHeader from '@/modules/driver/components/CaptainHeader';
 
 const CaptainRidesHistory = () => {
     const { data: rides = [], isLoading: loading } = useQuery({

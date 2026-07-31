@@ -2,10 +2,10 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import Home from '../../pages/Home';
-import { UserDataContext } from '../../context/UserContext';
-import { SocketContext } from '../../context/SocketContext';
-import { ToastProvider } from '../../context/ToastContext';
+import Home from '@/modules/passenger/pages/Home';
+import { UserDataContext } from '@/contexts/UserContext';
+import { SocketContext } from '@/contexts/SocketContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 vi.mock('firebase/messaging', () => ({
   getMessaging: vi.fn(),
@@ -15,6 +15,10 @@ vi.mock('firebase/messaging', () => ({
 
 vi.mock('../../services/fcm', () => ({
   requestFCMToken: vi.fn(),
+}));
+
+vi.mock('@/services/mapsApi', () => ({
+  reverseGeocode: vi.fn().mockResolvedValue({ address: 'Mocked Address' }),
 }));
 
 // Mocks for GSAP

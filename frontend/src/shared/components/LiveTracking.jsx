@@ -1,97 +1,7 @@
 import React, { useState, useEffect, useRef, useContext, useCallback } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import { SocketContext } from '../context/SocketContext'
-import { LocationContext } from '../context/LocationContext'
-
-// Fix default marker icon issue in Leaflet with Webpack/Vite
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
-import markerIcon from 'leaflet/dist/images/marker-icon.png'
-import markerShadow from 'leaflet/dist/images/marker-shadow.png'
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: markerIcon2x,
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-});
-
-const vehicleIcons = {
-    car: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-car-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    moto: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-motorbike-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    motorcycle: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-motorbike-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    auto: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-yellow-400 rounded-full border-2 border-white shadow-xl">
-            <i class="ri-taxi-fill text-xl text-yellow-400"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-};
-
-const userPositionIcon = L.divIcon({
-    html: `
-      <div class="relative flex items-center justify-center h-5 w-5">
-        <div class="absolute h-5 w-5 bg-blue-500 rounded-full animate-ping opacity-60"></div>
-        <div class="h-3 w-3 bg-blue-600 rounded-full border-2 border-white shadow-md"></div>
-      </div>
-    `,
-    className: 'user-position-icon',
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-});
-
-const pickupIcon = L.divIcon({
-    html: `
-      <div style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#16a34a;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="14" height="14"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-      </div>
-    `,
-    className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
-});
-
-const destinationIcon = L.divIcon({
-    html: `
-      <div style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#dc2626;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="14" height="14"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-      </div>
-    `,
-    className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
-});
+import { SocketContext } from '@/contexts/SocketContext'
+import { LocationContext } from '@/contexts/LocationContext'
+import { createMapProvider } from '@/services/maps'
 
 const sanitizeCoord = (lat, lng) => {
     if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
@@ -125,7 +35,7 @@ const getRemainingRoute = (route, position) => {
 const calculateRouteDistance = (coords) => {
     if (!coords || coords.length < 2) return 0;
     let totalDist = 0;
-    
+
     const toRad = (val) => (val * Math.PI) / 180;
     const R = 6371; // Earth radius in km
 
@@ -148,27 +58,22 @@ const calculateRouteDistance = (coords) => {
 
 const LiveTracking = (props) => {
     const mapRef = useRef(null);
-    const mapInstanceRef = useRef(null);
-    const markerInstanceRef = useRef(null);
-    const captainMarkerInstanceRef = useRef(null);
-    const pickupMarkerRef = useRef(null);
-    const destinationMarkerRef = useRef(null);
-    const routePolylineRef = useRef(null);
-    const radiusCircleRef = useRef(null);
-    
+    const providerRef = useRef(null);
+    const hasCaptainMarkerRef = useRef(false);
+
     const { socket } = useContext(SocketContext);
     const { userLocation } = useContext(LocationContext);
-    
+
     // Use ref for current position to avoid destroying the map
     const currentPositionRef = useRef(null);
     const [hasPosition, setHasPosition] = useState(false);
-    
+
     const [ captainPosition, setCaptainPosition ] = useState(null);
     const [ pickupCoords, setPickupCoords ] = useState(null);
     const [ destinationCoords, setDestinationCoords ] = useState(null);
     const [ routeCoords, setRouteCoords ] = useState([]);
     const [ isFollowing, setIsFollowing ] = useState(true);
-    
+
     const prevCaptainPosRef = useRef(null);
     const hasFitBoundsRef = useRef(false);
     const onMapCenterChangeRef = useRef(props.onMapCenterChange);
@@ -187,14 +92,14 @@ const LiveTracking = (props) => {
     useEffect(() => {
         if (!userLocation) return;
         const { lat, lng } = userLocation;
-        
+
         currentPositionRef.current = { lat, lng };
-        
+
         // Update marker position directly
-        if (markerInstanceRef.current) {
-            markerInstanceRef.current.setLatLng([lat, lng]);
+        if (providerRef.current) {
+            providerRef.current.placeMarker('user', { lat, lng }, { type: 'user' });
         }
-        
+
         // Signal that we have a position (only once, to trigger map init)
         if (!hasPosition) {
             setHasPosition(true);
@@ -240,17 +145,10 @@ const LiveTracking = (props) => {
                 setPickupCoords(null);
                 setDestinationCoords(null);
                 setRouteCoords([]);
-                if (pickupMarkerRef.current && mapInstanceRef.current) {
-                    mapInstanceRef.current.removeLayer(pickupMarkerRef.current);
-                    pickupMarkerRef.current = null;
-                }
-                if (destinationMarkerRef.current && mapInstanceRef.current) {
-                    mapInstanceRef.current.removeLayer(destinationMarkerRef.current);
-                    destinationMarkerRef.current = null;
-                }
-                if (routePolylineRef.current && mapInstanceRef.current) {
-                    mapInstanceRef.current.removeLayer(routePolylineRef.current);
-                    routePolylineRef.current = null;
+                if (providerRef.current) {
+                    providerRef.current.removeMarker('pickup');
+                    providerRef.current.removeMarker('destination');
+                    providerRef.current.removeRoute();
                 }
                 return;
             }
@@ -262,7 +160,7 @@ const LiveTracking = (props) => {
                 if (activePickup) {
                     const parsed = typeof activePickup === 'object' ? activePickup : { address: activePickup };
                     const coord = sanitizeCoord(parsed.lat, parsed.lng);
-                    
+
                     if (coord) {
                         setPickupCoords(coord);
                     } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
@@ -276,11 +174,11 @@ const LiveTracking = (props) => {
                         }
                     }
                 }
-                
+
                 if (activeDestination) {
                     const parsed = typeof activeDestination === 'object' ? activeDestination : { address: activeDestination };
                     const coord = sanitizeCoord(parsed.lat, parsed.lng);
-                    
+
                     if (coord) {
                         setDestinationCoords(coord);
                     } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
@@ -361,60 +259,44 @@ const LiveTracking = (props) => {
     // ====== MAP INITIALIZATION — RUNS ONLY ONCE ======
     useEffect(() => {
         // Wait until we have a position and the DOM element
-        if (!hasPosition || !mapRef.current || mapInstanceRef.current) return;
+        if (!hasPosition || !mapRef.current || providerRef.current) return;
 
         const pos = currentPositionRef.current;
         if (!pos) return;
 
-        const map = L.map(mapRef.current, {
-            zoomControl: false
-        }).setView([pos.lat, pos.lng], 15);
+        // init() é assíncrono por contrato (o provider google carrega a API JS via
+        // rede antes de poder criar o mapa). "cancelled" evita que um init ainda em
+        // andamento vaze um mapa/listener se o componente desmontar nesse meio-tempo.
+        let cancelled = false;
+        const provider = createMapProvider();
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
-
-        const marker = L.marker([pos.lat, pos.lng], { icon: userPositionIcon }).addTo(map);
-
-        mapInstanceRef.current = map;
-        markerInstanceRef.current = marker;
-
-        map.on('moveend', () => {
-            if (onMapCenterChangeRef.current) {
-                const center = map.getCenter();
-                onMapCenterChangeRef.current({ lat: center.lat, lng: center.lng });
+        Promise.resolve(provider.init(mapRef.current, {
+            center: pos,
+            zoom: 15,
+            onMoveEnd: (center) => {
+                if (onMapCenterChangeRef.current) {
+                    onMapCenterChangeRef.current(center);
+                }
+            },
+            onDragStart: () => setIsFollowing(false),
+            onZoomStart: () => setIsFollowing(false),
+        })).then(() => {
+            if (cancelled) {
+                provider.destroy();
+            } else {
+                providerRef.current = provider;
             }
-        });
-
-        // Fix gray tiles on initial render
-        setTimeout(() => {
-            if (mapInstanceRef.current) {
-                mapInstanceRef.current.invalidateSize();
-            }
-        }, 300);
-
-        // Disable follow mode on user drag/interaction
-        map.on('dragstart', () => {
-            setIsFollowing(false);
-        });
-        map.on('zoomstart', () => {
-            setIsFollowing(false);
+        }).catch((err) => {
+            console.error('Falha ao inicializar o provider de mapa:', err);
         });
 
         // Cleanup only on unmount
         return () => {
-            if (mapInstanceRef.current) {
-                mapInstanceRef.current.remove();
-                mapInstanceRef.current = null;
-                markerInstanceRef.current = null;
-                captainMarkerInstanceRef.current = null;
-                pickupMarkerRef.current = null;
-                destinationMarkerRef.current = null;
-                routePolylineRef.current = null;
-                if (radiusCircleRef.current) {
-                    mapInstanceRef.current.removeLayer(radiusCircleRef.current);
-                    radiusCircleRef.current = null;
-                }
+            cancelled = true;
+            if (providerRef.current) {
+                providerRef.current.destroy();
+                providerRef.current = null;
+                hasCaptainMarkerRef.current = false;
             }
         };
     }, [hasPosition]); // Only when position first becomes available
@@ -425,22 +307,22 @@ const LiveTracking = (props) => {
     }, [pickupCoords, destinationCoords, routeCoords.length]);
 
     const handleRecenter = useCallback(() => {
-        if (!mapInstanceRef.current) return;
-        mapInstanceRef.current.invalidateSize();
+        if (!providerRef.current) return;
+        providerRef.current.invalidateSize();
         const allCoords = [];
         if (routeCoordsRef.current.length > 0) {
             allCoords.push(...routeCoordsRef.current);
         }
-        
+
         const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
         if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
-        
+
         const pickCoord = sanitizeCoord(pickupCoords?.lat, pickupCoords?.lng);
         if (pickCoord) allCoords.push([pickCoord.lat, pickCoord.lng]);
-        
+
         const destCoord = sanitizeCoord(destinationCoords?.lat, destinationCoords?.lng);
         if (destCoord) allCoords.push([destCoord.lat, destCoord.lng]);
-        
+
         // Fallback to currentPosition only if no other coordinates exist
         const pos = currentPositionRef.current;
         const curCoord = sanitizeCoord(pos?.lat, pos?.lng);
@@ -449,68 +331,36 @@ const LiveTracking = (props) => {
         }
 
         if (allCoords.length > 0) {
-            try {
-                const bounds = L.latLngBounds(allCoords);
-                mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], animate: true });
+            if (providerRef.current.fitBounds(allCoords, { padding: [50, 50], animate: true })) {
                 setIsFollowing(true);
-            } catch (err) {
-                console.warn('Leaflet fitBounds error:', err);
             }
         }
     }, [captainPosition, pickupCoords, destinationCoords]);
 
     // Update markers and polyline when data changes
     useEffect(() => {
-        if (!mapInstanceRef.current) return;
+        if (!providerRef.current) return;
 
         if (pickupCoords) {
-            if (pickupMarkerRef.current) {
-                pickupMarkerRef.current.setLatLng([pickupCoords.lat, pickupCoords.lng]);
-            } else {
-                pickupMarkerRef.current = L.marker([pickupCoords.lat, pickupCoords.lng], {
-                    icon: pickupIcon,
-                    title: 'Pickup Location'
-                }).addTo(mapInstanceRef.current)
-                .bindTooltip('Pickup', { permanent: false, direction: 'top' });
-            }
+            providerRef.current.placeMarker('pickup', pickupCoords, { type: 'pickup', title: 'Pickup Location', tooltip: 'Pickup' });
         }
 
         if (destinationCoords) {
-            if (destinationMarkerRef.current) {
-                destinationMarkerRef.current.setLatLng([destinationCoords.lat, destinationCoords.lng]);
-            } else {
-                destinationMarkerRef.current = L.marker([destinationCoords.lat, destinationCoords.lng], {
-                    icon: destinationIcon,
-                    title: 'Destination'
-                }).addTo(mapInstanceRef.current)
-                .bindTooltip('Destination', { permanent: false, direction: 'top' });
-            }
+            providerRef.current.placeMarker('destination', destinationCoords, { type: 'destination', title: 'Destination', tooltip: 'Destination' });
         }
 
         if (routeCoords.length > 0) {
             const remainingRoute = getRemainingRoute(routeCoords, captainPosition);
-            if (routePolylineRef.current) {
-                routePolylineRef.current.setLatLngs(remainingRoute);
-            } else {
-                routePolylineRef.current = L.polyline(remainingRoute, {
-                    color: '#111111', // Uber black route line
-                    weight: 6,
-                    opacity: 0.9
-                }).addTo(mapInstanceRef.current);
-            }
+            providerRef.current.setRoute(remainingRoute);
 
             // Fit map bounds once
             if (!hasFitBoundsRef.current) {
                 const allCoords = [...routeCoords];
                 const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
                 if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
-                
-                try {
-                    const bounds = L.latLngBounds(allCoords);
-                    mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], animate: true });
+
+                if (providerRef.current.fitBounds(allCoords, { padding: [50, 50], animate: true })) {
                     hasFitBoundsRef.current = true;
-                } catch (err) {
-                    console.warn('Leaflet fitBounds error:', err);
                 }
             }
         } else {
@@ -519,27 +369,23 @@ const LiveTracking = (props) => {
                 const boundsCoords = [];
                 const pickCoord = sanitizeCoord(pickupCoords?.lat, pickupCoords?.lng);
                 if (pickCoord) boundsCoords.push([pickCoord.lat, pickCoord.lng]);
-                
+
                 const destCoord = sanitizeCoord(destinationCoords?.lat, destinationCoords?.lng);
                 if (destCoord) boundsCoords.push([destCoord.lat, destCoord.lng]);
-                
+
                 const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
                 if (capCoord) boundsCoords.push([capCoord.lat, capCoord.lng]);
-                
+
                 // Fallback to currentPosition only if no ride coordinates are set
                 const pos = currentPositionRef.current;
                 const curCoord = sanitizeCoord(pos?.lat, pos?.lng);
                 if (boundsCoords.length === 0 && curCoord) {
                     boundsCoords.push([curCoord.lat, curCoord.lng]);
                 }
-                
+
                 if (boundsCoords.length > 0) {
-                    try {
-                        const bounds = L.latLngBounds(boundsCoords);
-                        mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], animate: true });
+                    if (providerRef.current.fitBounds(boundsCoords, { padding: [50, 50], animate: true })) {
                         hasFitBoundsRef.current = true;
-                    } catch (err) {
-                        console.warn('Leaflet fitBounds error:', err);
                     }
                 }
             }
@@ -548,7 +394,7 @@ const LiveTracking = (props) => {
 
     // Update captain position marker smoothly with linear interpolation
     useEffect(() => {
-        if (!mapInstanceRef.current || !captainPosition) return;
+        if (!providerRef.current || !captainPosition) return;
 
         const startLat = prevCaptainPosRef.current ? prevCaptainPosRef.current.lat : captainPosition.lat;
         const startLng = prevCaptainPosRef.current ? prevCaptainPosRef.current.lng : captainPosition.lng;
@@ -558,14 +404,14 @@ const LiveTracking = (props) => {
         prevCaptainPosRef.current = captainPosition;
 
         const vType = props.ride?.vehicleType || props.ride?.captain?.vehicle?.vehicleType || props.vehicleType || 'car';
-        const selectedIcon = vehicleIcons[vType] || vehicleIcons.car;
 
         // If it's the first time placing the captain marker
-        if (!captainMarkerInstanceRef.current) {
-            captainMarkerInstanceRef.current = L.marker([endLat, endLng], { icon: selectedIcon }).addTo(mapInstanceRef.current);
+        if (!hasCaptainMarkerRef.current) {
+            providerRef.current.placeMarker('captain', { lat: endLat, lng: endLng }, { type: vType });
+            hasCaptainMarkerRef.current = true;
             return;
         } else {
-            captainMarkerInstanceRef.current.setIcon(selectedIcon);
+            providerRef.current.setMarkerIcon('captain', vType);
         }
 
         // Animate the marker smoothly over 2 seconds (matching the emission frequency)
@@ -581,34 +427,23 @@ const LiveTracking = (props) => {
             const currentLat = startLat + (endLat - startLat) * progress;
             const currentLng = startLng + (endLng - startLng) * progress;
 
-            if (captainMarkerInstanceRef.current) {
-                captainMarkerInstanceRef.current.setLatLng([currentLat, currentLng]);
-                
-                if (props.showSearchRadius && mapInstanceRef.current) {
-                    if (!radiusCircleRef.current) {
-                        radiusCircleRef.current = L.circle([currentLat, currentLng], {
-                            color: '#3b82f6', // Tailwind blue-500
-                            fillColor: '#3b82f6',
-                            fillOpacity: 0.08,
-                            radius: 3000, // 3km radius
-                            weight: 1.5,
-                            dashArray: '5, 5'
-                        }).addTo(mapInstanceRef.current);
-                    } else {
-                        radiusCircleRef.current.setLatLng([currentLat, currentLng]);
-                    }
+            if (providerRef.current) {
+                providerRef.current.moveMarker('captain', { lat: currentLat, lng: currentLng });
+
+                if (props.showSearchRadius) {
+                    providerRef.current.setCircle({ lat: currentLat, lng: currentLng }, { radius: 3000 });
                 }
 
                 // Auto pan if follow mode is active
-                if (isFollowing && mapInstanceRef.current) {
-                    mapInstanceRef.current.panTo([currentLat, currentLng], { animate: false });
+                if (isFollowing) {
+                    providerRef.current.panTo({ lat: currentLat, lng: currentLng }, { animate: false });
                 }
             }
 
             // Prune the route polyline smoothly on each animation frame
-            if (routePolylineRef.current && routeCoordsRef.current.length > 0) {
+            if (routeCoordsRef.current.length > 0) {
                 const remainingRoute = getRemainingRoute(routeCoordsRef.current, { lat: currentLat, lng: currentLng });
-                routePolylineRef.current.setLatLngs(remainingRoute);
+                providerRef.current.setRoute(remainingRoute);
             }
 
             if (progress < 1) {
@@ -673,7 +508,7 @@ const LiveTracking = (props) => {
 
             {/* Re-center / Focus button styled like Uber's native button */}
             {!props.isSelectingOnMap && (
-                <button 
+                <button
                     onClick={handleRecenter}
                     className={`absolute bottom-6 right-4 z-20 h-11 w-11 rounded-full shadow-xl flex items-center justify-center border border-gray-100 hover:scale-105 active:scale-95 transition-all ${isFollowing ? 'bg-blue-600 text-white' : 'bg-white text-black'}`}
                     title={isFollowing ? "Seguindo motorista" : "Focar no mapa"}

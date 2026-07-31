@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CaptainDataContext } from '../context/CapatainContext';
-import CaptainHeader from '../components/CaptainHeader';
+import { CaptainDataContext } from '@/contexts/CaptainContext';
+import CaptainHeader from '@/modules/driver/components/CaptainHeader';
 
 const CaptainProfile = () => {
     const { captain } = useContext(CaptainDataContext);

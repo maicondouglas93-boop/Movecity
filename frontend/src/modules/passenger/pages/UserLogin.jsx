@@ -1,12 +1,12 @@
 import React, { useState, useContext, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { UserDataContext } from '../context/UserContext'
+import { UserDataContext } from '@/contexts/UserContext'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
-import { useToast } from '../context/ToastContext'
+import { useToast } from '@/contexts/ToastContext'
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { app } from '../firebase';
+import { app } from '@/services/firebase';
 
 const UserLogin = () => {
   const [ email, setEmail ] = useState('')

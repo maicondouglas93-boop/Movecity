@@ -1,5 +1,5 @@
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { app } from '../firebase';
+import { app } from '@/services/firebase';
 import axios from 'axios';
 
 let messaging = null;

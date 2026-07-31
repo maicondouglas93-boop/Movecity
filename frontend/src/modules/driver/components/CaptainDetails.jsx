@@ -1,6 +1,6 @@
 import React, { useContext, useState, useEffect } from 'react'
-import { CaptainDataContext } from '../context/CapatainContext'
-import { SocketContext } from '../context/SocketContext'
+import { CaptainDataContext } from '@/contexts/CaptainContext'
+import { SocketContext } from '@/contexts/SocketContext'
 import axios from 'axios'
 
 const CaptainDetails = () => {

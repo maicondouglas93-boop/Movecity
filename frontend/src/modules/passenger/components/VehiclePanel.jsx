@@ -1,5 +1,5 @@
 import React from 'react'
-import { vehicleImages } from '../assets/vehicleAssets'
+import { vehicleImages } from '@/assets/vehicleAssets'
 
 const VehiclePanel = (props) => {
     return (

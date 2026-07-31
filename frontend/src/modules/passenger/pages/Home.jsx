@@ -3,23 +3,24 @@ import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import axios from 'axios';
 import 'remixicon/fonts/remixicon.css'
-import LocationSearchPanel from '../components/LocationSearchPanel';
-import VehiclePanel from '../components/VehiclePanel';
-import ConfirmRide from '../components/ConfirmRide';
-import OptionalsPanel from '../components/OptionalsPanel';
-import PaymentOptionsPanel from '../components/PaymentOptionsPanel';
-import LookingForDriver from '../components/LookingForDriver';
-import WaitingForDriver from '../components/WaitingForDriver';
-import { SocketContext } from '../context/SocketContext';
+import LocationSearchPanel from '@/modules/passenger/components/LocationSearchPanel';
+import VehiclePanel from '@/modules/passenger/components/VehiclePanel';
+import ConfirmRide from '@/modules/passenger/components/ConfirmRide';
+import OptionalsPanel from '@/modules/passenger/components/OptionalsPanel';
+import PaymentOptionsPanel from '@/modules/passenger/components/PaymentOptionsPanel';
+import LookingForDriver from '@/modules/passenger/components/LookingForDriver';
+import WaitingForDriver from '@/modules/passenger/components/WaitingForDriver';
+import { SocketContext } from '@/contexts/SocketContext';
 import { useContext } from 'react';
-import { UserDataContext } from '../context/UserContext';
+import { UserDataContext } from '@/contexts/UserContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import LiveTracking from '../components/LiveTracking'
-import { LocationContext } from '../context/LocationContext';
-import { useToast } from '../context/ToastContext';
-import Header from '../components/Header';
-import ScheduleRidePanel from '../components/ScheduleRidePanel';
-import { requestFCMToken } from '../services/fcm';
+import LiveTracking from '@/shared/components/LiveTracking'
+import { LocationContext } from '@/contexts/LocationContext';
+import { useToast } from '@/contexts/ToastContext';
+import Header from '@/modules/passenger/components/Header';
+import ScheduleRidePanel from '@/modules/passenger/components/ScheduleRidePanel';
+import { requestFCMToken } from '@/services/fcm';
+import { reverseGeocode } from '@/services/mapsApi';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -38,6 +39,7 @@ const Home = () => {
     const [ waitingForDriver, setWaitingForDriver ] = useState(false)
     const [ pickupSuggestions, setPickupSuggestions ] = useState([])
     const [ destinationSuggestions, setDestinationSuggestions ] = useState([])
+    const [ suggestionsSessionToken, setSuggestionsSessionToken ] = useState(null)
     const [ activeField, setActiveField ] = useState(null)
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
@@ -80,17 +82,13 @@ const Home = () => {
             const fetchInitialPickup = async () => {
                 const { lat, lng } = userLocation;
                 try {
-                    const response = await axios.get(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}`);
-                    if (response.data && response.data.features && response.data.features.length > 0) {
-                        const properties = response.data.features[0].properties;
-                        const address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
-                        if (address) {
-                            setPickup({
-                                address: address,
-                                lat,
-                                lng
-                            });
-                        }
+                    const { address } = await reverseGeocode(lat, lng);
+                    if (address) {
+                        setPickup({
+                            address,
+                            lat,
+                            lng
+                        });
                     }
                 } catch (err) {
                     console.warn("Reverse geocode on mount failed", err);
@@ -126,11 +124,8 @@ const Home = () => {
         const { lat, lng } = mapSelectionCoords;
         let address = "";
         try {
-            const response = await axios.get(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}`);
-            if (response.data && response.data.features && response.data.features.length > 0) {
-                const properties = response.data.features[0].properties;
-                address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
-            }
+            const result = await reverseGeocode(lat, lng);
+            address = result.address || "";
         } catch (err) {
             console.warn("Reverse geocode failed", err);
         }
@@ -260,6 +255,9 @@ const Home = () => {
                         }
                     })
                     setPickupSuggestions(response.data)
+                    // sessionToken só existe quando o provider ativo é "google" (Places New).
+                    // Sem efeito nenhum com o provider osm/nominatim (header ausente).
+                    setSuggestionsSessionToken(response.headers['x-maps-session-token'] || null)
                 } catch {
                     setPickupSuggestions([])
                 } finally {
@@ -293,6 +291,7 @@ const Home = () => {
                         }
                     })
                     setDestinationSuggestions(response.data)
+                    setSuggestionsSessionToken(response.headers['x-maps-session-token'] || null)
                 } catch {
                     setDestinationSuggestions([])
                 } finally {
@@ -317,11 +316,9 @@ const Home = () => {
         addToast('Definindo sua localização...', 'info');
         const { lat, lng } = userLocation;
         try {
-            const response = await axios.get(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}`);
-            if (response.data && response.data.features && response.data.features.length > 0) {
-                const properties = response.data.features[0].properties;
-                const address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
-                setPickup({ address: address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+            const { address } = await reverseGeocode(lat, lng);
+            if (address) {
+                setPickup({ address, lat, lng });
                 addToast('Localização atual definida', 'success');
             } else {
                 setPickup({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
@@ -644,6 +641,7 @@ const Home = () => {
                         activeField={activeField}
                         setIsSelectingOnMap={setIsSelectingOnMap}
                         isSearching={isSearching}
+                        sessionToken={suggestionsSessionToken}
                     />
                 </div>
             </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { db } from '../db/db'
+import { db } from '@/services/db'
 import * as Sentry from '@sentry/react'
 
 const ConfirmRidePopUp = (props) => {

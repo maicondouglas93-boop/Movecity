@@ -1,12 +1,12 @@
 import React, { useState, useContext, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { SocketContext } from '../context/SocketContext'
-import { UserDataContext } from '../context/UserContext'
-import LiveTracking from '../components/LiveTracking'
+import { SocketContext } from '@/contexts/SocketContext'
+import { UserDataContext } from '@/contexts/UserContext'
+import LiveTracking from '@/shared/components/LiveTracking'
 import axios from 'axios'
-import { vehicleImages, vehicleLabels } from '../assets/vehicleAssets'
-import { useToast } from '../context/ToastContext'
-import RideChat from '../components/RideChat'
+import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
+import { useToast } from '@/contexts/ToastContext'
+import RideChat from '@/shared/components/RideChat'
 
 const Riding = () => {
     const location = useLocation()

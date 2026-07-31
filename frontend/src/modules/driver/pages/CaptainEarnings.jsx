@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
-import CaptainHeader from '../components/CaptainHeader';
-import { CaptainDataContext } from '../context/CapatainContext';
+import CaptainHeader from '@/modules/driver/components/CaptainHeader';
+import { CaptainDataContext } from '@/contexts/CaptainContext';
 
 const CaptainEarnings = () => {
     const { captain } = useContext(CaptainDataContext);

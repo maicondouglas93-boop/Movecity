@@ -3,9 +3,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import axios from 'axios';
-import UserSignup from '../../pages/UserSignup';
-import { UserDataContext } from '../../context/UserContext';
-import { ToastProvider } from '../../context/ToastContext';
+import UserSignup from '@/modules/passenger/pages/UserSignup';
+import { UserDataContext } from '@/contexts/UserContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 vi.mock('axios');
 vi.mock('firebase/auth', () => ({

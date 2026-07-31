@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Header from '../../components/Header';
-import { UserDataContext } from '../../context/UserContext';
+import Header from '@/modules/passenger/components/Header';
+import { UserDataContext } from '@/contexts/UserContext';
 
 const Account = () => {
     const { user } = useContext(UserDataContext);

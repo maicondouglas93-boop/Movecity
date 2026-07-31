@@ -2,10 +2,10 @@ import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CaptainDataContext } from '../context/CapatainContext'
-import { SocketContext } from '../context/SocketContext'
-import CaptainHeader from '../components/CaptainHeader'
-import { useToast } from '../context/ToastContext'
+import { CaptainDataContext } from '@/contexts/CaptainContext'
+import { SocketContext } from '@/contexts/SocketContext'
+import CaptainHeader from '@/modules/driver/components/CaptainHeader'
+import { useToast } from '@/contexts/ToastContext'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)

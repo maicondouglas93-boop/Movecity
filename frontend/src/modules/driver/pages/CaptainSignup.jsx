@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { CaptainDataContext } from '../context/CapatainContext'
+import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { useToast } from '../context/ToastContext'
+import { useToast } from '@/contexts/ToastContext'
 
 const CaptainSignup = () => {
 

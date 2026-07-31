@@ -3,9 +3,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import axios from 'axios';
-import UserLogin from '../../pages/UserLogin';
-import { UserDataContext } from '../../context/UserContext';
-import { ToastProvider } from '../../context/ToastContext';
+import UserLogin from '@/modules/passenger/pages/UserLogin';
+import { UserDataContext } from '@/contexts/UserContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 // Mock dependências externas
 vi.mock('axios');

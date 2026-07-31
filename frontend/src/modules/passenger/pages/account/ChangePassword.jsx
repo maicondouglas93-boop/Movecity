@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import axios from 'axios';
-import { useToast } from '../../context/ToastContext';
+import { useToast } from '@/contexts/ToastContext';
 
 const passwordSchema = z.object({
     currentPassword: z.string().min(1, "Senha atual obrigatória"),

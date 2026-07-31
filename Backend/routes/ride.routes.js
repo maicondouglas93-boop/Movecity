@@ -37,6 +37,11 @@ router.post('/confirm',
     rideController.confirmRide
 )
 
+router.post('/:id/accept',
+    authMiddleware.authCaptain,
+    rideController.acceptRide
+)
+
 router.get('/start-ride',
     authMiddleware.authCaptain,
     query('rideId').isMongoId().withMessage('Invalid ride id'),

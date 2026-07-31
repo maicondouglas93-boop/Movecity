@@ -14,7 +14,8 @@ import { SocketContext } from '../context/SocketContext';
 import { useContext } from 'react';
 import { UserDataContext } from '../context/UserContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import LiveTracking from '../components/LiveTracking';
+import LiveTracking from '../components/LiveTracking'
+import { LocationContext } from '../context/LocationContext';
 import { useToast } from '../context/ToastContext';
 import Header from '../components/Header';
 import ScheduleRidePanel from '../components/ScheduleRidePanel';
@@ -52,11 +53,13 @@ const Home = () => {
     const [ observation, setObservation ] = useState('')
     const [ requestFemaleDriver, setRequestFemaleDriver ] = useState(false)
 
+    const { userLocation, locationError } = useContext(LocationContext);
+
     const [ isSelectingOnMap, setIsSelectingOnMap ] = useState(false)
     const [ mapSelectionCoords, setMapSelectionCoords ] = useState(null)
-    const [ userLocation, setUserLocation ] = useState(null)
     const [ isSearching, setIsSearching ] = useState(false)
     const debounceTimer = useRef(null)
+    const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
 
     useEffect(() => {
@@ -64,35 +67,36 @@ const Home = () => {
         if (location.state && location.state.pickup && location.state.destination) {
             setPickup(location.state.pickup);
             setDestination(location.state.destination);
+            setPanelOpen(true); // Abre o painel automaticamente
             // clear state so it doesn't loop
             window.history.replaceState({}, document.title)
         }
     }, [location.state])
 
     useEffect(() => {
-        // Obter localização inicial ao carregar a página
-        if (navigator.geolocation && !pickup) {
-            navigator.geolocation.getCurrentPosition(async (position) => {
-                const { latitude, longitude } = position.coords;
-                setUserLocation({ lat: latitude, lng: longitude });
-                
+        // Se a localização já estiver disponível e ainda não temos o pickup, faz o geocode reverso
+        if (userLocation && !pickup && !hasFetchedInitialLocationRef.current) {
+            hasFetchedInitialLocationRef.current = true;
+            const fetchInitialPickup = async () => {
+                const { lat, lng } = userLocation;
                 try {
-                    const response = await axios.get(`https://photon.komoot.io/reverse?lon=${longitude}&lat=${latitude}`);
+                    const response = await axios.get(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}`);
                     if (response.data && response.data.features && response.data.features.length > 0) {
                         const properties = response.data.features[0].properties;
                         const address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
                         if (address) {
                             setPickup({
                                 address: address,
-                                lat: latitude,
-                                lng: longitude
+                                lat,
+                                lng
                             });
                         }
                     }
                 } catch (err) {
                     console.warn("Reverse geocode on mount failed", err);
                 }
-            }, () => {}, { timeout: 10000, enableHighAccuracy: true });
+            };
+            fetchInitialPickup();
         }
         
         // Configurar Push Notifications para Passageiro
@@ -108,13 +112,8 @@ const Home = () => {
     }, []); // Run once on mount
 
     const requestLocationPermissions = () => {
-        if (navigator.geolocation && !userLocation) {
-            navigator.geolocation.getCurrentPosition((position) => {
-                setUserLocation({
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude
-                });
-            }, () => {}, { timeout: 10000, enableHighAccuracy: true });
+        if (locationError) {
+            addToast(locationError, 'error');
         }
     }
 
@@ -309,39 +308,29 @@ const Home = () => {
         e.preventDefault()
     }
 
-    const handleCurrentLocation = () => {
-        if (!navigator.geolocation) {
-            addToast('Geolocalização não suportada', 'error');
+    const handleCurrentLocation = async () => {
+        if (!userLocation) {
+            addToast(locationError || 'Obtendo geolocalização, aguarde...', 'info');
             return;
         }
 
-        addToast('Obtendo sua localização...', 'info');
-
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const { latitude, longitude } = position.coords;
-                try {
-                    const response = await axios.get(`https://photon.komoot.io/reverse?lon=${longitude}&lat=${latitude}`);
-                    if (response.data && response.data.features && response.data.features.length > 0) {
-                        const properties = response.data.features[0].properties;
-                        const address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
-                        setPickup({ address: address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lat: latitude, lng: longitude });
-                        addToast('Localização atual definida', 'success');
-                    } else {
-                        setPickup({ address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lat: latitude, lng: longitude });
-                        addToast('Usando coordenadas', 'info');
-                    }
-                } catch (err) {
-                    setPickup({ address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lat: latitude, lng: longitude });
-                    addToast('Endereço indisponível, usando coords', 'info');
-                }
-            }, 
-            (err) => {
-                console.error("Geolocation error:", err);
-                addToast('Não foi possível obter localização', 'error');
-            }, 
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
+        addToast('Definindo sua localização...', 'info');
+        const { lat, lng } = userLocation;
+        try {
+            const response = await axios.get(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}`);
+            if (response.data && response.data.features && response.data.features.length > 0) {
+                const properties = response.data.features[0].properties;
+                const address = [properties.name, properties.street, properties.city || properties.state].filter(Boolean).join(', ');
+                setPickup({ address: address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+                addToast('Localização atual definida', 'success');
+            } else {
+                setPickup({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+                addToast('Usando coordenadas', 'info');
+            }
+        } catch (err) {
+            setPickup({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+            addToast('Endereço indisponível, usando coords' + err, 'info');
+        }
     }
 
     useGSAP(function () {
@@ -516,7 +505,7 @@ const Home = () => {
             setPickup('');
             setDestination('');
         } catch (err) {
-            addToast('Erro ao cancelar corrida.', 'error');
+            addToast('Erro ao cancelar corrida.', err);
         }
     }
 

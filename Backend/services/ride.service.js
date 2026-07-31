@@ -63,7 +63,12 @@ async function getFare(pickup, destination) {
         distance,
         time,
         polyline: distanceTime.polyline,
-        breakdown: fareBreakdownData
+        breakdown: fareBreakdownData,
+        eta: {
+            car: Math.floor(Math.random() * 5) + 2, // 2 to 6 mins
+            moto: Math.floor(Math.random() * 3) + 1, // 1 to 3 mins
+            auto: Math.floor(Math.random() * 4) + 2  // 2 to 5 mins
+        }
     };
 
     setCache(cacheKey, result, 1800);
@@ -174,6 +179,39 @@ module.exports.createRide = async ({
             status: paymentMethod === 'carteira' ? 'approved' : 'pending'
         });
     }
+
+    return ride;
+}
+
+module.exports.acceptRideAtomic = async ({
+    rideId, captain
+}) => {
+    if (!rideId) {
+        throw new Error('Ride id is required');
+    }
+
+    const updatedRide = await rideModel.findOneAndUpdate({
+        _id: rideId,
+        status: 'requested'
+    }, {
+        $set: {
+            status: 'accepted',
+            captain: captain._id
+        }
+    }, { new: true });
+
+    if (!updatedRide) {
+        // Find out if it doesn't exist or was already accepted
+        const existingRide = await rideModel.findById(rideId);
+        if (!existingRide) {
+            throw new Error('RIDE_NOT_FOUND');
+        }
+        throw new Error('RIDE_ALREADY_ACCEPTED');
+    }
+
+    const ride = await rideModel.findOne({
+        _id: rideId
+    }).populate('user').populate('captain').select('+otp');
 
     return ride;
 }

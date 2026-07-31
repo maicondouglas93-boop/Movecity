@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useCallback } from 'rea
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { SocketContext } from '../context/SocketContext'
+import { LocationContext } from '../context/LocationContext'
 
 // Fix default marker icon issue in Leaflet with Webpack/Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -155,8 +156,9 @@ const LiveTracking = (props) => {
     const routePolylineRef = useRef(null);
     
     const { socket } = useContext(SocketContext);
+    const { userLocation } = useContext(LocationContext);
     
-    // Use ref for current position to avoid re-renders that destroy the map
+    // Use ref for current position to avoid destroying the map
     const currentPositionRef = useRef(null);
     const [hasPosition, setHasPosition] = useState(false);
     
@@ -180,38 +182,23 @@ const LiveTracking = (props) => {
         onMapCenterChangeRef.current = props.onMapCenterChange;
     }, [props.onMapCenterChange]);
 
-    // GPS tracking — updates ref without causing re-render
+    // GPS tracking sync from Global Context
     useEffect(() => {
-        const updatePosition = (lat, lng) => {
-            currentPositionRef.current = { lat, lng };
-            
-            // Update marker position directly (no re-render)
-            if (markerInstanceRef.current) {
-                markerInstanceRef.current.setLatLng([lat, lng]);
-            }
-            
-            // Signal that we have a position (only once, to trigger map init)
-            if (!hasPosition) {
-                setHasPosition(true);
-            }
-        };
-
-        navigator.geolocation.getCurrentPosition((position) => {
-            updatePosition(position.coords.latitude, position.coords.longitude);
-        }, (error) => {
-            console.error('Error getting location:', error);
-            // Fallback
-            updatePosition(-23.5505, -46.6333);
-        });
-
-        const watchId = navigator.geolocation.watchPosition((position) => {
-            updatePosition(position.coords.latitude, position.coords.longitude);
-        }, (error) => {
-            console.error('Error watching location:', error);
-        });
-
-        return () => navigator.geolocation.clearWatch(watchId);
-    }, []); // Only once
+        if (!userLocation) return;
+        const { lat, lng } = userLocation;
+        
+        currentPositionRef.current = { lat, lng };
+        
+        // Update marker position directly
+        if (markerInstanceRef.current) {
+            markerInstanceRef.current.setLatLng([lat, lng]);
+        }
+        
+        // Signal that we have a position (only once, to trigger map init)
+        if (!hasPosition) {
+            setHasPosition(true);
+        }
+    }, [userLocation]); // Syncs automatically when global location updates
 
     // Initialize captain position from ride details if available
     useEffect(() => {

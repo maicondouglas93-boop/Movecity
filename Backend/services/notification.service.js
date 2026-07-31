@@ -17,6 +17,11 @@ const sendPush = async (tokens, payload) => {
             data: payload.data || {},
             tokens: tokens
         };
+        
+        if (payload.webpush) {
+            message.webpush = payload.webpush;
+        }
+
         const response = await getMessaging().sendEachForMulticast(message);
         console.log('Firebase Push enviado:', response.successCount, 'sucesso,', response.failureCount, 'falhas');
     } catch (error) {
@@ -36,7 +41,7 @@ const sendToUser = async (userId, title, message, type, data = {}) => {
     await sendPush(tokens, { title, message, data });
 }
 
-const sendToCaptain = async (captainId, title, message, type, data = {}) => {
+const sendToCaptain = async (captainId, title, message, type, data = {}, options = {}) => {
     // Save to DB
     await Notification.create({ captainId, title, message, type, status: 'sent', sentAt: new Date(), targetAudience: 'specific' });
 
@@ -45,13 +50,33 @@ const sendToCaptain = async (captainId, title, message, type, data = {}) => {
     const tokens = captainTokens.map(t => t.token);
 
     // Send Push
-    await sendPush(tokens, { title, message, data });
+    await sendPush(tokens, { title, message, data, ...options });
 }
 
 module.exports.sendNewRide = async (captainId, data) => {
     const title = 'Nova Corrida Disponível!';
     const message = 'Há um passageiro solicitando uma corrida perto de você.';
-    await sendToCaptain(captainId, title, message, 'NEW_RIDE', data);
+    
+    // Anexar apiUrl para o ServiceWorker
+    data.apiUrl = process.env.BASE_URL || 'http://localhost:4000';
+    
+    const options = {
+        webpush: {
+            notification: {
+                actions: [
+                    { action: 'accept', title: '✅ Aceitar' },
+                    { action: 'reject', title: '❌ Recusar' },
+                    { action: 'open', title: '📱 Abrir App' }
+                ],
+                requireInteraction: true
+            },
+            fcmOptions: {
+                link: '/captain-home'
+            }
+        }
+    };
+
+    await sendToCaptain(captainId, title, message, 'NEW_RIDE', data, options);
 }
 
 module.exports.sendRideAccepted = async (userId, data) => {

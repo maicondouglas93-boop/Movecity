@@ -8,6 +8,7 @@ import ConfirmRidePopUp from '../components/ConfirmRidePopUp'
 import { useEffect, useContext } from 'react'
 import { SocketContext } from '../context/SocketContext'
 import { CaptainDataContext } from '../context/CapatainContext'
+import { LocationContext } from '../context/LocationContext'
 import axios from 'axios'
 import LiveTracking from '../components/LiveTracking'
 import { useToast } from '../context/ToastContext'
@@ -28,6 +29,7 @@ const CaptainHome = () => {
 
     const { socket } = useContext(SocketContext)
     const { captain } = useContext(CaptainDataContext)
+    const { locationRef } = useContext(LocationContext)
     const { addToast } = useToast()
 
     // Request browser notification permission on mount
@@ -68,33 +70,24 @@ const CaptainHome = () => {
         let simulationInterval;
 
         const updateLocation = () => {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(position => {
-                    const loc = {
-                        ltd: position.coords.latitude,
-                        lng: position.coords.longitude
-                    };
-                    
-                    if (socket.connected) {
-                        socket.emit('update-location-captain', {
-                            userId: captain._id,
-                            location: loc
-                        });
-                    } else {
-                        // Persist to Dexie for offline sync
-                        db.driverLocations.add({
-                            userId: captain._id,
-                            lat: loc.ltd,
-                            lng: loc.lng,
-                            timestamp: Date.now()
-                        }).catch(e => console.error(e));
-                    }
-                }, (error) => {
-                    console.error('Falha ao obter localização do GPS', error);
-                    Sentry.captureException(error, { tags: { issue: 'gps_error' } });
-                })
+            const loc = locationRef.current;
+            if (loc) {
+                if (socket.connected) {
+                    socket.emit('update-location-captain', {
+                        userId: captain._id,
+                        location: { ltd: loc.lat, lng: loc.lng }
+                    });
+                } else {
+                    // Persist to Dexie for offline sync
+                    db.driverLocations.add({
+                        userId: captain._id,
+                        lat: loc.lat,
+                        lng: loc.lng,
+                        timestamp: Date.now()
+                    }).catch(e => console.error(e));
+                }
             }
-        }
+        };
 
         // If ride is confirmed, simulate captain moving towards the pickup location
         if (ride && ride.status === 'accepted') {

@@ -7,11 +7,11 @@ const captainSchema = new mongoose.Schema({
         firstname: {
             type: String,
             required: true,
-            minlength: [ 3, 'Firstname must be at least 3 characters long' ],
+            minlength: [ 1, 'Firstname must be at least 1 character long' ],
         },
         lastname: {
             type: String,
-            minlength: [ 3, 'Lastname must be at least 3 characters long' ],
+            minlength: [ 1, 'Lastname must be at least 1 character long' ],
         }
     },
     email: {

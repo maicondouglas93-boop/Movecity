@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const dns = require('dns');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// mongodb-memory-server é devDependency (não instalada em produção) — por isso o
+// require fica dentro do fallback de dev/teste que realmente o usa, nunca no topo
+// do arquivo, para não derrubar o processo em produção.
 
 async function seedTestData() {
     try {
@@ -249,6 +251,7 @@ async function connectToDb() {
             process.exit(1);
         }
         console.warn('Starting in-memory MongoDB fallback...');
+        const { MongoMemoryServer } = require('mongodb-memory-server');
         const mongoServer = await MongoMemoryServer.create();
         const mongoUri = mongoServer.getUri();
         await mongoose.connect(mongoUri);

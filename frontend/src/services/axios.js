@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getFriendlyErrorMessage } from './errorMessages';
 
 const api = axios.create({
     baseURL: import.meta.env.VITE_BASE_URL,
@@ -45,6 +46,10 @@ api.interceptors.response.use((response) => {
             window.location.href = '/login';
         }
     }
+    // Mensagem pronta pra qualquer chamador que só quer exibir algo amigável, sem
+    // reimplementar a distinção timeout/rede/5xx/mensagem-do-backend em cada catch
+    // (item 17 da auditoria de UX — ver frontend/src/services/errorMessages.js).
+    error.friendlyMessage = getFriendlyErrorMessage(error);
     return Promise.reject(error);
 });
 

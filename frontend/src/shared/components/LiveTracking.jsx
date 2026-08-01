@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useContext, useCallback, memo } from 'react'
 import { SocketContext } from '@/contexts/SocketContext'
 import { LocationContext } from '@/contexts/LocationContext'
 import { createMapProvider } from '@/services/maps'
@@ -214,20 +214,18 @@ const LiveTracking = (props) => {
             let endLat = destinationCoords.lat;
             let endLng = destinationCoords.lng;
 
-            if (props.ride) {
-                if (props.ride.status === 'accepted') {
-                    // Phase 1: Captain heading to Pickup
-                    startLat = captainPosition?.lat || props.ride.captain?.location?.ltd || pickupCoords.lat;
-                    startLng = captainPosition?.lng || props.ride.captain?.location?.lng || pickupCoords.lng;
-                    endLat = pickupCoords.lat;
-                    endLng = pickupCoords.lng;
-                } else if (props.ride.status === 'ongoing') {
-                    // Phase 2: Trip ongoing to Destination
-                    startLat = pickupCoords.lat;
-                    startLng = pickupCoords.lng;
-                    endLat = destinationCoords.lat;
-                    endLng = destinationCoords.lng;
-                }
+            // Fase 1 (motorista a caminho do embarque): traça do motorista até o pickup.
+            // Fora dessa fase (corrida em andamento etc.) o default acima (pickup→destino)
+            // já está certo, não precisa de outro ramo.
+            // Antes só cobria status === 'accepted' — indo_para_embarque/chegou/aguardando
+            // caíam no default errado (pickup→destino) mesmo com o motorista ainda a
+            // caminho. 'ongoing' nunca existiu no enum real (é 'started').
+            const headingToPickup = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(props.ride?.status);
+            if (headingToPickup) {
+                startLat = captainPosition?.lat || props.ride.captain?.location?.ltd || pickupCoords.lat;
+                startLng = captainPosition?.lng || props.ride.captain?.location?.lng || pickupCoords.lng;
+                endLat = pickupCoords.lat;
+                endLng = pickupCoords.lng;
             }
 
             try {
@@ -460,22 +458,27 @@ const LiveTracking = (props) => {
         };
     }, [captainPosition, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType]);
 
-    const ridePhaseLabel = props.ride?.status === 'accepted'
-        ? 'Captain heading to pickup'
-        : props.ride?.status === 'ongoing'
-        ? 'Ride in progress'
+    // HUD de fase da corrida — antes só cobria 'accepted' e 'ongoing' (este último nunca
+    // existiu no enum real do backend), então o card de progresso nunca aparecia durante
+    // a viagem de verdade ('started'). Ver item 9 do relatório de UX.
+    const rideStatus = props.ride?.status;
+    const ridePhaseLabel =
+        ['accepted', 'going_to_pickup'].includes(rideStatus) ? 'Motorista a caminho'
+        : ['arrived', 'waiting_passenger'].includes(rideStatus) ? 'Motorista chegou'
+        : rideStatus === 'started' ? 'Corrida em andamento'
         : null;
 
-    const remainingKm = routeCoords.length > 1 && captainPosition
+    const showRemainingKm = ridePhaseLabel && rideStatus !== 'arrived' && rideStatus !== 'waiting_passenger';
+    const remainingKm = showRemainingKm && routeCoords.length > 1 && captainPosition
         ? calculateRouteDistance(getRemainingRoute(routeCoords, captainPosition)).toFixed(1)
         : null;
 
     if (!hasPosition) {
         return (
-            <div className="w-full h-full flex items-center justify-center bg-gray-100">
+            <div className="w-full h-full flex items-center justify-center bg-surface-alt">
                 <div className="flex flex-col items-center gap-2">
-                    <i className="ri-map-pin-line text-3xl text-gray-400 animate-bounce"></i>
-                    <p className="text-gray-500 font-medium">Obtendo localização...</p>
+                    <i className="ri-map-pin-line text-3xl text-ink-400 animate-bounce"></i>
+                    <p className="text-ink-600 font-medium">Obtendo localização...</p>
                 </div>
             </div>
         );
@@ -485,39 +488,42 @@ const LiveTracking = (props) => {
         <div className='relative w-full h-full'>
             <div ref={mapRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
 
-            {/* Uber-style ETA + route status HUD chip at the top */}
+            {/* Chip de status/progresso da corrida no topo do mapa */}
             {ridePhaseLabel && !props.isSelectingOnMap && (
-                <div className='absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-white rounded-full shadow-xl px-5 py-2.5 border border-gray-100'>
-                    <div className='h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse flex-shrink-0'></div>
+                <div className='absolute top-4 left-1/2 -translate-x-1/2 z-panel flex items-center gap-3 bg-surface rounded-full shadow-raised px-5 py-2.5 border border-line'>
+                    <div className='h-2.5 w-2.5 rounded-full bg-brand-500 animate-pulse flex-shrink-0'></div>
                     <div>
-                        <p className='text-xs text-gray-500 leading-tight'>{ridePhaseLabel}</p>
+                        <p className='text-xs text-ink-400 leading-tight'>{ridePhaseLabel}</p>
                         {remainingKm && (
-                            <p className='text-sm font-bold text-black leading-tight'>{remainingKm} km remaining</p>
+                            <p className='text-sm font-bold text-ink-900 leading-tight'>{remainingKm} km restantes</p>
                         )}
                     </div>
                 </div>
             )}
 
-            {/* Map Selection Center Pin */}
+            {/* Pino central de seleção manual no mapa */}
             {props.isSelectingOnMap && (
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full z-[9999] pointer-events-none drop-shadow-2xl flex flex-col items-center">
-                    <i className="ri-map-pin-fill text-5xl text-black"></i>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full z-modal pointer-events-none drop-shadow-2xl flex flex-col items-center">
+                    <i className="ri-map-pin-fill text-5xl text-ink-900"></i>
                     <div className="w-3 h-1 bg-black/30 rounded-[100%] absolute bottom-0 shadow-xl blur-[1px]"></div>
                 </div>
             )}
 
-            {/* Re-center / Focus button styled like Uber's native button */}
+            {/* Botão de recentralizar/seguir */}
             {!props.isSelectingOnMap && (
                 <button
                     onClick={handleRecenter}
-                    className={`absolute bottom-6 right-4 z-20 h-11 w-11 rounded-full shadow-xl flex items-center justify-center border border-gray-100 hover:scale-105 active:scale-95 transition-all ${isFollowing ? 'bg-blue-600 text-white' : 'bg-white text-black'}`}
-                    title={isFollowing ? "Seguindo motorista" : "Focar no mapa"}
+                    aria-label={isFollowing ? "Seguindo motorista" : "Focar no mapa"}
+                    className={`absolute bottom-6 right-4 z-panel h-11 w-11 rounded-full shadow-raised flex items-center justify-center border transition-all active:scale-95 ${isFollowing ? 'bg-brand-500 border-brand-500 text-white' : 'bg-surface border-line text-ink-900'}`}
                 >
-                    <i className="ri-gps-line text-xl"></i>
+                    <i className="ri-gps-line text-xl" aria-hidden="true"></i>
                 </button>
             )}
         </div>
     )
 }
 
-export default LiveTracking
+// Mapa + rota são o painel mais pesado do app (Leaflet/OSM). Envolto em memo pra não
+// re-renderizar à toa quando algo sem relação (toast, painel abrindo/fechando) muda
+// no componente pai — item 16 da auditoria de UX.
+export default memo(LiveTracking)

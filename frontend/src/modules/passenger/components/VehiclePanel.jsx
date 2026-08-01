@@ -1,10 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import { vehicleImages } from '@/assets/vehicleAssets'
 import { getVehicleCategories } from '@/services/vehicleCategoriesApi'
+import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
+import Button from '@/shared/components/ui/Button'
 
+// Antes, tocar numa categoria já navegava direto pra confirmação — o usuário nunca via
+// o que tinha escolhido até a tela seguinte. Agora o toque só seleciona (card destacado)
+// e um botão "Continuar" separado avança — mesmo padrão de apps de referência.
+// Ver §2.4/item da auditoria de UX.
 const VehiclePanel = (props) => {
     const [categories, setCategories] = useState([])
     const [loading, setLoading] = useState(true)
+    const [selectedName, setSelectedName] = useState(null)
 
     useEffect(() => {
         let cancelled = false
@@ -21,48 +28,64 @@ const VehiclePanel = (props) => {
         return () => { cancelled = true }
     }, [])
 
+    const handleContinue = () => {
+        if (!selectedName) return
+        props.selectVehicle(selectedName)
+        props.setConfirmRidePanel(true)
+    }
+
     return (
         <div className='pb-6'>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setVehiclePanel(false)
-            }}><i className="text-3xl text-gray-300 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Escolha um Veículo</h3>
+            <button
+                type="button"
+                onClick={() => props.setVehiclePanel(false)}
+                aria-label="Fechar"
+                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
+            >
+                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
+            </button>
+            <h3 className='text-xl font-semibold mb-4 text-ink-900'>Escolha um veículo</h3>
 
             {loading ? (
                 <div className='flex justify-center py-8'>
-                    <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                    <i className="ri-loader-4-line text-2xl animate-spin text-ink-400" aria-hidden="true"></i>
                 </div>
             ) : categories.length === 0 ? (
-                <p className='text-center text-gray-500 py-8'>Nenhuma categoria de veículo disponível no momento.</p>
+                <p className='text-center text-ink-400 py-8'>Nenhuma categoria de veículo disponível no momento.</p>
             ) : (
-                categories.map((category) => (
-                    <div
-                        key={category._id || category.name}
-                        onClick={() => {
-                            props.setConfirmRidePanel(true)
-                            props.selectVehicle(category.name)
-                        }}
-                        className='flex border-2 border-gray-200 active:border-green-500 mb-2 rounded-xl w-full p-3 items-center justify-between bg-gray-50 transition-colors cursor-pointer'
-                    >
-                        <img className='h-10 object-contain' src={vehicleImages[category.iconKey] || vehicleImages.car} alt={category.displayName} />
-                        <div className='w-1/2'>
-                            <h4 className='font-medium text-base text-gray-800'>
-                                {category.displayName} <span className='text-green-500'><i className="ri-user-3-fill"></i>{category.capacity}</span>
-                            </h4>
-                            {category.description && (
-                                <p className='font-normal text-xs text-gray-400'>{category.description}</p>
-                            )}
-                        </div>
-                        <h2 className='text-lg font-semibold text-green-600'>
-                            {props.fare?.fare?.[category.name] ? `R$${props.fare.fare[category.name]}` : ''}
-                        </h2>
-                    </div>
-                ))
+                <div className='flex flex-col gap-2'>
+                    {categories.map((category) => (
+                        <SelectableOptionCard
+                            key={category._id || category.name}
+                            selected={selectedName === category.name}
+                            onClick={() => setSelectedName(category.name)}
+                            icon={<img className='h-10 w-14 object-contain' src={vehicleImages[category.iconKey] || vehicleImages.car} alt="" />}
+                            title={
+                                <span className='inline-flex items-center gap-1.5'>
+                                    {category.displayName}
+                                    <span className='inline-flex items-center gap-0.5 text-xs text-ink-400 font-normal'>
+                                        <i className="ri-user-3-fill" aria-hidden="true"></i>{category.capacity}
+                                    </span>
+                                </span>
+                            }
+                            subtitle={category.description}
+                            trailing={
+                                <span className='text-lg font-bold text-ink-900'>
+                                    {props.fare?.fare?.[category.name] ? `R$${props.fare.fare[category.name]}` : ''}
+                                </span>
+                            }
+                        />
+                    ))}
+                </div>
             )}
 
-            <p className='text-xs text-center text-gray-400 mt-4 px-4'>
+            <p className='text-xs text-center text-ink-400 mt-4 px-4'>
                 O valor apresentado é uma estimativa. O preço final será calculado conforme a distância realmente percorrida.
             </p>
+
+            <Button onClick={handleContinue} disabled={!selectedName} className='mt-4'>
+                Continuar
+            </Button>
         </div>
     )
 }

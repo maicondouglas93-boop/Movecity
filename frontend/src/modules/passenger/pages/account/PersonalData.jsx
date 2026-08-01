@@ -6,6 +6,8 @@ import * as z from 'zod';
 import axios from 'axios';
 import { UserDataContext } from '@/contexts/UserContext';
 import { useToast } from '@/contexts/ToastContext';
+import PageHeader from '@/shared/components/ui/PageHeader';
+import Button from '@/shared/components/ui/Button';
 
 const personalDataSchema = z.object({
     firstname: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
@@ -101,106 +103,103 @@ const PersonalData = () => {
 
     if (initialLoading) {
         return (
-            <div className="h-screen flex items-center justify-center bg-gray-50">
-                <i className="ri-loader-4-line text-4xl animate-spin text-gray-400"></i>
+            <div className="h-screen flex items-center justify-center bg-surface-alt">
+                <i className="ri-loader-4-line text-4xl animate-spin text-ink-400" aria-hidden="true"></i>
             </div>
         );
     }
 
     return (
-        <div className="h-screen bg-gray-50 flex flex-col font-sans">
-            <div className="flex items-center gap-4 p-5 bg-white border-b border-gray-100 sticky top-0 z-10">
-                <i onClick={() => navigate('/profile')} className="ri-arrow-left-line text-2xl cursor-pointer active:scale-95 transition-transform"></i>
-                <h2 className="text-xl font-semibold flex-1 text-gray-800">Dados Pessoais</h2>
-            </div>
+        <div className="h-screen bg-surface-alt flex flex-col font-sans">
+            <PageHeader title="Dados Pessoais" onBack={() => navigate('/profile')} />
 
             <div className="flex-1 overflow-y-auto p-5 pb-24">
                 <div className="flex flex-col items-center justify-center mb-8">
                     <div className="relative mb-3">
-                        <div className="h-28 w-28 bg-gray-200 rounded-full flex items-center justify-center overflow-hidden border-4 border-white shadow-md">
+                        <div className="h-28 w-28 bg-surface-alt rounded-full flex items-center justify-center overflow-hidden border-4 border-surface shadow-raised">
                             {photoPreview ? (
                                 <img src={photoPreview} alt="Profile" className="w-full h-full object-cover" />
                             ) : (
-                                <i className="ri-user-fill text-6xl text-gray-400"></i>
+                                <i className="ri-user-fill text-6xl text-ink-400" aria-hidden="true"></i>
                             )}
                         </div>
-                        <label htmlFor="photo-upload" className="absolute bottom-0 right-0 bg-black text-white rounded-full h-10 w-10 flex items-center justify-center shadow-lg cursor-pointer active:scale-95 transition-transform border-2 border-white">
-                            <i className="ri-camera-fill text-lg"></i>
+                        <label htmlFor="photo-upload" className="absolute bottom-0 right-0 bg-ink-900 text-white rounded-full h-10 w-10 flex items-center justify-center shadow-raised cursor-pointer active:scale-95 transition-transform border-2 border-surface">
+                            <i className="ri-camera-fill text-lg" aria-hidden="true"></i>
                         </label>
                         <input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
                     </div>
-                    <p className="text-sm text-gray-500 font-medium">Trocar foto de perfil</p>
+                    <p className="text-sm text-ink-400 font-medium">Trocar foto de perfil</p>
                 </div>
 
                 <form id="profile-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
                     <div className="flex gap-4">
                         <div className="flex-1">
-                            <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">Nome</label>
-                            <input 
-                                type="text" 
+                            <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">Nome</label>
+                            <input
+                                type="text"
                                 {...register('firstname')}
-                                className={`w-full bg-white border ${errors.firstname ? 'border-red-400' : 'border-gray-200'} px-4 py-3 rounded-xl outline-none focus:border-black font-medium`}
+                                className={`w-full bg-surface border ${errors.firstname ? 'border-danger-500' : 'border-line'} px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900`}
                             />
-                            {errors.firstname && <p className="text-xs text-red-500 mt-1 ml-1">{errors.firstname.message}</p>}
+                            {errors.firstname && <p className="text-xs text-danger-500 mt-1 ml-1">{errors.firstname.message}</p>}
                         </div>
                         <div className="flex-1">
-                            <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">Sobrenome</label>
-                            <input 
-                                type="text" 
+                            <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">Sobrenome</label>
+                            <input
+                                type="text"
                                 {...register('lastname')}
-                                className={`w-full bg-white border ${errors.lastname ? 'border-red-400' : 'border-gray-200'} px-4 py-3 rounded-xl outline-none focus:border-black font-medium`}
+                                className={`w-full bg-surface border ${errors.lastname ? 'border-danger-500' : 'border-line'} px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900`}
                             />
-                            {errors.lastname && <p className="text-xs text-red-500 mt-1 ml-1">{errors.lastname.message}</p>}
+                            {errors.lastname && <p className="text-xs text-danger-500 mt-1 ml-1">{errors.lastname.message}</p>}
                         </div>
                     </div>
 
                     <div>
-                        <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">E-mail</label>
-                        <input 
-                            type="email" 
-                            {...register('email')} 
+                        <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">E-mail</label>
+                        <input
+                            type="email"
+                            {...register('email')}
                             disabled
-                            className="w-full bg-gray-100 border border-transparent text-gray-500 px-4 py-3 rounded-xl outline-none font-medium" 
+                            className="w-full bg-surface-alt border border-transparent text-ink-400 px-4 py-3 rounded-panel outline-none font-medium"
                         />
-                        <p className="text-[10px] text-gray-400 ml-1 mt-1">O e-mail não pode ser alterado por segurança.</p>
+                        <p className="text-[10px] text-ink-400 ml-1 mt-1">O e-mail não pode ser alterado por segurança.</p>
                     </div>
 
                     <div>
-                        <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">Telefone</label>
-                        <input 
-                            type="tel" 
-                            {...register('phone')} 
+                        <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">Telefone</label>
+                        <input
+                            type="tel"
+                            {...register('phone')}
                             placeholder="(00) 00000-0000"
-                            className={`w-full bg-white border ${errors.phone ? 'border-red-400' : 'border-gray-200'} px-4 py-3 rounded-xl outline-none focus:border-black font-medium`}
+                            className={`w-full bg-surface border ${errors.phone ? 'border-danger-500' : 'border-line'} px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900`}
                         />
-                        {errors.phone && <p className="text-xs text-red-500 mt-1 ml-1">{errors.phone.message}</p>}
+                        {errors.phone && <p className="text-xs text-danger-500 mt-1 ml-1">{errors.phone.message}</p>}
                     </div>
 
                     <div>
-                        <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">CPF</label>
-                        <input 
-                            type="text" 
-                            {...register('cpf')} 
+                        <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">CPF</label>
+                        <input
+                            type="text"
+                            {...register('cpf')}
                             placeholder="000.000.000-00"
-                            className={`w-full bg-white border ${errors.cpf ? 'border-red-400' : 'border-gray-200'} px-4 py-3 rounded-xl outline-none focus:border-black font-medium`}
+                            className={`w-full bg-surface border ${errors.cpf ? 'border-danger-500' : 'border-line'} px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900`}
                         />
-                        {errors.cpf && <p className="text-xs text-red-500 mt-1 ml-1">{errors.cpf.message}</p>}
+                        {errors.cpf && <p className="text-xs text-danger-500 mt-1 ml-1">{errors.cpf.message}</p>}
                     </div>
 
                     <div className="flex gap-4">
                         <div className="flex-[2]">
-                            <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">Data de Nascimento</label>
-                            <input 
-                                type="date" 
+                            <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">Data de Nascimento</label>
+                            <input
+                                type="date"
                                 {...register('birthDate')}
-                                className="w-full bg-white border border-gray-200 px-4 py-3 rounded-xl outline-none focus:border-black font-medium" 
+                                className="w-full bg-surface border border-line px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900"
                             />
                         </div>
                         <div className="flex-1">
-                            <label className="text-xs font-semibold text-gray-500 ml-1 mb-1 block">Gênero</label>
-                            <select 
+                            <label className="text-xs font-semibold text-ink-400 ml-1 mb-1 block">Gênero</label>
+                            <select
                                 {...register('gender')}
-                                className="w-full bg-white border border-gray-200 px-4 py-3 rounded-xl outline-none focus:border-black font-medium"
+                                className="w-full bg-surface border border-line px-4 py-3 rounded-panel outline-none focus:border-brand-500 font-medium text-ink-900"
                             >
                                 <option value="">...</option>
                                 <option value="male">Masc</option>
@@ -212,15 +211,10 @@ const PersonalData = () => {
                 </form>
             </div>
 
-            <div className="fixed bottom-0 w-full p-5 bg-white border-t border-gray-100">
-                <button 
-                    type="submit"
-                    form="profile-form"
-                    disabled={loading}
-                    className="w-full bg-black text-white font-semibold py-4 rounded-xl active:scale-[0.98] transition-transform flex justify-center items-center gap-2"
-                >
-                    {loading ? <i className="ri-loader-4-line animate-spin text-xl"></i> : 'Salvar alterações'}
-                </button>
+            <div className="fixed bottom-0 w-full p-5 bg-surface border-t border-line">
+                <Button type="submit" form="profile-form" loading={loading}>
+                    Salvar alterações
+                </Button>
             </div>
         </div>
     );

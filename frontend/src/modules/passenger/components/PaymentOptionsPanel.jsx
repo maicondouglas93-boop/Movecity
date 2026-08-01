@@ -1,83 +1,83 @@
 import React from 'react';
 
+const METHODS = [
+    { id: 'pix', label: 'Pix', icon: 'ri-instance-line', iconColor: 'text-teal-500' },
+    { id: 'cash', label: 'Dinheiro', icon: 'ri-money-dollar-box-fill', iconColor: 'text-brand-500' },
+];
+
 const PaymentOptionsPanel = (props) => {
-
-    const handleMethodSelect = (method) => {
-        props.setPaymentMethod(method);
-    };
-
     return (
-        <div className='pb-6 bg-white'>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setPaymentPanel(false)
-            }}><i className="text-3xl text-gray-300 ri-arrow-down-wide-line"></i></h5>
-            
-            <div className='flex items-center gap-3 mb-6 mt-2'>
-                <i className="ri-arrow-left-line text-xl cursor-pointer" onClick={() => props.setPaymentPanel(false)}></i>
-                <h3 className='text-xl font-semibold text-gray-800'>Opções de pagamento</h3>
+        <div className='pb-6 bg-surface'>
+            <button
+                type="button"
+                onClick={() => props.setPaymentPanel(false)}
+                aria-label="Fechar"
+                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
+            >
+                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
+            </button>
+
+            <div className='flex items-center gap-3 mb-5'>
+                <button
+                    type="button"
+                    onClick={() => props.setPaymentPanel(false)}
+                    aria-label="Voltar"
+                    className='min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center text-ink-900'
+                >
+                    <i className="ri-arrow-left-line text-xl" aria-hidden="true"></i>
+                </button>
+                <h3 className='text-xl font-semibold text-ink-900'>Opções de pagamento</h3>
             </div>
 
-            <div className='bg-gray-100 rounded-xl p-4 mb-4 flex items-center justify-between'>
+            <div className='bg-surface-alt rounded-panel p-4 mb-4 flex items-center justify-between'>
                 <div>
-                    <p className='text-sm text-gray-500 mb-1'>Saldo da carteira</p>
-                    <h2 className='text-3xl font-bold text-gray-700'>R$ {(props.walletBalance || 0).toFixed(2).replace('.', ',')}</h2>
+                    <p className='text-sm text-ink-400 mb-1'>Saldo da carteira</p>
+                    <h2 className='text-3xl font-bold text-ink-900'>R$ {(props.walletBalance || 0).toFixed(2).replace('.', ',')}</h2>
                 </div>
-                <i className="ri-arrow-right-s-line text-2xl text-gray-400"></i>
             </div>
 
-            <div className='flex items-center justify-between py-2 border-b border-gray-100 mb-4'>
-                <p className='text-base text-gray-700'>Usar saldo disponível em viagens</p>
-                <div className='relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in'>
-                    <input type="checkbox" name="toggle" id="toggle" 
+            <label className='flex items-center justify-between py-2 border-b border-line mb-4 cursor-pointer'>
+                <span className='text-base text-ink-900'>Usar saldo disponível em viagens</span>
+                <div className='relative inline-block w-12 h-6 align-middle select-none'>
+                    <input
+                        type="checkbox"
                         checked={props.useWalletBalance}
                         onChange={(e) => props.setUseWalletBalance(e.target.checked)}
-                        className={`toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ${props.useWalletBalance ? 'translate-x-6 border-green-500' : 'translate-x-0 border-gray-300'}`}/>
-                    <label htmlFor="toggle" className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer transition-colors duration-200 ${props.useWalletBalance ? 'bg-green-500' : 'bg-gray-300'}`}></label>
+                        className={`absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ${props.useWalletBalance ? 'translate-x-6 border-brand-500' : 'translate-x-0 border-line'}`}
+                    />
+                    <span className={`block overflow-hidden h-6 rounded-full transition-colors duration-200 ${props.useWalletBalance ? 'bg-brand-500' : 'bg-line'}`}></span>
                 </div>
+            </label>
+
+            <h4 className='text-base font-semibold text-ink-900 mb-3'>Forma de pagamento</h4>
+
+            <div className='flex flex-col gap-2'>
+                {METHODS.map((method) => {
+                    const isSelected = props.paymentMethod === method.id
+                    return (
+                        <button
+                            key={method.id}
+                            type="button"
+                            onClick={() => props.setPaymentMethod(method.id)}
+                            aria-pressed={isSelected}
+                            className={`flex items-center justify-between p-4 rounded-panel border transition-colors ${isSelected ? 'border-brand-500 bg-brand-50' : 'border-line'}`}
+                        >
+                            <div className='flex items-center gap-3'>
+                                <i className={`${method.icon} ${method.iconColor} text-2xl`} aria-hidden="true"></i>
+                                <span className='text-base font-medium text-ink-900'>{method.label}</span>
+                            </div>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-brand-500' : 'border-line'}`}>
+                                {isSelected && <div className='w-2.5 h-2.5 rounded-full bg-brand-500'></div>}
+                            </div>
+                        </button>
+                    )
+                })}
             </div>
-
-            <h4 className='text-base font-semibold text-gray-700 mb-3'>Forma de pagamento</h4>
-
-            <div className='flex flex-col'>
-                <div 
-                    onClick={() => handleMethodSelect('pix')}
-                    className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${props.paymentMethod === 'pix' ? 'bg-gray-100 rounded-lg' : ''}`}>
-                    <div className='flex items-center gap-3'>
-                        <i className="ri-instance-line text-teal-500 text-2xl"></i>
-                        <span className='text-base font-medium text-gray-800'>Pix</span>
-                    </div>
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${props.paymentMethod === 'pix' ? 'border-black' : 'border-gray-400'}`}>
-                        {props.paymentMethod === 'pix' && <div className='w-2.5 h-2.5 rounded-full bg-black'></div>}
-                    </div>
-                </div>
-
-                <div 
-                    onClick={() => handleMethodSelect('cash')}
-                    className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${props.paymentMethod === 'cash' ? 'bg-gray-100 rounded-lg' : ''}`}>
-                    <div className='flex items-center gap-3'>
-                        <i className="ri-money-dollar-box-fill text-green-500 text-2xl"></i>
-                        <span className='text-base font-medium text-gray-800'>Dinheiro</span>
-                    </div>
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${props.paymentMethod === 'cash' ? 'border-black' : 'border-gray-400'}`}>
-                        {props.paymentMethod === 'cash' && <div className='w-2.5 h-2.5 rounded-full bg-black'></div>}
-                    </div>
-                </div>
-            </div>
-
-            <div className='border-t border-gray-100 mt-2'>
-                <div className='p-4 text-base font-medium text-gray-800 cursor-pointer'>
-                    Adicionar cartão de crédito
-                </div>
-            </div>
-
-            <h4 className='text-base font-semibold text-gray-700 mt-4 mb-2'>Cupom</h4>
-            <div className='border-t border-gray-100'>
-                <div className='p-4 text-base font-medium text-gray-800 flex justify-between items-center cursor-pointer'>
-                    Adicionar cupom
-                    <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                </div>
-            </div>
-            
+            {/* "Adicionar cartão" e "Cupom" removidos — eram linhas sem nenhum onClick,
+                puramente decorativas (pagamento por cartão está fora do escopo atual —
+                ver decisão C2 da auditoria de integração; cupons ainda não têm fluxo de
+                aplicação real). Mesmo critério já usado pra esconder itens sem backend
+                no menu de conta (Sprint 4 da auditoria de integração). */}
         </div>
     );
 };

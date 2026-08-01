@@ -6,6 +6,8 @@ import { UserDataContext } from '@/contexts/UserContext'
 import { useToast } from '@/contexts/ToastContext'
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { app } from '@/services/firebase';
+import Button from '@/shared/components/ui/Button'
+import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 
 const UserSignup = () => {
   const [ email, setEmail ] = useState('')
@@ -14,6 +16,7 @@ const UserSignup = () => {
   const [ lastName, setLastName ] = useState('')
   const [ cpf, setCpf ] = useState('')
   const [ phone, setPhone ] = useState('')
+  const [ loading, setLoading ] = useState(false)
 
   const navigate = useNavigate()
   const { user, setUser } = useContext(UserDataContext)
@@ -54,6 +57,7 @@ const UserSignup = () => {
 
   const submitHandler = async (e) => {
     e.preventDefault()
+    setLoading(true)
     const newUser = {
       fullname: {
         firstname: firstName,
@@ -79,6 +83,7 @@ const UserSignup = () => {
       addToast(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Falha no cadastro', 'error')
     }
 
+    setLoading(false)
     setEmail('')
     setFirstName('')
     setLastName('')
@@ -88,7 +93,7 @@ const UserSignup = () => {
   }
   return (
     <div>
-      <div className='p-7 h-screen flex flex-col justify-between bg-white'>
+      <div className='p-7 h-screen flex flex-col justify-between bg-surface'>
         <div>
           <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity" />
 
@@ -96,11 +101,11 @@ const UserSignup = () => {
             submitHandler(e)
           }}>
 
-            <h3 className='text-lg w-1/2 font-medium mb-2 text-gray-800'>Qual é o seu nome?</h3>
+            <h3 className='text-lg w-1/2 font-medium mb-2 text-ink-900'>Qual é o seu nome?</h3>
             <div className='flex gap-4 mb-7'>
               <input
                 required
-                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 text-lg placeholder:text-ink-400 outline-none transition-colors'
                 type="text"
                 placeholder='Nome'
                 value={firstName}
@@ -110,7 +115,7 @@ const UserSignup = () => {
               />
               <input
                 required
-                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 text-lg placeholder:text-ink-400 outline-none transition-colors'
                 type="text"
                 placeholder='Sobrenome'
                 value={lastName}
@@ -120,11 +125,11 @@ const UserSignup = () => {
               />
             </div>
 
-            <h3 className='text-lg font-medium mb-2 text-gray-800'>Seus Documentos e Contato</h3>
+            <h3 className='text-lg font-medium mb-2 text-ink-900'>Seus Documentos e Contato</h3>
             <div className='flex gap-4 mb-7'>
               <input
                 required
-                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 text-lg placeholder:text-ink-400 outline-none transition-colors'
                 type="text"
                 placeholder='CPF (apenas números)'
                 value={cpf}
@@ -134,7 +139,7 @@ const UserSignup = () => {
               />
               <input
                 required
-                className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 text-lg placeholder:text-gray-400 outline-none transition-colors'
+                className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 text-lg placeholder:text-ink-400 outline-none transition-colors'
                 type="text"
                 placeholder='Celular (ex: +5511999999999)'
                 value={phone}
@@ -144,22 +149,22 @@ const UserSignup = () => {
               />
             </div>
 
-            <h3 className='text-lg font-medium mb-2 text-gray-800'>Qual é o seu email?</h3>
+            <h3 className='text-lg font-medium mb-2 text-ink-900'>Qual é o seu email?</h3>
             <input
               required
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value)
               }}
-              className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 mb-7 rounded-xl px-4 py-3 w-full text-lg placeholder:text-gray-400 outline-none transition-colors'
+              className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
               type="email"
               placeholder='email@exemplo.com'
             />
 
-            <h3 className='text-lg font-medium mb-2 text-gray-800'>Senha</h3>
+            <h3 className='text-lg font-medium mb-2 text-ink-900'>Senha</h3>
 
             <input
-              className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 mb-7 rounded-xl px-4 py-3 w-full text-lg placeholder:text-gray-400 outline-none transition-colors'
+              className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value)
@@ -168,32 +173,33 @@ const UserSignup = () => {
               placeholder='senha'
             />
 
-            <button
-              className='bg-green-500 hover:bg-green-600 text-white font-bold mb-3 rounded-xl px-4 py-3 w-full text-lg transition-colors shadow-lg shadow-green-500/20'
-            >Criar conta</button>
+            <Button type="submit" loading={loading} className='mb-3'>
+              Criar conta
+            </Button>
 
           </form>
 
           <div className="relative flex items-center justify-center my-6">
-            <hr className="w-full border-gray-200" />
-            <span className="absolute px-3 bg-white text-gray-400 text-sm">ou</span>
+            <hr className="w-full border-line" />
+            <span className="absolute px-3 bg-surface text-ink-400 text-sm">ou</span>
           </div>
 
-          <button
-              type="button"
-              onClick={handleGoogleLogin}
-              className='bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold mb-5 rounded-xl px-4 py-3 w-full text-lg transition-colors flex items-center justify-center gap-3 shadow-sm'
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleGoogleLogin}
+            className='mb-5 flex items-center justify-center gap-3'
           >
-              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className='w-6 h-6' />
-              Entrar com o Google
-          </button>
-          <p className='text-center text-gray-500'>Já tem uma conta? <Link to='/login' className='text-green-600 font-medium'>Faça login aqui</Link></p>
+            <GoogleIcon />
+            Entrar com o Google
+          </Button>
+          <p className='text-center text-ink-400'>Já tem uma conta? <Link to='/login' className='text-brand-700 font-medium'>Faça login aqui</Link></p>
         </div>
         <div>
-          <p className='text-[10px] leading-tight text-gray-400'>Ao criar uma conta, você concorda com os <span className='underline text-green-500'>Termos de Uso</span> e a <span className='underline text-green-500'>Política de Privacidade</span> da MoveCity.</p>
+          <p className='text-[10px] leading-tight text-ink-400'>Ao criar uma conta, você concorda com os <span className='underline text-brand-700'>Termos de Uso</span> e a <span className='underline text-brand-700'>Política de Privacidade</span> da MoveCity.</p>
         </div>
       </div>
-    </div >
+    </div>
   )
 }
 

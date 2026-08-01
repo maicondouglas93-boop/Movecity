@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import axios from 'axios';
@@ -21,6 +21,10 @@ import Header from '@/modules/passenger/components/Header';
 import ScheduleRidePanel from '@/modules/passenger/components/ScheduleRidePanel';
 import { requestFCMToken } from '@/services/fcm';
 import { reverseGeocode } from '@/services/mapsApi';
+import { getFriendlyErrorMessage } from '@/services/errorMessages';
+import { useBackToClose } from '@/shared/hooks/useBackToClose';
+import ConnectionBanner from '@/shared/components/ui/ConnectionBanner';
+import Button from '@/shared/components/ui/Button';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -59,10 +63,28 @@ const Home = () => {
 
     const [ isSelectingOnMap, setIsSelectingOnMap ] = useState(false)
     const [ mapSelectionCoords, setMapSelectionCoords ] = useState(null)
+    // Referência estável — sem isso o LiveTracking (envolvido em React.memo) re-renderiza
+    // de qualquer jeito a cada tecla digitada na busca, porque uma arrow function nova
+    // seria passada como prop a cada render (item 16 da auditoria de UX).
+    const handleMapCenterChange = useCallback((coords) => setMapSelectionCoords(coords), [])
     const [ isSearching, setIsSearching ] = useState(false)
+    const [ fareLoading, setFareLoading ] = useState(false)
+    const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
     const debounceTimer = useRef(null)
     const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
+
+    // Botão/gesto de voltar fecha o painel de busca/veículo/confirmação em vez de sair
+    // do fluxo de corrida inteiro — ver item 8 do relatório de UX (decisão registrada
+    // em docs/plans/2026-08-01-redesign-ux-passageiro.md §19).
+    useBackToClose(
+        panelOpen || vehiclePanel || confirmRidePanel,
+        () => {
+            setPanelOpen(false)
+            setVehiclePanel(false)
+            setConfirmRidePanel(false)
+        }
+    )
 
     useEffect(() => {
         // If coming from Repeat Ride, prefill and find trip
@@ -97,17 +119,35 @@ const Home = () => {
             fetchInitialPickup();
         }
         
-        // Configurar Push Notifications para Passageiro
+        // Push Notifications: se a decisão já foi tomada (concedida ou negada), só
+        // respeita o que já existe. Se nunca foi perguntado, mostra um cartão explicando
+        // o motivo antes do prompt nativo do navegador — pedir sem contexto faz o usuário
+        // negar por reflexo e perder notificação de corrida pra sempre (item 18 da
+        // auditoria de UX; navegadores não deixam perguntar de novo depois de um "Bloquear").
         const setupFCM = async () => {
-            if ('Notification' in window) {
-                const permission = await Notification.requestPermission()
-                if (permission === 'granted') {
-                    await requestFCMToken();
-                }
+            if (!('Notification' in window)) return;
+            if (Notification.permission === 'granted') {
+                await requestFCMToken();
+            } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeen')) {
+                setShowNotificationPrompt(true);
             }
         };
         setupFCM();
     }, []); // Run once on mount
+
+    const handleEnableNotifications = async () => {
+        setShowNotificationPrompt(false)
+        localStorage.setItem('notificationPromptSeen', '1')
+        const permission = await Notification.requestPermission()
+        if (permission === 'granted') {
+            await requestFCMToken();
+        }
+    }
+
+    const handleDismissNotifications = () => {
+        setShowNotificationPrompt(false)
+        localStorage.setItem('notificationPromptSeen', '1')
+    }
 
     const requestLocationPermissions = () => {
         if (locationError) {
@@ -217,7 +257,7 @@ const Home = () => {
         }
 
         const handleRideStarted = (ride) => {
-            addToast('Ride started! Enjoy your trip 🎉', 'ride', 4000, 'Your path is being tracked')
+            addToast('Corrida iniciada! Boa viagem 🎉', 'ride', 4000, 'Seu trajeto está sendo acompanhado')
             setWaitingForDriver(false)
             navigate('/riding', { state: { ride } })
         }
@@ -441,28 +481,35 @@ const Home = () => {
 
 
     async function findTrip() {
-        setVehiclePanel(true)
-        setPanelOpen(false)
-
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
         const destStr = typeof destination === 'object' ? `${destination.address} (${destination.lat}, ${destination.lng})` : destination;
 
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
-            params: { pickup: pickupStr, destination: destStr },
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        })
+        // O painel de busca fica aberto (com o botão "Buscar Corrida" girando) durante
+        // toda a espera — só fecha quando o preço já está pronto para mostrar, ou some
+        // sozinho junto do toast de erro. Antes ele fechava na hora, e o usuário ficava
+        // olhando pra tela inicial sem nenhum indício de que algo estava carregando.
+        setFareLoading(true)
+        try {
+            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
+                params: { pickup: pickupStr, destination: destStr },
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
 
-
-        setFare(response.data)
-
-
+            setFare(response.data)
+            setPanelOpen(false)
+            setVehiclePanel(true)
+        } catch (err) {
+            addToast(getFriendlyErrorMessage(err, 'Não foi possível calcular o preço da corrida. Tente novamente.'), 'error')
+        } finally {
+            setFareLoading(false)
+        }
     }
 
     async function createRide() {
-        addToast('Looking for nearby drivers...', 'info', 5000, 'This may take a moment')
-        
+        addToast('Buscando motoristas próximos...', 'info', 5000, 'Isso pode levar alguns instantes')
+
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
         const destStr = typeof destination === 'object' ? `${destination.address} (${destination.lat}, ${destination.lng})` : destination;
 
@@ -483,13 +530,19 @@ const Home = () => {
                     Authorization: `Bearer ${localStorage.getItem('token')}`
                 }
             });
-            
+
             const TRACE_ID = `Ride:${response.data._id}`;
             console.log(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
-            
+
             setRide(response.data);
         } catch (err) {
             console.error(`[AUDIT] Falha na criação da corrida pelo passageiro:`, err);
+            // Antes disso, uma falha aqui deixava o passageiro preso na tela "Buscando
+            // motorista" pra sempre — nenhuma corrida existia, e o botão de cancelar
+            // não fazia nada (cancelRide não acha corrida nenhuma pra cancelar). Voltar
+            // vehicleFound pra false devolve o usuário à tela inicial, com o erro claro.
+            setVehicleFound(false)
+            addToast(getFriendlyErrorMessage(err, 'Não foi possível solicitar a corrida. Tente novamente.'), 'error')
         }
     }
 
@@ -519,12 +572,13 @@ const Home = () => {
             setPickup('');
             setDestination('');
         } catch (err) {
-            addToast('Erro ao cancelar corrida.', err);
+            addToast(getFriendlyErrorMessage(err, 'Erro ao cancelar corrida.'), 'error');
         }
     }
 
     return (
         <div className='h-[100dvh] relative overflow-hidden'>
+            <ConnectionBanner />
             <div className='h-[100dvh] w-screen'>
                 {/* image for temporary use  */}
                 <LiveTracking 
@@ -533,7 +587,7 @@ const Home = () => {
                     destination={destination} 
                     vehicleType={vehicleType} 
                     isSelectingOnMap={isSelectingOnMap}
-                    onMapCenterChange={(coords) => setMapSelectionCoords(coords)}
+                    onMapCenterChange={handleMapCenterChange}
                 />
             </div>
             
@@ -546,45 +600,87 @@ const Home = () => {
                     
                     {!panelOpen ? (
                         <>
-                            <div className="w-12 h-1.5 bg-green-200 rounded-full mx-auto mb-5"></div>
-                            <h4 className='text-2xl font-bold mb-5 text-gray-800 text-center'>
-                                {`${new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, ${user?.fullname?.firstname || ''}`}
-                            </h4>
-                            <div className="flex items-center gap-3">
-                                <div
-                                    onClick={() => {
-                                        setPanelOpen(true)
-                                        setActiveField('destination')
-                                        requestLocationPermissions()
-                                    }}
-                                    className="flex-1 bg-gray-50 border border-gray-200 px-5 py-4 rounded-full flex items-center gap-3 cursor-pointer shadow-sm active:scale-[0.98] transition-transform"
-                                >
-                                    <i className="ri-search-line text-2xl text-green-500 font-bold"></i>
-                                    <span className="text-gray-500 font-semibold text-lg">Buscar destino</span>
-                                </div>
-                                {/* Botão de agendamento escondido até existir backend real (A8 na
-                                    auditoria) — ScheduleRidePanel continua implementado, só não
-                                    tem mais gatilho aqui. */}
+                            <div className="w-10 h-1 bg-line rounded-full mx-auto mb-4"></div>
+
+                            {/* Saudação e localização atual — texto de contexto, deliberadamente
+                                mais leve que o campo de busca abaixo (que é a ação primária da
+                                tela, não a saudação). Ver §6/item 19 do relatório de UX. */}
+                            <div className="mb-4">
+                                <p className="text-sm font-medium text-ink-600">
+                                    {new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, {user?.fullname?.firstname || ''}
+                                </p>
+                                <p className="text-xs text-ink-400 truncate flex items-center gap-1 mt-0.5">
+                                    <i className="ri-map-pin-2-fill text-brand-500" aria-hidden="true"></i>
+                                    {typeof pickup === 'object' && pickup?.address ? pickup.address : 'Obtendo sua localização...'}
+                                </p>
                             </div>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setPanelOpen(true)
+                                    setActiveField('destination')
+                                    requestLocationPermissions()
+                                }}
+                                className="w-full bg-surface border border-line px-5 py-4 rounded-panel shadow-raised flex items-center gap-3 active:scale-[0.98] transition-transform"
+                            >
+                                <i className="ri-search-line text-xl text-brand-500" aria-hidden="true"></i>
+                                <span className="text-ink-900 font-semibold text-base">Para onde vamos?</span>
+                            </button>
+                            {/* Botão de agendamento escondido até existir backend real (A8 na
+                                auditoria) — ScheduleRidePanel continua implementado, só não
+                                tem mais gatilho aqui. */}
+
+                            {showNotificationPrompt && (
+                                <div className="mt-4 bg-surface-alt border border-line rounded-panel p-4 flex gap-3">
+                                    <i className="ri-notification-3-fill text-brand-500 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-ink-900">Ativar notificações?</p>
+                                        <p className="text-xs text-ink-400 mt-0.5">Avisamos quando seu motorista aceitar, chegar e iniciar a corrida.</p>
+                                        <div className="flex gap-2 mt-3">
+                                            <button
+                                                type="button"
+                                                onClick={handleEnableNotifications}
+                                                className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold"
+                                            >
+                                                Ativar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleDismissNotifications}
+                                                className="min-h-[36px] px-4 rounded-full text-ink-600 text-sm font-medium"
+                                            >
+                                                Agora não
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </>
                     ) : (
                         <>
-                            <h5 ref={panelCloseRef} onClick={() => setPanelOpen(false)} className='absolute right-6 top-6 text-2xl cursor-pointer text-gray-400 hover:text-green-500'>
-                                <i className="ri-arrow-down-wide-line"></i>
-                            </h5>
-                            <h4 className='text-2xl font-semibold text-gray-800'>Escolha um destino</h4>
+                            <button
+                                type="button"
+                                ref={panelCloseRef}
+                                onClick={() => setPanelOpen(false)}
+                                aria-label="Fechar busca"
+                                className='absolute right-4 top-4 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400 active:scale-95 transition-transform'
+                            >
+                                <i className="ri-arrow-down-wide-line text-2xl" aria-hidden="true"></i>
+                            </button>
+                            <h4 className='text-xl font-semibold text-ink-900'>Escolha um destino</h4>
                             <form className='relative mt-4' onSubmit={submitHandler}>
                                 {/* Timeline / Dots */}
                                 <div className="absolute left-2 top-[22px] bottom-[26px] flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full border-2 border-green-500 bg-white z-10"></div>
-                                    <div className="w-0.5 bg-green-200 flex-1 my-1"></div>
-                                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 z-10"></div>
+                                    <div className="w-2.5 h-2.5 rounded-full border-2 border-brand-500 bg-white z-10"></div>
+                                    <div className="w-0.5 bg-line flex-1 my-1"></div>
+                                    <div className="w-2.5 h-2.5 rounded-full bg-brand-500 z-10"></div>
                                 </div>
 
                                 <div className="pl-8">
                                     {/* Pickup Field */}
-                                    <div className="border-b border-gray-200 pb-2 mb-2 relative">
-                                        <label className="text-xs text-green-600 font-medium ml-1">Partida</label>
+                                    <div className="border-b border-line pb-2 mb-2 relative">
+                                        <label className="text-xs text-brand-700 font-medium ml-1">Partida</label>
                                         <input
                                             onClick={() => {
                                                 setActiveField('pickup')
@@ -592,7 +688,7 @@ const Home = () => {
                                             }}
                                             value={typeof pickup === 'object' ? pickup.address : pickup}
                                             onChange={handlePickupChange}
-                                            className='w-full px-1 py-1 text-[16px] text-gray-800 font-medium outline-none bg-transparent placeholder-gray-400'
+                                            className='w-full pl-1 pr-11 py-1 text-[16px] text-ink-900 font-medium outline-none bg-transparent placeholder-ink-400'
                                             type="text"
                                             placeholder='Local de partida'
                                         />
@@ -603,16 +699,16 @@ const Home = () => {
                                                 e.stopPropagation();
                                                 handleCurrentLocation();
                                             }}
-                                            className='absolute right-0 top-1/2 translate-y-[-20%] text-gray-400 hover:text-green-500 flex items-center justify-center p-2 z-20'
-                                            title="Usar minha localização atual"
+                                            aria-label="Usar minha localização atual"
+                                            className='absolute right-0 top-1/2 translate-y-[-20%] p-3 -m-1 text-ink-400 active:text-brand-500 flex items-center justify-center z-20'
                                         >
-                                            <i className="ri-gps-line text-xl"></i>
+                                            <i className="ri-gps-line text-xl" aria-hidden="true"></i>
                                         </button>
                                     </div>
 
                                     {/* Destination Field */}
                                     <div className="relative pt-1">
-                                        <label className="text-xs text-green-600 font-medium ml-1">Destino</label>
+                                        <label className="text-xs text-brand-700 font-medium ml-1">Destino</label>
                                         <input
                                             onClick={() => {
                                                 setActiveField('destination')
@@ -628,11 +724,9 @@ const Home = () => {
                                     </div>
                                 </div>
                             </form>
-                            <button
-                                onClick={findTrip}
-                                className='bg-green-500 hover:bg-green-600 text-white font-bold px-4 py-3 rounded-xl mt-3 w-full transition-colors shadow-lg shadow-green-500/20'>
+                            <Button onClick={findTrip} loading={fareLoading} className='mt-3'>
                                 Buscar Corrida
-                            </button>
+                            </Button>
                         </>
                     )}
                 </div>

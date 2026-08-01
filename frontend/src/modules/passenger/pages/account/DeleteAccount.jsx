@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useToast } from '@/contexts/ToastContext';
+import Button from '@/shared/components/ui/Button';
 
 const DeleteAccount = () => {
     const navigate = useNavigate();
@@ -32,68 +33,76 @@ const DeleteAccount = () => {
     };
 
     return (
-        <div className="h-screen bg-gray-50 flex flex-col font-sans">
-            <div className="flex items-center gap-4 p-5 bg-white border-b border-gray-100 sticky top-0 z-10">
-                <i onClick={() => navigate('/profile')} className="ri-arrow-left-line text-2xl cursor-pointer active:scale-95 transition-transform"></i>
-                <h2 className="text-xl font-semibold flex-1 text-red-600">Excluir Conta</h2>
+        <div className="h-screen bg-surface-alt flex flex-col font-sans">
+            <div className="flex items-center gap-4 p-5 bg-surface border-b border-line sticky top-0 z-panel">
+                <button
+                    type="button"
+                    onClick={() => navigate('/profile')}
+                    aria-label="Voltar"
+                    className="min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center active:scale-95 transition-transform"
+                >
+                    <i className="ri-arrow-left-line text-2xl text-ink-900" aria-hidden="true"></i>
+                </button>
+                <h2 className="text-xl font-semibold flex-1 text-danger-600">Excluir Conta</h2>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5">
-                <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex gap-3 mb-6">
-                    <i className="ri-error-warning-fill text-2xl text-red-500 mt-0.5"></i>
+                <div className="bg-danger-50 border border-danger-500/20 rounded-panel p-4 flex gap-3 mb-6">
+                    <i className="ri-error-warning-fill text-2xl text-danger-500 mt-0.5" aria-hidden="true"></i>
                     <div>
-                        <h3 className="font-bold text-red-700 mb-1">Ação irreversível</h3>
-                        <p className="text-sm text-red-600">Ao deletar sua conta, todo o seu histórico de viagens, cupons, saldo na carteira e cartões salvos serão perdidos permanentemente.</p>
+                        <h3 className="font-bold text-danger-700 mb-1">Ação irreversível</h3>
+                        <p className="text-sm text-danger-600">Ao deletar sua conta, todo o seu histórico de viagens, cupons, saldo na carteira e cartões salvos serão perdidos permanentemente.</p>
                     </div>
                 </div>
 
                 <div className="mb-6">
-                    <label className="font-semibold text-gray-800 mb-2 block">
-                        Para confirmar, digite <span className="font-bold text-red-500 uppercase tracking-widest bg-red-50 px-2 py-0.5 rounded">EXCLUIR</span> abaixo:
+                    <label className="font-semibold text-ink-900 mb-2 block">
+                        Para confirmar, digite <span className="font-bold text-danger-500 uppercase tracking-widest bg-danger-50 px-2 py-0.5 rounded">EXCLUIR</span> abaixo:
                     </label>
-                    <input 
-                        type="text" 
+                    <input
+                        type="text"
                         placeholder="EXCLUIR"
                         value={confirmText}
                         onChange={(e) => setConfirmText(e.target.value)}
-                        className="w-full bg-white border border-gray-200 px-4 py-3 rounded-xl outline-none focus:border-red-400 font-bold uppercase tracking-widest text-red-600 placeholder-gray-300 text-center"
+                        className="w-full bg-surface border border-line px-4 py-3 rounded-panel outline-none focus:border-danger-500 font-bold uppercase tracking-widest text-danger-600 placeholder-ink-400/50 text-center"
                     />
                 </div>
 
                 {confirmText === 'EXCLUIR' && (
                     <div className="animate-fade-in">
-                        <label className="font-semibold text-gray-800 mb-2 block">
+                        <label className="font-semibold text-ink-900 mb-2 block">
                             Digite sua senha para finalizar:
                         </label>
                         <div className="relative">
-                            <input 
-                                type={showPassword ? "text" : "password"} 
+                            <input
+                                type={showPassword ? "text" : "password"}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="Sua senha atual"
-                                className="w-full bg-white border border-gray-200 pl-4 pr-12 py-3 rounded-xl outline-none focus:border-red-400 font-medium"
+                                className="w-full bg-surface border border-line pl-4 pr-12 py-3 rounded-panel outline-none focus:border-danger-500 font-medium text-ink-900"
                             />
-                            <i 
+                            <button
+                                type="button"
                                 onClick={() => setShowPassword(!showPassword)}
-                                className={`ri-eye-${showPassword ? 'off-' : ''}line absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg cursor-pointer`}
-                            ></i>
+                                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400"
+                            >
+                                <i className={`ri-eye-${showPassword ? 'off-' : ''}line text-lg`} aria-hidden="true"></i>
+                            </button>
                         </div>
                     </div>
                 )}
             </div>
 
-            <div className="p-5 bg-white border-t border-gray-100 pb-10">
-                <button 
+            <div className="p-5 bg-surface border-t border-line pb-10">
+                <Button
+                    variant="dangerSolid"
                     onClick={handleDelete}
-                    disabled={!isButtonEnabled || loading}
-                    className={`w-full py-4 rounded-xl font-semibold text-lg flex justify-center items-center gap-2 shadow-sm transition-all ${
-                        isButtonEnabled 
-                        ? 'bg-red-600 text-white active:scale-[0.98]' 
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
+                    disabled={!isButtonEnabled}
+                    loading={loading}
                 >
-                    {loading ? <i className="ri-loader-4-line animate-spin text-xl"></i> : 'Sim, excluir minha conta'}
-                </button>
+                    Sim, excluir minha conta
+                </Button>
             </div>
         </div>
     );

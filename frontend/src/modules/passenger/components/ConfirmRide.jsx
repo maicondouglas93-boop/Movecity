@@ -1,5 +1,8 @@
 import React from 'react'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
+import Card from '@/shared/components/ui/Card'
+import DetailRow from '@/shared/components/ui/DetailRow'
+import Button from '@/shared/components/ui/Button'
 
 const ConfirmRide = (props) => {
     const extractTitle = (addressStr) => {
@@ -13,77 +16,86 @@ const ConfirmRide = (props) => {
         if (typeof addressStr === 'object') return addressStr.address;
         return addressStr.replace(/\s*\(-?\d+\.\d+,\s*-?\d+\.\d+\)$/, '');
     };
+
+    const paymentLabel = props.paymentMethod === 'pix' ? 'Pix' : props.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro';
+    const paymentIconClass = props.paymentMethod === 'pix' ? 'ri-instance-line' : props.paymentMethod === 'card' ? 'ri-bank-card-fill' : 'ri-money-dollar-box-fill';
+    const paymentIconColor = props.paymentMethod === 'pix' ? 'text-teal-500' : props.paymentMethod === 'card' ? 'text-blue-500' : 'text-brand-500';
+
     return (
         <div className='pb-6'>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setConfirmRidePanel(false)
-            }}><i className="text-3xl text-gray-300 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Confirme sua Corrida</h3>
+            <button
+                type="button"
+                onClick={() => props.setConfirmRidePanel(false)}
+                aria-label="Fechar"
+                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
+            >
+                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
+            </button>
+            <h3 className='text-xl font-semibold mb-4 text-ink-900'>Confirme sua corrida</h3>
 
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full flex items-center justify-between'>
-                    <div className='flex flex-col items-center'>
-                        <img className='h-20 object-contain' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" />
-                        <p className='text-sm font-medium text-gray-500 mb-1'>{vehicleLabels[props.vehicleType]}</p>
+            <div className='flex flex-col gap-3'>
+                {/* Veículo + opcionais */}
+                <div className='flex items-center justify-between'>
+                    <div className='flex items-center gap-3'>
+                        <img className='h-12 object-contain' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" />
+                        <p className='text-sm font-medium text-ink-600'>{vehicleLabels[props.vehicleType]}</p>
                     </div>
-                    <button 
+                    <button
+                        type="button"
                         onClick={() => props.setOptionalsPanel(true)}
-                        className='px-4 py-2 border border-gray-300 rounded-full text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2'>
-                        <i className="ri-box-3-fill text-green-500"></i> Opcionais
+                        className='min-h-[44px] px-4 rounded-full border border-line text-sm font-medium text-ink-600 active:bg-surface-alt flex items-center gap-2'
+                    >
+                        <i className="ri-box-3-fill text-brand-500" aria-hidden="true"></i> Opcionais
                     </button>
                 </div>
-                <div className='w-full mt-2'>
-                    <div className='flex items-center gap-5 p-3 border-b border-gray-100'>
-                        <i className="ri-map-pin-user-fill text-green-500 flex-shrink-0"></i>
-                        <div className='min-w-0'>
-                            <h3 className='text-base font-medium text-gray-800 truncate'>{extractTitle(props.pickup)}</h3>
-                            <p className='text-sm -mt-1 text-gray-500 truncate'>{extractAddress(props.pickup)}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b border-gray-100'>
-                        <i className="text-lg ri-map-pin-2-fill text-red-500 flex-shrink-0"></i>
-                        <div className='min-w-0'>
-                            <h3 className='text-base font-medium text-gray-800 truncate'>{extractTitle(props.destination)}</h3>
-                            <p className='text-sm -mt-1 text-gray-500 truncate'>{extractAddress(props.destination)}</p>
-                        </div>
-                    </div>
-                    <div 
-                        onClick={() => props.setPaymentPanel(true)}
-                        className='flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 rounded-xl transition-colors'>
-                        <div className='flex items-center gap-5'>
-                            {props.paymentMethod === 'pix' ? (
-                                <i className="ri-instance-line text-teal-500 text-xl flex-shrink-0"></i>
-                            ) : props.paymentMethod === 'card' ? (
-                                <i className="ri-bank-card-fill text-blue-500 text-xl flex-shrink-0"></i>
-                            ) : (
-                                <i className="ri-money-dollar-box-fill text-green-500 text-xl flex-shrink-0"></i>
-                            )}
-                            <div>
-                                <h3 className='text-base font-medium text-gray-800'>
-                                    {props.paymentMethod === 'pix' ? 'Pix' : props.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
-                                </h3>
-                                <p className='text-sm -mt-1 text-gray-500'>Forma de pagamento</p>
-                            </div>
-                        </div>
-                        <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                    </div>
 
-                    <div className='flex items-center gap-5 p-3 border-t border-gray-100 mt-2'>
-                        <i className="ri-currency-line text-green-500 flex-shrink-0"></i>
-                        <div>
-                            <h3 className='text-base font-medium text-gray-800'>
-                                {props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]} - ${props.fare.fareMax?.[props.vehicleType]}` : ''}
-                            </h3>
-                            <p className='text-sm -mt-1 text-gray-500'>Valor estimado</p>
-                        </div>
-                    </div>
-                </div>
-                <button onClick={() => {
+                {/* Trajeto */}
+                <Card padding='p-1' className='divide-y divide-line'>
+                    <DetailRow
+                        icon="ri-map-pin-user-fill"
+                        title={extractTitle(props.pickup)}
+                        subtitle={extractAddress(props.pickup)}
+                        className='px-3'
+                    />
+                    <DetailRow
+                        icon="ri-map-pin-2-fill"
+                        iconColor="text-danger-500"
+                        title={extractTitle(props.destination)}
+                        subtitle={extractAddress(props.destination)}
+                        className='px-3'
+                    />
+                </Card>
+
+                {/* Pagamento + preço */}
+                <Card padding='p-1' className='divide-y divide-line'>
+                    <DetailRow
+                        icon={paymentIconClass}
+                        iconColor={paymentIconColor}
+                        title={paymentLabel}
+                        subtitle="Forma de pagamento"
+                        onClick={() => props.setPaymentPanel(true)}
+                        trailing={<i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>}
+                        className='px-3'
+                    />
+                    <DetailRow
+                        icon="ri-currency-line"
+                        title={props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]}` : ''}
+                        subtitle="Valor estimado"
+                        className='px-3'
+                    />
+                </Card>
+            </div>
+
+            <Button
+                onClick={() => {
                     props.setVehicleFound(true)
                     props.setConfirmRidePanel(false)
                     props.createRide()
-                }} className='w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'>Confirmar Corrida</button>
-            </div>
+                }}
+                className='mt-4'
+            >
+                Confirmar Corrida
+            </Button>
         </div>
     )
 }

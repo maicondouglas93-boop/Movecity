@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import PageHeader from '@/shared/components/ui/PageHeader';
+import EmptyState from '@/shared/components/ui/EmptyState';
+import Button from '@/shared/components/ui/Button';
 
 const Coupons = () => {
     const navigate = useNavigate();
@@ -36,67 +39,63 @@ const Coupons = () => {
     };
 
     return (
-        <div className="h-screen bg-gray-50 flex flex-col font-sans">
-            <div className="flex items-center gap-4 p-5 bg-white border-b border-gray-100 sticky top-0 z-10">
-                <i onClick={() => navigate('/account')} className="ri-arrow-left-line text-2xl cursor-pointer active:scale-95 transition-transform"></i>
-                <h2 className="text-xl font-semibold">Meus Cupons</h2>
-            </div>
+        <div className="h-screen bg-surface-alt flex flex-col font-sans">
+            <PageHeader title="Meus Cupons" onBack={() => navigate('/account')} />
 
-            <div className="p-5 bg-white shadow-sm mb-2">
+            <div className="p-5 bg-surface shadow-raised mb-2">
                 <form onSubmit={handleAddCoupon} className="flex gap-2">
                     <div className="relative flex-1">
-                        <i className="ri-ticket-2-line absolute left-3 top-3 text-gray-400"></i>
-                        <input 
-                            type="text" 
+                        <i className="ri-ticket-2-line absolute left-3 top-3 text-ink-400" aria-hidden="true"></i>
+                        <input
+                            type="text"
                             placeholder="Digite o código do cupom"
                             value={couponCode}
                             onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                            className="w-full bg-gray-100 pl-10 pr-4 py-3 rounded-xl outline-none font-medium placeholder-gray-400 focus:ring-2 focus:ring-black uppercase"
+                            className="w-full bg-surface-alt pl-10 pr-4 py-3 rounded-panel outline-none font-medium placeholder-ink-400 focus:ring-2 focus:ring-brand-500 uppercase text-ink-900"
                         />
                     </div>
-                    <button type="submit" className="bg-black text-white px-5 rounded-xl font-semibold active:bg-gray-800 transition-colors">
+                    <Button type="submit" fullWidth={false} className="px-5">
                         Aplicar
-                    </button>
+                    </Button>
                 </form>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5">
-                <h3 className="font-semibold text-gray-700 mb-4">Cupons ativos</h3>
-                
+                <h3 className="font-semibold text-ink-600 mb-4">Cupons ativos</h3>
+
                 {loading ? (
                     <div className="flex justify-center my-8">
-                        <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                        <i className="ri-loader-4-line text-2xl animate-spin text-ink-400" aria-hidden="true"></i>
                     </div>
                 ) : loadError ? (
-                    <div className="text-center py-16 flex flex-col items-center">
-                        <i className="ri-error-warning-line text-4xl text-red-300 mb-3"></i>
-                        <h4 className="text-gray-800 font-semibold text-lg mb-1">Não foi possível carregar seus cupons</h4>
-                        <p className="text-sm text-gray-500 max-w-[250px]">Tente novamente mais tarde.</p>
-                    </div>
+                    <EmptyState
+                        variant="error"
+                        icon="ri-error-warning-line"
+                        title="Não foi possível carregar seus cupons"
+                        description="Tente novamente mais tarde."
+                    />
                 ) : coupons.length > 0 ? (
                     <div className="flex flex-col gap-3">
                         {coupons.map((coupon, idx) => (
-                            <div key={idx} className="bg-white border border-gray-200 rounded-xl p-4 flex gap-4 items-center shadow-sm relative overflow-hidden">
-                                <div className="absolute left-0 top-0 bottom-0 w-2 bg-green-500"></div>
-                                <div className="h-12 w-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center flex-shrink-0">
-                                    <i className="ri-percent-line text-xl font-bold"></i>
+                            <div key={idx} className="bg-surface border border-line rounded-panel p-4 flex gap-4 items-center shadow-raised relative overflow-hidden">
+                                <div className="absolute left-0 top-0 bottom-0 w-2 bg-brand-500"></div>
+                                <div className="h-12 w-12 bg-brand-50 text-brand-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i className="ri-percent-line text-xl font-bold" aria-hidden="true"></i>
                                 </div>
                                 <div className="flex-1">
-                                    <h4 className="font-bold text-gray-800">{coupon.title}</h4>
-                                    <p className="text-xs text-gray-500 mt-1">{coupon.description}</p>
-                                    <p className="text-[10px] text-gray-400 mt-2 font-medium">Válido até {coupon.expiresAt}</p>
+                                    <h4 className="font-bold text-ink-900">{coupon.title}</h4>
+                                    <p className="text-xs text-ink-400 mt-1">{coupon.description}</p>
+                                    <p className="text-[10px] text-ink-400 mt-2 font-medium">Válido até {coupon.expiresAt}</p>
                                 </div>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <div className="text-center py-16 flex flex-col items-center">
-                        <div className="h-20 w-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                            <i className="ri-coupon-3-line text-4xl text-gray-300"></i>
-                        </div>
-                        <h4 className="text-gray-800 font-semibold text-lg mb-1">Nenhum cupom disponível</h4>
-                        <p className="text-sm text-gray-500 max-w-[250px]">Você não tem nenhum cupom de desconto ativo no momento.</p>
-                    </div>
+                    <EmptyState
+                        icon="ri-coupon-3-line"
+                        title="Nenhum cupom disponível"
+                        description="Você não tem nenhum cupom de desconto ativo no momento."
+                    />
                 )}
             </div>
         </div>

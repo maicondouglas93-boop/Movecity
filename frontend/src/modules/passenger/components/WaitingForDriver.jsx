@@ -1,5 +1,9 @@
 import React from 'react'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
+import Card from '@/shared/components/ui/Card'
+import DetailRow from '@/shared/components/ui/DetailRow'
+
+const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira' ? 'Carteira' : method === 'card' ? 'Cartão' : 'Dinheiro'
 
 const WaitingForDriver = (props) => {
     const extractTitle = (addressStr) => {
@@ -21,55 +25,56 @@ const WaitingForDriver = (props) => {
 
     return (
         <div className='pb-6'>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setWaitingForDriver(false)
-            }}><i className="text-3xl text-gray-300 ri-arrow-down-wide-line"></i></h5>
+            <button
+                type="button"
+                onClick={() => props.setWaitingForDriver(false)}
+                aria-label="Fechar"
+                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
+            >
+                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
+            </button>
 
             <div className='flex items-center justify-between mb-4'>
                 <div>
                     <img className='h-14 object-contain' src={vehicleImg} alt={captainVehicleType} />
-                    <p className='text-xs text-center text-gray-500 mt-1 font-medium'>{vehicleLabel}</p>
+                    <p className='text-xs text-center text-ink-400 mt-1 font-medium'>{vehicleLabel}</p>
                 </div>
                 <div className='text-right'>
-                    <h2 className='text-base font-medium capitalize text-gray-800'>{props.ride?.captain?.fullname?.firstname} {props.ride?.captain?.fullname?.lastname}</h2>
-                    <h4 className='text-lg font-semibold -mt-1 -mb-1 text-green-600'>{props.ride?.captain?.vehicle?.plate}</h4>
-                    <p className='text-sm text-gray-500 capitalize'>{props.ride?.captain?.vehicle?.color} {captainVehicleType}</p>
+                    <h2 className='text-base font-medium capitalize text-ink-900'>{props.ride?.captain?.fullname?.firstname} {props.ride?.captain?.fullname?.lastname}</h2>
+                    <h4 className='text-lg font-semibold -mt-1 -mb-1 text-brand-700'>{props.ride?.captain?.vehicle?.plate}</h4>
+                    <p className='text-sm text-ink-400 capitalize'>{props.ride?.captain?.vehicle?.color} {captainVehicleType}</p>
                 </div>
             </div>
 
-            <div className='flex justify-between items-center p-3 bg-green-50 border-2 border-green-200 rounded-xl'>
+            <div className='flex justify-between items-center p-3 bg-brand-50 border-2 border-brand-200 rounded-panel'>
                 <div>
-                    <p className='text-sm text-gray-500 mb-1'>Compartilhe o PIN com o motorista</p>
-                    <h1 className='text-3xl font-bold tracking-widest text-green-600'>{props.ride?.otp}</h1>
+                    <p className='text-sm text-ink-400 mb-1'>Compartilhe o PIN com o motorista</p>
+                    <h1 className='text-3xl font-bold tracking-widest text-brand-600'>{props.ride?.otp}</h1>
                 </div>
-                <i className="ri-lock-2-line text-3xl text-green-500"></i>
+                <i className="ri-lock-2-line text-3xl text-brand-500" aria-hidden="true"></i>
             </div>
 
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full mt-4'>
-                    <div className='flex items-center gap-5 p-3 border-b border-gray-100'>
-                        <i className="ri-map-pin-user-fill text-green-500 flex-shrink-0"></i>
-                        <div className='min-w-0'>
-                            <h3 className='text-base font-medium text-gray-800 truncate'>{extractTitle(props.ride?.pickup)}</h3>
-                            <p className='text-sm -mt-1 text-gray-500 truncate'>{extractAddress(props.ride?.pickup)}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b border-gray-100'>
-                        <i className="text-lg ri-map-pin-2-fill text-red-500 flex-shrink-0"></i>
-                        <div className='min-w-0'>
-                            <h3 className='text-base font-medium text-gray-800 truncate'>{extractTitle(props.ride?.destination)}</h3>
-                            <p className='text-sm -mt-1 text-gray-500 truncate'>{extractAddress(props.ride?.destination)}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line text-green-500 flex-shrink-0"></i>
-                        <div>
-                            <h3 className='text-base font-medium text-gray-800'>{props.ride?.fare ? `R$${props.ride.fare}` : ''}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <Card padding='p-1' className='divide-y divide-line mt-4'>
+                <DetailRow
+                    icon="ri-map-pin-user-fill"
+                    title={extractTitle(props.ride?.pickup)}
+                    subtitle={extractAddress(props.ride?.pickup)}
+                    className='px-3'
+                />
+                <DetailRow
+                    icon="ri-map-pin-2-fill"
+                    iconColor="text-danger-500"
+                    title={extractTitle(props.ride?.destination)}
+                    subtitle={extractAddress(props.ride?.destination)}
+                    className='px-3'
+                />
+                <DetailRow
+                    icon="ri-currency-line"
+                    title={props.ride?.fare ? `R$${props.ride.fare}` : ''}
+                    subtitle={paymentLabel(props.ride?.paymentMethod)}
+                    className='px-3'
+                />
+            </Card>
         </div>
     )
 }

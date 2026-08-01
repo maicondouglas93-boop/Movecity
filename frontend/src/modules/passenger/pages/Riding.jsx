@@ -8,6 +8,10 @@ import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 import { useToast } from '@/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { submitReview } from '@/services/reviewApi'
+import { getFriendlyErrorMessage } from '@/services/errorMessages'
+import Card from '@/shared/components/ui/Card'
+import DetailRow from '@/shared/components/ui/DetailRow'
+import Button from '@/shared/components/ui/Button'
 
 const Riding = () => {
     const location = useLocation()
@@ -64,12 +68,12 @@ const Riding = () => {
             }
             setShowPayModal(true)
         }
-        
+
         const handleReceiveMessage = (msg) => {
             if (!isChatOpen) {
                 setUnreadCount(prev => prev + 1);
                 addToast('Nova mensagem do motorista', 'info');
-                
+
                 // Play notification sound
                 try {
                     const audio = new Audio('/sounds/new-ride.wav');
@@ -77,21 +81,21 @@ const Riding = () => {
                 } catch (e) {}
             }
         }
-        
+
         socket.on('ride-ended', handleRideEnded)
         socket.on('receive-message', handleReceiveMessage)
-        
+
         return () => {
             socket.off('ride-ended', handleRideEnded)
             socket.off('receive-message', handleReceiveMessage)
         }
     }, [socket, ride, isChatOpen, addToast])
-    
+
     // Reset unread count when chat opens
     useEffect(() => {
         if (isChatOpen) setUnreadCount(0);
     }, [isChatOpen])
-    
+
     // Fetch initial unread count
     useEffect(() => {
         const fetchUnread = async () => {
@@ -121,7 +125,7 @@ const Riding = () => {
             })
             setModalStep('rating')
         } catch (err) {
-            setError(err.response?.data?.message || 'Não foi possível confirmar. Tente novamente.')
+            setError(getFriendlyErrorMessage(err, 'Não foi possível confirmar. Tente novamente.'))
         } finally {
             setLoading(false)
         }
@@ -135,7 +139,7 @@ const Riding = () => {
             await submitReview({ rideId: ride._id, rating: ratingValue, comment: ratingComment })
         } catch (err) {
             // Não bloqueia o fim do fluxo por causa da avaliação — só avisa.
-            addToast(err.response?.data?.message || 'Não foi possível enviar a avaliação.', 'error')
+            addToast(getFriendlyErrorMessage(err, 'Não foi possível enviar a avaliação.'), 'error')
         } finally {
             setSubmittingReview(false)
             setModalStep('done')
@@ -144,17 +148,23 @@ const Riding = () => {
 
     return (
         <div className='h-screen relative'>
-            <div className='fixed right-2 top-2 z-10 flex flex-col gap-2'>
-                <Link to='/home' className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow'>
-                    <i className="text-lg font-medium ri-home-5-line"></i>
-                </Link>
-                <button 
-                    onClick={() => setIsChatOpen(true)}
-                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow relative'
+            <div className='fixed right-3 top-3 z-10 flex flex-col gap-2'>
+                <Link
+                    to='/home'
+                    aria-label="Voltar para o início"
+                    className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised text-ink-900'
                 >
-                    <i className="text-lg font-medium ri-chat-3-line"></i>
+                    <i className="text-lg ri-home-5-line" aria-hidden="true"></i>
+                </Link>
+                <button
+                    type="button"
+                    onClick={() => setIsChatOpen(true)}
+                    aria-label="Abrir chat com o motorista"
+                    className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative text-ink-900'
+                >
+                    <i className="text-lg ri-chat-3-line" aria-hidden="true"></i>
                     {unreadCount > 0 && (
-                        <span className='absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold'>
+                        <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold'>
                             {unreadCount > 9 ? '9+' : unreadCount}
                         </span>
                     )}
@@ -169,109 +179,98 @@ const Riding = () => {
                 <div className='flex items-center justify-between'>
                     <div>
                         <img className='h-14 object-contain' src={vehicleImages[ride?.captain?.vehicle?.vehicleType] || vehicleImages.car} alt={ride?.captain?.vehicle?.vehicleType} />
-                        <p className='text-xs text-center text-gray-500 mt-0.5 font-medium'>{vehicleLabels[ride?.captain?.vehicle?.vehicleType] || 'MoveGo'}</p>
+                        <p className='text-xs text-center text-ink-400 mt-0.5 font-medium'>{vehicleLabels[ride?.captain?.vehicle?.vehicleType] || 'MoveGo'}</p>
                     </div>
                     <div className='text-right'>
-                        <h2 className='text-lg font-medium capitalize'>{ride?.captain?.fullname?.firstname}</h2>
-                        <h4 className='text-xl font-semibold -mt-1 -mb-1'>{ride?.captain?.vehicle?.plate}</h4>
-                        <p className='text-sm text-gray-600 capitalize'>{ride?.captain?.vehicle?.color} {ride?.captain?.vehicle?.vehicleType}</p>
+                        <h2 className='text-lg font-medium capitalize text-ink-900'>{ride?.captain?.fullname?.firstname}</h2>
+                        <h4 className='text-xl font-semibold -mt-1 -mb-1 text-ink-900'>{ride?.captain?.vehicle?.plate}</h4>
+                        <p className='text-sm text-ink-400 capitalize'>{ride?.captain?.vehicle?.color} {ride?.captain?.vehicle?.vehicleType}</p>
                     </div>
                 </div>
 
-                <div className='flex gap-2 justify-between flex-col items-center'>
-                    <div className='w-full mt-5'>
-                        <div className='flex items-center gap-5 p-3 border-b-2'>
-                            <i className="text-lg ri-map-pin-2-fill"></i>
-                            <div>
-                                <h3 className='text-lg font-medium'>{ride?.destination?.split(',')[0]}</h3>
-                                <p className='text-sm -mt-1 text-gray-600'>{ride?.destination}</p>
-                            </div>
-                        </div>
-                        <div className='flex items-center gap-5 p-3'>
-                            <i className="ri-currency-line"></i>
-                            <div>
-                                <h3 className='text-lg font-medium'>R${ride?.fare}</h3>
-                                <p className='text-sm -mt-1 text-gray-600'>Valor Total</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <Card padding='p-1' className='divide-y divide-line mt-5'>
+                    <DetailRow
+                        icon="ri-map-pin-2-fill"
+                        iconColor="text-danger-500"
+                        title={ride?.destination?.split(',')[0]}
+                        subtitle={ride?.destination}
+                        className='px-3'
+                    />
+                    <DetailRow
+                        icon="ri-currency-line"
+                        title={`R$${ride?.fare}`}
+                        subtitle="Valor Total"
+                        className='px-3'
+                    />
+                </Card>
 
                 {ride?.paymentMethod === 'carteira' ? (
                     <div className='flex flex-col gap-2 mt-4'>
-                        <div className='w-full bg-green-50 border border-green-200 text-green-700 font-semibold p-3 rounded-xl text-center flex items-center justify-center gap-2'>
-                            <i className="ri-checkbox-circle-fill"></i> Já pago pela carteira
+                        <div className='w-full bg-brand-50 border border-brand-200 text-brand-700 font-semibold p-3 rounded-panel text-center flex items-center justify-center gap-2'>
+                            <i className="ri-checkbox-circle-fill" aria-hidden="true"></i> Já pago pela carteira
                         </div>
-                        <button
+                        <Button
+                            variant='secondary'
                             onClick={() => { setModalStep('rating'); setShowPayModal(true) }}
-                            className='w-full bg-white border-2 border-green-500 text-green-600 font-semibold p-3 rounded-xl transition-colors hover:bg-green-50'
-                        >Avaliar Motorista</button>
+                        >
+                            Avaliar Motorista
+                        </Button>
                     </div>
                 ) : (
-                    <button
+                    <Button
                         onClick={() => { setModalStep('payment'); setShowPayModal(true) }}
-                        className='w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
-                    >Acertar Pagamento</button>
+                        className='mt-4'
+                    >
+                        Acertar Pagamento
+                    </Button>
                 )}
             </div>
 
-            {/* ── Modal pós-corrida: 'payment' -> 'rating' -> 'done' ── */}
+            {/* ── Modal pós-corrida: 'payment' -> 'rating' -> 'done' ──
+                Fechamento unificado com o resto do app: alça no topo, não mais o ícone
+                de X que só esse modal usava (item 13 da auditoria de UX). */}
             {showPayModal && (
                 <div className='fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm'>
-                    <div className='w-full max-w-md bg-white rounded-t-3xl px-6 py-8 shadow-2xl animate-slide-up'>
+                    <div className='relative w-full max-w-md bg-surface rounded-t-3xl px-6 pt-8 pb-8 shadow-2xl animate-slide-up'>
+                        {modalStep !== 'done' && (
+                            <button
+                                type="button"
+                                onClick={() => setShowPayModal(false)}
+                                aria-label="Fechar"
+                                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
+                            >
+                                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
+                            </button>
+                        )}
 
                         {modalStep === 'payment' && (
                             <>
-                                <div className='flex justify-between items-center mb-6'>
-                                    <h2 className='text-2xl font-bold text-gray-800'>Acertar R${ride?.fare}</h2>
-                                    <button onClick={() => setShowPayModal(false)}>
-                                        <i className="ri-close-line text-2xl text-gray-500"></i>
-                                    </button>
-                                </div>
+                                <h2 className='text-2xl font-bold text-ink-900 mb-6'>Acertar R${ride?.fare}</h2>
 
-                                <div className='bg-yellow-50 border border-yellow-300 rounded-xl p-4 mb-6 flex gap-3 items-center'>
-                                    <i className="ri-information-line text-yellow-500 text-xl"></i>
-                                    <p className='text-sm text-yellow-700'>
+                                <div className='bg-amber-50 border border-amber-300 rounded-panel p-4 mb-6 flex gap-3 items-center'>
+                                    <i className="ri-information-line text-amber-500 text-xl flex-shrink-0" aria-hidden="true"></i>
+                                    <p className='text-sm text-amber-700'>
                                         Pague <strong>R${ride?.fare}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
                                     </p>
                                 </div>
 
                                 {error && (
-                                    <div className='bg-red-50 border border-red-300 rounded-xl p-3 mb-4 flex gap-2 items-center'>
-                                        <i className="ri-error-warning-line text-red-500"></i>
-                                        <p className='text-sm text-red-600'>{error}</p>
+                                    <div className='bg-danger-50 border border-danger-500/30 rounded-panel p-3 mb-4 flex gap-2 items-center'>
+                                        <i className="ri-error-warning-line text-danger-500" aria-hidden="true"></i>
+                                        <p className='text-sm text-danger-600'>{error}</p>
                                     </div>
                                 )}
 
-                                <button
-                                    onClick={handleConfirmPayment}
-                                    disabled={loading}
-                                    className='w-full bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-4 rounded-xl text-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-500/20'
-                                >
-                                    {loading ? (
-                                        <>
-                                            <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                                            </svg>
-                                            Enviando...
-                                        </>
-                                    ) : (
-                                        'Já paguei o motorista'
-                                    )}
-                                </button>
+                                <Button onClick={handleConfirmPayment} loading={loading}>
+                                    Já paguei o motorista
+                                </Button>
                             </>
                         )}
 
                         {modalStep === 'rating' && (
                             <>
-                                <div className='flex justify-between items-center mb-2'>
-                                    <h2 className='text-2xl font-bold text-gray-800'>Avalie a corrida</h2>
-                                    <button onClick={() => setShowPayModal(false)}>
-                                        <i className="ri-close-line text-2xl text-gray-500"></i>
-                                    </button>
-                                </div>
-                                <p className='text-sm text-gray-500 mb-5'>
+                                <h2 className='text-2xl font-bold text-ink-900 mb-2'>Avalie a corrida</h2>
+                                <p className='text-sm text-ink-400 mb-5'>
                                     Como foi sua viagem com {ride?.captain?.fullname?.firstname || 'o motorista'}?
                                 </p>
 
@@ -281,9 +280,11 @@ const Riding = () => {
                                             key={star}
                                             type='button'
                                             onClick={() => setRatingValue(star)}
-                                            className='p-1'
+                                            aria-label={`${star} ${star === 1 ? 'estrela' : 'estrelas'}`}
+                                            aria-pressed={star <= ratingValue}
+                                            className='p-1 min-w-[44px] min-h-[44px] flex items-center justify-center'
                                         >
-                                            <i className={`text-4xl ${star <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-gray-300'}`}></i>
+                                            <i className={`text-4xl ${star <= ratingValue ? 'ri-star-fill text-amber-400' : 'ri-star-line text-ink-400/40'}`} aria-hidden="true"></i>
                                         </button>
                                     ))}
                                 </div>
@@ -293,52 +294,47 @@ const Riding = () => {
                                     onChange={e => setRatingComment(e.target.value)}
                                     placeholder='Deixe um comentário (opcional)'
                                     rows={3}
-                                    className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none mb-5 resize-none'
+                                    className='w-full border border-line rounded-panel px-4 py-3 text-base text-ink-900 placeholder-ink-400 focus:border-brand-500 focus:outline-none mb-5 resize-none'
                                 />
 
-                                <button
+                                <Button
                                     onClick={handleSubmitReview}
-                                    disabled={!ratingValue || submittingReview}
-                                    className='w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-bold p-4 rounded-xl text-lg transition-all shadow-lg shadow-green-500/20 mb-2'
+                                    disabled={!ratingValue}
+                                    loading={submittingReview}
+                                    className='mb-2'
                                 >
-                                    {submittingReview ? 'Enviando...' : 'Enviar Avaliação'}
-                                </button>
-                                <button
-                                    onClick={() => setModalStep('done')}
-                                    className='w-full text-gray-500 font-medium p-2'
-                                >
+                                    Enviar Avaliação
+                                </Button>
+                                <Button variant='ghost' onClick={() => setModalStep('done')}>
                                     Pular
-                                </button>
+                                </Button>
                             </>
                         )}
 
                         {modalStep === 'done' && (
                             <div className='flex flex-col items-center py-6'>
-                                <div className='h-20 w-20 rounded-full bg-green-100 flex items-center justify-center mb-4'>
-                                    <i className="ri-checkbox-circle-fill text-5xl text-green-500"></i>
+                                <div className='h-20 w-20 rounded-full bg-brand-50 flex items-center justify-center mb-4'>
+                                    <i className="ri-checkbox-circle-fill text-5xl text-brand-500" aria-hidden="true"></i>
                                 </div>
-                                <h2 className='text-2xl font-bold text-gray-800 mb-1'>Tudo certo!</h2>
-                                <p className='text-gray-500 mb-8'>Obrigado por viajar conosco 🙏</p>
-                                <button
-                                    onClick={() => navigate('/home')}
-                                    className='w-full bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
-                                >
+                                <h2 className='text-2xl font-bold text-ink-900 mb-1'>Tudo certo!</h2>
+                                <p className='text-ink-400 mb-8'>Obrigado por viajar conosco 🙏</p>
+                                <Button onClick={() => navigate('/home')}>
                                     Voltar ao Início
-                                </button>
+                                </Button>
                             </div>
                         )}
                     </div>
                 </div>
             )}
 
-            <RideChat 
-                ride={ride} 
-                isOpen={isChatOpen} 
-                onClose={() => setIsChatOpen(false)} 
-                currentUserType="user" 
+            <RideChat
+                ride={ride}
+                isOpen={isChatOpen}
+                onClose={() => setIsChatOpen(false)}
+                currentUserType="user"
             />
         </div>
     )
 }
 
-export default Riding
+export default Riding

@@ -7,10 +7,13 @@ import axios from 'axios'
 import { useToast } from '@/contexts/ToastContext'
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { app } from '@/services/firebase';
+import Button from '@/shared/components/ui/Button'
+import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 
 const UserLogin = () => {
   const [ email, setEmail ] = useState('')
   const [ password, setPassword ] = useState('')
+  const [ loading, setLoading ] = useState(false)
 
   const { user, setUser } = useContext(UserDataContext)
   const navigate = useNavigate()
@@ -52,6 +55,7 @@ const UserLogin = () => {
 
   const submitHandler = async (e) => {
     e.preventDefault();
+    setLoading(true)
 
     const userData = {
       email: email,
@@ -72,34 +76,35 @@ const UserLogin = () => {
       addToast(err.response?.data?.message || 'Email ou senha inválidos', 'error')
     }
 
+    setLoading(false)
     setEmail('')
     setPassword('')
   }
 
   return (
-    <div className='h-screen flex flex-col justify-between bg-white'>
+    <div className='h-screen flex flex-col justify-between bg-surface'>
       <div className='p-7 flex-1'>
         <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity" />
 
         <form onSubmit={(e) => {
           submitHandler(e)
         }}>
-          <h3 className='text-lg font-medium mb-2 text-gray-800'>Qual é o seu email?</h3>
+          <h3 className='text-lg font-medium mb-2 text-ink-900'>Qual é o seu email?</h3>
           <input
             required
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)
             }}
-            className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 mb-7 rounded-xl px-4 py-3 w-full text-lg placeholder:text-gray-400 outline-none transition-colors'
+            className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
             type="email"
             placeholder='email@exemplo.com'
           />
 
-          <h3 className='text-lg font-medium mb-2 text-gray-800'>Senha</h3>
+          <h3 className='text-lg font-medium mb-2 text-ink-900'>Senha</h3>
 
           <input
-            className='bg-gray-50 text-gray-800 border border-gray-200 focus:border-green-500 mb-7 rounded-xl px-4 py-3 w-full text-lg placeholder:text-gray-400 outline-none transition-colors'
+            className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
@@ -108,31 +113,31 @@ const UserLogin = () => {
             placeholder='senha'
           />
 
-          <button
-            className='bg-green-500 hover:bg-green-600 text-white font-bold mb-3 rounded-xl px-4 py-3 w-full text-lg transition-colors shadow-lg shadow-green-500/20'
-          >Entrar</button>
-
+          <Button type="submit" loading={loading} className='mb-3'>
+            Entrar
+          </Button>
         </form>
 
         <div className="relative flex items-center justify-center my-6">
-          <hr className="w-full border-gray-200" />
-          <span className="absolute px-3 bg-white text-gray-400 text-sm">ou</span>
+          <hr className="w-full border-line" />
+          <span className="absolute px-3 bg-surface text-ink-400 text-sm">ou</span>
         </div>
 
-        <button
-            type="button"
-            onClick={handleGoogleLogin}
-            className='bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold mb-5 rounded-xl px-4 py-3 w-full text-lg transition-colors flex items-center justify-center gap-3 shadow-sm'
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleGoogleLogin}
+          className='mb-5 flex items-center justify-center gap-3'
         >
-            <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className='w-6 h-6' />
-            Entrar com o Google
-        </button>
-        <p className='text-center text-gray-500'>Novo por aqui? <Link to='/signup' className='text-green-600 font-medium'>Criar uma conta</Link></p>
+          <GoogleIcon />
+          Entrar com o Google
+        </Button>
+        <p className='text-center text-ink-400'>Novo por aqui? <Link to='/signup' className='text-brand-700 font-medium'>Criar uma conta</Link></p>
       </div>
       <div className='p-7'>
         <Link
           to='/captain-login'
-          className='bg-gray-50 border border-green-200 flex items-center justify-center text-green-600 font-semibold mb-5 rounded-xl px-4 py-3 w-full text-lg hover:bg-green-50 transition-colors'
+          className='bg-surface-alt border border-brand-200 flex items-center justify-center text-brand-700 font-semibold mb-5 rounded-panel px-4 py-3 w-full text-lg active:bg-brand-50 transition-colors'
         >Entrar como Motorista</Link>
       </div>
     </div>

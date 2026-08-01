@@ -131,12 +131,17 @@ module.exports.getDashboardStats = async (period = 'today') => {
 
     // --- QUALITY ---
     const getQualityStats = async (start, end) => {
-        // Mocks for now as requested, we return null so frontend handles as "Not Available" if not implemented yet
+        const reviewModel = require('../models/review.model');
+        const [ratingAgg] = await reviewModel.aggregate([
+            { $match: { createdAt: { $gte: start, $lte: end }, type: 'passenger_to_driver' } },
+            { $group: { _id: null, avg: { $avg: '$rating' } } }
+        ]);
+
         return {
             avgSearchTimeSeconds: null, // To be implemented with logs
             cancelRate: currentRides.total > 0 ? (currentRides.cancelled / currentRides.total) * 100 : 0,
             acceptRate: null, // Need ride request logs
-            avgRating: 4.8 // Fixed global rating for now until aggregate from reviews
+            avgRating: ratingAgg ? Math.round(ratingAgg.avg * 10) / 10 : null // null = sem avaliações no período
         };
     };
     const currentQuality = await getQualityStats(currentStart, currentEnd);
@@ -547,28 +552,22 @@ module.exports.adjustCaptainWallet = async (captainId, amount, type, reason, adm
     const captain = await captainModel.findById(captainId);
     if (!captain) throw new Error('Motorista não encontrado');
 
-    const balanceBefore = captain.earnings || 0;
     const adjustmentAmount = type === 'credit' ? Number(amount) : -Number(amount);
-    const balanceAfter = balanceBefore + adjustmentAmount;
 
-    // Update balance
-    await captainModel.updateOne(
-        { _id: captain._id },
-        { $set: { earnings: balanceAfter } }
-    );
-
-    // Register transaction
-    const transaction = await transactionModel.create({
+    // Ajuste manual precisa mexer no MESMO saldo que o app do motorista e o resto do
+    // sistema leem (wallet.creditBalance), não em captain.earnings (contador vitalício
+    // de faturamento, sem relação com saldo disponível). Usar walletService garante que
+    // o ledger, o cache, a regra de bloqueio por saldo negativo e o evento em tempo real
+    // (wallet-updated) fiquem consistentes — antes esse ajuste não fazia nada disso.
+    const walletService = require('./wallet.service');
+    const { transaction, wallet } = await walletService.createTransaction({
         captainId: captain._id,
         type: 'adjustment',
         paymentMethod: 'wallet',
-        amount: adjustmentAmount, // positive or negative
-        balanceBefore,
-        balanceAfter,
+        amount: adjustmentAmount, // positive ou negative
         description: `Ajuste manual: ${type === 'credit' ? 'Crédito' : 'Débito'}`,
-        reason,
         adminId: admin.name || admin.email,
-        status: 'completed'
+        reason
     });
 
     // Audit log
@@ -579,11 +578,11 @@ module.exports.adjustCaptainWallet = async (captainId, amount, type, reason, adm
         targetId: captain._id.toString(),
         targetModel: 'Captain',
         reason: `Ajuste de R$ ${adjustmentAmount.toFixed(2)}. Motivo: ${reason}`,
-        newValue: { amount: adjustmentAmount, balanceBefore, balanceAfter, type, transactionId: transaction._id.toString() },
+        newValue: { amount: adjustmentAmount, balanceBefore: transaction.balanceBefore, balanceAfter: transaction.balanceAfter, type, transactionId: transaction._id.toString() },
         ipAddress: ip || '0.0.0.0'
     });
 
-    return { success: true, balanceAfter, transaction };
+    return { success: true, balanceAfter: wallet.creditBalance, transaction };
 };
 
 module.exports.getCaptainTimeline = async (captainId) => {
@@ -664,6 +663,11 @@ module.exports.cancelRide = async (id, reason, admin) => {
     if (reason) ride.observation = reason;
     await ride.save();
 
+    if (ride.captain) {
+        const captainService = require('./captain.service');
+        captainService.recalculateCancellationStats(ride.captain).catch(console.error);
+    }
+
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,
@@ -708,12 +712,23 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin) => {
     let updatedCount = 0;
     
     if (actionType === 'cancel') {
+        const affectedCaptainIds = await rideModel.distinct('captain', {
+            _id: { $in: rideIds },
+            status: { $nin: ['finished', 'cancelled'] },
+            captain: { $ne: null }
+        });
+
         const result = await rideModel.updateMany(
             { _id: { $in: rideIds }, status: { $nin: ['finished', 'cancelled'] } },
             { $set: { status: 'cancelled', observation: reason } }
         );
         updatedCount = result.modifiedCount;
-        
+
+        const captainService = require('./captain.service');
+        affectedCaptainIds.forEach(captainId => {
+            captainService.recalculateCancellationStats(captainId).catch(console.error);
+        });
+
         await module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
@@ -917,24 +932,64 @@ module.exports.getCaptainFinancialHistory = async (captainId) => {
 
 const tariffSettingModel = require('../models/tariffSetting.model');
 const vehicleCategoryModel = require('../models/vehicleCategory.model');
+const globalSettingModel = require('../models/globalSetting.model');
+
+// Campos de globalSetting expostos junto com tariffSetting na aba "Globais" do painel.
+// Antes o simulador de tarifas usava um platformCommission=15 fixo no front porque o
+// admin não tinha como ver/editar o valor real (20%) usado no cálculo.
+const GLOBAL_SETTING_FIELDS = ['platformCommission', 'cardFeePercent', 'cardFeeFixed'];
 
 module.exports.getTariffs = async () => {
     let tariff = await tariffSettingModel.findOne();
     if (!tariff) {
         tariff = await tariffSettingModel.create({});
     }
-    return tariff;
+
+    let globalSetting = await globalSettingModel.findOne();
+    if (!globalSetting) {
+        globalSetting = await globalSettingModel.create({});
+    }
+
+    const merged = tariff.toObject();
+    GLOBAL_SETTING_FIELDS.forEach(field => {
+        merged[field] = globalSetting[field];
+    });
+    return merged;
 };
 
 module.exports.updateGlobalSettings = async (data) => {
+    const globalFields = {};
+    const tariffFields = { ...data };
+    GLOBAL_SETTING_FIELDS.forEach(field => {
+        if (data[field] !== undefined) {
+            globalFields[field] = data[field];
+            delete tariffFields[field];
+        }
+    });
+
     let tariff = await tariffSettingModel.findOne();
     if (tariff) {
-        Object.assign(tariff, data);
+        Object.assign(tariff, tariffFields);
         await tariff.save();
     } else {
-        tariff = await tariffSettingModel.create(data);
+        tariff = await tariffSettingModel.create(tariffFields);
     }
-    return tariff;
+
+    let globalSetting = await globalSettingModel.findOne();
+    if (Object.keys(globalFields).length > 0) {
+        if (globalSetting) {
+            Object.assign(globalSetting, globalFields);
+            await globalSetting.save();
+        } else {
+            globalSetting = await globalSettingModel.create(globalFields);
+        }
+    }
+
+    const merged = tariff.toObject();
+    GLOBAL_SETTING_FIELDS.forEach(field => {
+        merged[field] = globalSetting ? globalSetting[field] : undefined;
+    });
+    return merged;
 };
 
 module.exports.getVehicleCategories = async () => {
@@ -945,9 +1000,14 @@ module.exports.getVehicleCategories = async () => {
 module.exports.updateVehicleCategory = async (id, data) => {
     const oldCategory = await vehicleCategoryModel.findById(id).lean();
     if (!oldCategory) throw new Error('Categoria não encontrada');
-    
+
     // extrair campos permitidos
     const updateData = {
+        displayName: data.displayName !== undefined ? data.displayName : oldCategory.displayName,
+        description: data.description !== undefined ? data.description : oldCategory.description,
+        capacity: data.capacity !== undefined ? data.capacity : oldCategory.capacity,
+        iconKey: data.iconKey !== undefined ? data.iconKey : oldCategory.iconKey,
+        sortOrder: data.sortOrder !== undefined ? data.sortOrder : oldCategory.sortOrder,
         baseFare: data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare,
         perKmRate: data.perKmRate !== undefined ? data.perKmRate : oldCategory.perKmRate,
         perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : oldCategory.perMinuteRate,
@@ -958,8 +1018,32 @@ module.exports.updateVehicleCategory = async (id, data) => {
     };
 
     const category = await vehicleCategoryModel.findByIdAndUpdate(id, updateData, { new: true });
-    
+
     return { category, oldValue: oldCategory };
+};
+
+module.exports.createVehicleCategory = async (data) => {
+    const { name, displayName } = data;
+    if (!name || !displayName) throw new Error('Nome interno e nome de exibição são obrigatórios');
+
+    const existing = await vehicleCategoryModel.findOne({ name });
+    if (existing) throw new Error('Já existe uma categoria com este nome interno');
+
+    const category = await vehicleCategoryModel.create({
+        name,
+        displayName,
+        description: data.description || '',
+        capacity: data.capacity !== undefined ? data.capacity : 4,
+        iconKey: data.iconKey || 'car',
+        sortOrder: data.sortOrder !== undefined ? data.sortOrder : 0,
+        baseFare: data.baseFare !== undefined ? data.baseFare : 5.0,
+        perKmRate: data.perKmRate !== undefined ? data.perKmRate : 1.5,
+        perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : 0.3,
+        minFare: data.minFare !== undefined ? data.minFare : 8.0,
+        isActive: data.isActive !== undefined ? data.isActive : true
+    });
+
+    return category;
 };
 
 module.exports.getLogs = async (page = 1, limit = 15) => {

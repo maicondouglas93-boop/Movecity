@@ -1,4 +1,5 @@
 import React from 'react'
+import Avatar from '@/shared/components/Avatar'
 
 const RidePopUp = (props) => {
     return (
@@ -9,7 +10,7 @@ const RidePopUp = (props) => {
             <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Nova Corrida Disponível!</h3>
             <div className='flex items-center justify-between p-3 bg-green-50 border-2 border-green-200 rounded-xl mt-4'>
                 <div className='flex items-center gap-3'>
-                    <img className='h-12 rounded-full object-cover w-12 border-2 border-white' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
+                    <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} className='border-2 border-white' />
                     <div>
                         <h2 className='text-lg font-bold capitalize text-gray-800'>
                             {props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}
@@ -18,7 +19,7 @@ const RidePopUp = (props) => {
                     </div>
                 </div>
                 <div className='text-right'>
-                    <h5 className='text-xl font-bold text-gray-800'>{props.ride?.distance ? (props.ride.distance / 1000).toFixed(1) : '2.2'} KM</h5>
+                    <h5 className='text-xl font-bold text-gray-800'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
                     <p className='text-xs text-gray-500'>Distância</p>
                 </div>
             </div>
@@ -42,10 +43,12 @@ const RidePopUp = (props) => {
                         <i className="ri-time-line text-yellow-500 text-lg"></i>
                         <div>
                             <h3 className='text-base font-semibold text-gray-800'>
-                                {props.ride?.estimatedTime ? Math.round(props.ride.estimatedTime / 60) : '15'} mins
-                                <span className='text-sm font-normal text-gray-500 ml-2'>
-                                    ({props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) : '2.2'} km)
-                                </span>
+                                {props.ride?.estimatedTime ? `${Math.round(props.ride.estimatedTime / 60)} mins` : '—'}
+                                {props.ride?.estimatedDistance && (
+                                    <span className='text-sm font-normal text-gray-500 ml-2'>
+                                        ({(props.ride.estimatedDistance / 1000).toFixed(1)} km)
+                                    </span>
+                                )}
                             </h3>
                             <p className='text-sm -mt-1 text-gray-500'>Tempo Estimado</p>
                         </div>
@@ -58,7 +61,7 @@ const RidePopUp = (props) => {
                             </h3>
                             <div className='flex justify-between items-center text-sm -mt-1 text-gray-500'>
                                 <p>Pagamento: {props.ride?.paymentMethod === 'card' ? 'Cartão' : props.ride?.paymentMethod === 'pix' ? 'PIX' : 'Dinheiro'}</p>
-                                <p className='text-red-500 font-medium'>Taxa: R$ {props.ride?.commissionAmount || Math.round((props.ride?.fare || 0) * 0.1)}</p>
+                                <p className='text-red-500 font-medium'>Taxa: R$ {props.ride?.commissionAmount?.toFixed(2) ?? '—'}</p>
                             </div>
                         </div>
                     </div>

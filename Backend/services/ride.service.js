@@ -263,10 +263,27 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Invalid OTP');
     }
 
+    // Taxa de espera: se o motorista já tinha marcado "cheguei" (arrivedAt) e o
+    // passageiro demorou além do tempo grátis configurado, soma a taxa por minuto
+    // excedente — acertada com o motorista junto do resto da corrida, igual a taxa
+    // normal (o app não processa pagamento, só calcula e informa).
+    let waitTimeFeeCharged = 0;
+    if (ride.arrivedAt) {
+        const TariffSetting = require('../models/tariffSetting.model');
+        const tariffSetting = await TariffSetting.findOne();
+        const maxFreeWaitTime = tariffSetting?.maxFreeWaitTime || 0;
+        const perMinuteWaitFee = tariffSetting?.perMinuteWaitFee || 0;
+        const waitSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
+        if (waitSeconds > maxFreeWaitTime && perMinuteWaitFee > 0) {
+            waitTimeFeeCharged = Math.round(((waitSeconds - maxFreeWaitTime) / 60) * perMinuteWaitFee * 100) / 100;
+        }
+    }
+
     await rideModel.findOneAndUpdate({
         _id: rideId
     }, {
-        status: 'started'
+        status: 'started',
+        waitTimeFeeCharged
     })
 
     const updatedRide = await rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
@@ -283,15 +300,23 @@ module.exports.updateRideStatus = async ({ rideId, captain, status }) => {
         throw new Error('Invalid status');
     }
 
+    const update = { status };
+    if (status === 'arrived') {
+        update.arrivedAt = new Date();
+    }
+
     const ride = await rideModel.findOneAndUpdate({
         _id: rideId,
         captain: captain._id
-    }, {
-        status: status
-    }, { new: true }).populate('user').populate('captain').select('+otp');
+    }, update, { new: true }).populate('user').populate('captain').select('+otp');
 
     if (!ride) {
         throw new Error('Ride not found');
+    }
+
+    if (status === 'cancelled') {
+        const captainService = require('./captain.service');
+        captainService.recalculateCancellationStats(captain._id).catch(console.error);
     }
 
     return ride;
@@ -330,7 +355,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 paymentMethod: ride.paymentMethod
             });
             finalPrice = pricing.finalFare;
-            
+
             // Atualizar o breakdown real se a distância foi maior
             await rideModel.findByIdAndUpdate(rideId, {
                 fareBreakdown: pricing.fareBreakdown,
@@ -340,7 +365,11 @@ module.exports.endRide = async ({ rideId, captain }) => {
             console.error("Erro recalculando tarifa no final da corrida:", e);
         }
     }
-    
+
+    // Taxa de espera calculada no startRide (motorista esperou além do tempo grátis) —
+    // soma ao valor final, acertado direto com o motorista igual ao resto da tarifa.
+    finalPrice += ride.waitTimeFeeCharged || 0;
+
     await rideModel.findOneAndUpdate({
         _id: rideId
     }, {
@@ -505,9 +534,63 @@ module.exports.cancelRide = async ({ rideId, user }) => {
         throw new Error('Ride cannot be cancelled at this stage');
     }
 
+    // Taxa de cancelamento: só se aplica quando já existe um motorista comprometido
+    // com a corrida (aceitou e está a caminho/esperando) — cancelar antes de qualquer
+    // motorista aceitar não gera taxa. Igual à taxa de espera, é informativa: acertada
+    // diretamente com o motorista, o app não processa nenhuma cobrança.
+    const capturedByDriver = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status);
+    if (capturedByDriver && ride.captain) {
+        const TariffSetting = require('../models/tariffSetting.model');
+        const tariffSetting = await TariffSetting.findOne();
+        ride.cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
+    }
+
     ride.status = 'cancelled';
     await ride.save();
 
+    if (ride.captain) {
+        const captainService = require('./captain.service');
+        captainService.recalculateCancellationStats(ride.captain).catch(console.error);
+    }
+
     return ride;
+}
+
+module.exports.submitReview = async ({ rideId, user, rating, comment, issueCategory }) => {
+    if (!rideId || !user || !rating) {
+        throw new Error('Ride id, user and rating are required');
+    }
+
+    const ride = await rideModel.findOne({ _id: rideId, user });
+    if (!ride) {
+        throw new Error('Ride not found');
+    }
+    if (ride.status !== 'finished') {
+        throw new Error('Only finished rides can be reviewed');
+    }
+    if (!ride.captain) {
+        throw new Error('Ride has no captain to review');
+    }
+
+    const reviewModel = require('../models/review.model');
+    const existing = await reviewModel.findOne({ ride: rideId, user, type: 'passenger_to_driver' });
+    if (existing) {
+        throw new Error('Ride already reviewed');
+    }
+
+    const review = await reviewModel.create({
+        ride: rideId,
+        user,
+        captain: ride.captain,
+        rating,
+        comment,
+        issueCategory: issueCategory || 'none',
+        type: 'passenger_to_driver'
+    });
+
+    const captainService = require('./captain.service');
+    await captainService.recalculateRating(ride.captain);
+
+    return review;
 }
 

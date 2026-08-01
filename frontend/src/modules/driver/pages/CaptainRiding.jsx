@@ -6,24 +6,24 @@ import gsap from 'gsap'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { SocketContext } from '@/contexts/SocketContext'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
+import { LocationContext } from '@/contexts/LocationContext'
 import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 import { useToast } from '@/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
-import * as Sentry from '@sentry/react'
 
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
     const finishRidePanelRef = useRef(null)
-    const simulationRef = useRef(null)
     const location = useLocation()
     const rideData = location.state?.ride
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
+    const { locationRef } = useContext(LocationContext)
     const { addToast } = useToast()
     const [ isChatOpen, setIsChatOpen ] = useState(false)
     const [ unreadCount, setUnreadCount ] = useState(0)
@@ -42,7 +42,9 @@ const CaptainRiding = () => {
         requestLock();
     }, [requestLock]);
 
-    /* ── Location simulation: captain moves from pickup → destination ── */
+    /* ── Envio periódico da localização real (GPS) do motorista durante a corrida ── */
+    const REAL_LOCATION_INTERVAL_MS = 5000
+
     useEffect(() => {
         if (!captain?._id || !rideData) return;
 
@@ -56,73 +58,36 @@ const CaptainRiding = () => {
 
         socket.on('connect', handleConnect)
 
-        // Clear any old simulation before starting a new one
-        if (simulationRef.current) clearInterval(simulationRef.current)
+        const updateLocation = () => {
+            const loc = locationRef.current;
+            if (!loc) return;
 
-        const startSimulation = async () => {
-            try {
-                const token = localStorage.getItem('captain-token');
-                const [ pickupRes, destRes ] = await Promise.all([
-                    axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates`, {
-                        params: { address: rideData.pickup },
-                        headers: { Authorization: `Bearer ${token}` }
-                    }),
-                    axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates`, {
-                        params: { address: rideData.destination },
-                        headers: { Authorization: `Bearer ${token}` }
-                    })
-                ]);
-
-                const pc = pickupRes.data;
-                const dc = destRes.data;
-
-                if (pc?.ltd && dc?.ltd) {
-                    let lat = pc.ltd, lng = pc.lng, step = 0;
-                    const totalSteps = 60;
-
-                    simulationRef.current = setInterval(() => {
-                        if (step >= totalSteps) {
-                            clearInterval(simulationRef.current);
-                            simulationRef.current = null;
-                            return;
-                        }
-                        lat = lat + (dc.ltd - lat) * 0.08;
-                        lng = lng + (dc.lng - lng) * 0.08;
-                        
-                        if (socket.connected) {
-                            socket.emit('update-location-captain', {
-                                userId: captain._id,
-                                location: { ltd: lat, lng: lng }
-                            });
-                        } else {
-                            db.driverLocations.add({
-                                userId: captain._id,
-                                lat: lat,
-                                lng: lng,
-                                timestamp: Date.now()
-                            }).catch(e => console.error(e));
-                        }
-                        step++;
-                    }, 2000);
-                }
-            } catch (err) {
-                console.error('Simulation error in CaptainRiding:', err);
-                Sentry.captureException(err, { tags: { issue: 'gps_error' } });
+            if (socket.connected) {
+                socket.emit('update-location-captain', {
+                    userId: captain._id,
+                    location: { ltd: loc.lat, lng: loc.lng }
+                });
+            } else {
+                db.driverLocations.add({
+                    userId: captain._id,
+                    lat: loc.lat,
+                    lng: loc.lng,
+                    timestamp: Date.now()
+                }).catch(e => console.error(e));
             }
         };
 
-        startSimulation();
+        const locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
+        updateLocation()
+
         addToast('Corrida iniciada — navegue até o destino!', 'info')
         showBrowserNotification('Corrida Iniciada', `A caminho de ${rideData?.destination?.split(',')[0]}`)
 
         return () => {
-            if (simulationRef.current) {
-                clearInterval(simulationRef.current);
-                simulationRef.current = null;
-            }
+            clearInterval(locationInterval);
             socket.off('connect', handleConnect)
         }
-    }, [captain?._id, rideData?.pickup, rideData?.destination])  // stable deps only
+    }, [captain?._id, rideData?._id])  // stable deps only
 
     /* ── Payment received socket event ── */
     useEffect(() => {

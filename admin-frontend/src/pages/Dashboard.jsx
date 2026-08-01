@@ -133,7 +133,7 @@ export default function Dashboard() {
           <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-text-muted">Concluídas</span><span className="font-medium text-primary">{stats.rides?.current?.finished}</span></div>
             <div className="flex justify-between"><span className="text-text-muted">Taxa de Cancelamento</span><span className="font-medium text-danger">{stats.quality?.current?.cancelRate?.toFixed(1)}%</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Avaliação Média</span><span className="font-medium text-text flex items-center gap-1">{stats.quality?.current?.avgRating} <Star className="w-3 h-3 text-warning fill-warning" /></span></div>
+            <div className="flex justify-between"><span className="text-text-muted">Avaliação Média</span><span className="font-medium text-text flex items-center gap-1">{stats.quality?.current?.avgRating != null ? (<>{stats.quality.current.avgRating} <Star className="w-3 h-3 text-warning fill-warning" /></>) : 'Sem avaliações'}</span></div>
             <div className="flex justify-between"><span className="text-text-muted">Tempo Busca Motorista</span><span className="font-medium text-text">{stats.quality?.current?.avgSearchTimeSeconds ? `${stats.quality.current.avgSearchTimeSeconds}s` : 'Não disp.'}</span></div>
           </div>
         </Link>

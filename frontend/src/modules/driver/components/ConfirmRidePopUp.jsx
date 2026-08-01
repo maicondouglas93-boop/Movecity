@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { db } from '@/services/db'
 import * as Sentry from '@sentry/react'
+import Avatar from '@/shared/components/Avatar'
 
 const ConfirmRidePopUp = (props) => {
     const [otp, setOtp] = useState('')
@@ -93,7 +94,7 @@ const ConfirmRidePopUp = (props) => {
             <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Iniciar a Corrida</h3>
             <div className='flex items-center justify-between p-3 border-2 border-green-200 bg-green-50 rounded-xl mt-4'>
                 <div className='flex items-center gap-3'>
-                    <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
+                    <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} />
                     <div>
                         <h2 className='text-lg font-bold capitalize text-gray-800'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
                         <p className='text-xs text-gray-500 font-medium'>Passageiro</p>
@@ -121,7 +122,7 @@ const ConfirmRidePopUp = (props) => {
                         <i className="ri-currency-line text-green-500"></i>
                         <div>
                             <h3 className='text-base font-medium text-gray-800'>R${props.ride?.fare}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>Dinheiro</p>
+                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                         </div>
                     </div>
                 </div>

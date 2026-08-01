@@ -112,6 +112,22 @@ const captainSchema = new mongoose.Schema({
     onlineTimeSeconds: {
         type: Number,
         default: 0,
+        description: "Acumulado vitalício (todas as sessões online já finalizadas)"
+    },
+    onlineSince: {
+        type: Date,
+        default: null,
+        description: "Início da sessão online atual (null se offline). Usado para calcular tempo online real."
+    },
+    todayOnlineSeconds: {
+        type: Number,
+        default: 0,
+        description: "Acumulado de hoje (sessões já finalizadas). Zera ao virar o dia — ver captain.service.js"
+    },
+    todayOnlineDate: {
+        type: Date,
+        default: null,
+        description: "Início (00:00) do dia a que todayOnlineSeconds se refere"
     },
     acceptanceRate: {
         type: Number,
@@ -148,9 +164,10 @@ const captainSchema = new mongoose.Schema({
             min: [ 1, 'Capacity must be at least 1' ],
         },
         vehicleType: {
+            // Corresponde a vehicleCategory.name. Não é mais um enum fixo: a validade é
+            // checada em runtime no cadastro (categoria precisa existir e estar ativa).
             type: String,
-            required: true,
-            enum: [ 'car', 'motorcycle', 'moto', 'auto' ],
+            required: true
         }
     },
 
@@ -173,19 +190,7 @@ const captainSchema = new mongoose.Schema({
             default: [0, 0] // Default for the ocean off Africa, updated on real location
         }
     },
-    rating: {
-        type: Number,
-        default: 5.0,
-    },
-    acceptanceRate: {
-        type: Number,
-        default: 100,
-    },
     cancelledRides: {
-        type: Number,
-        default: 0,
-    },
-    totalRides: {
         type: Number,
         default: 0,
     }

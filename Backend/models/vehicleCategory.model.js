@@ -40,6 +40,27 @@ const vehicleCategorySchema = new mongoose.Schema({
         type: Number,
         description: "Valor máximo opcional da corrida nesta categoria"
     },
+    description: {
+        type: String,
+        default: '',
+        description: "Descrição curta exibida ao passageiro (ex: Viagens diárias econômicas)"
+    },
+    capacity: {
+        type: Number,
+        default: 4,
+        description: "Lotação máxima de passageiros"
+    },
+    iconKey: {
+        type: String,
+        enum: [ 'car', 'moto', 'auto' ],
+        default: 'car',
+        description: "Qual ilustração de veículo (do conjunto disponível no app) representa esta categoria"
+    },
+    sortOrder: {
+        type: Number,
+        default: 0,
+        description: "Ordem de exibição para o passageiro (menor primeiro)"
+    },
     isActive: {
         type: Boolean,
         default: true

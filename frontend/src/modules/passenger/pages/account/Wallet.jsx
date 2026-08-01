@@ -7,6 +7,7 @@ const Wallet = () => {
     const [balance, setBalance] = useState(0);
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     useEffect(() => {
         const fetchWallet = async () => {
@@ -17,9 +18,10 @@ const Wallet = () => {
                 setBalance(response.data.balance || 0);
                 setTransactions(response.data.transactions || []);
             } catch (error) {
-                // Fallback gracefully since route doesn't exist yet
-                setBalance(0);
-                setTransactions([]);
+                // A rota /users/wallet ainda não existe (o saldo real do passageiro já
+                // existe em user.walletBalance e é usado no fluxo de corrida, mas esta
+                // tela nunca foi ligada a ele).
+                setLoadError(true);
             } finally {
                 setLoading(false);
             }
@@ -70,6 +72,12 @@ const Wallet = () => {
                 {loading ? (
                     <div className="flex justify-center my-8">
                         <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                    </div>
+                ) : loadError ? (
+                    <div className="text-center py-10 flex flex-col items-center">
+                        <i className="ri-error-warning-line text-5xl text-red-300 mb-3"></i>
+                        <h4 className="text-gray-600 font-medium">Não foi possível carregar sua carteira</h4>
+                        <p className="text-sm text-gray-400 mt-1">Tente novamente mais tarde.</p>
                     </div>
                 ) : transactions.length > 0 ? (
                     <ul className="flex flex-col gap-4">

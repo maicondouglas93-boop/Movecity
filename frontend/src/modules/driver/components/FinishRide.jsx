@@ -4,6 +4,7 @@ import axios from 'axios'
 import { db } from '@/services/db'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import Avatar from '@/shared/components/Avatar'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -11,7 +12,7 @@ const FinishRide = (props) => {
     const [paymentConfirmed, setPaymentConfirmed] = useState(false)
     const navigate = useNavigate()
 
-    const commissionAmount = props.ride?.commissionAmount || Math.round((props.ride?.fare || 0) * 0.1)
+    const commissionAmount = props.ride?.commissionAmount || 0
     const driverKeeps = (props.ride?.fare || 0) - commissionAmount
 
     const queryClient = useQueryClient();
@@ -101,10 +102,10 @@ const FinishRide = (props) => {
                     <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Finalizar esta Corrida</h3>
                     <div className='flex items-center justify-between p-4 border-2 border-green-200 bg-green-50 rounded-lg mt-4'>
                         <div className='flex items-center gap-3 '>
-                            <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
+                            <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} />
                             <h2 className='text-lg font-bold text-gray-800'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
                         </div>
-                        <h5 className='text-lg font-bold text-gray-800'>{props.ride?.distance ? (props.ride.distance / 1000).toFixed(1) : '2.2'} KM</h5>
+                        <h5 className='text-lg font-bold text-gray-800'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
                     </div>
                     <div className='flex gap-2 justify-between flex-col items-center'>
                         <div className='w-full mt-5'>
@@ -126,7 +127,7 @@ const FinishRide = (props) => {
                                 <i className="ri-currency-line text-green-500"></i>
                                 <div>
                                     <h3 className='text-lg font-medium text-gray-800'>R$ {props.ride?.fare}</h3>
-                                    <p className='text-sm -mt-1 text-gray-500'>Dinheiro</p>
+                                    <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                                 </div>
                             </div>
                         </div>
@@ -171,7 +172,7 @@ const FinishRide = (props) => {
                             <span className='text-xl font-bold'>R$ {(props.ride?.fare || 0).toFixed(2)}</span>
                         </div>
                         <div className='flex justify-between items-center mb-3 pb-3 border-b border-gray-200'>
-                            <span className='text-gray-600'>Comissão ({props.ride?.commissionPercent || 10}%)</span>
+                            <span className='text-gray-600'>Comissão ({props.ride?.commissionPercent ?? '—'}%)</span>
                             <span className='text-red-500 font-semibold'>- R$ {commissionAmount.toFixed(2)}</span>
                         </div>
                         <div className='flex justify-between items-center'>

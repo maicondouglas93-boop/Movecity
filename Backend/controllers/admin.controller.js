@@ -644,6 +644,28 @@ module.exports.getVehicleCategories = async (req, res, next) => {
     }
 };
 
+module.exports.createVehicleCategory = async (req, res, next) => {
+    try {
+        const category = await adminService.createVehicleCategory(req.body);
+
+        const tariffHistoryModel = require('../models/tariffHistory.model');
+        await tariffHistoryModel.create({
+            admin: req.admin.name || req.admin.email,
+            ip: req.ip,
+            browser: req.headers['user-agent'],
+            action: 'create',
+            entity: 'VehicleCategory',
+            categoryId: category._id,
+            newValue: req.body,
+            reason: `Categoria criada: ${category.displayName}`
+        });
+
+        res.status(201).json(category);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports.updateVehicleCategory = async (req, res, next) => {
     try {
         const { id } = req.params;

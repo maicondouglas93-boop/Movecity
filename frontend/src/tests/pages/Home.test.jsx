@@ -21,6 +21,10 @@ vi.mock('@/services/mapsApi', () => ({
   reverseGeocode: vi.fn().mockResolvedValue({ address: 'Mocked Address' }),
 }));
 
+vi.mock('@/services/vehicleCategoriesApi', () => ({
+  getVehicleCategories: vi.fn().mockResolvedValue([]),
+}));
+
 // Mocks for GSAP
 vi.mock('@gsap/react', () => ({
   useGSAP: vi.fn(),

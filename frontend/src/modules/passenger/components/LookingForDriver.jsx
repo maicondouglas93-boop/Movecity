@@ -52,7 +52,7 @@ const LookingForDriver = (props) => {
                             <h3 className='text-base font-medium text-gray-800'>
                                 {props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]} - ${props.fare.fareMax?.[props.vehicleType]}` : ''}
                             </h3>
-                            <p className='text-sm -mt-1 text-gray-500'>Dinheiro (Estimativa)</p>
+                            <p className='text-sm -mt-1 text-gray-500'>{props.paymentMethod === 'pix' ? 'Pix' : props.paymentMethod === 'carteira' ? 'Carteira' : props.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'} (Estimativa)</p>
                         </div>
                     </div>
                 </div>

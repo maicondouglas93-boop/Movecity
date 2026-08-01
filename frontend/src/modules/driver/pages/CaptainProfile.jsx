@@ -2,6 +2,7 @@ import React, { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CaptainDataContext } from '@/contexts/CaptainContext';
 import CaptainHeader from '@/modules/driver/components/CaptainHeader';
+import Avatar from '@/shared/components/Avatar';
 
 const CaptainProfile = () => {
     const { captain } = useContext(CaptainDataContext);
@@ -18,10 +19,11 @@ const CaptainProfile = () => {
 
             <div className="flex-1 overflow-y-auto p-4 pb-6">
                 <div className="bg-white rounded-2xl p-6 shadow-sm mb-6 flex flex-col items-center border border-gray-100">
-                    <img 
-                        src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRdlMd7stpWUCmjpfRjUsQ72xSWikidbgaI1w&s" 
-                        alt="Profile" 
-                        className="w-24 h-24 rounded-full border-4 border-yellow-400 mb-4 object-cover"
+                    <Avatar
+                        firstname={captain?.fullname?.firstname}
+                        lastname={captain?.fullname?.lastname}
+                        size="w-24 h-24"
+                        className="border-4 border-yellow-400 mb-4 text-3xl"
                     />
                     <h2 className="text-xl font-bold capitalize text-gray-800">
                         {captain?.fullname?.firstname} {captain?.fullname?.lastname}

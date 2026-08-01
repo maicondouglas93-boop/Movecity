@@ -2,12 +2,12 @@ import React, { useContext, useState, useEffect } from 'react'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { SocketContext } from '@/contexts/SocketContext'
 import axios from 'axios'
+import Avatar from '@/shared/components/Avatar'
 
 const CaptainDetails = () => {
 
     const { captain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    const [onlineTime, setOnlineTime] = useState(0) // minutes online this session
     const [summary, setSummary] = useState(null)
     const [loadingSummary, setLoadingSummary] = useState(true)
 
@@ -18,11 +18,6 @@ const CaptainDetails = () => {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setSummary(response.data);
-            
-            // Extract the simple "05:32" string into actual minutes if needed, or just display
-            if (response.data.onlineTime) {
-                setOnlineTime(response.data.onlineTime); 
-            }
         } catch (err) {
             console.error('Error fetching captain summary:', err);
         } finally {
@@ -79,11 +74,10 @@ const CaptainDetails = () => {
         }
     }
 
-    const formatOnlineTime = (timeStr) => {
-        if (!timeStr) return '0m';
-        const [hours, minutes] = timeStr.split(':');
-        const h = parseInt(hours, 10) || 0;
-        const m = parseInt(minutes, 10) || 0;
+    const formatOnlineTime = (totalSeconds) => {
+        if (!totalSeconds) return '0m';
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
         if (h > 0) return `${h}h${m}m`;
         return `${m}m`;
     };
@@ -93,9 +87,7 @@ const CaptainDetails = () => {
             {/* Cabecalho e Perfil */}
             <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-3'>
-                    <div className='w-12 h-12 rounded-full bg-gray-200 overflow-hidden border-2 border-yellow-400'>
-                         <img className='w-full h-full object-cover' src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRdlMd7stpWUCmjpfRjUsQ72xSWikidbgaI1w&s" alt="Captain" />
-                    </div>
+                    <Avatar firstname={captain?.fullname?.firstname} lastname={captain?.fullname?.lastname} className='border-2 border-yellow-400' />
                     <div>
                         <h4 className='text-lg font-bold capitalize flex items-center gap-2 text-gray-800'>
                             {captain?.fullname?.firstname} {captain?.fullname?.lastname} 
@@ -146,7 +138,7 @@ const CaptainDetails = () => {
                 <div className='flex items-center gap-4 mt-5 pt-4 border-t border-gray-100'>
                     <div className="flex-1">
                         <p className='text-[11px] text-gray-400 font-medium uppercase'>Tempo Online</p>
-                        <p className='text-base font-bold text-gray-800'>{loadingSummary ? '...' : formatOnlineTime(summary?.onlineTime)}</p>
+                        <p className='text-base font-bold text-gray-800'>{loadingSummary ? '...' : formatOnlineTime(summary?.onlineTimeSeconds)}</p>
                     </div>
                     <div className='w-px h-8 bg-gray-200'></div>
                     <div className="flex-1">

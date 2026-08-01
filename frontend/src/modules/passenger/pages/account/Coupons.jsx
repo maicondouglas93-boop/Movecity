@@ -6,6 +6,7 @@ const Coupons = () => {
     const navigate = useNavigate();
     const [coupons, setCoupons] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
     const [couponCode, setCouponCode] = useState('');
 
     useEffect(() => {
@@ -16,8 +17,9 @@ const Coupons = () => {
                 });
                 setCoupons(response.data.coupons || []);
             } catch (error) {
-                // Graceful fallback
-                setCoupons([]);
+                // A rota /users/coupons ainda não existe no backend — distinguir "sem
+                // cupons" de "não deu pra carregar" em vez de esconder o erro.
+                setLoadError(true);
             } finally {
                 setLoading(false);
             }
@@ -27,10 +29,9 @@ const Coupons = () => {
 
     const handleAddCoupon = (e) => {
         e.preventDefault();
-        // Mock add coupon behavior
-        if(couponCode.trim() !== '') {
+        if (couponCode.trim() !== '') {
             setCouponCode('');
-            alert('Código inválido ou expirado.');
+            alert('Aplicação de cupons ainda não está disponível.');
         }
     };
 
@@ -65,6 +66,12 @@ const Coupons = () => {
                 {loading ? (
                     <div className="flex justify-center my-8">
                         <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                    </div>
+                ) : loadError ? (
+                    <div className="text-center py-16 flex flex-col items-center">
+                        <i className="ri-error-warning-line text-4xl text-red-300 mb-3"></i>
+                        <h4 className="text-gray-800 font-semibold text-lg mb-1">Não foi possível carregar seus cupons</h4>
+                        <p className="text-sm text-gray-500 max-w-[250px]">Tente novamente mais tarde.</p>
                     </div>
                 ) : coupons.length > 0 ? (
                     <div className="flex flex-col gap-3">

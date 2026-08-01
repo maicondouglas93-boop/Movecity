@@ -6,6 +6,7 @@ const Scheduled = () => {
     const navigate = useNavigate();
     const [scheduledRides, setScheduledRides] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     useEffect(() => {
         const fetchScheduled = async () => {
@@ -15,7 +16,8 @@ const Scheduled = () => {
                 });
                 setScheduledRides(response.data.scheduled || []);
             } catch (error) {
-                setScheduledRides([]);
+                // A rota /users/scheduled ainda não existe no backend.
+                setLoadError(true);
             } finally {
                 setLoading(false);
             }
@@ -34,6 +36,12 @@ const Scheduled = () => {
                 {loading ? (
                     <div className="flex justify-center my-10">
                         <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                    </div>
+                ) : loadError ? (
+                    <div className="text-center py-16 flex flex-col items-center">
+                        <i className="ri-error-warning-line text-5xl text-red-300 mb-4"></i>
+                        <h4 className="text-gray-800 font-semibold text-lg mb-1">Não foi possível carregar suas corridas agendadas</h4>
+                        <p className="text-sm text-gray-500 max-w-[250px]">Tente novamente mais tarde.</p>
                     </div>
                 ) : scheduledRides.length > 0 ? (
                     <div className="flex flex-col gap-4">

@@ -184,7 +184,6 @@ async function seedTestData() {
                 minFare: 5.0,
                 pricePerKm: 2.0,
                 pricePerMinute: 0.5,
-                cancellationFee: 4.0,
                 vehicleTypes: ['car', 'moto', 'auto'],
                 promotionalHours: 'Nenhum horário promocional ativo'
             });
@@ -258,7 +257,11 @@ async function connectToDb() {
         console.log('Connected to In-Memory MongoDB at', mongoUri);
     }
 
-    await seedTestData();
+    // Nunca popular o banco de produção com dados fictícios (motoristas, corridas e
+    // avaliações inventados) — só roda em dev/teste, onde ajuda a ter dado pra trabalhar.
+    if (process.env.NODE_ENV !== 'production') {
+        await seedTestData();
+    }
 }
 
 module.exports = connectToDb;

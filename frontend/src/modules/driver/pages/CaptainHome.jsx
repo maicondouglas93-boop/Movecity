@@ -121,19 +121,11 @@ const CaptainHome = () => {
         }
     }, [captain, socket])
 
-    // --- Efeito 2: atualização/simulação de localização (depende do status do ride) ---
-    const OFFSET_DEG = 0.01
-    const INTERPOLATION_FACTOR = 0.12
-    const SIMULATION_STEPS = 40
-    const SIMULATION_INTERVAL_MS = 2000
+    // --- Efeito 2: envio periódico da localização real (GPS) do motorista ---
     const REAL_LOCATION_INTERVAL_MS = 10000
 
     useEffect(() => {
         if (!captain || !captain._id) return;
-
-        let locationInterval;
-        let simulationInterval;
-        let cancelled = false;
 
         const updateLocation = () => {
             const loc = locationRef.current;
@@ -154,52 +146,13 @@ const CaptainHome = () => {
             }
         };
 
-        if (ride && ride.status === 'accepted') {
-            const fetchPickupAndSimulate = async () => {
-                try {
-                    const token = localStorage.getItem('captain-token');
-                    const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates`, {
-                        params: { address: ride.pickup },
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
-                    const pickupCoords = response.data;
-                    if (cancelled || !pickupCoords?.ltd || !pickupCoords?.lng) return;
-
-                    let currentLat = pickupCoords.ltd + OFFSET_DEG;
-                    let currentLng = pickupCoords.lng + OFFSET_DEG;
-                    let step = 0;
-
-                    simulationInterval = setInterval(() => {
-                        if (step >= SIMULATION_STEPS) {
-                            clearInterval(simulationInterval);
-                            return;
-                        }
-                        currentLat += (pickupCoords.ltd - currentLat) * INTERPOLATION_FACTOR;
-                        currentLng += (pickupCoords.lng - currentLng) * INTERPOLATION_FACTOR;
-
-                        socket.emit('update-location-captain', {
-                            userId: captain._id,
-                            location: { ltd: currentLat, lng: currentLng }
-                        });
-                        step++;
-                    }, SIMULATION_INTERVAL_MS);
-                } catch (err) {
-                    console.error('Simulation error:', err);
-                    updateLocation();
-                }
-            };
-            fetchPickupAndSimulate();
-        } else {
-            locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
-            updateLocation()
-        }
+        const locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
+        updateLocation()
 
         return () => {
-            cancelled = true;
-            if (locationInterval) clearInterval(locationInterval);
-            if (simulationInterval) clearInterval(simulationInterval);
+            clearInterval(locationInterval);
         }
-    }, [captain, socket, ride?.status, ride?.pickup])
+    }, [captain, socket])
 
 
     async function confirmRide() {

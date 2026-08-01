@@ -4,6 +4,7 @@ import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useToast } from '@/contexts/ToastContext'
+import { getVehicleCategories } from '@/services/vehicleCategoriesApi'
 
 const CaptainSignup = () => {
 
@@ -53,6 +54,13 @@ const CaptainSignup = () => {
 
   const { captain, setCaptain } = React.useContext(CaptainDataContext)
   const { addToast } = useToast()
+
+  const [ vehicleCategories, setVehicleCategories ] = useState([])
+  useEffect(() => {
+    getVehicleCategories()
+      .then(setVehicleCategories)
+      .catch(() => setVehicleCategories([]))
+  }, [])
 
   const submitHandler = async (e) => {
     e.preventDefault()
@@ -194,9 +202,9 @@ const CaptainSignup = () => {
               <input required className='bg-white text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 outline-none' type="number" placeholder='Capacidade (Passageiros)' value={vehicleCapacity} onChange={(e) => setVehicleCapacity(e.target.value)} />
               <select required className='bg-white text-gray-800 border border-gray-200 focus:border-green-500 w-1/2 rounded-xl px-4 py-3 outline-none' value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
                 <option value="" disabled>Tipo de Veículo</option>
-                <option value="car">Carro</option>
-                <option value="moto">Moto</option>
-                <option value="auto">Triciclo/Auto</option>
+                {vehicleCategories.map((category) => (
+                  <option key={category.name} value={category.name}>{category.displayName}</option>
+                ))}
               </select>
             </div>
 

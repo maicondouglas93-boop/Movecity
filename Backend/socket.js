@@ -166,7 +166,22 @@ function initializeSocket(server) {
         socket.on('disconnect', async () => {
             console.log(`[AUDIT] Client disconnected: ${socket.id}`);
             await userModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
-            await captainModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
+
+            // findOneAndUpdate sem { new: true } retorna o documento ANTES do update,
+            // então dá pra saber se esse motorista estava online quando desconectou.
+            const captainBeforeUpdate = await captainModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
+            if (captainBeforeUpdate && captainBeforeUpdate.isOnline) {
+                // Motorista fechou o app/perdeu conexão sem tocar em "Ficar Offline" —
+                // sem isto, o tempo online contaria para sempre e ele continuaria
+                // aparecendo como candidato a corridas com isOnline:true.
+                const captainService = require('./services/captain.service');
+                await captainService.endOnlineSession(captainBeforeUpdate._id);
+                await captainModel.findByIdAndUpdate(captainBeforeUpdate._id, { isOnline: false, status: 'inactive' });
+
+                const { deleteByPrefix } = require('./cache/cache');
+                deleteByPrefix(`profile:captain:${captainBeforeUpdate._id}`);
+                deleteByPrefix('drivers:');
+            }
         });
     });
 }

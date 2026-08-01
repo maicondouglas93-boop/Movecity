@@ -498,14 +498,22 @@ const Home = () => {
         
         addToast('Cancelando corrida...', 'info');
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
                 rideId: ride._id
             }, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('token')}`
                 }
             });
-            addToast('Corrida cancelada.', 'success');
+            if (response.data?.cancellationFeeCharged > 0) {
+                addToast(
+                    `Corrida cancelada. Como o motorista já estava a caminho, uma taxa de R$${response.data.cancellationFeeCharged.toFixed(2)} pode ser cobrada — acerte diretamente com ele.`,
+                    'info',
+                    8000
+                );
+            } else {
+                addToast('Corrida cancelada.', 'success');
+            }
             setVehicleFound(false);
             setRide(null);
             setPickup('');
@@ -543,7 +551,7 @@ const Home = () => {
                                 {`${new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, ${user?.fullname?.firstname || ''}`}
                             </h4>
                             <div className="flex items-center gap-3">
-                                <div 
+                                <div
                                     onClick={() => {
                                         setPanelOpen(true)
                                         setActiveField('destination')
@@ -554,12 +562,9 @@ const Home = () => {
                                     <i className="ri-search-line text-2xl text-green-500 font-bold"></i>
                                     <span className="text-gray-500 font-semibold text-lg">Buscar destino</span>
                                 </div>
-                                <div 
-                                    onClick={() => setSchedulePanelOpen(true)}
-                                    className="h-16 w-16 bg-gray-50 border border-gray-200 rounded-full flex items-center justify-center cursor-pointer shadow-sm active:bg-gray-100 flex-shrink-0"
-                                >
-                                    <i className="ri-calendar-schedule-fill text-2xl text-green-500"></i>
-                                </div>
+                                {/* Botão de agendamento escondido até existir backend real (A8 na
+                                    auditoria) — ScheduleRidePanel continua implementado, só não
+                                    tem mais gatilho aqui. */}
                             </div>
                         </>
                     ) : (
@@ -710,6 +715,7 @@ const Home = () => {
                     destination={destination}
                     fare={fare}
                     vehicleType={vehicleType}
+                    paymentMethod={paymentMethod}
                     cancelRide={cancelRide}
                     setVehicleFound={setVehicleFound} />
             </div>

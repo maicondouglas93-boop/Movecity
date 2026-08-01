@@ -29,28 +29,8 @@ const Account = () => {
                 </div>
             </div>
 
-            <div className="p-4 bg-white mt-2">
-                <div 
-                    onClick={() => navigate('/wallet')}
-                    className="bg-gray-50 p-4 rounded-xl flex justify-between items-center cursor-pointer active:bg-gray-100 transition-colors border border-gray-200 shadow-sm"
-                >
-                    <div>
-                        <p className="text-gray-500 mb-1 text-sm">Saldo da carteira</p>
-                        <h1 className="text-3xl font-semibold text-green-600">R$ 0,00</h1>
-                    </div>
-                    <i className="ri-arrow-right-s-line text-2xl text-green-500"></i>
-                </div>
-            </div>
-
             <div className="mt-2 bg-white flex-1 overflow-y-auto">
                 <ul className="flex flex-col">
-                    <li onClick={() => navigate('/coupons')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <i className="ri-ticket-2-fill text-xl text-green-500"></i>
-                            <span className="font-medium text-gray-800">Cupons</span>
-                        </div>
-                        <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                    </li>
                     <li onClick={() => navigate('/profile')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
                         <div className="flex items-center gap-4">
                             <i className="ri-user-3-fill text-xl text-green-500"></i>
@@ -58,27 +38,9 @@ const Account = () => {
                         </div>
                         <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
                     </li>
-                    <li onClick={() => navigate('/cards')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <i className="ri-bank-card-fill text-xl text-green-500"></i>
-                            <span className="font-medium text-gray-800">Meus cartões</span>
-                        </div>
-                        <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                    </li>
-                    <li onClick={() => navigate('/scheduled')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <i className="ri-calendar-schedule-fill text-xl text-green-500"></i>
-                            <span className="font-medium text-gray-800">Corridas agendadas</span>
-                        </div>
-                        <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                    </li>
-                    <li onClick={() => navigate('/favorites')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <i className="ri-map-pin-heart-fill text-xl text-green-500"></i>
-                            <span className="font-medium text-gray-800">Favoritos e Locais</span>
-                        </div>
-                        <i className="ri-arrow-right-s-line text-xl text-gray-400"></i>
-                    </li>
+                    {/* Cupons, Cartões, Agendadas e Favoritos escondidos até existir backend real
+                        (rotas /coupons /cards /scheduled /favorites e a carteira do passageiro
+                        continuam implementadas, só não estão linkadas daqui — ver A7 na auditoria) */}
                     <li onClick={() => navigate('/help')} className="flex items-center justify-between p-4 border-b border-gray-100 cursor-pointer active:bg-green-50 transition-colors">
                         <div className="flex items-center gap-4">
                             <i className="ri-lifebuoy-fill text-xl text-green-500"></i>

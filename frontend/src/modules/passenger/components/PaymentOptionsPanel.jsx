@@ -43,7 +43,7 @@ const PaymentOptionsPanel = (props) => {
                     onClick={() => handleMethodSelect('pix')}
                     className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${props.paymentMethod === 'pix' ? 'bg-gray-100 rounded-lg' : ''}`}>
                     <div className='flex items-center gap-3'>
-                        <img src="https://logospng.org/download/pix/logo-pix-icone-1024.png" alt="Pix" className='w-6 h-6 object-contain' />
+                        <i className="ri-instance-line text-teal-500 text-2xl"></i>
                         <span className='text-base font-medium text-gray-800'>Pix</span>
                     </div>
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${props.paymentMethod === 'pix' ? 'border-black' : 'border-gray-400'}`}>

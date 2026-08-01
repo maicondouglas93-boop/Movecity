@@ -52,7 +52,7 @@ const ConfirmRide = (props) => {
                         className='flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 rounded-xl transition-colors'>
                         <div className='flex items-center gap-5'>
                             {props.paymentMethod === 'pix' ? (
-                                <img src="https://logospng.org/download/pix/logo-pix-icone-1024.png" alt="Pix" className='w-6 h-6 object-contain flex-shrink-0' />
+                                <i className="ri-instance-line text-teal-500 text-xl flex-shrink-0"></i>
                             ) : props.paymentMethod === 'card' ? (
                                 <i className="ri-bank-card-fill text-blue-500 text-xl flex-shrink-0"></i>
                             ) : (

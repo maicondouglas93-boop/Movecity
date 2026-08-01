@@ -1,23 +1,18 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { SocketContext } from '@/contexts/SocketContext'
 import CaptainHeader from '@/modules/driver/components/CaptainHeader'
-import { useToast } from '@/contexts/ToastContext'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    const { addToast } = useToast()
 
     const queryClient = useQueryClient();
 
     const [showRechargeModal, setShowRechargeModal] = useState(false);
-    const [showQRCode, setShowQRCode] = useState(false);
-    const [rechargeAmount, setRechargeAmount] = useState('');
-    const [recharging, setRecharging] = useState(false);
 
     // Queries
     const { data: walletData, isLoading: walletLoading } = useQuery({
@@ -57,34 +52,6 @@ const CaptainWallet = () => {
             if (socket) socket.off('wallet-updated', handleWalletUpdated)
         }
     }, [socket, queryClient])
-
-    // Mutations
-    const rechargeMutation = useMutation({
-        mutationFn: async (amount) => {
-            const token = localStorage.getItem('captain-token')
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/recharge`, { amount }, { headers: { Authorization: `Bearer ${token}` } })
-        },
-        onSuccess: () => {
-            addToast('Recarga efetuada com sucesso!', 'success')
-            setShowRechargeModal(false)
-            setShowQRCode(false)
-            setRechargeAmount('')
-            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
-            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
-        },
-        onError: (err) => {
-            console.error(err)
-            addToast('Erro ao realizar recarga.', 'error')
-        }
-    })
-
-    const handleRechargeSimulate = async () => {
-        if (!rechargeAmount || isNaN(rechargeAmount) || parseFloat(rechargeAmount) <= 0) {
-            addToast('Insira um valor válido para recarga.', 'error')
-            return
-        }
-        rechargeMutation.mutate(parseFloat(rechargeAmount))
-    }
 
     // Novos saldos
     const creditBalance = wallet?.creditBalance || 0;
@@ -220,64 +187,28 @@ const CaptainWallet = () => {
             {showRechargeModal && (
                 <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4'>
                     <div className='bg-white w-full max-w-sm rounded-2xl p-6 relative shadow-2xl'>
-                        <button 
-                            onClick={() => { setShowRechargeModal(false); setShowQRCode(false); }}
+                        <button
+                            onClick={() => setShowRechargeModal(false)}
                             className='absolute top-4 right-4 text-gray-400 hover:text-black bg-gray-100 rounded-full h-8 w-8 flex items-center justify-center'
                         >
                             <i className="ri-close-line text-xl"></i>
                         </button>
-                        
-                        <h2 className='text-xl font-bold mb-1'>Adicionar Créditos</h2>
-                        <p className='text-xs text-gray-500 mb-5'>O valor ficará disponível instantaneamente para pagamento das comissões (R$ 20 mínimo).</p>
-                        
-                        {!showQRCode ? (
-                            <>
-                                <div className='relative mb-6'>
-                                    <span className='absolute left-4 top-1/2 -translate-y-1/2 font-medium text-gray-500 text-lg'>R$</span>
-                                    <input 
-                                        type="number" 
-                                        value={rechargeAmount}
-                                        onChange={(e) => setRechargeAmount(e.target.value)}
-                                        className='w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-4 outline-none font-bold text-2xl text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition-all'
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className='grid grid-cols-3 gap-2 mb-6'>
-                                    {[20, 50, 100].map(val => (
-                                        <button key={val} onClick={() => setRechargeAmount(val)} className='bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold text-sm transition-colors border border-gray-200'>
-                                            +R$ {val}
-                                        </button>
-                                    ))}
-                                </div>
-                                <button 
-                                    onClick={() => {
-                                        if (rechargeAmount >= 20) setShowQRCode(true)
-                                        else addToast('O valor mínimo de recarga é R$ 20.', 'error')
-                                    }}
-                                    className='w-full bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold py-4 rounded-xl shadow-lg shadow-green-500/30 transition-all transform hover:-translate-y-0.5'
-                                >
-                                    Gerar PIX Copia e Cola
-                                </button>
-                            </>
-                        ) : (
-                            <div className='flex flex-col items-center mt-2'>
-                                <div className='bg-gray-50 p-6 rounded-2xl mb-4 border border-gray-200 w-full flex flex-col items-center justify-center relative overflow-hidden'>
-                                    <div className='absolute top-0 right-0 w-24 h-24 bg-green-500 rounded-full blur-3xl opacity-20 -mr-10 -mt-10'></div>
-                                    <i className="ri-qr-code-line text-7xl text-gray-800 mb-2 relative z-10"></i>
-                                    <p className='text-xs font-semibold text-gray-500 relative z-10'>Chave PIX Gerada</p>
-                                </div>
-                                <p className='text-[13px] text-center text-gray-600 mb-6 px-2'>
-                                    Ambiente Asaas Sandbox. Escaneie o QR Code ou clique abaixo para simular o pagamento de <b className='text-gray-900'>R$ {parseFloat(rechargeAmount).toFixed(2)}</b>. O crédito cai na hora!
-                                </p>
-                                <button 
-                                    onClick={handleRechargeSimulate}
-                                    disabled={recharging}
-                                    className='w-full bg-black text-white font-bold py-4 rounded-xl flex justify-center items-center gap-2 shadow-lg hover:bg-gray-800 transition-all'
-                                >
-                                    {rechargeMutation.isPending ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div> : 'Simular Pagamento Pago'}
-                                </button>
+
+                        <div className='flex flex-col items-center text-center pt-4'>
+                            <div className='h-14 w-14 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-4'>
+                                <i className="ri-tools-fill text-2xl"></i>
                             </div>
-                        )}
+                            <h2 className='text-xl font-bold mb-2'>Recarga temporariamente indisponível</h2>
+                            <p className='text-sm text-gray-500 mb-6'>
+                                Ainda não temos um meio de pagamento automático conectado para recarga de créditos. Fale com o suporte da MoveCity para adicionar saldo à sua conta.
+                            </p>
+                            <button
+                                onClick={() => setShowRechargeModal(false)}
+                                className='w-full bg-black text-white font-semibold py-3 rounded-xl hover:bg-gray-800 transition-colors'
+                            >
+                                Entendi
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -24,9 +24,10 @@ const rideSchema = new mongoose.Schema({
         required: true,
     },
     vehicleType: {
+        // Corresponde a vehicleCategory.name. Não é mais um enum fixo: a validade é
+        // garantida em runtime pelo PricingEngine (categoria precisa existir e estar ativa).
         type: String,
-        required: true,
-        enum: [ 'auto', 'car', 'moto' ]
+        required: true
     },
 
     status: {
@@ -67,6 +68,20 @@ const rideSchema = new mongoose.Schema({
     },
     finalPrice: {
         type: Number,
+    },
+    arrivedAt: {
+        type: Date,
+        description: "Quando o status virou 'arrived' — usado para calcular taxa de espera excedente"
+    },
+    cancellationFeeCharged: {
+        type: Number,
+        default: 0,
+        description: "Taxa de cancelamento (tariffSetting.cancellationFee) quando o passageiro cancela com motorista já a caminho"
+    },
+    waitTimeFeeCharged: {
+        type: Number,
+        default: 0,
+        description: "Taxa de espera excedente (tariffSetting.perMinuteWaitFee) além de maxFreeWaitTime, somada ao finalPrice"
     },
     commissionPercent: {
         type: Number,

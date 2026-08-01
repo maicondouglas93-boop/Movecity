@@ -25,9 +25,13 @@ module.exports.authUser = async (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await userService.getUserProfile(decoded._id);
-        
+
         if (!user) {
             return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        if (user.isBlocked) {
+            return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
         }
 
         req.user = user;
@@ -58,11 +62,15 @@ module.exports.authCaptain = async (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const captain = await captainService.getCaptainProfile(decoded._id);
-        
+
         if (!captain) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
-        
+
+        if (captain.isBlocked) {
+            return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+        }
+
         req.captain = captain;
 
         return next()
@@ -91,12 +99,18 @@ module.exports.authBoth = async (req, res, next) => {
         
         const user = await userService.getUserProfile(decoded._id);
         if (user) {
+            if (user.isBlocked) {
+                return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+            }
             req.user = user;
             return next();
         }
 
         const captain = await captainService.getCaptainProfile(decoded._id);
         if (captain) {
+            if (captain.isBlocked) {
+                return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+            }
             req.captain = captain;
             return next();
         }

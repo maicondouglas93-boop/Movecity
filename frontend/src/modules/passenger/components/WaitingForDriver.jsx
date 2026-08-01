@@ -65,7 +65,7 @@ const WaitingForDriver = (props) => {
                         <i className="ri-currency-line text-green-500 flex-shrink-0"></i>
                         <div>
                             <h3 className='text-base font-medium text-gray-800'>{props.ride?.fare ? `R$${props.ride.fare}` : ''}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>Dinheiro</p>
+                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                         </div>
                     </div>
                 </div>

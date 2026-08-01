@@ -111,4 +111,48 @@ describe('Pricing Engine', () => {
         expect(result.finalFare).toBe(15);
         expect(result.fareBreakdown.couponDiscount).toBe(10);
     });
+
+    it('should NOT apply a PricingRule without conditions (regression: "Taxa de Chuva" bug)', async () => {
+        await PricingRule.create({
+            name: 'Taxa de Chuva',
+            type: 'weather',
+            modificationType: 'percentage',
+            value: 20,
+            priority: 1,
+            isActive: true
+            // sem `conditions` — antes isso era aplicado sempre, incondicionalmente
+        });
+
+        const result = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash'
+        });
+
+        expect(result.finalFare).toBe(25); // sem +20% de chuva
+        expect(result.fareBreakdown.appliedRules).toEqual([]);
+    });
+
+    it('should NOT apply a PricingRule with conditions yet (no evaluator implemented)', async () => {
+        await PricingRule.create({
+            name: 'Horário de Pico',
+            type: 'time_based',
+            modificationType: 'percentage',
+            value: 10,
+            priority: 1,
+            isActive: true,
+            conditions: { startHour: 18, endHour: 20 }
+        });
+
+        const result = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash'
+        });
+
+        expect(result.finalFare).toBe(25);
+        expect(result.fareBreakdown.appliedRules).toEqual([]);
+    });
 });

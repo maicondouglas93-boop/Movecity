@@ -71,16 +71,7 @@ class PricingEngine {
 
         // 4. Aplicar PricingRules
         for (const rule of rules) {
-            let applyRule = false;
-
-            // Para simplificar a POC, se for type 'custom' ou 'always_on' sem condições, aplicamos direto.
-            if (!rule.conditions || Object.keys(rule.conditions).length === 0) {
-                applyRule = true;
-            } else {
-                // Aqui podemos expandir a lógica (dias da semana, clima real)
-            }
-
-            if (applyRule) {
+            if (PricingEngine._evaluateRuleConditions(rule)) {
                 let ruleAmount = 0;
                 if (rule.modificationType === 'fixed') {
                     ruleAmount = rule.value;
@@ -173,6 +164,25 @@ class PricingEngine {
             commissionAmount: breakdown.platformCommission,
             fareBreakdown: breakdown
         };
+    }
+
+    /**
+     * Decide se uma PricingRule deve ser aplicada nesta corrida.
+     * Uma regra só é aplicada quando suas `conditions` são de fato verificadas — nunca
+     * por padrão. Antes, uma regra sem `conditions` era aplicada sempre (e uma regra COM
+     * `conditions` nunca era avaliada, pois a avaliação não existe ainda), o que fez a
+     * regra "Taxa de Chuva" ser cobrada em toda corrida independente do clima.
+     */
+    static _evaluateRuleConditions(rule) {
+        if (!rule.conditions || Object.keys(rule.conditions).length === 0) {
+            return false;
+        }
+
+        // Avaliação de condições (horário, dia da semana, clima real via weatherProvider,
+        // polígonos de zona, etc.) ainda não está implementada para nenhum tipo de regra.
+        // Até existir, nenhuma regra com condições é aplicada — mais seguro do que cobrar
+        // uma taxa cuja condição nunca foi de fato checada.
+        return false;
     }
 }
 

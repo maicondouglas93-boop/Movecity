@@ -9,7 +9,7 @@ router.post('/create',
     authMiddleware.authUser,
     body('pickup').isString().isLength({ min: 3 }).withMessage('Invalid pickup address'),
     body('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination address'),
-    body('vehicleType').isString().isIn([ 'auto', 'car', 'moto' ]).withMessage('Invalid vehicle type'),
+    body('vehicleType').isString().isLength({ min: 1 }).withMessage('Invalid vehicle type'),
     rideController.createRide
 )
 
@@ -78,6 +78,15 @@ router.post('/confirm-payment',
 router.get('/history',
     authMiddleware.authUser,
     rideController.getRideHistory
+)
+
+router.post('/review',
+    authMiddleware.authUser,
+    body('rideId').isMongoId().withMessage('Invalid ride id'),
+    body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+    body('comment').optional().isString().isLength({ max: 500 }),
+    body('issueCategory').optional().isIn(['none', 'delay', 'behavior', 'vehicle_cleanliness', 'overcharge']),
+    rideController.submitReview
 )
 
 module.exports = router;

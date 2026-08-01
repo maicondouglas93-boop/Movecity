@@ -572,3 +572,32 @@ Todas as 5 capacidades do `google.provider.js` validadas end-to-end via HTTP rea
 2. `npm run build` → ✅ sem erros
 3. `vitest run` → ✅ idêntico ao baseline (3 failed | 4 passed | 7 total) após a correção do mock
 4. `eslint` nos arquivos tocados → 0 erro novo introduzido (o único erro em `Home.jsx` e os 14 em `Home.test.jsx` são pré-existentes, ligados a padrões do projeto — import `React` não utilizado e globais do Vitest não configurados no ESLint — nenhum dos dois criado por esta mudança)
+
+---
+
+### Etapa 7 — ✅ CONCLUÍDA em 2026-08-01 (cutover em produção)
+
+**Resumo:** `MAPS_PROVIDER=google` (Render) e `VITE_MAPS_PROVIDER=google` (Vercel) ativados em produção. Mapa Google renderizando de verdade para usuários reais, validado via Playwright contra as URLs de produção reais (não mais localhost).
+
+**Cronologia real (com os desvios, porque valem o registro):**
+
+1. Usuário configurou as variáveis nos dois dashboards (Render: `MAPS_PROVIDER=google` + `GOOGLE_MAPS_API` atualizado para a chave nova; Vercel: `VITE_MAPS_PROVIDER=google` + `VITE_GOOGLE_MAPS_API_KEY`).
+2. **Incidente de produção não relacionado, descoberto no caminho:** ao verificar se o deploy tinha ido ar, encontramos `Backend/db/db.js` importando `mongodb-memory-server` (devDependency) incondicionalmente no topo do arquivo — isso derrubava o processo em produção (`Cannot find module`, crash loop) porque devDependencies não são instaladas lá. Bug pré-existente, nunca tocado nesta migração, só ficou exposto porque foi o primeiro redeploy do backend em um tempo. Corrigido movendo o `require` para dentro do fallback de dev/teste que efetivamente usa o pacote (commit `a05719f`).
+3. `MAPS_PROVIDER=google` confirmado funcionando no backend real (Geocoding, Reverse Geocoding, Places New, Routes API — todos com dados reais, sem fallback mockado).
+4. **Frontend quebrado em produção:** mapa não carregava, `ApiNotActivatedMapError` no console.
+5. Investigação percorreu, nessa ordem, três hipóteses — as duas primeiras descartadas com evidência, só a terceira era a causa real:
+   - **Hipótese 1 (descartada): restrição de HTTP Referrer errada.** O padrão configurado era `https://movecity-six.vercel.app/` (sem asterisco) — pelas regras do Google isso libera só a URL raiz, não `/home`. Corrigido para `.../*`. Não resolveu sozinho, mas era uma correção real e necessária de qualquer forma.
+   - **Hipótese 2 (descartada após investigação extensa): cache de borda do Vercel preso.** O bundle publicado (`index-BNk94rv5.js`) não mudava de hash mesmo após: Redeploy manual, purga completa de cache CDN+ISR+imagens (confirmada pelo usuário), e um commit novo com bump de versão (`6c55cf6`) que gerou um build novo e bem-sucedido segundo o dashboard do Vercel. Essa persistência era o sinal de que não era cache — mas só ficou claro depois.
+   - **Hipótese 3 (confirmada com evidência direta, a causa real):** o usuário questionou a teoria de cache e pediu prova objetiva. Extraindo o bundle publicado e localizando a linha exata da chamada `setOptions({key:..., v:"weekly"})` (a assinatura do `@googlemaps/js-api-loader`), o valor gravado era `AIzaSyBR8Kw7...` — a chave do **Firebase**, não a do Maps. A variável `VITE_GOOGLE_MAPS_API_KEY` no Vercel continha, por engano, o valor errado. Como o Vite grava env vars em tempo de build, **todo rebuild gerava o mesmo arquivo byte a byte** (mesmo hash) porque a entrada nunca mudava — não havia cache nenhum travado, o build sempre esteve correto para o valor que realmente estava salvo.
+6. Usuário corrigiu o valor da variável no Vercel (não deu para conferir o valor anterior — variáveis "Confidenciais" no Vercel são só-escrita, não expõem o valor salvo) e redeployou.
+7. **Teste decisivo:** hash do bundle mudou (`BNk94rv5` → `BxVjSjiS`) e a chave extraída do novo bundle já é a correta (`AIzaSyDRlpz...`). Confirma a hipótese 3 de forma conclusiva.
+
+**Verificação final em produção (Playwright, URLs reais):**
+- `.gm-style` presente — Google Maps renderizando
+- 6 marcadores SVG customizados no DOM
+- Zero erro de console relacionado a maps/API — só o `404` esperado de `/rides/current` (usuário de teste sem corrida ativa, mesmo padrão já visto durante toda a migração)
+- Screenshot confirma visualmente: mapa completo, pin de pickup correto, mesma UI validada localmente na Etapa 6
+
+**Limpeza:** revertida uma mudança de CORS (`FRONTEND_URL_ALT` em `app.js`/`socket.js`) que tinha sido preparada para um plano B (domínio alternativo) que acabou não sendo necessário — não fazia sentido manter código para um workaround que não foi usado.
+
+**Pendente, fora do escopo técnico:** remover `leaflet` do `package.json` — decisão de quando fazer o corte final fica com o usuário, após um período de observação real em produção.

@@ -38,7 +38,9 @@ module.exports.createRide = async (req, res) => {
         console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
         const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
-        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, 50000, TRACE_ID);
+        // 15km: raio de busca de motoristas a partir do ponto de embarque.
+        const CAPTAIN_SEARCH_RADIUS_KM = 15;
+        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, CAPTAIN_SEARCH_RADIUS_KM, TRACE_ID);
         
         console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
         console.log(`[AUDIT][${TRACE_ID}] Captains no raio inicial:`, captainsInRadius.length);
@@ -50,10 +52,8 @@ module.exports.createRide = async (req, res) => {
                 return false;
             }
             const capType = captain.vehicle.vehicleType;
-            const isMatch = capType === vehicleType || 
-                   (vehicleType === 'moto' && capType === 'motorcycle') ||
-                   (vehicleType === 'motorcycle' && capType === 'moto');
-                   
+            const isMatch = capType === vehicleType;
+
             if (!isMatch) {
                 console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
             } else {
@@ -355,7 +355,9 @@ module.exports.getRideHistory = async (req, res) => {
             } else if (status === 'cancelled') {
                 query.status = 'cancelled';
             } else if (status === 'ongoing') {
-                query.status = { $in: ['pending', 'accepted', 'ongoing'] };
+                // 'pending'/'ongoing' nunca existiram no enum de ride.status — o filtro só
+                // pegava 'accepted' de fato, perdendo corridas indo/chegando/em viagem.
+                query.status = { $in: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'] };
             }
         }
 
@@ -426,5 +428,26 @@ module.exports.cancelRide = async (req, res) => {
         return res.status(200).json(ride);
     } catch (err) {
         return res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports.submitReview = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId, rating, comment, issueCategory } = req.body;
+
+    try {
+        const review = await rideService.submitReview({
+            rideId, user: req.user._id, rating, comment, issueCategory
+        });
+        return res.status(201).json(review);
+    } catch (err) {
+        if (err.message === 'Ride already reviewed') {
+            return res.status(409).json({ message: 'Você já avaliou esta corrida.' });
+        }
+        return res.status(400).json({ message: err.message });
     }
 }

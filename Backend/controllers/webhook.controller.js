@@ -4,6 +4,16 @@ const walletService = require('../services/wallet.service');
 
 module.exports.handleAsaasWebhook = async (req, res) => {
     try {
+        // Sem essa validação, qualquer POST externo com um paymentId/asaasInvoiceId
+        // conhecido creditava carteira ou marcava corrida como paga (M11 na auditoria).
+        // O Asaas reenvia de volta o token configurado no painel no header abaixo.
+        const receivedToken = req.headers['asaas-access-token'];
+        const expectedToken = process.env.ASAAS_WEBHOOK_TOKEN;
+        if (!expectedToken || receivedToken !== expectedToken) {
+            console.warn('[Webhook Asaas] Requisição rejeitada: token ausente ou inválido.');
+            return res.status(401).send('Unauthorized');
+        }
+
         const event = req.body;
 
         if (!event || !event.event) {

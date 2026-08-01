@@ -67,6 +67,7 @@ router.get('/captains/:id/financial-history', authAdmin, authorizeRoles('super_a
 // Tariffs & Pricing Engine
 router.get('/tariffs', authAdmin, adminController.getTariffs);
 router.get('/vehicle-categories', authAdmin, adminController.getVehicleCategories);
+router.post('/vehicle-categories', authAdmin, authorizeRoles('super_admin'), adminController.createVehicleCategory);
 router.put('/settings/tariffs', authAdmin, authorizeRoles('super_admin'), adminController.updateTariff);
 router.put('/vehicle-categories/:id/tariffs', authAdmin, authorizeRoles('super_admin'), adminController.updateVehicleCategory);
 router.post('/vehicle-categories/:id/duplicate', authAdmin, authorizeRoles('super_admin'), adminController.duplicateCategory);

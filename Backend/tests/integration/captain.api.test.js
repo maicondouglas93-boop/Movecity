@@ -1,13 +1,18 @@
 const request = require('supertest');
 const app = require('../../app');
 const captainModel = require('../../models/captain.model');
+const vehicleCategoryModel = require('../../models/vehicleCategory.model');
 const { generateAuthToken } = require('../setup/authHelper');
 const { createCaptain } = require('../factories/captain.factory');
 
 describe('Captain API Integration Tests', () => {
-    
+
     describe('POST /captains/register', () => {
         it('should register a new captain successfully', async () => {
+            // Cadastro exige que o vehicleType corresponda a uma categoria ativa real
+            // (categorias agora são 100% dinâmicas, sem enum fixo — ver A2 na auditoria).
+            await vehicleCategoryModel.create({ name: 'car', displayName: 'Carro', isActive: true });
+
             const res = await request(app)
                 .post('/captains/register')
                 .send({

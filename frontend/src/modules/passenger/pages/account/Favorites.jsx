@@ -6,6 +6,7 @@ const Favorites = () => {
     const navigate = useNavigate();
     const [favorites, setFavorites] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     useEffect(() => {
         const fetchFavorites = async () => {
@@ -15,7 +16,8 @@ const Favorites = () => {
                 });
                 setFavorites(response.data.favorites || []);
             } catch (error) {
-                setFavorites([]);
+                // A rota /users/favorites ainda não existe no backend.
+                setLoadError(true);
             } finally {
                 setLoading(false);
             }
@@ -66,6 +68,11 @@ const Favorites = () => {
                 {loading ? (
                     <div className="flex justify-center my-10">
                         <i className="ri-loader-4-line text-2xl animate-spin text-gray-400"></i>
+                    </div>
+                ) : loadError ? (
+                    <div className="text-center py-6 flex flex-col items-center border-2 border-dashed border-red-200 rounded-xl">
+                        <i className="ri-error-warning-line text-3xl text-red-300 mb-2"></i>
+                        <p className="text-sm text-gray-500">Não foi possível carregar seus locais salvos.</p>
                     </div>
                 ) : favorites.length > 0 ? (
                     <div className="flex flex-col gap-3">

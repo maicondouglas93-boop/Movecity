@@ -7,6 +7,7 @@ import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 import { useToast } from '@/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
+import { submitReview } from '@/services/reviewApi'
 
 const Riding = () => {
     const location = useLocation()
@@ -17,17 +18,15 @@ const Riding = () => {
     const { addToast } = useToast()
 
     const [ showPayModal, setShowPayModal ] = useState(false)
-    const [ payMethod, setPayMethod ] = useState('') // 'upi' | 'card' | 'cash'
-    const [ upiId, setUpiId ] = useState('')
-    const [ cardNum, setCardNum ] = useState('')
-    const [ cardName, setCardName ] = useState('')
-    const [ cardExpiry, setCardExpiry ] = useState('')
-    const [ cardCvv, setCardCvv ] = useState('')
+    // 'payment' -> 'rating' -> 'done'. Corridas pagas pela carteira pulam direto pra 'rating'.
+    const [ modalStep, setModalStep ] = useState('payment')
     const [ loading, setLoading ] = useState(false)
-    const [ paid, setPaid ] = useState(false)
     const [ error, setError ] = useState('')
     const [ isChatOpen, setIsChatOpen ] = useState(false)
     const [ unreadCount, setUnreadCount ] = useState(0)
+    const [ ratingValue, setRatingValue ] = useState(0)
+    const [ ratingComment, setRatingComment ] = useState('')
+    const [ submittingReview, setSubmittingReview ] = useState(false)
 
     useEffect(() => {
         if (!user || !user._id) return;
@@ -49,13 +48,21 @@ const Riding = () => {
 
     useEffect(() => {
         const handleRideEnded = () => {
+            // Corrida paga pela carteira: o valor já foi debitado na solicitação, não
+            // há nada a "acertar" — vai direto para a avaliação do motorista.
+            if (ride?.paymentMethod === 'carteira') {
+                setModalStep('rating')
+                addToast('Viagem concluída! Que tal avaliar o motorista?', 'money', 6000)
+            } else {
+                setModalStep('payment')
+                addToast(
+                    `Viagem concluída! Pague R$${ride?.fare}`,
+                    'money',
+                    6000,
+                    'Escolha sua forma de pagamento abaixo'
+                )
+            }
             setShowPayModal(true)
-            addToast(
-                `Viagem concluída! Pague R$${ride?.fare}`,
-                'money',
-                6000,
-                'Escolha sua forma de pagamento abaixo'
-            )
         }
         
         const handleReceiveMessage = (msg) => {
@@ -100,18 +107,11 @@ const Riding = () => {
         if (ride?._id) fetchUnread();
     }, [ride])
 
-    async function handlePay() {
+    // O acerto (dinheiro ou pix) é feito diretamente com o motorista — o app não
+    // processa nenhum pagamento. Este botão só avisa o motorista que o passageiro
+    // confirma ter pago, para ele liberar a corrida do lado dele.
+    async function handleConfirmPayment() {
         setError('')
-        if (payMethod === 'upi' && !upiId.includes('@')) {
-            return setError('Enter a valid UPI ID (e.g. name@upi)')
-        }
-        if (payMethod === 'card') {
-            if (cardNum.replace(/\s/g, '').length < 16) return setError('Enter a valid 16-digit card number')
-            if (!cardName.trim()) return setError('Enter cardholder name')
-            if (!cardExpiry.match(/^\d{2}\/\d{2}$/)) return setError('Enter expiry as MM/YY')
-            if (cardCvv.length < 3) return setError('Enter a valid CVV')
-        }
-
         setLoading(true)
         try {
             await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
@@ -119,23 +119,27 @@ const Riding = () => {
             }, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
             })
-            setPaid(true)
-            addToast('Pagamento concluído! Obrigado 🙏', 'success', 5000, 'Esperamos que tenha gostado da viagem')
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('Pagamento Confirmado! ✅', {
-                    body: `R$${ride?.fare} pago. Obrigado por viajar com a MoveCity!`,
-                    icon: '/movecity-icon.jpg'
-                })
-            }
+            setModalStep('rating')
         } catch (err) {
-            setError(err.response?.data?.message || 'Payment failed. Please try again.')
+            setError(err.response?.data?.message || 'Não foi possível confirmar. Tente novamente.')
         } finally {
             setLoading(false)
         }
     }
 
-    function formatCardNum(val) {
-        return val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
+    async function handleSubmitReview() {
+        if (!ratingValue) return
+        setError('')
+        setSubmittingReview(true)
+        try {
+            await submitReview({ rideId: ride._id, rating: ratingValue, comment: ratingComment })
+        } catch (err) {
+            // Não bloqueia o fim do fluxo por causa da avaliação — só avisa.
+            addToast(err.response?.data?.message || 'Não foi possível enviar a avaliação.', 'error')
+        } finally {
+            setSubmittingReview(false)
+            setModalStep('done')
+        }
     }
 
     return (
@@ -193,137 +197,45 @@ const Riding = () => {
                     </div>
                 </div>
 
-                <button
-                    onClick={() => setShowPayModal(true)}
-                    className='w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
-                >Fazer Pagamento</button>
+                {ride?.paymentMethod === 'carteira' ? (
+                    <div className='flex flex-col gap-2 mt-4'>
+                        <div className='w-full bg-green-50 border border-green-200 text-green-700 font-semibold p-3 rounded-xl text-center flex items-center justify-center gap-2'>
+                            <i className="ri-checkbox-circle-fill"></i> Já pago pela carteira
+                        </div>
+                        <button
+                            onClick={() => { setModalStep('rating'); setShowPayModal(true) }}
+                            className='w-full bg-white border-2 border-green-500 text-green-600 font-semibold p-3 rounded-xl transition-colors hover:bg-green-50'
+                        >Avaliar Motorista</button>
+                    </div>
+                ) : (
+                    <button
+                        onClick={() => { setModalStep('payment'); setShowPayModal(true) }}
+                        className='w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
+                    >Acertar Pagamento</button>
+                )}
             </div>
 
-            {/* ── Payment Modal ── */}
+            {/* ── Modal pós-corrida: 'payment' -> 'rating' -> 'done' ── */}
             {showPayModal && (
                 <div className='fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm'>
                     <div className='w-full max-w-md bg-white rounded-t-3xl px-6 py-8 shadow-2xl animate-slide-up'>
 
-                        {paid ? (
-                            /* Success Screen */
-                            <div className='flex flex-col items-center py-6'>
-                                <div className='h-20 w-20 rounded-full bg-green-100 flex items-center justify-center mb-4'>
-                                    <i className="ri-checkbox-circle-fill text-5xl text-green-500"></i>
-                                </div>
-                                <h2 className='text-2xl font-bold text-gray-800 mb-1'>Pagamento Concluído!</h2>
-                                <p className='text-gray-500 mb-2'>R$${ride?.fare} pagos com sucesso</p>
-                                <p className='text-xs text-gray-400 mb-8'>Obrigado por viajar conosco 🙏</p>
-                                <button
-                                    onClick={() => navigate('/home')}
-                                    className='w-full bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
-                                >
-                                    Voltar ao Início
-                                </button>
-                            </div>
-                        ) : (
+                        {modalStep === 'payment' && (
                             <>
                                 <div className='flex justify-between items-center mb-6'>
-                                    <h2 className='text-2xl font-bold text-gray-800'>Pagar R$${ride?.fare}</h2>
+                                    <h2 className='text-2xl font-bold text-gray-800'>Acertar R${ride?.fare}</h2>
                                     <button onClick={() => setShowPayModal(false)}>
                                         <i className="ri-close-line text-2xl text-gray-500"></i>
                                     </button>
                                 </div>
 
-                                {/* Payment Method Selector */}
-                                <div className='flex gap-3 mb-6'>
-                                    {[
-                                        { id: 'upi', icon: 'ri-qr-code-line', label: 'Pix/UPI' },
-                                        { id: 'card', icon: 'ri-bank-card-line', label: 'Cartão' },
-                                        { id: 'cash', icon: 'ri-money-rupee-circle-line', label: 'Dinheiro' }
-                                    ].map(m => (
-                                        <button
-                                            key={m.id}
-                                            onClick={() => { setPayMethod(m.id); setError('') }}
-                                            className={`flex-1 flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
-                                                payMethod === m.id
-                                                    ? 'border-green-500 bg-green-50 text-green-700'
-                                                    : 'border-gray-200 text-gray-500'
-                                            }`}
-                                        >
-                                            <i className={`${m.icon} text-2xl`}></i>
-                                            <span className='text-xs font-semibold'>{m.label}</span>
-                                        </button>
-                                    ))}
+                                <div className='bg-yellow-50 border border-yellow-300 rounded-xl p-4 mb-6 flex gap-3 items-center'>
+                                    <i className="ri-information-line text-yellow-500 text-xl"></i>
+                                    <p className='text-sm text-yellow-700'>
+                                        Pague <strong>R${ride?.fare}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
+                                    </p>
                                 </div>
 
-                                {/* UPI Form */}
-                                {payMethod === 'upi' && (
-                                    <div className='mb-4'>
-                                        <label className='block text-sm font-medium text-gray-600 mb-1'>UPI ID</label>
-                                        <input
-                                            value={upiId}
-                                            onChange={e => setUpiId(e.target.value)}
-                                            placeholder='yourname@upi'
-                                            className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none'
-                                        />
-                                    </div>
-                                )}
-
-                                {/* Card Form */}
-                                {payMethod === 'card' && (
-                                    <div className='space-y-3 mb-4'>
-                                        <div>
-                                            <label className='block text-sm font-medium text-gray-600 mb-1'>Card Number</label>
-                                            <input
-                                                value={cardNum}
-                                                onChange={e => setCardNum(formatCardNum(e.target.value))}
-                                                placeholder='1234 5678 9012 3456'
-                                                maxLength={19}
-                                                className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base tracking-widest focus:border-green-400 focus:outline-none'
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className='block text-sm font-medium text-gray-600 mb-1'>Cardholder Name</label>
-                                            <input
-                                                value={cardName}
-                                                onChange={e => setCardName(e.target.value)}
-                                                placeholder='John Doe'
-                                                className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none'
-                                            />
-                                        </div>
-                                        <div className='flex gap-3'>
-                                            <div className='flex-1'>
-                                                <label className='block text-sm font-medium text-gray-600 mb-1'>Expiry</label>
-                                                <input
-                                                    value={cardExpiry}
-                                                    onChange={e => {
-                                                        const v = e.target.value.replace(/\D/g, '').slice(0,4)
-                                                        setCardExpiry(v.length > 2 ? v.slice(0,2) + '/' + v.slice(2) : v)
-                                                    }}
-                                                    placeholder='MM/YY'
-                                                    maxLength={5}
-                                                    className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none'
-                                                />
-                                            </div>
-                                            <div className='flex-1'>
-                                                <label className='block text-sm font-medium text-gray-600 mb-1'>CVV</label>
-                                                <input
-                                                    value={cardCvv}
-                                                    onChange={e => setCardCvv(e.target.value.replace(/\D/g, '').slice(0,4))}
-                                                    placeholder='•••'
-                                                    maxLength={4}
-                                                    type='senha'
-                                                    className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none'
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Cash Note */}
-                                {payMethod === 'cash' && (
-                                    <div className='bg-yellow-50 border border-yellow-300 rounded-xl p-4 mb-4 flex gap-3 items-center'>
-                                        <i className="ri-information-line text-yellow-500 text-xl"></i>
-                                        <p className='text-sm text-yellow-700'>Por favor, pague <strong>R$${ride?.fare}</strong> em dinheiro ao motorista.</p>
-                                    </div>
-                                )}
-
-                                {/* Error */}
                                 {error && (
                                     <div className='bg-red-50 border border-red-300 rounded-xl p-3 mb-4 flex gap-2 items-center'>
                                         <i className="ri-error-warning-line text-red-500"></i>
@@ -331,27 +243,89 @@ const Riding = () => {
                                     </div>
                                 )}
 
-                                {/* Pay Button */}
-                                {payMethod && (
-                                    <button
-                                        onClick={handlePay}
-                                        disabled={loading}
-                                        className='w-full bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-4 rounded-xl text-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-500/20'
-                                    >
-                                        {loading ? (
-                                            <>
-                                                <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                                                </svg>
-                                                Processing...
-                                            </>
-                                        ) : (
-                                            `Pagar R$${ride?.fare}`
-                                        )}
-                                    </button>
-                                )}
+                                <button
+                                    onClick={handleConfirmPayment}
+                                    disabled={loading}
+                                    className='w-full bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-4 rounded-xl text-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-500/20'
+                                >
+                                    {loading ? (
+                                        <>
+                                            <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                            </svg>
+                                            Enviando...
+                                        </>
+                                    ) : (
+                                        'Já paguei o motorista'
+                                    )}
+                                </button>
                             </>
+                        )}
+
+                        {modalStep === 'rating' && (
+                            <>
+                                <div className='flex justify-between items-center mb-2'>
+                                    <h2 className='text-2xl font-bold text-gray-800'>Avalie a corrida</h2>
+                                    <button onClick={() => setShowPayModal(false)}>
+                                        <i className="ri-close-line text-2xl text-gray-500"></i>
+                                    </button>
+                                </div>
+                                <p className='text-sm text-gray-500 mb-5'>
+                                    Como foi sua viagem com {ride?.captain?.fullname?.firstname || 'o motorista'}?
+                                </p>
+
+                                <div className='flex justify-center gap-2 mb-5'>
+                                    {[1, 2, 3, 4, 5].map(star => (
+                                        <button
+                                            key={star}
+                                            type='button'
+                                            onClick={() => setRatingValue(star)}
+                                            className='p-1'
+                                        >
+                                            <i className={`text-4xl ${star <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-gray-300'}`}></i>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <textarea
+                                    value={ratingComment}
+                                    onChange={e => setRatingComment(e.target.value)}
+                                    placeholder='Deixe um comentário (opcional)'
+                                    rows={3}
+                                    className='w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base focus:border-green-400 focus:outline-none mb-5 resize-none'
+                                />
+
+                                <button
+                                    onClick={handleSubmitReview}
+                                    disabled={!ratingValue || submittingReview}
+                                    className='w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-bold p-4 rounded-xl text-lg transition-all shadow-lg shadow-green-500/20 mb-2'
+                                >
+                                    {submittingReview ? 'Enviando...' : 'Enviar Avaliação'}
+                                </button>
+                                <button
+                                    onClick={() => setModalStep('done')}
+                                    className='w-full text-gray-500 font-medium p-2'
+                                >
+                                    Pular
+                                </button>
+                            </>
+                        )}
+
+                        {modalStep === 'done' && (
+                            <div className='flex flex-col items-center py-6'>
+                                <div className='h-20 w-20 rounded-full bg-green-100 flex items-center justify-center mb-4'>
+                                    <i className="ri-checkbox-circle-fill text-5xl text-green-500"></i>
+                                </div>
+                                <h2 className='text-2xl font-bold text-gray-800 mb-1'>Tudo certo!</h2>
+                                <p className='text-gray-500 mb-8'>Obrigado por viajar conosco 🙏</p>
+                                <button
+                                    onClick={() => navigate('/home')}
+                                    className='w-full bg-green-500 hover:bg-green-600 text-white font-semibold p-3 rounded-xl text-lg transition-colors shadow-lg shadow-green-500/20'
+                                >
+                                    Voltar ao Início
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>

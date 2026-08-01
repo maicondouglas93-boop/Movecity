@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { Save, Copy, RotateCcw, CalendarClock, Beaker, FileSearch } from 'lucide-react';
+import { Save, Copy, RotateCcw, CalendarClock, Beaker, FileSearch, Plus, X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 
 import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
@@ -22,6 +22,7 @@ const fetchVehicleCategories = async () => {
 export default function Tariffs() {
   const [activeTab, setActiveTab] = useState('general');
   const [testMode, setTestMode] = useState(false);
+  const [newCategoryModalOpen, setNewCategoryModalOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: globalSettings, isLoading: loadingGlobal } = useQuery({
@@ -95,7 +96,24 @@ export default function Tariffs() {
             {!cat.isActive && <span className="w-2 h-2 rounded-full bg-danger"></span>}
           </button>
         ))}
+        <button
+          onClick={() => setNewCategoryModalOpen(true)}
+          className="px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 border-transparent text-primary hover:text-primary-hover flex items-center gap-1.5"
+        >
+          <Plus className="w-4 h-4" /> Nova Categoria
+        </button>
       </div>
+
+      {newCategoryModalOpen && (
+        <NewCategoryModal
+          onClose={() => setNewCategoryModalOpen(false)}
+          onCreated={(newCat) => {
+            queryClient.invalidateQueries(['vehicleCategories']);
+            setActiveTab(newCat._id);
+            setNewCategoryModalOpen(false);
+          }}
+        />
+      )}
 
       {/* Tab Content */}
       <div className="mt-6">
@@ -108,14 +126,19 @@ export default function Tariffs() {
         )}
 
         {activeTab !== 'general' && activeTab !== 'comparison' && categories && (
-          <div className="mt-6">
-            <CategorySettingsCard 
-              key={activeTab}
-              category={categories.find(c => c._id === activeTab)} 
-              queryClient={queryClient} 
-              testMode={testMode}
-            />
-          </div>
+          categories.find(c => c._id === activeTab) ? (
+            <div className="mt-6">
+              <CategorySettingsCard
+                key={activeTab}
+                category={categories.find(c => c._id === activeTab)}
+                queryClient={queryClient}
+                testMode={testMode}
+                platformCommission={globalSettings?.platformCommission}
+              />
+            </div>
+          ) : (
+            <div className="text-text-muted mt-6">Carregando categoria...</div>
+          )
         )}
       </div>
     </div>
@@ -130,7 +153,10 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       maxFreeWaitTime: settings.maxFreeWaitTime,
       dynamicPricingStatus: settings.dynamicPricingStatus,
       currentMultiplier: settings.currentMultiplier,
-      manualRainFee: settings.manualRainFee
+      manualRainFee: settings.manualRainFee,
+      platformCommission: settings.platformCommission,
+      cardFeePercent: settings.cardFeePercent,
+      cardFeeFixed: settings.cardFeeFixed
     }
   });
 
@@ -176,6 +202,18 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
           <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador Global</label>
           <input type="number" step="0.1" min="1" {...register('currentMultiplier')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
         </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Comissão da Plataforma (%)</label>
+          <input type="number" step="0.1" min="0" max="100" {...register('platformCommission')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cartão (%)</label>
+          <input type="number" step="0.01" min="0" {...register('cardFeePercent')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cartão Fixa (R$)</label>
+          <input type="number" step="0.01" min="0" {...register('cardFeeFixed')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
         <div className="flex items-center mt-6">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" {...register('manualRainFee')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
@@ -198,12 +236,16 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
   );
 }
 
-function CategorySettingsCard({ category, queryClient, testMode }) {
+function CategorySettingsCard({ category, queryClient, testMode, platformCommission }) {
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   
   const { register, handleSubmit, watch, reset, getValues, formState: { isSubmitting, isDirty } } = useForm({
     defaultValues: {
+      displayName: category.displayName,
+      description: category.description || '',
+      capacity: category.capacity ?? 4,
+      iconKey: category.iconKey || 'car',
       baseFare: category.baseFare,
       perKmRate: category.perKmRate,
       perMinuteRate: category.perMinuteRate,
@@ -277,6 +319,29 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
               </label>
             </div>
             
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 border-b border-border">
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição (passageiro vê este nome)</label>
+                <input type="text" {...register('displayName', { required: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Lotação (passageiros)</label>
+                <input type="number" step="1" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-text-muted mb-1">Descrição (subtítulo exibido ao passageiro)</label>
+                <input type="text" {...register('description')} placeholder="Ex: Viagens diárias econômicas" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Ícone do Veículo</label>
+                <select {...register('iconKey')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
+                  <option value="car">Carro</option>
+                  <option value="moto">Moto</option>
+                  <option value="auto">Auto/TukTuk</option>
+                </select>
+              </div>
+            </div>
+
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1">
               <div>
                 <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Base (R$)</label>
@@ -341,7 +406,7 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
         </div>
         
         <div className="lg:col-span-1 xl:col-span-1">
-          <TariffAdvancedSimulator values={liveValues} platformCommission={15} />
+          <TariffAdvancedSimulator values={liveValues} platformCommission={platformCommission ?? 0} />
         </div>
       </div>
 
@@ -400,5 +465,98 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
         </div>
       )}
     </>
+  );
+}
+
+function NewCategoryModal({ onClose, onCreated }) {
+  const { register, handleSubmit, formState: { isSubmitting, errors } } = useForm({
+    defaultValues: { name: '', displayName: '', description: '', capacity: 4, iconKey: 'car' }
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await api.post('/admin/vehicle-categories', data);
+      return res.data;
+    },
+    onSuccess: (newCat) => {
+      onCreated(newCat);
+    },
+    onError: (err) => {
+      alert(err.response?.data?.message || 'Erro ao criar categoria');
+    }
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-surface rounded-xl border border-border w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+        <div className="p-5 border-b border-border bg-background/50 flex justify-between items-center">
+          <div>
+            <h2 className="font-semibold text-lg text-text">Nova Categoria de Veículo</h2>
+            <p className="text-sm text-text-muted">Ela aparecerá para o passageiro assim que salva.</p>
+          </div>
+          <button onClick={onClose} className="text-text-muted hover:text-text">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit((data) => createMutation.mutate(data))} className="p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome interno (sem espaços, ex: van)</label>
+            <input
+              type="text"
+              {...register('name', { required: true, pattern: /^[a-z0-9_]+$/ })}
+              placeholder="van"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
+            />
+            {errors.name && <p className="text-xs text-danger mt-1">Use apenas letras minúsculas, números e "_", sem espaços.</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição</label>
+            <input
+              type="text"
+              {...register('displayName', { required: true })}
+              placeholder="Ex: MoveVan"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Descrição</label>
+            <input
+              type="text"
+              {...register('description')}
+              placeholder="Ex: Vans para grupos"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Lotação</label>
+              <input type="number" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Ícone</label>
+              <select {...register('iconKey')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
+                <option value="car">Carro</option>
+                <option value="moto">Moto</option>
+                <option value="auto">Auto/TukTuk</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-text-muted">Tarifas (base, por km, por minuto) começam com valores padrão — ajuste na aba da categoria depois de criada.</p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-text-muted hover:text-text font-medium transition-colors">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              {isSubmitting ? 'Criando...' : 'Criar Categoria'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

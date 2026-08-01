@@ -20,6 +20,11 @@ module.exports.registerCaptain = async (req, res, next) => {
         return res.status(400).json({ message: 'Captain already exist' });
     }
 
+    const vehicleCategoryModel = require('../models/vehicleCategory.model');
+    const category = await vehicleCategoryModel.findOne({ name: vehicle.vehicleType, isActive: true });
+    if (!category) {
+        return res.status(400).json({ message: 'Categoria de veículo inválida' });
+    }
 
     const hashedPassword = await captainModel.hashPassword(password);
 
@@ -130,25 +135,13 @@ module.exports.getTransactions = async (req, res, next) => {
 }
 
 module.exports.rechargeWallet = async (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { amount } = req.body;
-    try {
-        const walletService = require('../services/wallet.service');
-        const result = await walletService.createTransaction({
-            captainId: req.captain._id,
-            type: 'recharge',
-            paymentMethod: 'pix',
-            amount: parseFloat(amount),
-            description: 'Recarga de carteira via PIX'
-        });
-        res.status(200).json(result);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    // Bloqueado propositalmente: este endpoint creditava saldo real sem nenhuma cobrança
+    // de fato acontecer (o "QR Code PIX" no app era só um ícone estático, e "Simular
+    // Pagamento Pago" chamava direto esta rota). Fica desativado até existir integração
+    // real com gateway de pagamento (Asaas) confirmando o recebimento antes de creditar.
+    return res.status(501).json({
+        message: 'Recarga automática de carteira está temporariamente indisponível. Entre em contato com o suporte para adicionar créditos.'
+    });
 }
 
 module.exports.toggleOnline = async (req, res, next) => {
@@ -160,6 +153,10 @@ module.exports.toggleOnline = async (req, res, next) => {
 
     try {
         if (isOnline) {
+            if (req.captain.approvalStatus !== 'aprovado') {
+                return res.status(403).json({ message: 'Seu cadastro ainda não foi aprovado. Você não pode ficar online até a aprovação.' });
+            }
+
             const walletService = require('../services/wallet.service');
             const wallet = await walletService.getWallet(req.captain._id);
             if (wallet.creditBalance < 0) {
@@ -167,11 +164,20 @@ module.exports.toggleOnline = async (req, res, next) => {
             }
         }
 
+        const captainService = require('../services/captain.service');
+        // Tempo online real: começa/fecha a sessão ANTES de ler o estado anterior de
+        // isOnline, para não contar duas sessões abertas se o app chamar toggle 2x seguidas.
+        if (isOnline && !req.captain.isOnline) {
+            await captainService.startOnlineSession(req.captain._id);
+        } else if (!isOnline && req.captain.isOnline) {
+            await captainService.endOnlineSession(req.captain._id);
+        }
+
         const captain = await captainModel.findByIdAndUpdate(req.captain._id, { isOnline, status: isOnline ? 'active' : 'inactive' }, { new: true });
-        
+
         deleteByPrefix(`profile:captain:${req.captain._id}`);
         deleteByPrefix(`drivers:`); // clear drivers cache since online status changed
-        
+
         res.status(200).json({ captain });
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -188,8 +194,10 @@ module.exports.getSummary = async (req, res, next) => {
         }
 
         const walletService = require('../services/wallet.service');
+        const captainService = require('../services/captain.service');
         const rideModel = require('../models/ride.model');
         const wallet = await walletService.getWallet(req.captain._id);
+        const todayOnlineSeconds = await captainService.getTodayOnlineSeconds(req.captain._id);
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -217,7 +225,7 @@ module.exports.getSummary = async (req, res, next) => {
             commissions: parseFloat(commissions.toFixed(2)),
             walletBalance: wallet.creditBalance,
             walletBlocked: wallet.pendingBalance || 0,
-            onlineTime: "05:32", // Mocked or calculated if we store session time
+            onlineTimeSeconds: todayOnlineSeconds, // tempo online real de hoje, calculado a partir de onlineSince
             rating: req.captain.rating || 5.0,
             acceptanceRate: req.captain.acceptanceRate || 100,
             cancelledRides: req.captain.cancelledRides || 0

@@ -74,13 +74,19 @@ const Activity = () => {
         return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
 
+    // Valores reais de ride.status (Backend/models/ride.model.js) — 'completed'/'ongoing'/
+    // 'pending' nunca existiram no enum, por isso corridas finalizadas sempre caíam no
+    // default e mostravam a string crua "finished" em vez de um rótulo amigável.
     const getStatusText = (status) => {
         switch (status) {
-            case 'completed': return { text: 'Finalizada', color: 'text-green-600', bg: 'bg-green-100' };
+            case 'finished': return { text: 'Finalizada', color: 'text-green-600', bg: 'bg-green-100' };
             case 'cancelled': return { text: 'Cancelada', color: 'text-red-600', bg: 'bg-red-100' };
+            case 'requested': return { text: 'Buscando motorista', color: 'text-yellow-600', bg: 'bg-yellow-100' };
             case 'accepted':
-            case 'ongoing': return { text: 'Em andamento', color: 'text-blue-600', bg: 'bg-blue-100' };
-            case 'pending': return { text: 'Pendente', color: 'text-yellow-600', bg: 'bg-yellow-100' };
+            case 'going_to_pickup': return { text: 'Motorista a caminho', color: 'text-blue-600', bg: 'bg-blue-100' };
+            case 'arrived':
+            case 'waiting_passenger': return { text: 'Motorista chegou', color: 'text-blue-600', bg: 'bg-blue-100' };
+            case 'started': return { text: 'Em andamento', color: 'text-blue-600', bg: 'bg-blue-100' };
             default: return { text: status, color: 'text-gray-600', bg: 'bg-gray-100' };
         }
     };

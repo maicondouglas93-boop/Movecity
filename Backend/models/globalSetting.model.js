@@ -21,11 +21,6 @@ const globalSettingSchema = new mongoose.Schema({
         required: true,
         default: 0.5
     },
-    cancellationFee: {
-        type: Number,
-        required: true,
-        default: 4.0
-    },
     vehicleTypes: {
         type: [String],
         default: ['car', 'moto', 'auto']

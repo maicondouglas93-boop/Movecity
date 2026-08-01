@@ -7,6 +7,41 @@ const Coupon = require('../models/coupon.model');
 class PricingEngine {
     
     /**
+     * Monta um snapshot congelado da configuração de tarifa/comissão pra uma categoria —
+     * P2.2 da auditoria de concorrência (2026-08-02). Guardado na corrida no momento da
+     * criação (`createRide`) e reutilizado no fim da corrida (`endRide`) pra recalcular o
+     * preço final só com base na distância/tempo reais, sem sofrer efeito de mudanças de
+     * tarifa/comissão feitas pelo admin enquanto a corrida já estava em andamento.
+     * @param {Object} params
+     * @param {String} params.vehicleType Nome da categoria (ex: 'car')
+     * @returns {Object} snapshot pronto pra passar como `configSnapshot` em calculateFare
+     */
+    static async buildConfigSnapshot({ vehicleType }) {
+        const [tariffSetting, globalSetting, category, rules] = await PricingEngine._fetchLiveConfig(vehicleType);
+
+        if (!category) {
+            throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
+        }
+
+        return {
+            tariffSetting: tariffSetting ? tariffSetting.toObject() : {},
+            globalSetting: globalSetting ? globalSetting.toObject() : { platformCommission: 20, cardFeePercent: 0, cardFeeFixed: 0 },
+            category: category.toObject(),
+            rules: rules.map(r => r.toObject()),
+            capturedAt: new Date()
+        };
+    }
+
+    static async _fetchLiveConfig(vehicleType) {
+        return Promise.all([
+            TariffSetting.findOne(),
+            GlobalSetting.findOne(),
+            VehicleCategory.findOne({ name: vehicleType, isActive: true }),
+            PricingRule.find({ isActive: true }).sort({ priority: 1 })
+        ]);
+    }
+
+    /**
      * Calcula a tarifa completa da corrida.
      * @param {Object} params
      * @param {Number} params.distance Distância em metros
@@ -15,17 +50,23 @@ class PricingEngine {
      * @param {String} params.paymentMethod (opcional) 'cash', 'card', 'pix'
      * @param {String} params.couponCode (opcional) Código do cupom
      * @param {Date} params.requestDate (opcional) Data da solicitação
+     * @param {Object} params.configSnapshot (opcional) Snapshot de `buildConfigSnapshot` —
+     *   quando presente, usa essa configuração congelada em vez de consultar o banco de
+     *   novo (P2.2 da auditoria de concorrência). Ausente (padrão): comportamento de
+     *   sempre, consulta a configuração vigente — usado pra cotações (`getFare`) e pra
+     *   montar o snapshot inicial em `createRide`.
      * @returns {Object} { finalFare, fareBreakdown, commissionAmount }
      */
-    static async calculateFare({ distance, time, vehicleType, paymentMethod = 'cash', couponCode = null, requestDate = new Date() }) {
-        
-        // 1. Carregar Configurações Globais e do Veículo
-        let [tariffSetting, globalSetting, category, rules] = await Promise.all([
-            TariffSetting.findOne(),
-            GlobalSetting.findOne(),
-            VehicleCategory.findOne({ name: vehicleType, isActive: true }),
-            PricingRule.find({ isActive: true }).sort({ priority: 1 })
-        ]);
+    static async calculateFare({ distance, time, vehicleType, paymentMethod = 'cash', couponCode = null, requestDate = new Date(), configSnapshot = null }) {
+
+        // 1. Carregar Configurações Globais e do Veículo — do snapshot congelado, se vier
+        // um, senão consulta o banco (comportamento de sempre).
+        let tariffSetting, globalSetting, category, rules;
+        if (configSnapshot) {
+            ({ tariffSetting, globalSetting, category, rules } = configSnapshot);
+        } else {
+            [tariffSetting, globalSetting, category, rules] = await PricingEngine._fetchLiveConfig(vehicleType);
+        }
 
         tariffSetting = tariffSetting || {};
         globalSetting = globalSetting || { platformCommission: 20, cardFeePercent: 0, cardFeeFixed: 0 };

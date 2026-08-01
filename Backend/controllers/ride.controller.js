@@ -107,60 +107,27 @@ module.exports.getFare = async (req, res) => {
     }
 }
 
-module.exports.confirmRide = async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { rideId } = req.body;
-
+// Único caminho de aceite (P1.3 da auditoria de concorrência, 2026-08-01) — usado por
+// POST /rides/confirm (rideId no body) e POST /rides/:id/accept (rideId na URL), que
+// antes tinham implementações diferentes: /confirm sobrescrevia sem checar status,
+// permitindo dois motoristas "vencerem" a mesma corrida. Ambas as rotas agora chamam
+// exatamente a mesma lógica atômica.
+async function performAcceptRide(rideId, captain, res) {
+    const TRACE_ID = `Ride:${rideId}`;
     try {
-        const ride = await rideService.confirmRide({ rideId, captain: req.captain });
-
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-confirmed',
-            data: ride
-        })
-        notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() });
-
-        // Delete otp from response sent to captain for security
-        const rideForCaptain = ride.toObject();
-        delete rideForCaptain.otp;
-
-        // Invalidate dashboard cache
-        deleteCache('dashboard:today');
-
-        return res.status(200).json(rideForCaptain);
-    } catch (err) {
-
-        console.log(err);
-        return res.status(500).json({ message: err.message });
-    }
-}
-
-module.exports.acceptRide = async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { id: rideId } = req.params;
-
-    try {
-        const TRACE_ID = `Ride:${rideId}`;
-        console.log(`[AUDIT][${TRACE_ID}] Captain ${req.captain._id} tentando aceitar a corrida.`);
-        const ride = await rideService.acceptRideAtomic({ rideId, captain: req.captain });
-        console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${req.captain._id}.`);
+        console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} tentando aceitar a corrida.`);
+        const ride = await rideService.acceptRideAtomic({ rideId, captain });
+        console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${captain._id}.`);
 
         sendMessageToSocketId(ride.user.socketId, {
             event: 'ride-confirmed',
             data: ride
         });
-        
+
         notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() });
 
-        // Inform other captains that this ride was taken
+        // Avisa os outros motoristas que estavam com essa corrida na tela que ela já foi
+        // aceita por outro colega — fecha o popup deles (listener entra na Etapa P3.1).
         sendMessageToRoom(`ride_${rideId}`, {
             event: 'ride-taken',
             data: { rideId }
@@ -175,7 +142,6 @@ module.exports.acceptRide = async (req, res) => {
 
         return res.status(200).json(rideForCaptain);
     } catch (err) {
-        const TRACE_ID = `Ride:${rideId}`;
         console.error(`[AUDIT][${TRACE_ID}] Falha ao aceitar corrida (Concorrência ou Erro):`, err.message);
         if (err.message === 'RIDE_ALREADY_ACCEPTED') {
             return res.status(409).json({ message: 'Corrida já aceita por outro motorista' });
@@ -183,8 +149,31 @@ module.exports.acceptRide = async (req, res) => {
         if (err.message === 'RIDE_NOT_FOUND') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
         }
+        if (err.message === 'CAPTAIN_ALREADY_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({ message: 'Você já está em outra corrida ativa.' });
+        }
         return res.status(500).json({ message: err.message });
     }
+}
+
+module.exports.confirmRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+    return performAcceptRide(rideId, req.captain, res);
+}
+
+module.exports.acceptRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id: rideId } = req.params;
+    return performAcceptRide(rideId, req.captain, res);
 }
 
 module.exports.startRide = async (req, res) => {
@@ -211,6 +200,15 @@ module.exports.startRide = async (req, res) => {
 
         return res.status(200).json(ride);
     } catch (err) {
+        if (err.message === 'Ride not found') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.message === 'Ride not accepted') {
+            return res.status(409).json({ message: 'Corrida não está mais num estado que permita iniciar (pode ter sido cancelada).' });
+        }
+        if (err.message === 'Invalid OTP') {
+            return res.status(400).json({ message: 'PIN inválido.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -236,6 +234,12 @@ module.exports.updateRideStatus = async (req, res) => {
 
         return res.status(200).json(ride);
     } catch (err) {
+        if (err.message === 'Invalid status') {
+            return res.status(400).json({ message: 'Status inválido para esta ação.' });
+        }
+        if (err.message === 'Ride not found or invalid transition') {
+            return res.status(409).json({ message: 'Corrida não encontrada ou não está mais num estado que permita essa mudança.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -265,6 +269,12 @@ module.exports.endRide = async (req, res) => {
 
         return res.status(200).json(ride);
     } catch (err) {
+        if (err.message === 'Ride not found') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.message === 'Ride not started') {
+            return res.status(409).json({ message: 'Corrida não está mais num estado que permita finalizar.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -328,6 +338,17 @@ module.exports.confirmPaymentReceived = async (req, res) => {
 
         return res.status(200).json(ride);
     } catch (err) {
+        // Pagamento já confirmado é o desfecho esperado de uma corrida (duplo clique,
+        // retry de rede) — 409, não 500, igual ao acceptRide para RIDE_ALREADY_ACCEPTED.
+        if (err.message === 'Payment already confirmed') {
+            return res.status(409).json({ message: 'Este pagamento já foi confirmado.' });
+        }
+        if (err.message === 'Ride not found') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.message === 'Ride not finished yet') {
+            return res.status(409).json({ message: 'Corrida ainda não foi finalizada.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -427,6 +448,12 @@ module.exports.cancelRide = async (req, res) => {
 
         return res.status(200).json(ride);
     } catch (err) {
+        if (err.message === 'Ride not found') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.message === 'Ride cannot be cancelled at this stage') {
+            return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }

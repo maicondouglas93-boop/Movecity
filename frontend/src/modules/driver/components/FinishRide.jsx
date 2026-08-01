@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { db } from '@/services/db'
+import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Avatar from '@/shared/components/Avatar'
@@ -10,6 +10,10 @@ const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
     const [ended, setEnded] = useState(false)
     const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+    // true quando "pago"/"finalizado" é otimista (sem rede) — ainda não confirmado pelo
+    // servidor. A fila offline (P1.2 da auditoria de concorrência) avisa por toast quando
+    // sincronizar de verdade; aqui só evitamos comemorar "Pagamento Confirmado!" antes da hora.
+    const [pendingSync, setPendingSync] = useState(false)
     const navigate = useNavigate()
 
     const commissionAmount = props.ride?.commissionAmount || 0
@@ -35,11 +39,10 @@ const FinishRide = (props) => {
         onError: (err) => {
             console.error('End ride error:', err)
             if (!navigator.onLine || err.message === 'Network Error') {
-                db.offlineActions.add({
+                enqueueOfflineAction({
                     type: 'end-ride',
                     rideId: props.ride._id,
-                    payload: { rideId: props.ride._id },
-                    timestamp: Date.now()
+                    payload: { rideId: props.ride._id }
                 }).catch(e => console.error(e));
                 setEnded(true); // Optimistic
             } else {
@@ -73,13 +76,13 @@ const FinishRide = (props) => {
         onError: (err) => {
             console.error('Confirm payment error:', err)
             if (!navigator.onLine || err.message === 'Network Error') {
-                db.offlineActions.add({
+                enqueueOfflineAction({
                     type: 'confirm-payment',
                     rideId: props.ride._id,
-                    payload: { rideId: props.ride._id },
-                    timestamp: Date.now()
+                    payload: { rideId: props.ride._id }
                 }).catch(e => console.error(e));
                 setPaymentConfirmed(true)
+                setPendingSync(true)
                 setTimeout(() => navigate('/captain-home'), 2500) // Optimistic
             } else {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
@@ -153,11 +156,20 @@ const FinishRide = (props) => {
                 </>
             ) : paymentConfirmed ? (
                 <div className='flex flex-col items-center justify-center py-10 gap-4'>
-                    <div className='bg-green-100 rounded-full p-4'>
-                        <i className="ri-checkbox-circle-fill text-green-500 text-5xl"></i>
+                    <div className={pendingSync ? 'bg-yellow-100 rounded-full p-4' : 'bg-green-100 rounded-full p-4'}>
+                        <i className={pendingSync ? 'ri-time-line text-yellow-600 text-5xl' : 'ri-checkbox-circle-fill text-green-500 text-5xl'}></i>
                     </div>
-                    <h3 className='text-xl font-bold text-green-700'>Pagamento Confirmado!</h3>
-                    <p className='text-gray-500 text-center'>Comissão de R$ {commissionAmount.toFixed(2)} descontada dos créditos.</p>
+                    {pendingSync ? (
+                        <>
+                            <h3 className='text-xl font-bold text-yellow-700'>Pagamento registrado</h3>
+                            <p className='text-gray-500 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar. Comissão prevista de R$ {commissionAmount.toFixed(2)}.</p>
+                        </>
+                    ) : (
+                        <>
+                            <h3 className='text-xl font-bold text-green-700'>Pagamento Confirmado!</h3>
+                            <p className='text-gray-500 text-center'>Comissão de R$ {commissionAmount.toFixed(2)} descontada dos créditos.</p>
+                        </>
+                    )}
                     <p className='text-gray-400 text-sm'>Redirecionando...</p>
                 </div>
             ) : (

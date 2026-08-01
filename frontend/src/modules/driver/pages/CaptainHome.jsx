@@ -16,6 +16,7 @@ import CaptainHeader from '@/modules/driver/components/CaptainHeader'
 import { requestFCMToken } from '@/services/fcm'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
+import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 
 const CaptainHome = () => {
@@ -111,13 +112,27 @@ const CaptainHome = () => {
             }
         }
 
+        // P3.1 da auditoria de concorrência (2026-08-02): emitido desde sempre pelo
+        // backend quando outro motorista aceita a corrida primeiro (ride.controller.js),
+        // mas nenhum frontend escutava — o motorista que perdeu a corrida ficava com o
+        // popup aberto até tocar em algo, sem saber que ela já tinha sido pega.
+        const handleRideTaken = (data) => {
+            if (rideRef.current && rideRef.current._id === data.rideId) {
+                setRidePopupPanel(false)
+                setRide(null)
+                addToast('Essa corrida já foi aceita por outro motorista.', 'info')
+            }
+        }
+
         socket.on('new-ride', handleNewRide)
         socket.on('ride-cancelled', handleRideCancelled)
+        socket.on('ride-taken', handleRideTaken)
 
         return () => {
             socket.off('connect', handleConnect)
             socket.off('new-ride', handleNewRide)
             socket.off('ride-cancelled', handleRideCancelled)
+            socket.off('ride-taken', handleRideTaken)
         }
     }, [captain, socket])
 
@@ -157,10 +172,10 @@ const CaptainHome = () => {
 
     async function confirmRide() {
         try {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm`, {
-                rideId: ride._id,
-                captainId: captain._id,
-            }, {
+            // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
+            // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
+            // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/${ride._id}/accept`, {}, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('captain-token')}`
                 }
@@ -173,14 +188,19 @@ const CaptainHome = () => {
             setConfirmRidePopupPanel(true)
         } catch (err) {
             console.error('Confirm ride error:', err);
-            if (!navigator.onLine || err.code === 'ERR_NETWORK') {
-                db.offlineActions.add({
+            if (err.response?.status === 409) {
+                // Outro motorista já aceitou — desfecho esperado da concorrência, não um
+                // erro de rede. Fecha o popup em vez de deixar o motorista tentando de novo.
+                addToast('Essa corrida já foi aceita por outro motorista.', 'info');
+                setRidePopupPanel(false)
+                setRide(null)
+            } else if (!navigator.onLine || err.code === 'ERR_NETWORK') {
+                enqueueOfflineAction({
                     type: 'accept-ride',
                     rideId: ride._id,
-                    payload: { rideId: ride._id, captainId: captain._id },
-                    timestamp: Date.now()
+                    payload: { rideId: ride._id }
                 }).catch(e => console.error(e));
-                
+
                 // Optimistic UI updates
                 const optimisticRide = { ...ride, status: 'accepted', captain };
                 setRide(optimisticRide);

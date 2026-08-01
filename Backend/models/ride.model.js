@@ -93,6 +93,10 @@ const rideSchema = new mongoose.Schema({
         type: Object,
         description: "Detalhamento de todos os fatores de preço (base, tempo, distância, chuva, etc)"
     },
+    pricingSnapshot: {
+        type: Object,
+        description: "Snapshot da configuração de tarifa/comissão (tariffSetting, globalSetting, categoria de veículo, regras ativas) vigente no momento em que a corrida foi solicitada — P2.2 da auditoria de concorrência, 2026-08-02. endRide recalcula o preço final a partir DESTE snapshot, não da configuração atual, pra uma mudança de tarifa/comissão feita pelo admin durante a corrida não afetar o valor já contratado. Ausente em corridas criadas antes desta mudança."
+    },
 
     paymentID: {
         type: String,
@@ -150,5 +154,21 @@ rideSchema.index({ status: 1 });
 rideSchema.index({ captain: 1 });
 rideSchema.index({ user: 1 });
 rideSchema.index({ createdAt: -1 });
+
+// Um motorista só pode ter uma corrida ativa por vez (C2 da auditoria de concorrência,
+// 2026-08-02) — antes, nada impedia aceitar duas corridas simultâneas: o
+// findOneAndUpdate atômico do aceite garante que só um motorista "ganha" cada corrida
+// individualmente, mas não olhava se esse motorista já tinha outra corrida em aberto.
+// Esta é a garantia no nível do banco: a segunda tentativa de gravar `captain` num
+// status ativo enquanto já existe outro documento igual vira erro de chave duplicada
+// (tratado em acceptRideAtomic).
+rideSchema.index(
+    { captain: 1 },
+    {
+        name: 'captain_active_ride_unique',
+        unique: true,
+        partialFilterExpression: { status: { $in: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'] } }
+    }
+);
 
 module.exports = mongoose.model('ride', rideSchema);

@@ -7,6 +7,7 @@ import UserContext from '@/contexts/UserContext';
 import CaptainContext from '@/contexts/CaptainContext';
 import SocketProvider from '@/contexts/SocketContext';
 import { LocationProvider } from '@/contexts/LocationContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 import * as Sentry from "@sentry/react";
 
@@ -32,13 +33,15 @@ createRoot(document.getElementById('root')).render(
   <QueryClientProvider client={queryClient}>
     <CaptainContext>
       <UserContext>
-        <SocketProvider>
-          <LocationProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </LocationProvider>
-        </SocketProvider>
+        <ToastProvider>
+          <SocketProvider>
+            <LocationProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </LocationProvider>
+          </SocketProvider>
+        </ToastProvider>
       </UserContext>
     </CaptainContext>
   </QueryClientProvider>

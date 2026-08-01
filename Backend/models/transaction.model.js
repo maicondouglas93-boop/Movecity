@@ -48,4 +48,14 @@ const transactionSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+// Rede de segurança contra pagamento duplicado: no máximo um lançamento 'ride_payment'
+// e um 'commission' por corrida. A guarda de verdade é o findOneAndUpdate condicional
+// em confirmPaymentReceived (ride.service.js); este índice existe para o caso de uma
+// regressão futura reintroduzir um caminho que tente gravar duas vezes — o Mongo recusa
+// a segunda escrita em vez de deixar a inconsistência silenciosa.
+transactionSchema.index(
+    { rideId: 1, type: 1 },
+    { unique: true, partialFilterExpression: { type: { $in: ['ride_payment', 'commission'] } } }
+);
+
 module.exports = mongoose.model('transaction', transactionSchema);

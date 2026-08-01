@@ -217,4 +217,17 @@ const sendMessageToRoom = (roomName, messageObject) => {
     }
 }
 
-module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom };
+// P3.2 da auditoria de concorrência (2026-08-02): usado no bloqueio administrativo de
+// usuário/motorista — sem derrubar o socket ativo, a pessoa bloqueada continua recebendo
+// eventos em tempo real (inclusive novas corridas, se for motorista) até fechar o app
+// sozinha, mesmo com o token já rejeitado nas próximas chamadas HTTP.
+const disconnectSocket = (socketId) => {
+    if (!io || !socketId) return;
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+        console.log(`[AUDIT] Desconectando socketId ${socketId} (bloqueio administrativo)`);
+        socket.disconnect(true);
+    }
+}
+
+module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, disconnectSocket };

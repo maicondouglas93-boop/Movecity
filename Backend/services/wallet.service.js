@@ -13,39 +13,67 @@ const getWallet = async (captainId) => {
     return wallet;
 };
 
-const createTransaction = async ({ captainId, rideId, type, paymentMethod, amount, description, adminId, reason }) => {
-    const wallet = await getWallet(captainId);
-    let balanceBefore = wallet.creditBalance; // Base para o ledger principal
-    
-    // Atualiza os saldos com base no tipo
-    if (type === 'recharge' || type === 'bonus') {
-        wallet.creditBalance += amount;
-    } else if (type === 'commission') {
-        balanceBefore = wallet.creditBalance;
-        wallet.creditBalance -= amount;
-        wallet.totalCommissionPaid += amount;
-    } else if (type === 'ride_payment') {
-        // Se for cartão, o valor vai para pendente (a plataforma deve repassar)
-        // Se for dinheiro/pix, o valor já está com o motorista
-        if (paymentMethod === 'card') {
-            balanceBefore = wallet.pendingBalance; // Para cartão, o ledger reflete o pending
-            wallet.pendingBalance += amount;
-        }
-        wallet.totalEarned += amount;
-    } else if (type === 'payout' || type === 'withdraw') {
-        balanceBefore = wallet.pendingBalance;
-        wallet.pendingBalance -= amount;
-    } else if (type === 'adjustment') {
-        // Ajustes manuais geralmente afetam o creditBalance, a menos que especificado de outra forma.
-        // Assumindo creditBalance aqui por padrão.
-        wallet.creditBalance += amount;
+// Qual campo do wallet representa o "saldo" movimentado por cada tipo de transação —
+// usado tanto pra montar o $inc quanto pra saber de qual campo tirar balanceBefore/After.
+function resolveLedgerField(type, paymentMethod) {
+    if ((type === 'ride_payment' && paymentMethod === 'card') || type === 'payout' || type === 'withdraw') {
+        return 'pendingBalance';
     }
+    return 'creditBalance';
+}
 
-    let balanceAfter = (type === 'ride_payment' && paymentMethod === 'card') || type === 'payout' || type === 'withdraw' 
-        ? wallet.pendingBalance 
-        : wallet.creditBalance;
+function buildIncFields(type, paymentMethod, amount) {
+    const inc = {};
+    switch (type) {
+        case 'recharge':
+        case 'bonus':
+        case 'adjustment':
+            inc.creditBalance = amount;
+            break;
+        case 'commission':
+            inc.creditBalance = -amount;
+            inc.totalCommissionPaid = amount;
+            break;
+        case 'ride_payment':
+            inc.totalEarned = amount;
+            if (paymentMethod === 'card') {
+                inc.pendingBalance = amount;
+            }
+            break;
+        case 'payout':
+        case 'withdraw':
+            inc.pendingBalance = -amount;
+            break;
+        default:
+            throw new Error(`Unknown transaction type: ${type}`);
+    }
+    return inc;
+}
 
-    const transaction = await transactionModel.create({
+// Registra uma movimentação financeira e atualiza o wallet do motorista de forma
+// atômica ($inc via findOneAndUpdate, nunca read-modify-write com wallet.save()).
+//
+// `session` é opcional: quando o chamador está dentro de uma transação Mongo maior
+// (ex.: confirmPaymentReceived em ride.service.js), passa a própria session e assume
+// a responsabilidade de chamar `applySideEffects()` só DEPOIS do commit — emitir socket
+// ou invalidar cache antes do commit avisaria o motorista de um dinheiro que pode nunca
+// ter sido efetivado, se a transação abortar. Sem `session` (uso direto, como em
+// admin.service.js e webhook.controller.js), o comportamento é o de sempre: os efeitos
+// colaterais acontecem imediatamente, antes de retornar.
+const createTransaction = async ({ captainId, rideId, type, paymentMethod, amount, description, adminId, reason, session }) => {
+    const incFields = buildIncFields(type, paymentMethod, amount);
+    const ledgerField = resolveLedgerField(type, paymentMethod);
+
+    const wallet = await walletModel.findOneAndUpdate(
+        { captainId },
+        { $inc: incFields },
+        { new: true, upsert: true, setDefaultsOnInsert: true, session }
+    );
+
+    const balanceAfter = wallet[ledgerField];
+    const balanceBefore = balanceAfter - (incFields[ledgerField] || 0);
+
+    const [transaction] = await transactionModel.create([{
         captainId,
         rideId,
         type,
@@ -57,37 +85,39 @@ const createTransaction = async ({ captainId, rideId, type, paymentMethod, amoun
         adminId,
         reason,
         status: 'completed'
-    });
+    }], { session });
 
-    await wallet.save();
+    // Regra de bloqueio de motorista — parte da mesma unidade atômica da movimentação
+    // que a disparou (saldo negativo pode ser resultado direto desta transação).
+    const settings = await globalSettingModel.findOne().session(session || null)
+        || { blockDriverOnNegativeBalance: true, maximumNegativeBalance: 0 };
+    const shouldBlock = settings.blockDriverOnNegativeBalance && wallet.creditBalance < settings.maximumNegativeBalance;
+    await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: !shouldBlock }, { session });
 
-    // Regra de bloqueio de motorista
-    const settings = await globalSettingModel.findOne() || { blockDriverOnNegativeBalance: true, maximumNegativeBalance: 0 };
-    if (settings.blockDriverOnNegativeBalance && wallet.creditBalance < settings.maximumNegativeBalance) {
-        await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: false });
-    } else {
-        // Desbloqueia se estiver acima
-        await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: true });
+    const applySideEffects = async () => {
+        deleteByPrefix(`wallet:${captainId}`);
+        deleteByPrefix(`transactions:${captainId}`);
+        deleteByPrefix(`profile:captain:${captainId}`);
+        deleteByPrefix(`summary:${captainId}`);
+
+        const captain = await captainModel.findById(captainId);
+        if (captain && captain.socketId) {
+            sendMessageToSocketId(captain.socketId, {
+                event: 'wallet-updated',
+                data: { wallet, transaction }
+            });
+            sendMessageToSocketId(captain.socketId, {
+                event: 'summary-updated',
+                data: { timestamp: Date.now() }
+            });
+        }
+    };
+
+    if (!session) {
+        await applySideEffects();
     }
 
-    deleteByPrefix(`wallet:${captainId}`);
-    deleteByPrefix(`transactions:${captainId}`);
-    deleteByPrefix(`profile:captain:${captainId}`);
-    deleteByPrefix(`summary:${captainId}`);
-
-    const captain = await captainModel.findById(captainId);
-    if (captain && captain.socketId) {
-        sendMessageToSocketId(captain.socketId, {
-            event: 'wallet-updated',
-            data: { wallet, transaction }
-        });
-        sendMessageToSocketId(captain.socketId, {
-            event: 'summary-updated',
-            data: { timestamp: Date.now() }
-        });
-    }
-
-    return { transaction, wallet };
+    return { transaction, wallet, applySideEffects };
 };
 
 const getTransactions = async (captainId, limit = 50) => {

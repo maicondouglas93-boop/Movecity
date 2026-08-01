@@ -5,6 +5,8 @@ const captainModel = require('../models/captain.model');
 const userModel = require('../models/user.model');
 const transactionModel = require('../models/transaction.model');
 const payoutModel = require('../models/payout.model');
+const { deleteByPrefix } = require('../cache/cache');
+const { disconnectSocket } = require('../socket');
 
 module.exports.login = async (email, password) => {
     const admin = await adminUserModel.findOne({ email }).select('+password');
@@ -314,9 +316,18 @@ module.exports.getUserDetails = async (userId) => {
 
 module.exports.toggleUserBlock = async (userId, isBlocked, reason, admin, ip) => {
     if (!reason) throw new Error('O motivo do bloqueio/desbloqueio é obrigatório');
-    
+
     const user = await userModel.findByIdAndUpdate(userId, { isBlocked }, { new: true });
-    
+
+    // P3.2 da auditoria de concorrência (2026-08-02): authUser lê o perfil de um cache de
+    // 10 minutos (getUserProfile). Sem invalidar aqui, um usuário recém-bloqueado
+    // continuava autenticando normalmente por até 10 minutos — e um recém-desbloqueado
+    // continuava sendo rejeitado pelo mesmo motivo, na direção contrária.
+    deleteByPrefix(`profile:user:${userId}`);
+    if (isBlocked && user.socketId) {
+        disconnectSocket(user.socketId);
+    }
+
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,
@@ -344,7 +355,10 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
             { $set: { isBlocked: true } }
         );
         updatedCount = result.modifiedCount;
-        
+        // Mesmo motivo do toggleUserBlock individual (P3.2 da auditoria de concorrência):
+        // sem isso, cada usuário bloqueado em lote continuaria autenticando por até 10min.
+        userIds.forEach(id => deleteByPrefix(`profile:user:${id}`));
+
         await module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
@@ -359,7 +373,8 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
             { $set: { isBlocked: false } }
         );
         updatedCount = result.modifiedCount;
-        
+        userIds.forEach(id => deleteByPrefix(`profile:user:${id}`));
+
         await module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
@@ -469,9 +484,35 @@ module.exports.updateCaptainApproval = async (captainId, approvalStatus, reason,
     return captain;
 };
 
+// P3.2 da auditoria de concorrência (2026-08-02): bloquear um motorista precisa ter
+// efeito imediato — antes, authCaptain lia o perfil de um cache de 10 minutos
+// (getCaptainProfile) sem nenhuma invalidação aqui, então um motorista bloqueado
+// continuava aceitando e realizando corridas por até 10 minutos. Uma corrida já em
+// andamento continua existindo normalmente (decisão consciente: interromper uma
+// viagem em curso por causa de uma ação administrativa cria um problema pior — o
+// passageiro na rua — do que o que resolve; bloqueio administrativo raramente é uma
+// emergência que exige interrupção imediata da corrida). O que muda é só o que o
+// motorista consegue fazer DAQUI PRA FRENTE: nenhuma corrida nova.
 module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, ip) => {
-    const captain = await captainModel.findByIdAndUpdate(captainId, { isBlocked }, { new: true });
-    
+    const update = { isBlocked };
+    if (isBlocked) {
+        // Tira o motorista do pool de despacho de novas corridas imediatamente —
+        // getCaptainsInTheRadius já filtra por isOnline:true, então isso sozinho impede
+        // que ele receba qualquer corrida nova a partir de agora.
+        update.isOnline = false;
+        update.status = 'inactive';
+    }
+
+    const captain = await captainModel.findByIdAndUpdate(captainId, update, { new: true });
+
+    deleteByPrefix(`profile:captain:${captainId}`);
+    if (isBlocked) {
+        deleteByPrefix('drivers:'); // cache de busca de motoristas por raio
+        if (captain.socketId) {
+            disconnectSocket(captain.socketId);
+        }
+    }
+
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,

@@ -2,8 +2,23 @@ import React from 'react'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
+import StatusBadge from '@/shared/components/ui/StatusBadge'
 
 const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira' ? 'Carteira' : method === 'card' ? 'Cartão' : 'Dinheiro'
+
+// P3.1 da auditoria de concorrência (2026-08-02): o backend emite 'ride-status-updated'
+// a cada "a caminho"/"cheguei" do motorista, mas até então nenhuma tela do passageiro
+// escutava — essa tela ficava com os dados congelados do momento do aceite a corrida
+// inteira. Agora reflete o status real da corrida em tempo real.
+const statusInfo = (status) => {
+    if (status === 'arrived' || status === 'waiting_passenger') {
+        return { label: 'Motorista chegou', tone: 'success' };
+    }
+    if (status === 'going_to_pickup' || status === 'accepted') {
+        return { label: 'Motorista a caminho', tone: 'info' };
+    }
+    return null;
+};
 
 const WaitingForDriver = (props) => {
     const extractTitle = (addressStr) => {
@@ -22,6 +37,7 @@ const WaitingForDriver = (props) => {
     const captainVehicleType = props.ride?.captain?.vehicle?.vehicleType || props.ride?.vehicleType || 'car'
     const vehicleImg = vehicleImages[captainVehicleType] || vehicleImages.car
     const vehicleLabel = vehicleLabels[captainVehicleType] || 'MoveGo'
+    const status = statusInfo(props.ride?.status)
 
     return (
         <div className='pb-6'>
@@ -33,6 +49,12 @@ const WaitingForDriver = (props) => {
             >
                 <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
             </button>
+
+            {status && (
+                <div className='flex justify-center mb-3'>
+                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                </div>
+            )}
 
             <div className='flex items-center justify-between mb-4'>
                 <div>

@@ -65,6 +65,13 @@ const sendToUser = async (userId, title, message, type, data = {}) => {
     // Send Push
     await sendPush(tokens, { title, message, data });
 }
+// Achado incidental durante a verificação de P1.1 (auditoria de concorrência,
+// 2026-08-01): esta função nunca foi exportada, embora `ride.controller.js` já a
+// chamasse como `notificationService.sendToUser(...)` na confirmação de pagamento —
+// todo `confirmPaymentReceived` bem-sucedido derrubava com 500 depois do dinheiro já
+// ter sido movimentado (TypeError silencioso, só visível ao testar o caminho de sucesso
+// de verdade). Corrigido só expondo a função já correta que existe desde sempre.
+module.exports.sendToUser = sendToUser;
 
 const sendToCaptain = async (captainId, title, message, type, data = {}, options = {}, traceId = '[AUDIT]') => {
     // Save to DB

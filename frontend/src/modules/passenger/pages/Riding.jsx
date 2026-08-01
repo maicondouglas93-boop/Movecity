@@ -82,12 +82,23 @@ const Riding = () => {
             }
         }
 
+        // P3.1 da auditoria de concorrência (2026-08-02): o backend já emitia este evento
+        // quando o motorista confirmava o recebimento (rides/confirm-payment), mas nenhum
+        // frontend escutava — o passageiro nunca sabia que o motorista tinha confirmado
+        // do lado dele. Só um aviso; o passageiro já avança pro passo de avaliação
+        // localmente assim que confirma "Já paguei", sem depender deste evento.
+        const handlePaymentConfirmed = () => {
+            addToast('O motorista confirmou o recebimento do pagamento.', 'success')
+        }
+
         socket.on('ride-ended', handleRideEnded)
         socket.on('receive-message', handleReceiveMessage)
+        socket.on('payment-confirmed', handlePaymentConfirmed)
 
         return () => {
             socket.off('ride-ended', handleRideEnded)
             socket.off('receive-message', handleReceiveMessage)
+            socket.off('payment-confirmed', handlePaymentConfirmed)
         }
     }, [socket, ride, isChatOpen, addToast])
 

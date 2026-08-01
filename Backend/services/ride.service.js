@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const rideModel = require('../models/ride.model');
 const userModel = require('../models/user.model');
 const paymentModel = require('../models/payment.model');
@@ -7,6 +8,39 @@ const crypto = require('crypto');
 const { getCache, setCache } = require('../cache/cache');
 
 const PricingEngine = require('./pricingEngine.service');
+
+// Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
+// transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
+// atômico com o(s) status de origem permitido(s) no próprio filtro. Antes, cada função
+// (startRide, cancelRide, endRide, updateRideStatus...) validava o status em memória
+// (`if (!['accepted', ...].includes(ride.status))`) e só DEPOIS gravava — entre a leitura
+// e a escrita havia uma janela real de corrida (aceitar × cancelar, iniciar × cancelar
+// simultâneos podiam produzir estados impossíveis, ver C3/C4 na auditoria). `finished` e
+// `cancelled` são terminais: nenhuma chave abaixo os lista como origem de nada.
+const VALID_ORIGINS_BY_TARGET = {
+    accepted: ['requested'],
+    going_to_pickup: ['accepted'],
+    arrived: ['going_to_pickup', 'accepted'],
+    started: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
+    finished: ['started'],
+    cancelled: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
+};
+
+// `extraFilter` permite exigir dono (captain/user) e outras condições (ex.: OTP) no
+// mesmo `findOneAndUpdate` atômico — não só o status. Retorna `null` quando a transição
+// não é válida a partir do estado atual (ou quando `extraFilter` não bate), e quem chama
+// decide a mensagem/status HTTP certo a partir disso.
+async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}) {
+    const validOrigins = VALID_ORIGINS_BY_TARGET[toStatus];
+    if (!validOrigins) {
+        throw new Error(`Transição de status desconhecida: ${toStatus}`);
+    }
+    return rideModel.findOneAndUpdate(
+        { _id: rideId, status: { $in: validOrigins }, ...extraFilter },
+        { $set: { status: toStatus, ...extraSet } },
+        { new: true }
+    );
+}
 
 async function getFare(pickup, destination) {
     if (!pickup || !destination) {
@@ -96,12 +130,19 @@ module.exports.createRide = async ({
     const distance = distanceTime.distance.value;
     const time = distanceTime.duration.value;
 
+    // Congela a configuração de tarifa/comissão vigente agora (P2.2 da auditoria de
+    // concorrência, 2026-08-02) — guardada na corrida e reutilizada em endRide, pra uma
+    // mudança de tarifa feita pelo admin durante a corrida não alterar o valor que o
+    // passageiro já viu e aceitou na confirmação.
+    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+
     // Usar o Pricing Engine Oficial
     const pricing = await PricingEngine.calculateFare({
         distance,
         time,
         vehicleType,
-        paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod // Use a fallback method for calculation if carteira
+        paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod, // Use a fallback method for calculation if carteira
+        configSnapshot: pricingSnapshot
     });
 
     // Calcular opcionais
@@ -166,6 +207,7 @@ module.exports.createRide = async ({
             ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0,
         commissionAmount: pricing.commissionAmount,
         fareBreakdown: pricing.fareBreakdown,
+        pricingSnapshot,
         distance,
         duration: time
     });
@@ -183,6 +225,14 @@ module.exports.createRide = async ({
     return ride;
 }
 
+// Único caminho de aceite de corrida no sistema (P1.3 da auditoria de concorrência,
+// 2026-08-01) — usado tanto por POST /rides/:id/accept quanto por POST /rides/confirm
+// (mantida como alias de compatibilidade no controller). Antes existiam dois caminhos:
+// este, atômico, e um segundo em ride.service.js (`confirmRide`, removido) que fazia
+// `findOneAndUpdate({_id})` sem checar status — dois motoristas aceitando a mesma
+// corrida recebiam 200 os dois, e o segundo aceite conseguia rebaixar até uma corrida
+// já `finished`/`cancelled` de volta pra `accepted`. O filtro `status:'requested'`
+// abaixo é a garantia real: só um `findOneAndUpdate` ganha a corrida.
 module.exports.acceptRideAtomic = async ({
     rideId, captain
 }) => {
@@ -190,15 +240,18 @@ module.exports.acceptRideAtomic = async ({
         throw new Error('Ride id is required');
     }
 
-    const updatedRide = await rideModel.findOneAndUpdate({
-        _id: rideId,
-        status: 'requested'
-    }, {
-        $set: {
-            status: 'accepted',
-            captain: captain._id
+    let updatedRide;
+    try {
+        updatedRide = await transitionRide(rideId, 'accepted', {}, { captain: captain._id });
+    } catch (err) {
+        // Índice único parcial em ride.model.js (C2 da auditoria de concorrência): este
+        // motorista já tem outra corrida ativa. Erro de chave duplicada do Mongo, não uma
+        // falha de servidor — traduzido pra uma mensagem que o app sabe mostrar.
+        if (err.code === 11000) {
+            throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
         }
-    }, { new: true });
+        throw err;
+    }
 
     if (!updatedRide) {
         // Find out if it doesn't exist or was already accepted
@@ -216,37 +269,13 @@ module.exports.acceptRideAtomic = async ({
     return ride;
 }
 
-module.exports.confirmRide = async ({
-    rideId, captain
-}) => {
-    if (!rideId) {
-        throw new Error('Ride id is required');
-    }
-
-    await rideModel.findOneAndUpdate({
-        _id: rideId
-    }, {
-        status: 'accepted',
-        captain: captain._id
-    })
-
-    const ride = await rideModel.findOne({
-        _id: rideId
-    }).populate('user').populate('captain').select('+otp');
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    return ride;
-
-}
-
 module.exports.startRide = async ({ rideId, otp, captain }) => {
     if (!rideId || !otp) {
         throw new Error('Ride id and OTP are required');
     }
 
+    // Pré-checagem só pra mensagens de erro precisas (OTP errado vs. corrida em estado
+    // errado) — a garantia real de concorrência é o findOneAndUpdate atômico abaixo.
     const ride = await rideModel.findOne({
         _id: rideId
     }).populate('user').populate('captain').select('+otp');
@@ -255,7 +284,7 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Ride not found');
     }
 
-    if (!['accepted', 'going_to_pickup', 'arrived'].includes(ride.status)) {
+    if (!VALID_ORIGINS_BY_TARGET.started.includes(ride.status)) {
         throw new Error('Ride not accepted');
     }
 
@@ -279,47 +308,46 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         }
     }
 
-    await rideModel.findOneAndUpdate({
-        _id: rideId
-    }, {
-        status: 'started',
-        waitTimeFeeCharged
-    })
+    // Guarda atômica de verdade: status de origem E otp certo no mesmo filtro. Se outro
+    // request (cancelamento, ou outra tentativa de start) mudou o status entre a leitura
+    // acima e aqui, isto retorna null em vez de gravar por cima de um estado inválido.
+    const updatedRide = await transitionRide(rideId, 'started', { otp }, { waitTimeFeeCharged });
+    if (!updatedRide) {
+        throw new Error('Ride not accepted');
+    }
 
-    const updatedRide = await rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
-    return updatedRide;
+    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
 }
+
+// Só cobre as transições de deslocamento do motorista até o embarque (a caminho /
+// cheguei). 'started'/'finished'/'cancelled' têm funções dedicadas (startRide/endRide/
+// cancelRide) com validação de OTP, cálculo de tarifa e efeitos de carteira que este
+// endpoint genérico não faz — permitir esses destinos aqui seria uma forma de
+// contorná-los (P2.1 da auditoria de concorrência: nenhum endpoint deve conseguir
+// aplicar uma transição de status sem passar pela lógica que ela exige).
+const UPDATE_STATUS_ALLOWED_TARGETS = ['going_to_pickup', 'arrived', 'waiting_passenger'];
 
 module.exports.updateRideStatus = async ({ rideId, captain, status }) => {
     if (!rideId || !status) {
         throw new Error('Ride id and status are required');
     }
 
-    const validStatuses = ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'finished', 'cancelled'];
-    if (!validStatuses.includes(status)) {
+    if (!UPDATE_STATUS_ALLOWED_TARGETS.includes(status)) {
         throw new Error('Invalid status');
     }
 
-    const update = { status };
+    const extraSet = {};
     if (status === 'arrived') {
-        update.arrivedAt = new Date();
+        extraSet.arrivedAt = new Date();
     }
 
-    const ride = await rideModel.findOneAndUpdate({
-        _id: rideId,
-        captain: captain._id
-    }, update, { new: true }).populate('user').populate('captain').select('+otp');
+    const ride = await transitionRide(rideId, status, { captain: captain._id }, extraSet);
 
     if (!ride) {
-        throw new Error('Ride not found');
+        throw new Error('Ride not found or invalid transition');
     }
 
-    if (status === 'cancelled') {
-        const captainService = require('./captain.service');
-        captainService.recalculateCancellationStats(captain._id).catch(console.error);
-    }
-
-    return ride;
+    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
 }
 
 module.exports.endRide = async ({ rideId, captain }) => {
@@ -336,7 +364,9 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw new Error('Ride not found');
     }
 
-    if (ride.status !== 'started' && ride.status !== 'ongoing') {
+    // 'ongoing' nunca existiu no enum de status (Backend/models/ride.model.js) — checagem
+    // morta removida, `started` é a única origem real de `finished`.
+    if (!VALID_ORIGINS_BY_TARGET.finished.includes(ride.status)) {
         throw new Error('Ride not started');
     }
 
@@ -352,7 +382,14 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 distance: actualDistance,
                 time: actualTimeSeconds,
                 vehicleType: ride.vehicleType,
-                paymentMethod: ride.paymentMethod
+                paymentMethod: ride.paymentMethod,
+                // Recalcula com a tarifa/comissão CONGELADAS no momento em que a corrida foi
+                // pedida (P2.2 da auditoria de concorrência) — só distância/tempo variam pro
+                // valor real. Sem isso, uma mudança de tarifa feita pelo admin enquanto a
+                // corrida estava em andamento mudava o preço cobrado no final.
+                // `|| null` cobre corridas criadas antes desta mudança (sem snapshot
+                // guardado) — cai de volta pro comportamento antigo (config vigente).
+                configSnapshot: ride.pricingSnapshot || null
             });
             finalPrice = pricing.finalFare;
 
@@ -370,98 +407,132 @@ module.exports.endRide = async ({ rideId, captain }) => {
     // soma ao valor final, acertado direto com o motorista igual ao resto da tarifa.
     finalPrice += ride.waitTimeFeeCharged || 0;
 
-    await rideModel.findOneAndUpdate({
-        _id: rideId
-    }, {
-        status: 'finished',
+    const updated = await transitionRide(rideId, 'finished', { captain: captain._id }, {
         actualTime: actualTimeSeconds,
         finalPrice: finalPrice,
         paymentStatus: 'pending' // Awaiting driver to confirm cash received
-    })
-    
+    });
+    if (!updated) {
+        throw new Error('Ride not started');
+    }
+
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');
     return updatedRide;
 }
 
+// Idempotente e transacional (P1.1 da auditoria de concorrência, 2026-08-01): duas
+// chamadas concorrentes (duplo clique, retry de rede) não podem creditar o motorista
+// duas vezes. A marcação paymentStatus:'paid' é o "claim" da operação — só quem
+// consegue gravá-la de fato move dinheiro. Tudo roda dentro de uma transação Mongo;
+// se qualquer passo falhar, nada é aplicado. `session.withTransaction` já faz retry
+// automático de conflitos transitórios (duas transações disputando o mesmo documento),
+// então uma corrida perdida na gravação cai de volta na pré-checagem, que já vê o
+// resultado da outra transação após o commit dela.
 module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
 
-    const ride = await rideModel.findOne({
-        _id: rideId,
-        captain: captain._id
-    }).populate('user').populate('captain');
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    if (ride.status !== 'finished') {
-        throw new Error('Ride not finished yet');
-    }
-
-    if (ride.paymentStatus === 'paid') {
-        throw new Error('Payment already confirmed');
-    }
-
     const walletService = require('./wallet.service');
-    const finalFare = ride.finalPrice || ride.fare;
+    const captainModel = require('../models/captain.model');
 
-    if (ride.paymentMethod === 'card') {
-        // Se for cartão, credita o valor líquido no pendingBalance do motorista.
-        // A plataforma processou via Asaas.
-        const driverNetEarnings = finalFare - ride.commissionAmount;
+    const session = await mongoose.startSession();
+    let sideEffectCallbacks = [];
+    let finalFare;
 
-        // Registra o ganho da corrida
-        await walletService.createTransaction({
-            captainId: captain._id,
-            rideId: ride._id,
-            type: 'ride_payment',
-            paymentMethod: 'card',
-            amount: driverNetEarnings,
-            description: `Repasse da Corrida #${ride._id.toString().slice(-6)} (Cartão)`
-        });
-        
-    } else {
-        // Se for dinheiro ou pix, motorista fica com o valor total e descontamos a comissão
-        await walletService.createTransaction({
-            captainId: captain._id,
-            rideId: ride._id,
-            type: 'ride_payment',
-            paymentMethod: ride.paymentMethod,
-            amount: finalFare,
-            description: `Corrida #${ride._id.toString().slice(-6)} (${ride.paymentMethod})`
-        });
+    try {
+        await session.withTransaction(async () => {
+            sideEffectCallbacks = [];
 
-        // Deduz a comissão do creditBalance
-        await walletService.createTransaction({
-            captainId: captain._id,
-            rideId: ride._id,
-            type: 'commission',
-            paymentMethod: 'wallet',
-            amount: ride.commissionAmount,
-            description: `Comissão corrida #${ride._id.toString().slice(-6)} (${ride.commissionPercent}%)`
+            const existing = await rideModel.findOne({
+                _id: rideId,
+                captain: captain._id
+            }).session(session);
+
+            if (!existing) {
+                throw new Error('Ride not found');
+            }
+            if (existing.status !== 'finished') {
+                throw new Error('Ride not finished yet');
+            }
+            if (existing.paymentStatus === 'paid') {
+                throw new Error('Payment already confirmed');
+            }
+
+            // Guarda atômica: só segue se ainda ninguém marcou como paga entre a leitura
+            // acima e este update. Em concorrência real isso normalmente nem dispara —
+            // o WriteConflict do Mongo já força um retry que refaz a pré-checagem acima.
+            const claimed = await rideModel.findOneAndUpdate(
+                { _id: rideId, captain: captain._id, status: 'finished', paymentStatus: { $ne: 'paid' } },
+                { $set: { paymentStatus: 'paid' } },
+                { new: true, session }
+            );
+            if (!claimed) {
+                throw new Error('Payment already confirmed');
+            }
+
+            finalFare = claimed.finalPrice || claimed.fare;
+
+            if (claimed.paymentMethod === 'card') {
+                // Se for cartão, credita o valor líquido no pendingBalance do motorista.
+                // A plataforma processou via Asaas.
+                const driverNetEarnings = finalFare - claimed.commissionAmount;
+
+                const result = await walletService.createTransaction({
+                    captainId: captain._id,
+                    rideId: claimed._id,
+                    type: 'ride_payment',
+                    paymentMethod: 'card',
+                    amount: driverNetEarnings,
+                    description: `Repasse da Corrida #${claimed._id.toString().slice(-6)} (Cartão)`,
+                    session
+                });
+                sideEffectCallbacks.push(result.applySideEffects);
+            } else {
+                // Se for dinheiro ou pix, motorista fica com o valor total e descontamos a comissão
+                const result1 = await walletService.createTransaction({
+                    captainId: captain._id,
+                    rideId: claimed._id,
+                    type: 'ride_payment',
+                    paymentMethod: claimed.paymentMethod,
+                    amount: finalFare,
+                    description: `Corrida #${claimed._id.toString().slice(-6)} (${claimed.paymentMethod})`,
+                    session
+                });
+                sideEffectCallbacks.push(result1.applySideEffects);
+
+                const result2 = await walletService.createTransaction({
+                    captainId: captain._id,
+                    rideId: claimed._id,
+                    type: 'commission',
+                    paymentMethod: 'wallet',
+                    amount: claimed.commissionAmount,
+                    description: `Comissão corrida #${claimed._id.toString().slice(-6)} (${claimed.commissionPercent}%)`,
+                    session
+                });
+                sideEffectCallbacks.push(result2.applySideEffects);
+            }
+
+            await captainModel.findByIdAndUpdate(captain._id, {
+                $inc: { totalRides: 1, earnings: finalFare }
+            }, { session });
+
+            // Update User CRM fields
+            await userModel.findByIdAndUpdate(existing.user, {
+                $inc: { totalRides: 1, totalSpent: finalFare, totalDistance: claimed.distance || 0 },
+                $set: { lastRideAt: new Date() }
+            }, { session });
         });
+    } finally {
+        await session.endSession();
     }
 
-    // Mark payment as paid
-    await rideModel.findOneAndUpdate({
-        _id: rideId
-    }, {
-        paymentStatus: 'paid'
-    });
-
-    const captainModel = require('../models/captain.model');
-    await captainModel.findByIdAndUpdate(captain._id, {
-        $inc: { totalRides: 1, earnings: finalFare }
-    });
-
-    // Update User CRM fields
-    await userModel.findByIdAndUpdate(ride.user._id, {
-        $inc: { totalRides: 1, totalSpent: finalFare, totalDistance: ride.distance || 0 },
-        $set: { lastRideAt: new Date() }
-    });
+    // Efeitos colaterais (socket + invalidação de cache) só depois do commit — emiti-los
+    // de dentro da transação avisaria o motorista de um dinheiro que pode nunca ter sido
+    // efetivado, se ela abortasse.
+    for (const applySideEffects of sideEffectCallbacks) {
+        await applySideEffects();
+    }
 
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');
     return updatedRide;
@@ -521,6 +592,10 @@ module.exports.cancelRide = async ({ rideId, user }) => {
         throw new Error('Ride id and user are required');
     }
 
+    // Pré-checagem só pra mensagem de erro e pra decidir a taxa de cancelamento a partir
+    // do status atual — a garantia real de concorrência é o findOneAndUpdate atômico
+    // abaixo (P2.1 da auditoria: sem isso, um `cancel` e um `start`/`confirm` simultâneos
+    // podiam ambos passar pela checagem em memória e produzir um estado impossível).
     const ride = await rideModel.findOne({
         _id: rideId,
         user
@@ -530,7 +605,7 @@ module.exports.cancelRide = async ({ rideId, user }) => {
         throw new Error('Ride not found');
     }
 
-    if (['started', 'ongoing', 'completed', 'cancelled'].includes(ride.status)) {
+    if (!VALID_ORIGINS_BY_TARGET.cancelled.includes(ride.status)) {
         throw new Error('Ride cannot be cancelled at this stage');
     }
 
@@ -539,21 +614,24 @@ module.exports.cancelRide = async ({ rideId, user }) => {
     // motorista aceitar não gera taxa. Igual à taxa de espera, é informativa: acertada
     // diretamente com o motorista, o app não processa nenhuma cobrança.
     const capturedByDriver = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status);
+    let cancellationFeeCharged = 0;
     if (capturedByDriver && ride.captain) {
         const TariffSetting = require('../models/tariffSetting.model');
         const tariffSetting = await TariffSetting.findOne();
-        ride.cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
+        cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
     }
 
-    ride.status = 'cancelled';
-    await ride.save();
+    const updated = await transitionRide(rideId, 'cancelled', { user }, { cancellationFeeCharged });
+    if (!updated) {
+        throw new Error('Ride cannot be cancelled at this stage');
+    }
 
-    if (ride.captain) {
+    if (updated.captain) {
         const captainService = require('./captain.service');
-        captainService.recalculateCancellationStats(ride.captain).catch(console.error);
+        captainService.recalculateCancellationStats(updated.captain).catch(console.error);
     }
 
-    return ride;
+    return updated;
 }
 
 module.exports.submitReview = async ({ rideId, user, rating, comment, issueCategory }) => {

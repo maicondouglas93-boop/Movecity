@@ -262,13 +262,28 @@ const Home = () => {
             navigate('/riding', { state: { ride } })
         }
 
+        // P3.1 da auditoria de concorrência (2026-08-02): o backend já emitia este evento
+        // a cada "a caminho"/"cheguei" do motorista (ride.controller.js `updateRideStatus`)
+        // — só que nenhum frontend escutava. A tela de "aguardando motorista" ficava
+        // congelada com os dados do momento do aceite até a corrida começar.
+        const handleRideStatusUpdated = (updatedRide) => {
+            setRide(updatedRide)
+            if (updatedRide.status === 'going_to_pickup') {
+                addToast('Motorista a caminho 🚗', 'info', 3000)
+            } else if (updatedRide.status === 'arrived') {
+                addToast('Motorista chegou!', 'success', 4000, 'Ele está te esperando no local de embarque')
+            }
+        }
+
         socket.on('ride-confirmed', handleRideConfirmed)
         socket.on('ride-started', handleRideStarted)
+        socket.on('ride-status-updated', handleRideStatusUpdated)
 
         return () => {
             socket.off('connect', handleConnect)
             socket.off('ride-confirmed', handleRideConfirmed)
             socket.off('ride-started', handleRideStarted)
+            socket.off('ride-status-updated', handleRideStatusUpdated)
         }
     }, [user])
 

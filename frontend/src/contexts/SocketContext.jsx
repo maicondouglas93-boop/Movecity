@@ -1,17 +1,21 @@
 
-import React, { createContext, useEffect } from 'react';
+import React, { createContext, useEffect } from 'react'
 import { io } from 'socket.io-client';
 
 export const SocketContext = createContext();
 
 import * as Sentry from '@sentry/react';
 import { db } from '@/services/db';
+import { replayOfflineActions, actionLabel } from '@/services/offlineQueue';
+import { useToast } from '@/contexts/ToastContext';
 
 const socket = io(`${import.meta.env.VITE_BASE_URL}`, {
     transports: [ 'polling' ]
 });
 
 const SocketProvider = ({ children }) => {
+    const { addToast } = useToast()
+
     useEffect(() => {
         socket.on('connect', () => {
             console.log('Connected to server');
@@ -23,17 +27,30 @@ const SocketProvider = ({ children }) => {
             Sentry.captureMessage(`Socket disconnected: ${reason}`, 'warning');
         });
 
+        // Reexecuta a fila de ações offline via HTTP (P1.2 da auditoria de concorrência,
+        // 2026-08-02) — só sai da fila com uma resposta real do servidor. Antes disso, as
+        // ações eram emitidas como evento de socket sem handler no backend e apagadas na
+        // hora, sem nenhuma confirmação (item O1 da auditoria).
         const syncOfflineQueue = async () => {
             try {
-                const actions = await db.offlineActions.toArray();
-                if (actions.length > 0) {
-                    console.log('Syncing offline actions...', actions);
-                    for (const action of actions) {
-                        socket.emit(action.type, action.payload);
-                        await db.offlineActions.delete(action.id);
-                    }
-                }
-                
+                await replayOfflineActions({
+                    onResolved: (action) => {
+                        addToast(`Confirmado: ${actionLabel(action.type)}.`, 'success')
+                    },
+                    onAlreadyApplied: (action) => {
+                        addToast(`Já confirmado anteriormente: ${actionLabel(action.type)}.`, 'info')
+                    },
+                    onPermanentFailure: (action, err) => {
+                        addToast(
+                            `Não foi possível ${actionLabel(action.type)}. ${err.response?.data?.message || 'Verifique o histórico da corrida.'}`,
+                            'error',
+                            8000
+                        )
+                    },
+                    // onRetryLater: rede ainda instável, tenta de novo na próxima reconexão
+                    // sem incomodar o motorista a cada tentativa silenciosa.
+                });
+
                 const locations = await db.driverLocations.toArray();
                 if (locations.length > 0) {
                     // Send last location or bulk locations
@@ -55,7 +72,7 @@ const SocketProvider = ({ children }) => {
         return () => {
             window.removeEventListener('online', syncOfflineQueue);
         };
-    }, []);
+    }, [addToast]);
     return (
         <SocketContext.Provider value={{ socket }}>
             {children}

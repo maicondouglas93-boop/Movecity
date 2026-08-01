@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { db } from '@/services/db'
+import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
 
@@ -27,11 +27,10 @@ const ConfirmRidePopUp = (props) => {
         } catch (err) {
             console.error('Update status error:', err)
             if (!navigator.onLine || err.message === 'Network Error') {
-                db.offlineActions.add({
+                enqueueOfflineAction({
                     type: 'update-ride-status',
                     rideId: props.ride._id,
-                    payload: { rideId: props.ride._id, status },
-                    timestamp: Date.now()
+                    payload: { rideId: props.ride._id, status }
                 }).catch(e => console.error(e));
                 setRideStatus(status); // optimistic
             } else {
@@ -68,11 +67,10 @@ const ConfirmRidePopUp = (props) => {
             }
         } catch (err) {
             if (!navigator.onLine || err.message === 'Network Error') {
-                db.offlineActions.add({
+                enqueueOfflineAction({
                     type: 'start-ride',
                     rideId: props.ride._id,
-                    payload: { rideId: props.ride._id, otp: otp },
-                    timestamp: Date.now()
+                    payload: { rideId: props.ride._id, otp: otp }
                 }).catch(e => console.error(e));
                 props.setConfirmRidePopupPanel(false)
                 props.setRidePopupPanel(false)

@@ -1,5 +1,6 @@
 process.env.NODE_ENV = 'test';
 require('dotenv').config();
+const mongoose = require('mongoose');
 const { connect, closeDatabase, clearDatabase } = require('./testDatabase');
 
 // Global setup
@@ -30,6 +31,20 @@ beforeAll(async () => {
     }));
     
     await connect();
+
+    // O índice único parcial de ride.model.js (impede um motorista de ter duas corridas
+    // ativas — P2.1 da auditoria de concorrência) só existe de fato no Mongo depois de
+    // `syncIndexes()`; sem esperar aqui, os primeiros testes rodam antes do índice
+    // existir e a constraint não pega. Escopado só ao model `ride` de propósito: alguns
+    // outros models (ex. user) têm uma declaração de índice duplicada pré-existente
+    // (`unique:true` no campo + um `schema.index()` separado pro mesmo campo — já avisado
+    // pelo Mongoose como warning) que faz `syncIndexes()` falhar por conflito de nome.
+    // Corrigir isso é um problema separado, fora do escopo desta etapa. E só chama se o
+    // model já foi registrado — arquivos de teste que não importam ride.model.js (ex.:
+    // pricingEngine, tariffScheduler) nem têm o schema carregado nesta suíte.
+    if (mongoose.modelNames().includes('ride')) {
+        await mongoose.model('ride').syncIndexes();
+    }
 });
 
 afterEach(async () => {

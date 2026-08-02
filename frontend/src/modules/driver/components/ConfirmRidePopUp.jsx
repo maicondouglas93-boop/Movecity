@@ -4,6 +4,7 @@ import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
+import Button from '@/shared/components/ui/Button'
 import { useToast } from '@/contexts/ToastContext'
 
 const ConfirmRidePopUp = (props) => {
@@ -114,69 +115,66 @@ const ConfirmRidePopUp = (props) => {
 
     return (
         <div>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setConfirmRidePopupPanel(false)
-            }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Iniciar a Corrida</h3>
-            <div className='flex items-center justify-between p-3 border-2 border-green-200 bg-green-50 rounded-xl mt-4'>
+            <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Iniciar a Corrida</h3>
+            <div className='flex items-center justify-between p-3 border-2 border-brand-100 bg-brand-50 rounded-panel mt-4'>
                 <div className='flex items-center gap-3'>
                     <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} />
                     <div>
-                        <h2 className='text-lg font-bold capitalize text-gray-800'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
-                        <p className='text-xs text-gray-500 font-medium'>Passageiro</p>
+                        <h2 className='text-lg font-bold capitalize text-ink-900'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
+                        <p className='text-xs text-ink-600 font-medium'>Passageiro</p>
                     </div>
                 </div>
-                <h5 className='text-lg font-bold text-gray-800'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
+                <h5 className='text-lg font-bold text-ink-900'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
             </div>
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="ri-map-pin-user-fill text-green-500"></i>
+                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
+                        <i className="ri-map-pin-user-fill text-brand-500"></i>
                         <div>
-                            <h3 className='text-base font-medium text-gray-800'>{props.ride?.pickup?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.pickup}</p>
+                            <h3 className='text-base font-medium text-ink-900'>{props.ride?.pickup?.split(',')[0]}</h3>
+                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.pickup}</p>
                         </div>
                     </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="text-lg ri-map-pin-2-fill text-red-500"></i>
+                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
+                        <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
                         <div>
-                            <h3 className='text-base font-medium text-gray-800'>{props.ride?.destination?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.destination}</p>
+                            <h3 className='text-base font-medium text-ink-900'>{props.ride?.destination?.split(',')[0]}</h3>
+                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.destination}</p>
                         </div>
                     </div>
                     <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line text-green-500"></i>
+                        <i className="ri-currency-line text-brand-500"></i>
                         <div>
-                            <h3 className='text-base font-medium text-gray-800'>R${props.ride?.fare}</h3>
-                            <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
+                            <h3 className='text-base font-medium text-ink-900'>R${props.ride?.fare}</h3>
+                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                         </div>
                     </div>
                 </div>
 
                 <div className='mt-4 w-full'>
                     {rideStatus === 'accepted' && (
-                        <button
+                        <Button
                             onClick={() => updateStatus('going_to_pickup')}
-                            disabled={loading}
-                            className='w-full mt-4 text-lg flex justify-center bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-3 rounded-xl transition-all shadow-lg shadow-green-500/20'
+                            loading={loading}
+                            className="mt-4"
                         >
-                            {loading ? 'Atualizando...' : 'A caminho'}
-                        </button>
+                            A caminho
+                        </Button>
                     )}
 
                     {rideStatus === 'going_to_pickup' && (
-                        <button
+                        <Button
                             onClick={() => updateStatus('arrived')}
-                            disabled={loading}
-                            className='w-full mt-4 text-lg flex justify-center bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-3 rounded-xl transition-all shadow-lg shadow-green-500/20'
+                            loading={loading}
+                            className="mt-4"
                         >
-                            {loading ? 'Atualizando...' : 'Cheguei ao local'}
-                        </button>
+                            Cheguei ao local
+                        </Button>
                     )}
 
                     {rideStatus === 'arrived' && (
                         <form onSubmit={submitHandler}>
-                            <label className='block text-sm font-medium text-gray-600 mb-1'>Digite o PIN do passageiro</label>
+                            <label className='block text-sm font-medium text-ink-600 mb-1'>Digite o PIN do passageiro</label>
                             <input
                                 value={otp}
                                 onChange={(e) => {
@@ -186,42 +184,31 @@ const ConfirmRidePopUp = (props) => {
                                 }}
                                 type="text"
                                 inputMode="numeric"
-                                className='bg-gray-100 px-6 py-4 font-mono text-2xl text-center tracking-widest rounded-xl w-full mt-2 border-2 border-transparent focus:border-green-500 focus:bg-green-50 focus:outline-none transition-colors'
+                                className='bg-surface-alt px-6 py-4 font-mono text-2xl text-center tracking-widest rounded-panel w-full mt-2 border-2 border-transparent focus:border-brand-500 focus:bg-brand-50 focus:outline-none transition-colors'
                                 placeholder='• • • • • •'
                                 maxLength={6}
                             />
 
                             {error && (
-                                <div className='flex items-center gap-2 bg-red-50 border border-red-300 rounded-lg p-3 mt-3'>
-                                    <i className="ri-error-warning-line text-red-500"></i>
-                                    <p className='text-sm text-red-600'>{error}</p>
+                                <div className='flex items-center gap-2 bg-danger-50 border border-danger-500/30 rounded-panel p-3 mt-3'>
+                                    <i className="ri-error-warning-line text-danger-500"></i>
+                                    <p className='text-sm text-danger-600'>{error}</p>
                                 </div>
                             )}
 
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className='w-full mt-4 text-lg flex justify-center bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-3 rounded-xl transition-all shadow-lg shadow-green-500/20'
-                            >
-                                {loading ? (
-                                    <span className='flex items-center gap-2'>
-                                        <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                                        </svg>
-                                        Verificando PIN...
-                                    </span>
-                                ) : 'Iniciar Corrida'}
-                            </button>
+                            <Button type="submit" loading={loading} className="mt-4">
+                                Iniciar Corrida
+                            </Button>
                         </form>
                     )}
 
-                    <button
+                    <Button
                         type="button"
+                        variant="secondary"
                         onClick={cancelRide}
-                        disabled={cancelling}
-                        className='w-full mt-2 bg-white border-2 border-gray-200 hover:bg-gray-50 disabled:opacity-60 text-lg text-gray-700 font-bold p-3 rounded-xl transition-colors'
-                    >{cancelling ? 'Cancelando...' : 'Cancelar'}</button>
+                        loading={cancelling}
+                        className="mt-2"
+                    >Cancelar</Button>
                 </div>
             </div>
         </div>

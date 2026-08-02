@@ -5,6 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { SocketContext } from '@/contexts/SocketContext'
 import CaptainHeader from '@/modules/driver/components/CaptainHeader'
+import StatusBadge from '@/shared/components/ui/StatusBadge'
+import EmptyState from '@/shared/components/ui/EmptyState'
+import Skeleton from '@/shared/components/ui/Skeleton'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
@@ -60,7 +63,7 @@ const CaptainWallet = () => {
     const status = isBlocked ? 'BLOQUEADO' : 'ATIVO';
 
     return (
-        <div className='h-screen bg-gray-50 flex flex-col pt-24'>
+        <div className='h-screen bg-surface-alt flex flex-col pt-24'>
             {/* Header */}
             <div className='bg-black text-white p-6 pt-8 flex items-center justify-between'>
                 <h1 className='text-xl font-bold'>Minha Carteira</h1>
@@ -74,7 +77,7 @@ const CaptainWallet = () => {
                 
                 {/* Notice Blocked */}
                 {isBlocked && (
-                    <div className='bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl mb-4 text-sm flex items-start gap-3 shadow-sm'>
+                    <div className='bg-danger-50 border border-danger-500/30 text-danger-600 p-4 rounded-panel mb-4 text-sm flex items-start gap-3 shadow-raised'>
                         <i className="ri-error-warning-fill text-xl"></i>
                         <div>
                             <p className='font-bold mb-1'>Conta Suspensa para Corridas</p>
@@ -87,31 +90,29 @@ const CaptainWallet = () => {
                 <div className='grid grid-cols-1 gap-4 mb-6'>
                     
                     {/* Credit Balance Card */}
-                    <div className={`rounded-2xl shadow-sm border p-5 relative overflow-hidden ${creditBalance < 0 ? 'bg-red-50 border-red-100' : 'bg-white border-gray-100'}`}>
+                    <div className={`rounded-panel shadow-raised border p-5 relative overflow-hidden ${creditBalance < 0 ? 'bg-danger-50 border-danger-500/20' : 'bg-surface border-line'}`}>
                         <div className='absolute top-0 right-0 p-3'>
-                            <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase tracking-wider ${status === 'ATIVO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                {status}
-                            </span>
+                            <StatusBadge tone={status === 'ATIVO' ? 'success' : 'danger'}>{status}</StatusBadge>
                         </div>
-                        
-                        <p className='text-sm text-gray-500 mb-1 flex items-center gap-1'>
+
+                        <p className='text-sm text-ink-600 mb-1 flex items-center gap-1'>
                             <i className="ri-coins-fill text-yellow-500"></i> Meus Créditos
                         </p>
-                        <h2 className={`text-4xl font-bold mb-2 ${creditBalance < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                        <h2 className={`text-4xl font-bold mb-2 ${creditBalance < 0 ? 'text-danger-600' : 'text-ink-900'}`}>
                             R$ {creditBalance.toFixed(2)}
                         </h2>
-                        <p className='text-xs text-gray-500 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
+                        <p className='text-xs text-ink-600 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
 
                         <button 
                             onClick={() => setShowRechargeModal(true)}
-                            className='w-full bg-black text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-800 transition'
+                            className='w-full bg-black text-white font-semibold py-3 rounded-panel flex items-center justify-center gap-2 hover:bg-gray-800 transition'
                         >
                             <i className="ri-add-circle-fill text-green-400"></i> Adicionar Crédito (PIX)
                         </button>
                     </div>
 
                     {/* Pending Balance Card */}
-                    <div className='bg-blue-50 rounded-2xl shadow-sm border border-blue-100 p-5'>
+                    <div className='bg-blue-50 rounded-panel shadow-raised border border-blue-100 p-5'>
                         <p className='text-sm text-blue-600 mb-1 flex items-center gap-1 font-semibold'>
                             <i className="ri-bank-card-fill"></i> Repasses Pendentes
                         </p>
@@ -122,14 +123,20 @@ const CaptainWallet = () => {
                 </div>
 
                 {/* Transactions List */}
-                <h3 className='text-lg font-bold text-gray-800 mb-4'>Extrato (Ledger)</h3>
+                <h3 className='text-lg font-bold text-ink-900 mb-4'>Extrato (Ledger)</h3>
                 
                 {loading ? (
-                    <div className='flex justify-center p-8'>
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
+                    <div className='space-y-3'>
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
                     </div>
                 ) : transactions.length === 0 ? (
-                    <div className='text-center text-gray-500 p-8'>Nenhuma transação encontrada.</div>
+                    <EmptyState
+                        icon="ri-exchange-dollar-line"
+                        title="Nenhuma transação ainda"
+                        description="Seu extrato aparece aqui assim que você tiver a primeira corrida ou recarga."
+                    />
                 ) : (
                     <div className='space-y-3'>
                         {transactions.map((tx) => {
@@ -139,40 +146,40 @@ const CaptainWallet = () => {
 
                             let icon = 'ri-exchange-dollar-line';
                             let title = 'Transação';
-                            let bgColor = 'bg-gray-100';
-                            let iconColor = 'text-gray-600';
+                            let bgColor = 'bg-surface-alt';
+                            let iconColor = 'text-ink-600';
 
-                            if (tx.type === 'commission') { icon = 'ri-arrow-down-line'; title = 'Comissão Plataforma'; bgColor = 'bg-red-100'; iconColor = 'text-red-600'; }
-                            if (tx.type === 'recharge') { icon = 'ri-add-line'; title = 'Recarga Pix'; bgColor = 'bg-green-100'; iconColor = 'text-green-600'; }
+                            if (tx.type === 'commission') { icon = 'ri-arrow-down-line'; title = 'Comissão Plataforma'; bgColor = 'bg-danger-50'; iconColor = 'text-danger-600'; }
+                            if (tx.type === 'recharge') { icon = 'ri-add-line'; title = 'Recarga Pix'; bgColor = 'bg-brand-50'; iconColor = 'text-brand-600'; }
                             if (tx.type === 'ride_payment') { icon = 'ri-car-line'; title = 'Ganho de Corrida'; bgColor = 'bg-blue-100'; iconColor = 'text-blue-600'; }
                             if (tx.type === 'payout') { icon = 'ri-bank-line'; title = 'Repasse Bancário'; bgColor = 'bg-purple-100'; iconColor = 'text-purple-600'; }
                             if (tx.type === 'adjustment') { icon = 'ri-tools-line'; title = 'Ajuste Admin'; bgColor = 'bg-orange-100'; iconColor = 'text-orange-600'; }
 
                             return (
-                                <div key={tx._id} className='bg-white p-4 rounded-xl border border-gray-100 shadow-sm'>
+                                <div key={tx._id} className='bg-surface p-4 rounded-panel border border-line shadow-raised'>
                                     <div className='flex justify-between items-start mb-2'>
                                         <div className='flex items-center gap-3'>
                                             <div className={`h-10 w-10 rounded-full flex items-center justify-center ${bgColor} ${iconColor}`}>
                                                 <i className={icon}></i>
                                             </div>
                                             <div>
-                                                <h4 className='font-semibold text-gray-800 text-sm'>
+                                                <h4 className='font-semibold text-ink-900 text-sm'>
                                                     {title}
                                                 </h4>
-                                                <p className='text-[10px] text-gray-500 leading-tight w-40 truncate'>{tx.description}</p>
-                                                <p className='text-[9px] text-gray-400 mt-0.5'>{new Date(tx.createdAt).toLocaleString('pt-BR')}</p>
+                                                <p className='text-[10px] text-ink-600 leading-tight w-40 truncate'>{tx.description}</p>
+                                                <p className='text-[9px] text-ink-400 mt-0.5'>{new Date(tx.createdAt).toLocaleString('pt-BR')}</p>
                                             </div>
                                         </div>
                                         <div className='text-right'>
-                                            <h4 className={`font-bold ${isDebit ? 'text-red-500' : 'text-green-500'}`}>
+                                            <h4 className={`font-bold ${isDebit ? 'text-danger-500' : 'text-brand-600'}`}>
                                                 {isDebit ? '-' : '+'}R$ {Math.abs(tx.amount).toFixed(2)}
                                             </h4>
                                             {tx.paymentMethod === 'card' && <span className='text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>Cartão</span>}
                                         </div>
                                     </div>
-                                    <div className='flex justify-between items-center text-[10px] text-gray-400 border-t border-gray-50 pt-2 mt-1'>
+                                    <div className='flex justify-between items-center text-[10px] text-ink-400 border-t border-line pt-2 mt-1'>
                                         <p>Saldo Ant: R$ {tx.balanceBefore.toFixed(2)}</p>
-                                        <p>Saldo Atual: <span className='font-semibold text-gray-600'>R$ {tx.balanceAfter.toFixed(2)}</span></p>
+                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>R$ {tx.balanceAfter.toFixed(2)}</span></p>
                                     </div>
                                 </div>
                             )
@@ -185,11 +192,11 @@ const CaptainWallet = () => {
 
             {/* Recharge Modal */}
             {showRechargeModal && (
-                <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4'>
-                    <div className='bg-white w-full max-w-sm rounded-2xl p-6 relative shadow-2xl'>
+                <div className='fixed inset-0 z-modal flex items-center justify-center bg-black/60 px-4'>
+                    <div className='bg-surface w-full max-w-sm rounded-panel p-6 relative shadow-floating'>
                         <button
                             onClick={() => setShowRechargeModal(false)}
-                            className='absolute top-4 right-4 text-gray-400 hover:text-black bg-gray-100 rounded-full h-8 w-8 flex items-center justify-center'
+                            className='absolute top-4 right-4 text-ink-400 hover:text-ink-900 bg-surface-alt rounded-full h-8 w-8 flex items-center justify-center'
                         >
                             <i className="ri-close-line text-xl"></i>
                         </button>
@@ -199,12 +206,12 @@ const CaptainWallet = () => {
                                 <i className="ri-tools-fill text-2xl"></i>
                             </div>
                             <h2 className='text-xl font-bold mb-2'>Recarga temporariamente indisponível</h2>
-                            <p className='text-sm text-gray-500 mb-6'>
+                            <p className='text-sm text-ink-600 mb-6'>
                                 Ainda não temos um meio de pagamento automático conectado para recarga de créditos. Fale com o suporte da MoveCity para adicionar saldo à sua conta.
                             </p>
                             <button
                                 onClick={() => setShowRechargeModal(false)}
-                                className='w-full bg-black text-white font-semibold py-3 rounded-xl hover:bg-gray-800 transition-colors'
+                                className='w-full bg-black text-white font-semibold py-3 rounded-panel hover:bg-gray-800 transition-colors'
                             >
                                 Entendi
                             </button>

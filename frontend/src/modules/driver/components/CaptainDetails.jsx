@@ -6,6 +6,7 @@ import { LocationContext } from '@/contexts/LocationContext'
 import { useToast } from '@/contexts/ToastContext'
 import axios from 'axios'
 import Avatar from '@/shared/components/Avatar'
+import Card from '@/shared/components/ui/Card'
 
 const CaptainDetails = () => {
 
@@ -101,13 +102,13 @@ const CaptainDetails = () => {
                 <div className='flex items-center gap-3'>
                     <Avatar firstname={captain?.fullname?.firstname} lastname={captain?.fullname?.lastname} className='border-2 border-yellow-400' />
                     <div>
-                        <h4 className='text-lg font-bold capitalize flex items-center gap-2 text-gray-800'>
+                        <h4 className='text-lg font-bold capitalize flex items-center gap-2 text-ink-900'>
                             {captain?.fullname?.firstname} {captain?.fullname?.lastname}
-                            <span className="text-[11px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm border border-gray-200">
+                            <span className="text-[11px] font-bold text-ink-600 bg-surface-alt px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-raised border border-line">
                                 ⭐ {summary?.rating?.toFixed(1) || '5.0'}
                             </span>
                         </h4>
-                        <p className='text-xs text-gray-500 font-medium capitalize'>{captain?.vehicle?.color} {captain?.vehicle?.vehicleType} • {captain?.vehicle?.plate}</p>
+                        <p className='text-xs text-ink-600 font-medium capitalize'>{captain?.vehicle?.color} {captain?.vehicle?.vehicleType} • {captain?.vehicle?.plate}</p>
                     </div>
                 </div>
             </div>
@@ -116,22 +117,23 @@ const CaptainDetails = () => {
                 online sem GPS via "Procurando corridas..." pulsando em verde — uma
                 afirmação falsa, já que sem localização ele nem aparece no despacho. */}
             {isOnline && locationError && (
-                <div className='flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-lg'>
+                <div className='flex items-center gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-panel'>
                     <i className="ri-map-pin-off-line text-base"></i>
                     Sem sinal de GPS — você pode não estar recebendo corridas.
                 </div>
             )}
 
-            {/* Smart Card & Status Toggle */}
-            <div className={`p-4 rounded-xl flex items-center justify-between ${isOnline ? 'bg-green-600 text-white shadow-green-200' : 'bg-gray-800 text-white shadow-gray-200'} shadow-lg transition-all duration-300`}>
+            {/* Smart Card & Status Toggle — cor dinâmica de propósito (não é um cartão
+                neutro do sistema): comunica o estado online/offline/sem-GPS do motorista. */}
+            <div className={`p-4 rounded-panel flex items-center justify-between ${isOnline && locationError ? 'bg-danger-600 text-white' : isOnline ? 'bg-brand-600 text-white' : 'bg-ink-900 text-white'} shadow-floating transition-all duration-300`}>
                 <div>
                     <h3 className="font-bold text-lg flex items-center gap-2">
                         {isOnline && locationError ? (
-                            <><div className="w-2.5 h-2.5 bg-red-400 rounded-full"></div> Online, sem GPS</>
+                            <><div className="w-2.5 h-2.5 bg-white/70 rounded-full"></div> Online, sem GPS</>
                         ) : isOnline ? (
-                            <><div className="w-2.5 h-2.5 bg-green-300 rounded-full animate-pulse"></div> Procurando corridas...</>
+                            <><div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-pulse"></div> Procurando corridas...</>
                         ) : (
-                            <><div className="w-2.5 h-2.5 bg-gray-400 rounded-full"></div> Offline</>
+                            <><div className="w-2.5 h-2.5 bg-white/40 rounded-full"></div> Offline</>
                         )}
                     </h3>
                     <p className="text-[13px] opacity-90 mt-1 font-medium">
@@ -143,10 +145,10 @@ const CaptainDetails = () => {
                 <button
                     onClick={toggleOnline}
                     disabled={loadingToggle || captain.approvalStatus !== 'aprovado'}
-                    className={`px-5 py-3 rounded-full font-bold text-sm transition-all shadow-md active:scale-95 ${
+                    className={`px-5 py-3 rounded-full font-bold text-sm transition-all shadow-raised active:scale-95 ${
                         isOnline
-                        ? 'bg-white text-green-700 hover:bg-green-50'
-                        : 'bg-green-500 text-white hover:bg-green-400'
+                        ? 'bg-white text-brand-700 hover:bg-brand-50'
+                        : 'bg-brand-500 text-white hover:bg-brand-400'
                     } ${(loadingToggle || captain.approvalStatus !== 'aprovado') && 'opacity-70 cursor-not-allowed'}`}
                 >
                     {isOnline ? 'Ficar Offline' : 'Ficar Online'}
@@ -154,59 +156,59 @@ const CaptainDetails = () => {
             </div>
 
             {/* Ganhos Hoje */}
-            <div className='bg-white border border-gray-200 p-5 rounded-2xl shadow-sm'>
-                <p className='text-xs text-gray-500 font-bold uppercase tracking-wider mb-1'>💰 Ganhos Hoje</p>
-                <h2 className='text-4xl font-black text-gray-900 tracking-tight mt-1'>
+            <Card shadow="raised" padding="p-5">
+                <p className='text-xs text-ink-600 font-bold uppercase tracking-wider mb-1'>💰 Ganhos Hoje</p>
+                <h2 className='text-4xl font-black text-ink-900 tracking-tight mt-1'>
                     {loadingSummary ? '...' : `R$ ${summary?.earnings?.toFixed(2) || '0.00'}`}
                 </h2>
 
-                <div className='flex items-center gap-4 mt-5 pt-4 border-t border-gray-100'>
+                <div className='flex items-center gap-4 mt-5 pt-4 border-t border-line'>
                     <div className="flex-1">
-                        <p className='text-[11px] text-gray-400 font-medium uppercase'>Tempo Online</p>
-                        <p className='text-base font-bold text-gray-800'>{loadingSummary ? '...' : formatOnlineTime(summary?.onlineTimeSeconds)}</p>
+                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Tempo Online</p>
+                        <p className='text-base font-bold text-ink-900'>{loadingSummary ? '...' : formatOnlineTime(summary?.onlineTimeSeconds)}</p>
                     </div>
-                    <div className='w-px h-8 bg-gray-200'></div>
+                    <div className='w-px h-8 bg-line'></div>
                     <div className="flex-1">
-                        <p className='text-[11px] text-gray-400 font-medium uppercase'>Corridas Hoje</p>
-                        <p className='text-base font-bold text-gray-800'>{loadingSummary ? '...' : `${summary?.ridesToday || 0}`}</p>
+                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Corridas Hoje</p>
+                        <p className='text-base font-bold text-ink-900'>{loadingSummary ? '...' : `${summary?.ridesToday || 0}`}</p>
                     </div>
-                    <div className='w-px h-8 bg-gray-200'></div>
+                    <div className='w-px h-8 bg-line'></div>
                     <div className="flex-1">
-                        <p className='text-[11px] text-gray-400 font-medium uppercase'>Carteira</p>
+                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Carteira</p>
                         <p className='text-base font-bold text-blue-600'>{loadingSummary ? '...' : `R$ ${summary?.walletBalance?.toFixed(2) || '0.00'}`}</p>
                     </div>
                 </div>
-            </div>
+            </Card>
 
             {/* Ações Rápidas (Atalhos) */}
-            <h3 className='text-xs font-bold text-gray-800 mt-2 uppercase tracking-wider px-1'>Ações Rápidas</h3>
+            <h3 className='text-xs font-bold text-ink-900 mt-2 uppercase tracking-wider px-1'>Ações Rápidas</h3>
             <div className='grid grid-cols-3 gap-3'>
                 <button
                     onClick={() => navigate('/captain-wallet')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
-                    <div className='w-14 h-14 bg-white border border-gray-200 rounded-2xl flex items-center justify-center shadow-sm text-green-600 text-[26px]'>
+                    <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-brand-600 text-[26px]'>
                         <i className="ri-wallet-3-fill"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-gray-700 text-center uppercase tracking-wide'>Carteira</span>
+                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Carteira</span>
                 </button>
                 <button
                     onClick={() => navigate('/captain/rides')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
-                    <div className='w-14 h-14 bg-white border border-gray-200 rounded-2xl flex items-center justify-center shadow-sm text-gray-700 text-[26px]'>
+                    <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-ink-600 text-[26px]'>
                         <i className="ri-history-line"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-gray-700 text-center uppercase tracking-wide'>Histórico</span>
+                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Histórico</span>
                 </button>
                 <button
                     onClick={() => navigate('/captain/earnings')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
-                    <div className='w-14 h-14 bg-white border border-gray-200 rounded-2xl flex items-center justify-center shadow-sm text-gray-700 text-[26px]'>
+                    <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-ink-600 text-[26px]'>
                         <i className="ri-bar-chart-fill"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-gray-700 text-center uppercase tracking-wide'>Ganhos</span>
+                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Ganhos</span>
                 </button>
             </div>
         </div>

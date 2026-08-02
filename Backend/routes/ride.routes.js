@@ -100,4 +100,12 @@ router.post('/review',
     rideController.submitReview
 )
 
+router.post('/captain-review',
+    authMiddleware.authCaptain,
+    body('rideId').isMongoId().withMessage('Invalid ride id'),
+    body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+    body('comment').optional().isString().isLength({ max: 500 }),
+    rideController.submitCaptainReview
+)
+
 module.exports = router;

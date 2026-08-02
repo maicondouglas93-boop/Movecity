@@ -733,3 +733,41 @@ module.exports.submitReview = async ({ rideId, user, rating, comment, issueCateg
     return review;
 }
 
+// Espelha submitReview (acima), na direção motorista → passageiro. Auditoria de UX do
+// motorista (2026-08-02, Etapa 7, relatório: "Avaliação... Não existe. O motorista
+// nunca avalia o passageiro, embora reviewApi.js exista no projeto") — o schema de
+// review já tinha o tipo 'driver_to_passenger' pronto, só nada no backend o usava.
+module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }) => {
+    if (!rideId || !captain || !rating) {
+        throw new Error('Ride id, captain and rating are required');
+    }
+
+    const ride = await rideModel.findOne({ _id: rideId, captain });
+    if (!ride) {
+        throw new Error('Ride not found');
+    }
+    if (ride.status !== 'finished') {
+        throw new Error('Only finished rides can be reviewed');
+    }
+
+    const reviewModel = require('../models/review.model');
+    const existing = await reviewModel.findOne({ ride: rideId, captain, type: 'driver_to_passenger' });
+    if (existing) {
+        throw new Error('Ride already reviewed');
+    }
+
+    const review = await reviewModel.create({
+        ride: rideId,
+        user: ride.user,
+        captain,
+        rating,
+        comment,
+        type: 'driver_to_passenger'
+    });
+
+    const userService = require('./user.service');
+    await userService.recalculateRating(ride.user);
+
+    return review;
+}
+

@@ -2,9 +2,10 @@ import React, { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CaptainDetails from '@/modules/driver/components/CaptainDetails'
 import RidePopUp from '@/modules/driver/components/RidePopUp'
-import { useGSAP } from '@gsap/react'
-import gsap from 'gsap'
 import ConfirmRidePopUp from '@/modules/driver/components/ConfirmRidePopUp'
+import ApprovalGate from '@/modules/driver/components/ApprovalGate'
+import BottomSheet from '@/shared/components/ui/BottomSheet'
+import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { useEffect, useContext } from 'react'
 import { SocketContext } from '@/contexts/SocketContext'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
@@ -24,14 +25,31 @@ const CaptainHome = () => {
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
     const [ confirmRidePopupPanel, setConfirmRidePopupPanel ] = useState(false)
 
-    const ridePopupPanelRef = useRef(null)
-    const confirmRidePopupPanelRef = useRef(null)
     const [ ride, setRide ] = useState(null)
 
     const { socket } = useContext(SocketContext)
-    const { captain } = useContext(CaptainDataContext)
+    const { captain, setCaptain } = useContext(CaptainDataContext)
     const { locationRef, locationError } = useContext(LocationContext)
     const { addToast } = useToast()
+    const [ refreshingApproval, setRefreshingApproval ] = useState(false)
+
+    // Auditoria de UX do motorista (2026-08-02, §2.7): busca o perfil de novo sob
+    // demanda (botão "Verificar novamente" do ApprovalGate) — o contexto só é
+    // atualizado no login/refresh de página, então um motorista aprovado enquanto o
+    // app estava aberto continuaria vendo a tela de bloqueio até fechar e reabrir.
+    const refreshApprovalStatus = async () => {
+        setRefreshingApproval(true)
+        try {
+            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/profile`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+            })
+            setCaptain(response.data.captain)
+        } catch (err) {
+            console.error('Failed to refresh approval status:', err)
+        } finally {
+            setRefreshingApproval(false)
+        }
+    }
 
     // Auditoria de UX do motorista (2026-08-02, §2.5): sem GPS, updateLocation() (efeito
     // abaixo) simplesmente retorna cedo e a posição do motorista para de ser atualizada
@@ -202,9 +220,14 @@ const CaptainHome = () => {
             console.error('Confirm ride error:', err);
             if (err.response?.status === 409) {
                 // Outro motorista já aceitou — desfecho esperado da concorrência, não um
-                // erro de rede. Fecha o popup em vez de deixar o motorista tentando de novo.
+                // erro de rede. Fecha os DOIS painéis: o RidePopUp (botão "Aceitar" já
+                // abre o ConfirmRidePopUp de forma otimista, antes da resposta da API,
+                // pro caso de rede offline — sem fechar os dois aqui, um 409 real deixava
+                // o ConfirmRidePopUp pendurado aberto com a corrida zerada, Etapa 6 da
+                // auditoria de UX, 2026-08-02).
                 addToast('Essa corrida já foi aceita por outro motorista.', 'info');
                 setRidePopupPanel(false)
+                setConfirmRidePopupPanel(false)
                 setRide(null)
             } else if (!navigator.onLine || err.code === 'ERR_NETWORK') {
                 enqueueOfflineAction({
@@ -226,52 +249,43 @@ const CaptainHome = () => {
     }
 
 
-    useGSAP(function () {
-        if (ridePopupPanel) {
-            gsap.to(ridePopupPanelRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(ridePopupPanelRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ ridePopupPanel ])
-
-    useGSAP(function () {
-        if (confirmRidePopupPanel) {
-            gsap.to(confirmRidePopupPanelRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(confirmRidePopupPanelRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ confirmRidePopupPanel ])
+    // Auditoria de UX do motorista (2026-08-02, §2.7): antes disto, um motorista fora
+    // do estado 'aprovado' (ou bloqueado depois de já ter sido aprovado) entrava direto
+    // na Home operacional inteira e só descobria a restrição ao tocar em "Ficar Online".
+    const needsApprovalGate = captain && (captain.isBlocked || captain.approvalStatus !== 'aprovado')
 
     return (
-        <div className='h-screen flex flex-col overflow-hidden bg-gray-50'>
+        <div className='h-screen flex flex-col overflow-hidden bg-surface-alt'>
+            <ConnectionBanner />
 
-            <div className='h-[40vh] relative shadow-sm z-10'>
-                <LiveTracking ride={ride} showSearchRadius={true} />
-            </div>
-            <div className='h-[60vh] p-4 overflow-y-auto pb-24'>
-                <CaptainDetails />
-            </div>
-            <div ref={ridePopupPanelRef} className='fixed w-full z-[70] bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>
+            {needsApprovalGate ? (
+                <div className='flex-1 overflow-y-auto pb-20'>
+                    <ApprovalGate captain={captain} onRefresh={refreshApprovalStatus} refreshing={refreshingApproval} />
+                </div>
+            ) : (
+                <>
+                    <div className='h-[40vh] relative shadow-raised z-panel'>
+                        <LiveTracking ride={ride} showSearchRadius={true} />
+                    </div>
+                    <div className='h-[60vh] p-4 overflow-y-auto pb-24'>
+                        <CaptainDetails />
+                    </div>
+                </>
+            )}
+            <BottomSheet open={ridePopupPanel} onClose={() => setRidePopupPanel(false)} className="pb-6">
                 <RidePopUp
                     ride={ride}
+                    open={ridePopupPanel}
                     setRidePopupPanel={setRidePopupPanel}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel}
                     confirmRide={confirmRide}
                 />
-            </div>
-            <div ref={confirmRidePopupPanelRef} className='fixed w-full h-screen z-[70] bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>
+            </BottomSheet>
+            <BottomSheet open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)} className="pb-6">
                 <ConfirmRidePopUp
                     ride={ride}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />
-            </div>
+            </BottomSheet>
             <CaptainHeader />
         </div>
     )

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useCallback, memo } fro
 import { SocketContext } from '@/contexts/SocketContext'
 import { LocationContext } from '@/contexts/LocationContext'
 import { createMapProvider } from '@/services/maps'
+import EmptyState from '@/shared/components/ui/EmptyState'
 
 const sanitizeCoord = (lat, lng) => {
     if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
@@ -78,6 +79,12 @@ const LiveTracking = (props) => {
     const hasFitBoundsRef = useRef(false);
     const onMapCenterChangeRef = useRef(props.onMapCenterChange);
     const routeCoordsRef = useRef([]);
+
+    // §12 do relatório de UX: quando provider.init() falhava, o mapa ficava em branco
+    // sem nenhuma explicação nem forma de tentar de novo — só um console.error. retryKey
+    // força o efeito de inicialização a rodar de novo mesmo sem `hasPosition` mudar.
+    const [ mapError, setMapError ] = useState(false);
+    const [ retryKey, setRetryKey ] = useState(0);
 
     // Keep routeCoordsRef in sync
     useEffect(() => {
@@ -283,9 +290,11 @@ const LiveTracking = (props) => {
                 provider.destroy();
             } else {
                 providerRef.current = provider;
+                setMapError(false);
             }
         }).catch((err) => {
             console.error('Falha ao inicializar o provider de mapa:', err);
+            if (!cancelled) setMapError(true);
         });
 
         // Cleanup only on unmount
@@ -297,7 +306,12 @@ const LiveTracking = (props) => {
                 hasCaptainMarkerRef.current = false;
             }
         };
-    }, [hasPosition]); // Only when position first becomes available
+    }, [hasPosition, retryKey]); // Only when position first becomes available (ou retry manual)
+
+    const handleRetryMap = useCallback(() => {
+        setMapError(false);
+        setRetryKey(k => k + 1);
+    }, []);
 
     // Reset fit bounds flag when route or coordinates change
     useEffect(() => {
@@ -480,6 +494,21 @@ const LiveTracking = (props) => {
                     <i className="ri-map-pin-line text-3xl text-ink-400 animate-bounce"></i>
                     <p className="text-ink-600 font-medium">Obtendo localização...</p>
                 </div>
+            </div>
+        );
+    }
+
+    if (mapError) {
+        return (
+            <div className="w-full h-full flex items-center justify-center bg-surface-alt">
+                <EmptyState
+                    variant="error"
+                    icon="ri-map-2-line"
+                    title="Não foi possível carregar o mapa"
+                    description="Verifique sua conexão e tente novamente."
+                    actionLabel="Tentar de novo"
+                    onAction={handleRetryMap}
+                />
             </div>
         );
     }

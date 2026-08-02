@@ -42,7 +42,14 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
 
     console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
 
-    const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
+    // Persiste as coordenadas do embarque na própria corrida (Etapa 6 da auditoria de UX,
+    // 2026-08-02) — o frontend usa isso pra mostrar a distância até o passageiro no popup
+    // de oferta, calculada localmente a partir da posição GPS do motorista.
+    const rideWithUser = await rideModel.findOneAndUpdate(
+        { _id: ride._id },
+        { pickupCoordinates: { lat: pickupCoordinates.ltd, lng: pickupCoordinates.lng } },
+        { new: true }
+    ).populate('user');
 
     matchingCaptains.forEach(captain => {
         // Put captain in a room for this specific ride
@@ -539,6 +546,29 @@ module.exports.submitReview = async (req, res) => {
     try {
         const review = await rideService.submitReview({
             rideId, user: req.user._id, rating, comment, issueCategory
+        });
+        return res.status(201).json(review);
+    } catch (err) {
+        if (err.message === 'Ride already reviewed') {
+            return res.status(409).json({ message: 'Você já avaliou esta corrida.' });
+        }
+        return res.status(400).json({ message: err.message });
+    }
+}
+
+// Auditoria de UX do motorista (2026-08-02, Etapa 7): motorista avalia o passageiro —
+// espelha submitReview acima.
+module.exports.submitCaptainReview = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId, rating, comment } = req.body;
+
+    try {
+        const review = await rideService.submitCaptainReview({
+            rideId, captain: req.captain._id, rating, comment
         });
         return res.status(201).json(review);
     } catch (err) {

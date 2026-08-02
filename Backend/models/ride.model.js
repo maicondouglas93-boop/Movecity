@@ -46,6 +46,14 @@ const rideSchema = new mongoose.Schema({
     estimatedDistance: {
         type: Number, // meters
     },
+    // Auditoria de UX do motorista (2026-08-02, Etapa 6): coordenadas do embarque,
+    // resolvidas uma vez no despacho e persistidas aqui — sem isso, o frontend não tinha
+    // como calcular "a quantos km você está do passageiro", a informação que mais pesa
+    // na decisão de aceitar ou não uma corrida (§2.10 do relatório de UX).
+    pickupCoordinates: {
+        lat: { type: Number },
+        lng: { type: Number },
+    },
     estimatedTime: {
         type: Number, // seconds
     },

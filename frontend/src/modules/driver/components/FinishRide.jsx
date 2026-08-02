@@ -5,6 +5,7 @@ import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Avatar from '@/shared/components/Avatar'
+import Button from '@/shared/components/ui/Button'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -20,6 +21,12 @@ const FinishRide = (props) => {
     // começar. Cobrar do passageiro com base na estimativa fazia o motorista receber a
     // menos sempre que a corrida real foi mais longa/demorada que a estimada.
     const [endedRide, setEndedRide] = useState(null)
+    // Auditoria de UX do motorista (2026-08-02, Etapa 7): "o motorista nunca avalia o
+    // passageiro, embora reviewApi.js exista no projeto" — o backend já suportava o tipo
+    // 'driver_to_passenger' no schema de review, só nunca tinha endpoint pra usá-lo.
+    const [showRating, setShowRating] = useState(false)
+    const [ratingValue, setRatingValue] = useState(0)
+    const [submittingRating, setSubmittingRating] = useState(false)
     const navigate = useNavigate()
 
     // Antes de finalizar, mostra a estimativa (ainda não existe valor final). Depois de
@@ -83,7 +90,10 @@ const FinishRide = (props) => {
             queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
             queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
             queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
-            setTimeout(() => navigate('/captain-home'), 2500)
+            // Breve confirmação visual, depois pede a avaliação do passageiro em vez de
+            // já mandar pra Home — só faz sentido pedir quando o pagamento foi
+            // confirmado de verdade (não no caminho offline/pendingSync abaixo).
+            setTimeout(() => setShowRating(true), 1200)
         },
         onError: (err) => {
             console.error('Confirm payment error:', err)
@@ -106,130 +116,151 @@ const FinishRide = (props) => {
         confirmPaymentMutation.mutate();
     }
 
+    async function submitRating() {
+        if (ratingValue === 0) {
+            navigate('/captain-home')
+            return
+        }
+        setSubmittingRating(true)
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/captain-review`, {
+                rideId: props.ride._id,
+                rating: ratingValue
+            }, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+            })
+        } catch (err) {
+            console.error('Captain review error:', err)
+            // Não trava a navegação por causa disso — a corrida já foi paga e concluída,
+            // a avaliação é um extra.
+        } finally {
+            navigate('/captain-home')
+        }
+    }
+
     return (
         <div>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setFinishRidePanel(false)
-            }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-
             {!ended ? (
                 <>
-                    <h3 className='text-2xl font-semibold mb-5 text-gray-800'>Finalizar esta Corrida</h3>
-                    <div className='flex items-center justify-between p-4 border-2 border-green-200 bg-green-50 rounded-lg mt-4'>
+                    <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Finalizar esta Corrida</h3>
+                    <div className='flex items-center justify-between p-4 border-2 border-brand-100 bg-brand-50 rounded-panel mt-4'>
                         <div className='flex items-center gap-3 '>
                             <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} />
-                            <h2 className='text-lg font-bold text-gray-800'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
+                            <h2 className='text-lg font-bold text-ink-900'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
                         </div>
-                        <h5 className='text-lg font-bold text-gray-800'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
+                        <h5 className='text-lg font-bold text-ink-900'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
                     </div>
                     <div className='flex gap-2 justify-between flex-col items-center'>
                         <div className='w-full mt-5'>
-                            <div className='flex items-center gap-5 p-3 border-b-2'>
-                                <i className="ri-map-pin-user-fill text-green-500"></i>
+                            <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
+                                <i className="ri-map-pin-user-fill text-brand-500"></i>
                                 <div>
-                                    <h3 className='text-lg font-medium text-gray-800'>{props.ride?.pickup?.split(',')[0]}</h3>
-                                    <p className='text-sm -mt-1 text-gray-500'>{props.ride?.pickup}</p>
+                                    <h3 className='text-lg font-medium text-ink-900'>{props.ride?.pickup?.split(',')[0]}</h3>
+                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.pickup}</p>
                                 </div>
                             </div>
-                            <div className='flex items-center gap-5 p-3 border-b-2'>
-                                <i className="text-lg ri-map-pin-2-fill text-red-500"></i>
+                            <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
+                                <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
                                 <div>
-                                    <h3 className='text-lg font-medium text-gray-800'>{props.ride?.destination?.split(',')[0]}</h3>
-                                    <p className='text-sm -mt-1 text-gray-500'>{props.ride?.destination}</p>
+                                    <h3 className='text-lg font-medium text-ink-900'>{props.ride?.destination?.split(',')[0]}</h3>
+                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.destination}</p>
                                 </div>
                             </div>
                             <div className='flex items-center gap-5 p-3'>
-                                <i className="ri-currency-line text-green-500"></i>
+                                <i className="ri-currency-line text-brand-500"></i>
                                 <div>
-                                    <h3 className='text-lg font-medium text-gray-800'>R$ {props.ride?.fare}</h3>
-                                    <p className='text-sm -mt-1 text-gray-500'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
+                                    <h3 className='text-lg font-medium text-ink-900'>R$ {props.ride?.fare}</h3>
+                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                                 </div>
                             </div>
                         </div>
 
                         <div className='mt-6 w-full'>
-                            <button
+                            <Button
                                 onClick={endRide}
-                                disabled={endRideMutation.isPending}
-                                className='w-full mt-5 flex text-lg justify-center bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold p-3 rounded-xl transition-all shadow-lg shadow-green-500/20'
+                                loading={endRideMutation.isPending}
+                                className="mt-5"
                             >
-                                {endRideMutation.isPending ? (
-                                    <span className='flex items-center gap-2'>
-                                        <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                                        </svg>
-                                        Finalizando...
-                                    </span>
-                                ) : 'Finalizar Corrida'}
-                            </button>
+                                Finalizar Corrida
+                            </Button>
                         </div>
                     </div>
                 </>
+            ) : showRating ? (
+                <div className='flex flex-col items-center justify-center py-8 gap-4'>
+                    <h3 className='text-xl font-bold text-ink-900 text-center'>
+                        Como foi a corrida com {props.ride?.user?.fullname?.firstname || 'o passageiro'}?
+                    </h3>
+                    <div className='flex gap-2'>
+                        {[1, 2, 3, 4, 5].map(n => (
+                            <button
+                                key={n}
+                                type="button"
+                                onClick={() => setRatingValue(n)}
+                                aria-label={`${n} estrela${n > 1 ? 's' : ''}`}
+                                className='p-1'
+                            >
+                                <i className={`text-4xl ${n <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-ink-400'}`}></i>
+                            </button>
+                        ))}
+                    </div>
+                    <div className='w-full flex flex-col gap-2 mt-2'>
+                        <Button onClick={submitRating} loading={submittingRating} disabled={ratingValue === 0}>
+                            Enviar avaliação
+                        </Button>
+                        <Button variant="ghost" onClick={() => navigate('/captain-home')}>
+                            Pular
+                        </Button>
+                    </div>
+                </div>
             ) : paymentConfirmed ? (
                 <div className='flex flex-col items-center justify-center py-10 gap-4'>
-                    <div className={pendingSync ? 'bg-yellow-100 rounded-full p-4' : 'bg-green-100 rounded-full p-4'}>
-                        <i className={pendingSync ? 'ri-time-line text-yellow-600 text-5xl' : 'ri-checkbox-circle-fill text-green-500 text-5xl'}></i>
+                    <div className={pendingSync ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
+                        <i className={pendingSync ? 'ri-time-line text-amber-600 text-5xl' : 'ri-checkbox-circle-fill text-brand-500 text-5xl'}></i>
                     </div>
                     {pendingSync ? (
                         <>
-                            <h3 className='text-xl font-bold text-yellow-700'>Pagamento registrado</h3>
-                            <p className='text-gray-500 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar. Comissão prevista de R$ {commissionAmount.toFixed(2)}.</p>
+                            <h3 className='text-xl font-bold text-amber-700'>Pagamento registrado</h3>
+                            <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar. Comissão prevista de R$ {commissionAmount.toFixed(2)}.</p>
+                            <p className='text-ink-400 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>
-                            <h3 className='text-xl font-bold text-green-700'>Pagamento Confirmado!</h3>
-                            <p className='text-gray-500 text-center'>Comissão de R$ {commissionAmount.toFixed(2)} descontada dos créditos.</p>
+                            <h3 className='text-xl font-bold text-brand-700'>Pagamento Confirmado!</h3>
+                            <p className='text-ink-600 text-center'>Comissão de R$ {commissionAmount.toFixed(2)} descontada dos créditos.</p>
                         </>
                     )}
-                    <p className='text-gray-400 text-sm'>Redirecionando...</p>
                 </div>
             ) : (
                 <>
-                    <h3 className='text-2xl font-semibold mb-3 text-gray-800'>Confirmar Pagamento</h3>
-                    <p className='text-gray-500 mb-5'>Receba o dinheiro do passageiro e confirme abaixo.</p>
+                    <h3 className='text-2xl font-semibold mb-3 text-ink-900'>Confirmar Pagamento</h3>
+                    <p className='text-ink-600 mb-5'>Receba o dinheiro do passageiro e confirme abaixo.</p>
 
                     {/* Payment Summary */}
-                    <div className='bg-gray-50 rounded-2xl p-5 border border-gray-200 mb-5'>
-                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-gray-200'>
-                            <span className='text-gray-600'>Valor final da corrida</span>
-                            <span className='text-xl font-bold'>R$ {finalAmount.toFixed(2)}</span>
+                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5'>
+                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-line'>
+                            <span className='text-ink-600'>Valor final da corrida</span>
+                            <span className='text-xl font-bold text-ink-900'>R$ {finalAmount.toFixed(2)}</span>
                         </div>
-                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-gray-200'>
-                            <span className='text-gray-600'>Comissão ({props.ride?.commissionPercent ?? '—'}%)</span>
-                            <span className='text-red-500 font-semibold'>- R$ {commissionAmount.toFixed(2)}</span>
+                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-line'>
+                            <span className='text-ink-600'>Comissão ({props.ride?.commissionPercent ?? '—'}%)</span>
+                            <span className='text-danger-500 font-semibold'>- R$ {commissionAmount.toFixed(2)}</span>
                         </div>
                         <div className='flex justify-between items-center'>
-                            <span className='text-gray-800 font-semibold'>Você fica com (dinheiro)</span>
-                            <span className='text-green-600 text-xl font-bold'>R$ {driverKeeps.toFixed(2)}</span>
+                            <span className='text-ink-900 font-semibold'>Você fica com (dinheiro)</span>
+                            <span className='text-brand-600 text-xl font-bold'>R$ {driverKeeps.toFixed(2)}</span>
                         </div>
                     </div>
 
-                    <div className='bg-gray-50 border border-gray-200 rounded-xl p-3 mb-5 flex items-start gap-2'>
-                        <i className="ri-information-line text-gray-400 mt-0.5"></i>
-                        <p className='text-sm text-gray-600'>A comissão de <strong>R$ {commissionAmount.toFixed(2)}</strong> será descontada dos seus créditos na carteira.</p>
+                    <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>
+                        <i className="ri-information-line text-ink-400 mt-0.5"></i>
+                        <p className='text-sm text-ink-600'>A comissão de <strong>R$ {commissionAmount.toFixed(2)}</strong> será descontada dos seus créditos na carteira.</p>
                     </div>
 
-                    <button
-                        onClick={confirmPayment}
-                        disabled={confirmPaymentMutation.isPending}
-                        className='w-full flex text-lg justify-center bg-green-500 hover:bg-green-600 text-white font-bold p-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-green-500/20'
-                    >
-                        {confirmPaymentMutation.isPending ? (
-                            <span className='flex items-center gap-2'>
-                                <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                                </svg>
-                                Confirmando...
-                            </span>
-                        ) : (
-                            <span className='flex items-center gap-2'>
-                                <i className="ri-hand-coin-fill text-xl"></i>
-                                Pagamento Recebido
-                            </span>
-                        )}
-                    </button>
+                    <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending}>
+                        <i className="ri-hand-coin-fill text-xl"></i>
+                        Pagamento Recebido
+                    </Button>
                 </>
             )}
         </div>

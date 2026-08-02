@@ -9,6 +9,8 @@ const vehicleCategoryModel = require('../../models/vehicleCategory.model');
 const transactionModel = require('../../models/transaction.model');
 const walletModel = require('../../models/wallet.model');
 const captainModel = require('../../models/captain.model');
+const userModel = require('../../models/user.model');
+const reviewModel = require('../../models/review.model');
 
 describe('Ride API Integration Tests', () => {
     let userToken;
@@ -376,6 +378,65 @@ describe('Ride API Integration Tests', () => {
             // ficou disponível de novo para qualquer motorista compatível encontrá-la.
             const requeued = await rideModel.findOne({ _id: ride._id, status: 'requested' });
             expect(requeued).toBeTruthy();
+        });
+    });
+
+    describe('POST /rides/captain-review (auditoria de UX, 2026-08-02, Etapa 7)', () => {
+        it('motorista avalia o passageiro numa corrida finished, e a nota do passageiro é recalculada', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'finished' });
+
+            const res = await request(app)
+                .post('/rides/captain-review')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id, rating: 4 });
+
+            expect(res.statusCode).toBe(201);
+            expect(res.body.type).toBe('driver_to_passenger');
+
+            const persistedUser = await userModel.findById(user._id);
+            expect(persistedUser.rating).toBe(4);
+        });
+
+        it('rejeita avaliar duas vezes a mesma corrida', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'finished' });
+
+            await request(app)
+                .post('/rides/captain-review')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id, rating: 5 });
+
+            const res = await request(app)
+                .post('/rides/captain-review')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id, rating: 3 });
+
+            expect(res.statusCode).toBe(409);
+        });
+
+        it('rejeita avaliar corrida ainda não finalizada', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'started' });
+
+            const res = await request(app)
+                .post('/rides/captain-review')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id, rating: 5 });
+
+            expect(res.statusCode).toBe(400);
+            const found = await reviewModel.findOne({ ride: ride._id });
+            expect(found).toBeFalsy();
+        });
+
+        it('rejeita motorista avaliando corrida que não é dele', async () => {
+            const otherCaptain = await createCaptain();
+            const otherCaptainToken = generateAuthToken(otherCaptain, 'captain');
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'finished' });
+
+            const res = await request(app)
+                .post('/rides/captain-review')
+                .set('Authorization', `Bearer ${otherCaptainToken}`)
+                .send({ rideId: ride._id, rating: 5 });
+
+            expect(res.statusCode).toBe(400);
         });
     });
 });

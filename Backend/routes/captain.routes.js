@@ -51,6 +51,7 @@ router.get('/logout', authMiddleware.authCaptain, captainController.logoutCaptai
 router.get('/wallet', authMiddleware.authCaptain, captainController.getWallet)
 router.get('/transactions', authMiddleware.authCaptain, captainController.getTransactions)
 router.get('/summary', authMiddleware.authCaptain, captainController.getSummary)
+router.get('/earnings', authMiddleware.authCaptain, captainController.getEarnings)
 
 router.post('/recharge', 
     authMiddleware.authCaptain,

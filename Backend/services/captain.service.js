@@ -110,6 +110,57 @@ function startOfToday() {
     return d;
 }
 
+// Auditoria de UX do motorista (2026-08-02, Etapa 8): a tela de Ganhos só mostrava
+// captain.earnings — um total acumulado vitalício, sem nenhum recorte temporal nem
+// detalhe por corrida. 'day' usa o mesmo corte de meia-noite já usado em getSummary;
+// 'week'/'month' são janelas rolantes (últimos 7/30 dias), não limites de calendário —
+// mais simples e mais útil pra um motorista conferir "quanto ganhei nos últimos X dias".
+module.exports.getEarningsBreakdown = async (captainId, range = 'day') => {
+    const rideModel = require('../models/ride.model');
+
+    let startDate;
+    if (range === 'week') {
+        startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    } else if (range === 'month') {
+        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    } else {
+        startDate = startOfToday();
+    }
+
+    const rides = await rideModel.find({
+        captain: captainId,
+        status: 'finished',
+        updatedAt: { $gte: startDate }
+    }).sort({ updatedAt: -1 });
+
+    let totalEarnings = 0;
+    let totalCommission = 0;
+    const breakdown = rides.map(ride => {
+        const grossFare = ride.finalPrice || ride.fare || 0;
+        const commission = ride.commissionAmount || 0;
+        const netEarnings = grossFare - commission;
+        totalEarnings += netEarnings;
+        totalCommission += commission;
+        return {
+            rideId: ride._id,
+            date: ride.updatedAt,
+            pickup: ride.pickup,
+            destination: ride.destination,
+            grossFare,
+            commission,
+            netEarnings
+        };
+    });
+
+    return {
+        range,
+        totalEarnings: Math.round(totalEarnings * 100) / 100,
+        totalCommission: Math.round(totalCommission * 100) / 100,
+        totalRides: rides.length,
+        rides: breakdown
+    };
+};
+
 // Início de uma sessão online real (chamado quando o motorista fica online, seja por
 // toggle-online explícito ou por reconexão de socket).
 module.exports.startOnlineSession = async (captainId) => {

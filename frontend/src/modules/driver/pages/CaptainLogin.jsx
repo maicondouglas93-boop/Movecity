@@ -59,8 +59,9 @@ const Captainlogin = () => {
         <form onSubmit={(e) => {
           submitHandler(e)
         }}>
-          <h3 className='text-lg font-medium mb-2 text-ink-900'>Qual é o seu email?</h3>
+          <label htmlFor="captain-login-email" className='block text-lg font-medium mb-2 text-ink-900'>Qual é o seu email?</label>
           <input
+            id="captain-login-email"
             required
             value={email}
             onChange={(e) => {
@@ -68,18 +69,21 @@ const Captainlogin = () => {
             }}
             className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
             type="email"
+            autoComplete="email"
             placeholder='email@exemplo.com'
           />
 
-          <h3 className='text-lg font-medium mb-2 text-ink-900'>Senha</h3>
+          <label htmlFor="captain-login-password" className='block text-lg font-medium mb-2 text-ink-900'>Senha</label>
 
           <input
+            id="captain-login-password"
             className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 mb-7 rounded-panel px-4 py-3 w-full text-lg placeholder:text-ink-400 outline-none transition-colors'
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
             }}
             required type="password"
+            autoComplete="current-password"
             placeholder='senha'
           />
 

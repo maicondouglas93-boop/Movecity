@@ -40,7 +40,7 @@ const CaptainProfile = () => {
                 title="Perfil"
                 className="shadow-raised"
                 rightSlot={
-                    <button onClick={() => navigate('/captain/logout')} className="text-danger-500 font-semibold p-2 bg-danger-50 rounded-panel">
+                    <button type="button" onClick={() => navigate('/captain/logout')} className="text-danger-500 font-semibold p-2 bg-danger-50 rounded-panel">
                         Sair
                     </button>
                 }

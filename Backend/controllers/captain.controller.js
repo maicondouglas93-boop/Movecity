@@ -269,3 +269,16 @@ module.exports.getSummary = async (req, res, next) => {
         res.status(500).json({ message: err.message });
     }
 }
+
+// Auditoria de UX do motorista (2026-08-02, Etapa 8): recorte temporal de ganhos +
+// detalhe por corrida — a tela de Ganhos só tinha o total vitalício até aqui.
+module.exports.getEarnings = async (req, res, next) => {
+    try {
+        const range = ['day', 'week', 'month'].includes(req.query.range) ? req.query.range : 'day';
+        const captainService = require('../services/captain.service');
+        const breakdown = await captainService.getEarningsBreakdown(req.captain._id, range);
+        res.status(200).json(breakdown);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}

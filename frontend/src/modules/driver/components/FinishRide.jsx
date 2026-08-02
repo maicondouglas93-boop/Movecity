@@ -222,7 +222,7 @@ const FinishRide = (props) => {
                         <>
                             <h3 className='text-xl font-bold text-amber-700'>Pagamento registrado</h3>
                             <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar. Comissão prevista de R$ {commissionAmount.toFixed(2)}.</p>
-                            <p className='text-ink-400 text-sm'>Redirecionando...</p>
+                            <p className='text-ink-600 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>

@@ -13,7 +13,7 @@ const CaptainHeader = () => {
                 <div className={location.pathname === '/captain-home' ? 'bg-surface-alt px-3 py-1 rounded-full' : 'px-3 py-1'}>
                     <i className="ri-home-5-fill text-xl"></i>
                 </div>
-                <span className="text-[10px]">Início</span>
+                <span className="text-xs">Início</span>
             </Link>
 
             <Link
@@ -23,7 +23,7 @@ const CaptainHeader = () => {
                 <div className={location.pathname === '/captain/rides' ? 'bg-surface-alt px-3 py-1 rounded-full' : 'px-3 py-1'}>
                     <i className="ri-car-fill text-xl"></i>
                 </div>
-                <span className="text-[10px]">Corridas</span>
+                <span className="text-xs">Corridas</span>
             </Link>
 
             <Link
@@ -33,7 +33,7 @@ const CaptainHeader = () => {
                 <div className={location.pathname === '/captain-wallet' ? 'bg-surface-alt px-3 py-1 rounded-full' : 'px-3 py-1'}>
                     <i className="ri-wallet-3-fill text-xl"></i>
                 </div>
-                <span className="text-[10px]">Carteira</span>
+                <span className="text-xs">Carteira</span>
             </Link>
 
             <Link
@@ -43,7 +43,7 @@ const CaptainHeader = () => {
                 <div className={location.pathname === '/captain/earnings' ? 'bg-surface-alt px-3 py-1 rounded-full' : 'px-3 py-1'}>
                     <i className="ri-bar-chart-fill text-xl"></i>
                 </div>
-                <span className="text-[10px]">Ganhos</span>
+                <span className="text-xs">Ganhos</span>
             </Link>
 
             <Link
@@ -53,7 +53,7 @@ const CaptainHeader = () => {
                 <div className={location.pathname === '/captain/profile' ? 'bg-surface-alt px-3 py-1 rounded-full' : 'px-3 py-1'}>
                     <i className="ri-user-3-fill text-xl"></i>
                 </div>
-                <span className="text-[10px]">Perfil</span>
+                <span className="text-xs">Perfil</span>
             </Link>
         </div>
     );

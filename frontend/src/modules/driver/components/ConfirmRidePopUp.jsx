@@ -174,8 +174,9 @@ const ConfirmRidePopUp = (props) => {
 
                     {rideStatus === 'arrived' && (
                         <form onSubmit={submitHandler}>
-                            <label className='block text-sm font-medium text-ink-600 mb-1'>Digite o PIN do passageiro</label>
+                            <label htmlFor="captain-otp-input" className='block text-sm font-medium text-ink-600 mb-1'>Digite o PIN do passageiro</label>
                             <input
+                                id="captain-otp-input"
                                 value={otp}
                                 onChange={(e) => {
                                     const val = e.target.value.replace(/\D/g, '').slice(0, 6)

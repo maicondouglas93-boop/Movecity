@@ -165,11 +165,12 @@ const CaptainSignup = () => {
   }
 
   // Helper for file inputs
-  const FileInput = ({ label, file, setFile }) => (
+  const FileInput = ({ id, label, file, setFile }) => (
     <div className='mb-4'>
-        <label className='block text-sm font-medium text-ink-600 mb-1'>{label}</label>
-        <input 
-            type="file" 
+        <label htmlFor={id} className='block text-sm font-medium text-ink-600 mb-1'>{label}</label>
+        <input
+            id={id}
+            type="file"
             accept="image/*"
             onChange={(e) => setFile(e.target.files[0])}
             className='block w-full text-sm text-ink-600 file:mr-4 file:py-2 file:px-4 file:rounded-panel file:border-0 file:text-sm file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100'
@@ -192,21 +193,21 @@ const CaptainSignup = () => {
             <h3 className='text-lg font-semibold mb-4 text-brand-700 border-b border-brand-100 pb-2'>1. Dados Pessoais</h3>
             
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Nome' value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Sobrenome' value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" autoComplete="given-name" placeholder='Nome' aria-label='Nome' value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" autoComplete="family-name" placeholder='Sobrenome' aria-label='Sobrenome' value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </div>
             
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='CPF (só números)' value={cpf} onChange={(e) => setCpf(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none text-sm' type="date" placeholder='Data de Nasc.' value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='CPF (só números)' aria-label='CPF (só números)' value={cpf} onChange={(e) => setCpf(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none text-sm' type="date" placeholder='Data de Nasc.' aria-label='Data de Nasc.' value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
             </div>
 
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Celular (+55...)' value={phone} onChange={(e) => setPhone(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="email" placeholder='E-mail' value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" autoComplete="tel" placeholder='Celular (+55...)' aria-label='Celular (+55...)' value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="email" autoComplete="email" placeholder='E-mail' aria-label='E-mail' value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
 
-            <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-full rounded-panel px-4 py-3 outline-none' type="password" placeholder='Senha de acesso' value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-full rounded-panel px-4 py-3 outline-none' type="password" autoComplete="new-password" placeholder='Senha de acesso' aria-label='Senha de acesso' value={password} onChange={(e) => setPassword(e.target.value)} />
           </section>
 
           {/* SEÇÃO: CNH */}
@@ -214,22 +215,22 @@ const CaptainSignup = () => {
             <h3 className='text-lg font-semibold mb-4 text-brand-700 border-b border-brand-100 pb-2'>2. Carteira de Motorista (CNH)</h3>
             
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Número da CNH' value={cnhNumber} onChange={(e) => setCnhNumber(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Cat. (ex: AB)' value={cnhCategory} onChange={(e) => setCnhCategory(e.target.value)} />
-              <input className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='UF' value={cnhUf} onChange={(e) => setCnhUf(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Número da CNH' aria-label='Número da CNH' value={cnhNumber} onChange={(e) => setCnhNumber(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Cat. (ex: AB)' aria-label='Cat. (ex: AB)' value={cnhCategory} onChange={(e) => setCnhCategory(e.target.value)} />
+              <input className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='UF' aria-label='UF' value={cnhUf} onChange={(e) => setCnhUf(e.target.value)} />
             </div>
 
             <div className='flex gap-4 mb-6 items-center'>
-                <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none text-sm' type="date" value={cnhExpiration} onChange={(e) => setCnhExpiration(e.target.value)} />
+                <input required aria-label="Validade da CNH" className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none text-sm' type="date" value={cnhExpiration} onChange={(e) => setCnhExpiration(e.target.value)} />
                 <label className='flex items-center gap-2 text-ink-600 cursor-pointer w-1/2 text-sm'>
                     <input type="checkbox" checked={cnhEar} onChange={(e) => setCnhEar(e.target.checked)} className='w-5 h-5 text-brand-600 rounded focus:ring-brand-500' />
                     <span>Exerce Atividade Remunerada</span>
                 </label>
             </div>
 
-            <FileInput label="Foto da CNH (Frente)" file={cnhFrontFile} setFile={setCnhFrontFile} />
-            <FileInput label="Foto da CNH (Verso)" file={cnhBackFile} setFile={setCnhBackFile} />
-            <FileInput label="Selfie segurando CNH" file={selfieFile} setFile={setSelfieFile} />
+            <FileInput id="file-cnh-front" label="Foto da CNH (Frente)" file={cnhFrontFile} setFile={setCnhFrontFile} />
+            <FileInput id="file-cnh-back" label="Foto da CNH (Verso)" file={cnhBackFile} setFile={setCnhBackFile} />
+            <FileInput id="file-selfie" label="Selfie segurando CNH" file={selfieFile} setFile={setSelfieFile} />
           </section>
 
           {/* SEÇÃO: VEÍCULO */}
@@ -237,19 +238,19 @@ const CaptainSignup = () => {
             <h3 className='text-lg font-semibold mb-4 text-brand-700 border-b border-brand-100 pb-2'>3. Dados do Veículo</h3>
             
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Marca' value={vehicleMarca} onChange={(e) => setVehicleMarca(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Modelo' value={vehicleModelo} onChange={(e) => setVehicleModelo(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Marca' aria-label='Marca' value={vehicleMarca} onChange={(e) => setVehicleMarca(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Modelo' aria-label='Modelo' value={vehicleModelo} onChange={(e) => setVehicleModelo(e.target.value)} />
             </div>
 
             <div className='flex gap-4 mb-4'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="number" placeholder='Ano' value={vehicleAno} onChange={(e) => setVehicleAno(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Cor' value={vehicleColor} onChange={(e) => setVehicleColor(e.target.value)} />
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Placa' value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="number" placeholder='Ano' aria-label='Ano' value={vehicleAno} onChange={(e) => setVehicleAno(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Cor' aria-label='Cor' value={vehicleColor} onChange={(e) => setVehicleColor(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Placa' aria-label='Placa' value={vehiclePlate} onChange={(e) => setVehiclePlate(e.target.value)} />
             </div>
 
             <div className='flex gap-4 mb-6'>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="number" placeholder='Capacidade (Passageiros)' value={vehicleCapacity} onChange={(e) => setVehicleCapacity(e.target.value)} />
-              <select required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="number" placeholder='Capacidade (Passageiros)' aria-label='Capacidade (Passageiros)' value={vehicleCapacity} onChange={(e) => setVehicleCapacity(e.target.value)} />
+              <select required aria-label="Tipo de Veículo" className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' value={vehicleType} onChange={(e) => setVehicleType(e.target.value)}>
                 <option value="" disabled>Tipo de Veículo</option>
                 {vehicleCategories.map((category) => (
                   <option key={category.name} value={category.name}>{category.displayName}</option>
@@ -257,8 +258,8 @@ const CaptainSignup = () => {
               </select>
             </div>
 
-            <FileInput label="Foto do CRLV (Documento)" file={crlvFile} setFile={setCrlvFile} />
-            <FileInput label="Foto do Veículo (Frente)" file={vehicleFrontFile} setFile={setVehicleFrontFile} />
+            <FileInput id="file-crlv" label="Foto do CRLV (Documento)" file={crlvFile} setFile={setCrlvFile} />
+            <FileInput id="file-vehicle-front" label="Foto do Veículo (Frente)" file={vehicleFrontFile} setFile={setVehicleFrontFile} />
           </section>
 
           {/* SEÇÃO: FINANCEIRO */}
@@ -266,14 +267,14 @@ const CaptainSignup = () => {
             <h3 className='text-lg font-semibold mb-4 text-brand-700 border-b border-brand-100 pb-2'>4. Recebimento (PIX)</h3>
             
             <div className='flex gap-4'>
-              <select required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)}>
+              <select required aria-label="Tipo de Chave Pix" className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)}>
                 <option value="" disabled>Tipo de Chave</option>
                 <option value="cpf">CPF</option>
                 <option value="celular">Celular</option>
                 <option value="email">E-mail</option>
                 <option value="aleatoria">Aleatória</option>
               </select>
-              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-2/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Chave Pix' value={pixKey} onChange={(e) => setPixKey(e.target.value)} />
+              <input required className='bg-surface text-ink-900 border border-line focus:border-brand-500 w-2/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Chave Pix' aria-label='Chave Pix' value={pixKey} onChange={(e) => setPixKey(e.target.value)} />
             </div>
           </section>
 
@@ -287,7 +288,7 @@ const CaptainSignup = () => {
         <p className='text-center text-ink-600 mt-6'>Já tem uma conta? <Link to='/captain-login' className='text-brand-600 font-medium'>Faça login aqui</Link></p>
       </div>
       <div>
-        <p className='text-[10px] mt-6 leading-tight text-ink-400'>Este site é protegido pelo reCAPTCHA e as <span className='underline'>Políticas de Privacidade</span> e <span className='underline'>Termos de Serviço</span> do Google se aplicam.</p>
+        <p className='text-xs mt-6 leading-tight text-ink-600'>Este site é protegido pelo reCAPTCHA e as <span className='underline'>Políticas de Privacidade</span> e <span className='underline'>Termos de Serviço</span> do Google se aplicam.</p>
       </div>
     </div>
   )

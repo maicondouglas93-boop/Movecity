@@ -2,8 +2,11 @@ const request = require('supertest');
 const app = require('../../app');
 const captainModel = require('../../models/captain.model');
 const vehicleCategoryModel = require('../../models/vehicleCategory.model');
+const rideModel = require('../../models/ride.model');
 const { generateAuthToken } = require('../setup/authHelper');
 const { createCaptain } = require('../factories/captain.factory');
+const { createUser } = require('../factories/user.factory');
+const { createRide } = require('../factories/ride.factory');
 
 describe('Captain API Integration Tests', () => {
 
@@ -78,6 +81,85 @@ describe('Captain API Integration Tests', () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.body.captain.email).toBe(captain.email);
+        });
+    });
+
+    describe('GET /captains/earnings (auditoria de UX, 2026-08-02, Etapa 8)', () => {
+        it('recorte "day" só soma corridas finalizadas hoje, com detalhe por corrida', async () => {
+            const captain = await createCaptain();
+            const token = generateAuthToken(captain, 'captain');
+            const user = await createUser();
+
+            const today = await createRide({
+                user: user._id, captain: captain._id, status: 'finished',
+                fare: 50, finalPrice: 50, commissionAmount: 10
+            });
+            const eightDaysAgo = await createRide({
+                user: user._id, captain: captain._id, status: 'finished',
+                fare: 30, finalPrice: 30, commissionAmount: 6
+            });
+            // updatedAt é auto-gerenciado (timestamps:true) — sobrescreve direto no banco
+            // pra simular uma corrida de 8 dias atrás, fora da janela de "day" e "week".
+            await rideModel.updateOne(
+                { _id: eightDaysAgo._id },
+                { updatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) },
+                { timestamps: false }
+            );
+
+            const res = await request(app)
+                .get('/captains/earnings?range=day')
+                .set('Authorization', `Bearer ${token}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.totalRides).toBe(1);
+            expect(res.body.totalEarnings).toBe(40); // 50 - 10
+            expect(res.body.rides).toHaveLength(1);
+            expect(res.body.rides[0].netEarnings).toBe(40);
+        });
+
+        it('recorte "week" inclui corridas de até 7 dias atrás, mas não de 8', async () => {
+            const captain = await createCaptain();
+            const token = generateAuthToken(captain, 'captain');
+            const user = await createUser();
+
+            const threeDaysAgo = await createRide({
+                user: user._id, captain: captain._id, status: 'finished',
+                fare: 40, finalPrice: 40, commissionAmount: 8
+            });
+            await rideModel.updateOne(
+                { _id: threeDaysAgo._id },
+                { updatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+                { timestamps: false }
+            );
+            const nineDaysAgo = await createRide({
+                user: user._id, captain: captain._id, status: 'finished',
+                fare: 20, finalPrice: 20, commissionAmount: 4
+            });
+            await rideModel.updateOne(
+                { _id: nineDaysAgo._id },
+                { updatedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000) },
+                { timestamps: false }
+            );
+
+            const res = await request(app)
+                .get('/captains/earnings?range=week')
+                .set('Authorization', `Bearer ${token}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.totalRides).toBe(1);
+            expect(res.body.totalEarnings).toBe(32); // 40 - 8
+        });
+
+        it('range inválido cai no padrão "day" em vez de quebrar', async () => {
+            const captain = await createCaptain();
+            const token = generateAuthToken(captain, 'captain');
+
+            const res = await request(app)
+                .get('/captains/earnings?range=year')
+                .set('Authorization', `Bearer ${token}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.range).toBe('day');
         });
     });
 });

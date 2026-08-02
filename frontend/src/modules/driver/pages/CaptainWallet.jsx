@@ -67,7 +67,7 @@ const CaptainWallet = () => {
             {/* Header */}
             <div className='bg-black text-white p-6 pt-8 flex items-center justify-between'>
                 <h1 className='text-xl font-bold'>Minha Carteira</h1>
-                <Link to='/captain-home' className='h-10 w-10 bg-gray-800 flex items-center justify-center rounded-full text-white'>
+                <Link to='/captain-home' aria-label="Voltar para a Home" className='h-11 w-11 bg-gray-800 flex items-center justify-center rounded-full text-white'>
                     <i className="text-lg ri-home-5-line"></i>
                 </Link>
             </div>
@@ -103,7 +103,8 @@ const CaptainWallet = () => {
                         </h2>
                         <p className='text-xs text-ink-600 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
 
-                        <button 
+                        <button
+                            type="button"
                             onClick={() => setShowRechargeModal(true)}
                             className='w-full bg-black text-white font-semibold py-3 rounded-panel flex items-center justify-center gap-2 hover:bg-gray-800 transition'
                         >
@@ -166,18 +167,18 @@ const CaptainWallet = () => {
                                                 <h4 className='font-semibold text-ink-900 text-sm'>
                                                     {title}
                                                 </h4>
-                                                <p className='text-[10px] text-ink-600 leading-tight w-40 truncate'>{tx.description}</p>
-                                                <p className='text-[9px] text-ink-400 mt-0.5'>{new Date(tx.createdAt).toLocaleString('pt-BR')}</p>
+                                                <p className='text-xs text-ink-600 leading-tight w-40 truncate'>{tx.description}</p>
+                                                <p className='text-xs text-ink-600 mt-0.5'>{new Date(tx.createdAt).toLocaleString('pt-BR')}</p>
                                             </div>
                                         </div>
                                         <div className='text-right'>
                                             <h4 className={`font-bold ${isDebit ? 'text-danger-500' : 'text-brand-600'}`}>
                                                 {isDebit ? '-' : '+'}R$ {Math.abs(tx.amount).toFixed(2)}
                                             </h4>
-                                            {tx.paymentMethod === 'card' && <span className='text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>Cartão</span>}
+                                            {tx.paymentMethod === 'card' && <span className='text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>Cartão</span>}
                                         </div>
                                     </div>
-                                    <div className='flex justify-between items-center text-[10px] text-ink-400 border-t border-line pt-2 mt-1'>
+                                    <div className='flex justify-between items-center text-xs text-ink-600 border-t border-line pt-2 mt-1'>
                                         <p>Saldo Ant: R$ {tx.balanceBefore.toFixed(2)}</p>
                                         <p>Saldo Atual: <span className='font-semibold text-ink-600'>R$ {tx.balanceAfter.toFixed(2)}</span></p>
                                     </div>
@@ -195,8 +196,10 @@ const CaptainWallet = () => {
                 <div className='fixed inset-0 z-modal flex items-center justify-center bg-black/60 px-4'>
                     <div className='bg-surface w-full max-w-sm rounded-panel p-6 relative shadow-floating'>
                         <button
+                            type="button"
                             onClick={() => setShowRechargeModal(false)}
-                            className='absolute top-4 right-4 text-ink-400 hover:text-ink-900 bg-surface-alt rounded-full h-8 w-8 flex items-center justify-center'
+                            aria-label="Fechar"
+                            className='absolute top-4 right-4 text-ink-400 hover:text-ink-900 bg-surface-alt rounded-full h-11 w-11 flex items-center justify-center'
                         >
                             <i className="ri-close-line text-xl"></i>
                         </button>
@@ -210,6 +213,7 @@ const CaptainWallet = () => {
                                 Ainda não temos um meio de pagamento automático conectado para recarga de créditos. Fale com o suporte da MoveCity para adicionar saldo à sua conta.
                             </p>
                             <button
+                                type="button"
                                 onClick={() => setShowRechargeModal(false)}
                                 className='w-full bg-black text-white font-semibold py-3 rounded-panel hover:bg-gray-800 transition-colors'
                             >

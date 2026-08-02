@@ -104,7 +104,7 @@ const CaptainDetails = () => {
                     <div>
                         <h4 className='text-lg font-bold capitalize flex items-center gap-2 text-ink-900'>
                             {captain?.fullname?.firstname} {captain?.fullname?.lastname}
-                            <span className="text-[11px] font-bold text-ink-600 bg-surface-alt px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-raised border border-line">
+                            <span className="text-xs font-bold text-ink-600 bg-surface-alt px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-raised border border-line">
                                 ⭐ {summary?.rating?.toFixed(1) || '5.0'}
                             </span>
                         </h4>
@@ -143,6 +143,7 @@ const CaptainDetails = () => {
                     </p>
                 </div>
                 <button
+                    type="button"
                     onClick={toggleOnline}
                     disabled={loadingToggle || captain.approvalStatus !== 'aprovado'}
                     className={`px-5 py-3 rounded-full font-bold text-sm transition-all shadow-raised active:scale-95 ${
@@ -164,17 +165,17 @@ const CaptainDetails = () => {
 
                 <div className='flex items-center gap-4 mt-5 pt-4 border-t border-line'>
                     <div className="flex-1">
-                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Tempo Online</p>
+                        <p className='text-xs text-ink-600 font-medium uppercase'>Tempo Online</p>
                         <p className='text-base font-bold text-ink-900'>{loadingSummary ? '...' : formatOnlineTime(summary?.onlineTimeSeconds)}</p>
                     </div>
                     <div className='w-px h-8 bg-line'></div>
                     <div className="flex-1">
-                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Corridas Hoje</p>
+                        <p className='text-xs text-ink-600 font-medium uppercase'>Corridas Hoje</p>
                         <p className='text-base font-bold text-ink-900'>{loadingSummary ? '...' : `${summary?.ridesToday || 0}`}</p>
                     </div>
                     <div className='w-px h-8 bg-line'></div>
                     <div className="flex-1">
-                        <p className='text-[11px] text-ink-400 font-medium uppercase'>Carteira</p>
+                        <p className='text-xs text-ink-600 font-medium uppercase'>Carteira</p>
                         <p className='text-base font-bold text-blue-600'>{loadingSummary ? '...' : `R$ ${summary?.walletBalance?.toFixed(2) || '0.00'}`}</p>
                     </div>
                 </div>
@@ -184,31 +185,34 @@ const CaptainDetails = () => {
             <h3 className='text-xs font-bold text-ink-900 mt-2 uppercase tracking-wider px-1'>Ações Rápidas</h3>
             <div className='grid grid-cols-3 gap-3'>
                 <button
+                    type="button"
                     onClick={() => navigate('/captain-wallet')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
                     <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-brand-600 text-[26px]'>
                         <i className="ri-wallet-3-fill"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Carteira</span>
+                    <span className='text-xs font-bold text-ink-600 text-center uppercase tracking-wide'>Carteira</span>
                 </button>
                 <button
+                    type="button"
                     onClick={() => navigate('/captain/rides')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
                     <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-ink-600 text-[26px]'>
                         <i className="ri-history-line"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Histórico</span>
+                    <span className='text-xs font-bold text-ink-600 text-center uppercase tracking-wide'>Histórico</span>
                 </button>
                 <button
+                    type="button"
                     onClick={() => navigate('/captain/earnings')}
                     className='flex flex-col items-center gap-1.5 focus:outline-none hover:opacity-80 transition-opacity'
                 >
                     <div className='w-14 h-14 bg-surface border border-line rounded-panel flex items-center justify-center shadow-raised text-ink-600 text-[26px]'>
                         <i className="ri-bar-chart-fill"></i>
                     </div>
-                    <span className='text-[10px] font-bold text-ink-600 text-center uppercase tracking-wide'>Ganhos</span>
+                    <span className='text-xs font-bold text-ink-600 text-center uppercase tracking-wide'>Ganhos</span>
                 </button>
             </div>
         </div>

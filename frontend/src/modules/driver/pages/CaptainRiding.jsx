@@ -200,7 +200,8 @@ const CaptainRiding = () => {
                 <div className='flex flex-col gap-2 pointer-events-auto'>
                     <Link
                         to='/captain-home'
-                        className='h-10 w-10 bg-surface flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
+                        aria-label="Voltar para a Home"
+                        className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
                     >
                         <i className="text-lg ri-home-5-line"></i>
                     </Link>
@@ -213,7 +214,7 @@ const CaptainRiding = () => {
                             target="_blank"
                             rel="noopener noreferrer"
                             aria-label="Navegar até o destino"
-                            className='h-10 w-10 bg-brand-500 text-white flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
+                            className='h-11 w-11 bg-brand-500 text-white flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
                         >
                             <i className="text-lg ri-navigation-fill"></i>
                         </a>
@@ -222,18 +223,20 @@ const CaptainRiding = () => {
                         <a
                             href={`tel:${rideData.user.phone}`}
                             aria-label="Ligar para o passageiro"
-                            className='h-10 w-10 bg-surface flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
+                            className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
                         >
                             <i className="text-lg ri-phone-fill"></i>
                         </a>
                     )}
                     <button
+                        type="button"
                         onClick={() => setIsChatOpen(true)}
-                        className='h-10 w-10 bg-surface flex items-center justify-center rounded-full shadow-raised relative pointer-events-auto'
+                        aria-label="Abrir chat com o passageiro"
+                        className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative pointer-events-auto'
                     >
                         <i className="text-lg font-medium ri-chat-3-line"></i>
                         {unreadCount > 0 && (
-                            <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-raised'>
+                            <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-raised'>
                                 {unreadCount > 9 ? '9+' : unreadCount}
                             </span>
                         )}
@@ -261,7 +264,7 @@ const CaptainRiding = () => {
                                 className='h-14 w-20 object-contain flex-shrink-0'
                             />
                             <div className='min-w-0'>
-                                <p className='text-[10px] text-brand-600 font-bold uppercase tracking-widest'>{vehicleLabel}</p>
+                                <p className='text-xs text-brand-600 font-bold uppercase tracking-widest'>{vehicleLabel}</p>
                                 <h4 className='text-base font-bold text-ink-900 leading-tight truncate'>
                                     {rideData?.user?.fullname?.firstname || 'Passageiro'} {rideData?.user?.fullname?.lastname || ''}
                                 </h4>
@@ -279,6 +282,7 @@ const CaptainRiding = () => {
 
                         {/* Complete button */}
                         <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); setFinishRidePanel(true) }}
                             className='flex-shrink-0 bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 px-5 rounded-panel text-sm shadow-floating active:scale-95 transition-all whitespace-nowrap'
                         >

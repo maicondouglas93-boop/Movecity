@@ -21,12 +21,17 @@ require('./services/tariffScheduler.service'); // registra o cron que aplica tar
 
 const adminRoutes = require('./routes/admin.routes');
 
-const allowedOrigins = [
+const rawOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   process.env.FRONTEND_URL,
   process.env.ADMIN_FRONTEND_URL,
 ];
+
+// Remove barras no final (trailing slashes) e ignora valores vazios
+const allowedOrigins = rawOrigins
+  .filter(Boolean)
+  .map(url => url.replace(/\/+$/, ''));
 
 app.use(cors({
     origin: function(origin, callback){

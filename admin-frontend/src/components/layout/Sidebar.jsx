@@ -1,24 +1,27 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, Users, Car, Map, CreditCard, 
-  Settings, Bell, LogOut, Receipt, FileText, ClipboardList, Tag,
+import {
+  LayoutDashboard, Users, Car, Map, CreditCard,
+  Bell, LogOut, Receipt, FileText, ClipboardList, Tag,
   BarChart3
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Bloco G (2026-08-02, achado S2): espelha exatamente allowedRoles de App.jsx, que por
+// sua vez espelha as restrições reais de Backend/routes/admin.routes.js. `roles: undefined`
+// = leitura aberta a qualquer papel autenticado (mesmo critério usado em App.jsx).
+// "Configurações" foi removido daqui — linkava pra uma rota (/settings) que nunca existiu.
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Map, label: 'Corridas & Mapa', path: '/rides' },
   { icon: Users, label: 'Passageiros', path: '/users' },
   { icon: Car, label: 'Motoristas', path: '/captains' },
-  { icon: CreditCard, label: 'Financeiro', path: '/finance' },
+  { icon: CreditCard, label: 'Financeiro', path: '/finance', roles: ['super_admin', 'financeiro'] },
   { icon: Receipt, label: 'Tarifas', path: '/tariffs' },
-  { icon: Tag, label: 'Cupons', path: '/promotions' },
-  { icon: BarChart3, label: 'Relatórios & BI', path: '/reports' },
-  { icon: Bell, label: 'Notificações', path: '/notifications' },
-  { icon: ClipboardList, label: 'Logs & Auditoria', path: '/logs', role: 'super_admin' },
-  { icon: Settings, label: 'Configurações', path: '/settings', role: 'super_admin' },
+  { icon: Tag, label: 'Cupons', path: '/promotions', roles: ['super_admin', 'operador'] },
+  { icon: BarChart3, label: 'Relatórios & BI', path: '/reports', roles: ['super_admin'] },
+  { icon: Bell, label: 'Notificações', path: '/notifications', roles: ['super_admin', 'operador'] },
+  { icon: ClipboardList, label: 'Logs & Auditoria', path: '/logs', roles: ['super_admin'] },
 ];
 
 export default function Sidebar() {
@@ -33,8 +36,9 @@ export default function Sidebar() {
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
-          if (item.role && user?.role !== item.role && user?.role !== 'super_admin') return null;
-          
+          // OWNER é quem o backend sempre deixa passar (authorizeRoles), não super_admin.
+          if (item.roles && user?.role !== 'OWNER' && !item.roles.includes(user?.role)) return null;
+
           return (
             <NavLink
               key={item.path}

@@ -79,9 +79,14 @@ const VehiclePanel = (props) => {
                 </div>
             )}
 
-            <p className='text-xs text-center text-ink-400 mt-4 px-4'>
-                O valor apresentado é uma estimativa. O preço final será calculado conforme a distância realmente percorrida.
-            </p>
+            {/* Bloco H (2026-08-02): antes este aviso era fixo — o toggle "Exibir Valor
+                como Estimativa" do painel admin (showAsEstimate) nunca tinha efeito
+                nenhum, ligado ou desligado. */}
+            {props.fare?.showAsEstimate !== false && (
+                <p className='text-xs text-center text-ink-400 mt-4 px-4'>
+                    O valor apresentado é uma estimativa. O preço final será calculado conforme a distância realmente percorrida.
+                </p>
+            )}
 
             <Button onClick={handleContinue} disabled={!selectedName} className='mt-4'>
                 Continuar

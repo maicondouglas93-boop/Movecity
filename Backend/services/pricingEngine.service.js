@@ -141,7 +141,7 @@ class PricingEngine {
 
         // Multiplicador da categoria de veículo
         const categoryMult = category.dynamicMultiplier || 1.0;
-        const categoryRainMult = (tariffSetting.manualRainFee || tariffSetting.automaticRainFee) ? (category.rainFeeMultiplier || 1.0) : 1.0;
+        const categoryRainMult = tariffSetting.manualRainFee ? (category.rainFeeMultiplier || 1.0) : 1.0;
 
         const finalMultiplier = globalMult * categoryMult * categoryRainMult;
 

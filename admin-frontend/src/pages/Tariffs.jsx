@@ -157,6 +157,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       dynamicPricingStatus: settings.dynamicPricingStatus,
       currentMultiplier: settings.currentMultiplier,
       manualRainFee: settings.manualRainFee,
+      showAsEstimate: settings.showAsEstimate,
       platformCommission: settings.platformCommission,
       cardFeePercent: settings.cardFeePercent,
       cardFeeFixed: settings.cardFeeFixed
@@ -207,10 +208,12 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
         </div>
         <div>
           <label className="block text-sm font-medium text-text-muted mb-1">Status Dinâmico Global</label>
+          {/* Bloco H (2026-08-02, achado F12): "Automático" foi removido daqui — o
+              backend trata 'auto' exatamente igual a 'manual' hoje (nenhum cálculo de
+              demanda existe). Deixar a opção no seletor prometeria algo que não existe. */}
           <select {...register('dynamicPricingStatus')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
             <option value="off">Desligado</option>
             <option value="manual">Manual</option>
-            <option value="auto">Automático</option>
           </select>
         </div>
         <div>
@@ -233,6 +236,14 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" {...register('manualRainFee')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
             <span className="text-sm font-medium text-text">Ativar Taxa de Chuva Global</span>
+          </label>
+        </div>
+        {/* Bloco H (2026-08-02): antes deste bloco, este campo nem tinha controle na
+            UI — era salvo só se enviado manualmente por API, e nada lia o valor. */}
+        <div className="flex items-center mt-6">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" {...register('showAsEstimate')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
+            <span className="text-sm font-medium text-text">Exibir Valor como Estimativa ao Passageiro</span>
           </label>
         </div>
       </div>

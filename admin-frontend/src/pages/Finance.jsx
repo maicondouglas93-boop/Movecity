@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import {
   Search, CheckCircle, XCircle, MoreVertical, FileText, Lock, ShieldAlert,
-  Wallet, ArrowUpRight, ArrowDownRight, Clock, Building, Download, Square, CheckSquare, X
+  Wallet, ArrowUpRight, ArrowDownRight, Clock, Building, Download, Square, CheckSquare, X, AlertTriangle
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { useToast } from '../contexts/ToastContext';
@@ -124,7 +124,7 @@ export default function Finance() {
 
           {/* Quick Stats Summary */}
           {data?.summary && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
                 <div className="flex items-center gap-2 mb-2 text-text-muted"><Wallet className="w-4 h-4"/><p className="text-sm font-medium">Saldo Plataforma</p></div>
                 <p className="text-2xl font-bold">{data.summary.platformBalance !== null ? `R$ ${data.summary.platformBalance}` : 'Não disponível'}</p>
@@ -149,6 +149,13 @@ export default function Finance() {
                 <div className="flex items-center gap-2 mb-2 text-danger"><XCircle className="w-4 h-4"/><p className="text-sm font-medium">Rejeitados</p></div>
                 <p className="text-2xl font-bold">{data.summary.rejectedCount || 0}</p>
                 <p className="text-xs text-text-muted mt-1">Solicitações com erro</p>
+              </div>
+              {/* Bloco H (2026-08-02): payoutDeadlineDays era salvo em Configurações e
+                  nunca lido por nada — primeiro uso real. */}
+              <div className={`bg-background border px-4 py-4 rounded-xl flex flex-col ${data.summary.overdueCount > 0 ? 'border-warning/40' : 'border-border'}`}>
+                <div className={`flex items-center gap-2 mb-2 ${data.summary.overdueCount > 0 ? 'text-warning' : 'text-text-muted'}`}><AlertTriangle className="w-4 h-4"/><p className="text-sm font-medium">Atrasados</p></div>
+                <p className="text-2xl font-bold">{data.summary.overdueCount || 0}</p>
+                <p className="text-xs text-text-muted mt-1">Sem aprovação há mais de {data.summary.payoutDeadlineDays ?? 2} dias</p>
               </div>
             </div>
           )}

@@ -22,27 +22,24 @@ const globalSettingSchema = new mongoose.Schema({
         required: true,
         default: 0.5
     },
-    vehicleTypes: {
-        type: [String],
-        default: ['car', 'moto', 'auto']
-    },
-    promotionalHours: {
-        type: String,
-        default: 'Nenhum horário promocional ativo'
-    },
     // Novas configurações financeiras
     cardFeePercent: { type: Number, default: 0 },
     cardFeeFixed: { type: Number, default: 0 },
-    minRecharge: { type: Number, default: 20.0 },
-    minDriverBalance: { type: Number, default: 0.0 },
-    allowNegativeBalance: { type: Boolean, default: false },
     maximumNegativeBalance: { type: Number, default: -20.0 },
     blockDriverOnNegativeBalance: { type: Boolean, default: true },
     minimumPayout: { type: Number, default: 50.0 },
     payoutDeadlineDays: { type: Number, default: 2 },
-    automaticPayout: { type: Boolean, default: false },
-    paymentGateway: { type: String, enum: ['asaas', 'stripe', 'mercado_pago'], default: 'asaas' },
-    platformPixKey: { type: String, default: '' }
+    // Bloco H (2026-08-02, §6): 7 campos removidos daqui — eram salvos pelo formulário
+    // mas nenhuma lógica em todo o projeto os lia, e nenhum tinha caminho de implementação
+    // sem construir uma feature nova (gateway de pagamento real, API de clima, etc.):
+    // vehicleTypes (superado pelo vehicleCategory dinâmico), promotionalHours (texto
+    // livre sem UI pra exibi-lo), minRecharge/platformPixKey (o fluxo de recarga em si já
+    // está desativado propositalmente — ver captain.controller.js: rechargeWallet),
+    // minDriverBalance/allowNegativeBalance (redundantes com maximumNegativeBalance +
+    // blockDriverOnNegativeBalance, que já funcionam), paymentGateway (nenhuma
+    // integração de gateway existe). automaticPayout foi mantido — ver
+    // docs/plans/2026-08-02-execucao-bloco-h-admin-regras-negocio.md.
+    automaticPayout: { type: Boolean, default: false }
 }, { timestamps: true, optimisticConcurrency: true });
 
 module.exports = mongoose.model('globalSetting', globalSettingSchema);

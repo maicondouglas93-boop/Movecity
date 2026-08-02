@@ -24,7 +24,6 @@ async function seed() {
                 perMinuteWaitFee: 0.50,
                 cancellationFee: 5.00,
                 roundingRule: 'none',
-                autoTollCharge: false,
                 showAsEstimate: true,
                 dynamicPricingStatus: 'off'
             });

@@ -80,10 +80,24 @@ const ConfirmRide = (props) => {
                     <DetailRow
                         icon="ri-currency-line"
                         title={props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]}` : ''}
-                        subtitle="Valor estimado"
+                        subtitle={props.fare?.showAsEstimate !== false ? 'Valor estimado' : 'Valor da corrida'}
                         className='px-3'
                     />
                 </Card>
+
+                {/* Bloco H (2026-08-02): cupom é opcional — o código só é enviado junto
+                    com a criação da corrida (sem endpoint de validação separado); um
+                    código inválido não trava a confirmação, só não desconta nada. */}
+                <div className='flex items-center gap-2 border border-line rounded-panel px-3 py-2.5'>
+                    <i className="ri-coupon-3-line text-brand-500 text-lg" aria-hidden="true"></i>
+                    <input
+                        type="text"
+                        value={props.promoCode}
+                        onChange={(e) => props.setPromoCode(e.target.value.toUpperCase())}
+                        placeholder="Cupom de desconto (opcional)"
+                        className='flex-1 text-sm text-ink-900 placeholder:text-ink-400 outline-none bg-transparent min-w-0'
+                    />
+                </div>
             </div>
 
             <Button

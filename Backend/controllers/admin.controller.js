@@ -330,24 +330,12 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
 module.exports.simulatePromotion = async (req, res, next) => {
     try {
         const { rideValue, promotionData } = req.body;
-        let discount = 0;
-
-        if (promotionData.discountType === 'percentage') {
-            discount = rideValue * (promotionData.value / 100);
-            if (promotionData.maxDiscountLimit && discount > promotionData.maxDiscountLimit) {
-                discount = promotionData.maxDiscountLimit;
-            }
-        } else if (promotionData.discountType === 'fixed') {
-            discount = promotionData.value;
-        } else if (promotionData.discountType === 'free_ride') {
-            discount = rideValue;
-            if (promotionData.maxDiscountLimit && discount > promotionData.maxDiscountLimit) {
-                discount = promotionData.maxDiscountLimit;
-            }
-        }
-
-        const clientPays = Math.max(0, rideValue - discount);
-        const subsidy = rideValue - clientPays;
+        // Bloco H (2026-08-02): usa a mesma função que a aplicação real em createRide
+        // usa (promotion.service.js) — antes essa matemática vivia duplicada só aqui e
+        // não tratava 'cashback' (caía em desconto zero); agora o simulador nunca pode
+        // divergir do que realmente acontece numa corrida.
+        const promotionService = require('../services/promotion.service');
+        const { discount, clientPays, subsidy } = promotionService.evaluateDiscount(promotionData, rideValue);
 
         res.status(200).json({
             rideValue,

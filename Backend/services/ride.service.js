@@ -99,6 +99,12 @@ async function getFare(pickup, destination) {
         fareCard[cat.name] = cardCalc.finalFare;
     }
 
+    // Bloco H (2026-08-02, achado §6): showAsEstimate era salvo em Configurações e
+    // nunca lido por nada — o app do passageiro sempre mostrava "valor estimado" fixo,
+    // então o toggle nunca teve efeito nenhum, ligado ou desligado.
+    const TariffSetting = require('../models/tariffSetting.model');
+    const tariffSetting = await TariffSetting.findOne();
+
     const result = {
         fare,
         fareMax: fare, // Mocking max until dynamic range is implemented
@@ -108,6 +114,7 @@ async function getFare(pickup, destination) {
         time,
         polyline: distanceTime.polyline,
         breakdown: fareBreakdownData,
+        showAsEstimate: tariffSetting?.showAsEstimate ?? true,
         eta: {
             car: Math.floor(Math.random() * 5) + 2, // 2 to 6 mins
             moto: Math.floor(Math.random() * 3) + 1, // 1 to 3 mins
@@ -129,7 +136,7 @@ function getOtp(num) {
 }
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false
+    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
@@ -176,6 +183,32 @@ module.exports.createRide = async ({
     }
 
     let finalPrice = pricing.finalFare + optionalsTotal;
+
+    // Bloco H (2026-08-02, achados F3/F4): aplica o cupom ANTES do desconto de carteira,
+    // pra useWalletBalance cobrir o valor já com desconto, não o valor cheio. Um código
+    // inválido/expirado/fora de regra não derruba a criação da corrida — só não aplica
+    // desconto nenhum; o motivo vai em promoError pro frontend decidir como avisar.
+    let discountAmount = 0;
+    let promotionApplied = null;
+    let promoError = null;
+    if (promoCode) {
+        const promotionService = require('./promotion.service');
+        const result = await promotionService.findApplicablePromotion({
+            code: promoCode,
+            userId: user,
+            vehicleType,
+            paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod,
+            rideValue: finalPrice
+        });
+        if (result?.error) {
+            promoError = result.error;
+        } else if (result?.promotion) {
+            discountAmount = result.discountAmount;
+            promotionApplied = result.promotion._id;
+            finalPrice -= discountAmount;
+        }
+    }
+
     let walletAmountUsed = 0;
 
     if (useWalletBalance) {
@@ -202,6 +235,8 @@ module.exports.createRide = async ({
         otp: getOtp(6),
         fare: pricing.finalFare,
         finalPrice: finalPrice,
+        promotionApplied,
+        discountAmount,
         walletAmountUsed,
         paymentMethod,
         optionals: processedOptionals,
@@ -213,7 +248,7 @@ module.exports.createRide = async ({
         estimatedTime: time,
         estimatedPriceMin: pricing.finalFare,
         estimatedPriceMax: pricing.finalFare,
-        commissionPercent: pricing.fareBreakdown.platformCommission > 0 
+        commissionPercent: pricing.fareBreakdown.platformCommission > 0
             ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0,
         commissionAmount: pricing.commissionAmount,
         fareBreakdown: pricing.fareBreakdown,
@@ -232,7 +267,17 @@ module.exports.createRide = async ({
         });
     }
 
-    return ride;
+    if (promotionApplied) {
+        const promotionService = require('./promotion.service');
+        await promotionService.recordPromotionUsage({
+            promotionId: promotionApplied,
+            userId: user,
+            rideId: ride._id,
+            discountAmount
+        });
+    }
+
+    return { ride, promoError };
 }
 
 // Único caminho de aceite de corrida no sistema (P1.3 da auditoria de concorrência,
@@ -521,6 +566,23 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
                     session
                 });
                 sideEffectCallbacks.push(result2.applySideEffects);
+            }
+
+            // Bloco H (2026-08-02, achados F3/F4): se um cupom do admin descontou esta
+            // corrida, o motorista não é quem paga essa conta — a plataforma absorve o
+            // desconto (contabilizado no orçamento da promoção, ver promotion.service.js),
+            // e o motorista recebe aqui exatamente o que receberia sem a promoção.
+            if (claimed.discountAmount > 0) {
+                const bonusResult = await walletService.createTransaction({
+                    captainId: captain._id,
+                    rideId: claimed._id,
+                    type: 'bonus',
+                    paymentMethod: 'wallet',
+                    amount: claimed.discountAmount,
+                    description: `Compensação de cupom — Corrida #${claimed._id.toString().slice(-6)}`,
+                    session
+                });
+                sideEffectCallbacks.push(bonusResult.applySideEffects);
             }
 
             await captainModel.findByIdAndUpdate(captain._id, {

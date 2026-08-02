@@ -37,11 +37,9 @@ const tariffSettingSchema = new mongoose.Schema({
         default: 'none',
         description: "Regra de arredondamento do valor final da corrida"
     },
-    autoTollCharge: {
-        type: Boolean,
-        default: false,
-        description: "Cobrar pedágio automaticamente"
-    },
+    // Bloco H (2026-08-02, §6): autoTollCharge removido — cobrar pedágio automaticamente
+    // exigiria uma API de rotas com pedágio, que não existe no projeto. Nenhum caminho
+    // de implementação parcial existia; ver docs/plans/2026-08-02-execucao-bloco-h-admin-regras-negocio.md.
     showAsEstimate: {
         type: Boolean,
         default: true,
@@ -66,16 +64,10 @@ const tariffSettingSchema = new mongoose.Schema({
         default: 1.0,
         description: "Usado apenas quando o status for manual"
     },
-    weatherProvider: {
-        type: String,
-        default: 'none',
-        description: "Provedor de API de clima (ex: OpenWeatherMap, AccuWeather)"
-    },
-    automaticRainFee: {
-        type: Boolean,
-        default: false,
-        description: "Ativar taxa de chuva automaticamente via API"
-    },
+    // Bloco H (2026-08-02, achado F13): weatherProvider e automaticRainFee removidos —
+    // nenhuma integração de API de clima existe no projeto, e nenhum admin conseguia
+    // sequer ativar automaticRainFee pelo painel (não tinha controle na UI). manualRainFee
+    // é o único jeito real de ativar taxa de chuva hoje.
     manualRainFee: {
         type: Boolean,
         default: false,

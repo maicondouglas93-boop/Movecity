@@ -58,6 +58,7 @@ const Home = () => {
     const [ optionals, setOptionals ] = useState([])
     const [ observation, setObservation ] = useState('')
     const [ requestFemaleDriver, setRequestFemaleDriver ] = useState(false)
+    const [ promoCode, setPromoCode ] = useState('')
 
     const { userLocation, locationError } = useContext(LocationContext);
 
@@ -539,7 +540,8 @@ const Home = () => {
                 useWalletBalance,
                 optionals,
                 observation,
-                requestFemaleDriver
+                requestFemaleDriver,
+                promoCode: promoCode.trim() || undefined
             }, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -548,6 +550,16 @@ const Home = () => {
 
             const TRACE_ID = `Ride:${response.data._id}`;
             console.log(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
+
+            // Bloco H (2026-08-02): cupom inválido não impede a corrida (ela já foi
+            // criada normalmente, sem desconto) — só avisa o motivo. Cupom aplicado com
+            // sucesso mostra quanto foi descontado.
+            if (response.data.promoError) {
+                addToast(response.data.promoError, 'error');
+            } else if (response.data.discountAmount > 0) {
+                addToast(`Cupom aplicado! Desconto de R$${response.data.discountAmount.toFixed(2)}.`, 'success');
+            }
+            setPromoCode('');
 
             setRide(response.data);
         } catch (err) {
@@ -792,11 +804,13 @@ const Home = () => {
                     destination={destination}
                     fare={fare}
                     vehicleType={vehicleType}
-                    setConfirmRidePanel={setConfirmRidePanel} 
-                    setVehicleFound={setVehicleFound} 
+                    setConfirmRidePanel={setConfirmRidePanel}
+                    setVehicleFound={setVehicleFound}
                     setOptionalsPanel={setOptionalsPanel}
                     setPaymentPanel={setPaymentPanel}
                     paymentMethod={paymentMethod}
+                    promoCode={promoCode}
+                    setPromoCode={setPromoCode}
                 />
             </div>
             <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>

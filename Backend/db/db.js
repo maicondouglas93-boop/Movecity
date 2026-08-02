@@ -183,9 +183,7 @@ async function seedTestData() {
                 platformCommission: 20,
                 minFare: 5.0,
                 pricePerKm: 2.0,
-                pricePerMinute: 0.5,
-                vehicleTypes: ['car', 'moto', 'auto'],
-                promotionalHours: 'Nenhum horário promocional ativo'
+                pricePerMinute: 0.5
             });
 
             await notificationModel.create({

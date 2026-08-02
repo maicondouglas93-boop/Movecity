@@ -78,13 +78,16 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { userId, pickup, destination, vehicleType, paymentMethod, optionals, observation, useWalletBalance, requestFemaleDriver } = req.body;
+    const { userId, pickup, destination, vehicleType, paymentMethod, optionals, observation, useWalletBalance, requestFemaleDriver, promoCode } = req.body;
 
     try {
         if (!req.user || !req.user._id) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
-        const ride = await rideService.createRide({
+        // Bloco H (2026-08-02): createRide agora devolve { ride, promoError } — um cupom
+        // inválido não impede a corrida de ser criada, só não aplica desconto; o motivo
+        // vai junto na resposta pro app do passageiro decidir como avisar.
+        const { ride, promoError } = await rideService.createRide({
             user: req.user._id,
             pickup,
             destination,
@@ -93,7 +96,8 @@ module.exports.createRide = async (req, res) => {
             optionals,
             observation,
             useWalletBalance,
-            requestFemaleDriver
+            requestFemaleDriver,
+            promoCode
         });
 
         const TRACE_ID = `Ride:${ride._id}`;
@@ -105,7 +109,7 @@ module.exports.createRide = async (req, res) => {
         deleteCache('dashboard:today');
         deleteByPrefix(`history:${req.user._id}`);
 
-        res.status(201).json(ride);
+        res.status(201).json({ ...ride.toObject(), promoError });
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);

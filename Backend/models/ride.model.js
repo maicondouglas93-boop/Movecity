@@ -77,6 +77,17 @@ const rideSchema = new mongoose.Schema({
     finalPrice: {
         type: Number,
     },
+    // Bloco H (2026-08-02): promoção aplicada na criação da corrida — finalPrice já vem
+    // com o desconto subtraído; estes dois campos guardam o que foi aplicado e por quê,
+    // pra auditoria e pra confirmPaymentReceived saber quanto compensar o motorista.
+    promotionApplied: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Promotion'
+    },
+    discountAmount: {
+        type: Number,
+        default: 0
+    },
     arrivedAt: {
         type: Date,
         description: "Quando o status virou 'arrived' — usado para calcular taxa de espera excedente"

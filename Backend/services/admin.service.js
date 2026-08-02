@@ -884,15 +884,29 @@ module.exports.getPayouts = async (page = 1, limit = 10, filters = {}) => {
     const [paidMonthSum] = await payoutModel.aggregate([{ $match: { status: 'paid', paidAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
     const rejectedCount = await payoutModel.countDocuments({ status: 'rejected' });
 
-    return { 
-        payouts, 
-        total, 
+    // Bloco H (2026-08-02): payoutDeadlineDays era salvo em globalSetting e nunca lido
+    // por nada — primeiro uso real: repasses parados (não processing/paid/rejected) há
+    // mais dias que o prazo configurado viram um alerta visível no Financeiro.
+    const settings = await globalSettingModel.findOne();
+    const deadlineDays = settings?.payoutDeadlineDays ?? 2;
+    const deadlineDate = new Date();
+    deadlineDate.setDate(deadlineDate.getDate() - deadlineDays);
+    const overdueCount = await payoutModel.countDocuments({
+        status: { $in: ['requested', 'in_analysis', 'approved'] },
+        createdAt: { $lt: deadlineDate }
+    });
+
+    return {
+        payouts,
+        total,
         pages: Math.ceil(total / limit),
         summary: {
             pendingAmount: pendingSum?.total || 0,
             paidToday: paidTodaySum?.total || 0,
             paidMonth: paidMonthSum?.total || 0,
             rejectedCount,
+            overdueCount,
+            payoutDeadlineDays: deadlineDays,
             platformBalance: null // Not available yet
         }
     };

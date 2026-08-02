@@ -28,13 +28,19 @@ module.exports.login = async (email, password) => {
         throw new Error('Admin account is deactivated');
     }
 
-    const token = admin.generateAuthToken();
-    const refreshToken = admin.generateRefreshToken();
+    // Auditoria de sessão persistente (2026-08-02): migrado do refresh token de 7 dias
+    // guardado em texto puro no próprio documento do admin para o auth.service
+    // compartilhado — refresh de 365 dias, hash SHA-256 no banco, múltiplas sessões
+    // por admin (antes, logar num segundo dispositivo derrubava o primeiro, porque só
+    // cabia um refreshToken no documento) e detecção de reuse.
+    const authService = require('./auth.service');
+    const { accessToken, refreshToken } = await authService.issueTokenPair({
+        userId: admin._id,
+        userType: 'admin',
+        extraClaims: { role: admin.role }
+    });
 
-    admin.refreshToken = refreshToken;
-    await admin.save();
-
-    return { admin, token, refreshToken };
+    return { admin, token: accessToken, refreshToken };
 };
 
 // Auditoria de sessão (2026-08-02, S6): o refresh token já era gerado e salvo no login,
@@ -42,33 +48,35 @@ module.exports.login = async (email, password) => {
 // morria a cada 15min sem chance de renovação silenciosa. Rotaciona o refresh token a
 // cada uso (o antigo para de valer assim que um novo é emitido).
 module.exports.refreshAccessToken = async (refreshToken) => {
-    if (!refreshToken) throw new Error('Refresh token ausente');
+    const authService = require('./auth.service');
 
-    let decoded;
-    try {
-        decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    } catch (err) {
-        throw new Error('Refresh token inválido ou expirado');
-    }
+    const rotated = await authService.rotateRefreshToken({ refreshToken });
 
-    const admin = await adminUserModel.findById(decoded._id).select('+refreshToken');
-    if (!admin || !admin.active || admin.refreshToken !== refreshToken) {
+    const admin = await adminUserModel.findById(rotated.userId);
+    if (!admin || !admin.active) {
+        // Admin desativado depois de a sessão ter começado — derruba tudo.
+        await authService.revokeAllForUser({
+            userId: rotated.userId,
+            userType: 'admin',
+            reason: 'blocked'
+        });
         throw new Error('Refresh token inválido');
     }
 
-    const token = admin.generateAuthToken();
-    const newRefreshToken = admin.generateRefreshToken();
-    admin.refreshToken = newRefreshToken;
-    await admin.save();
+    const token = authService.generateAccessToken(admin._id, { role: admin.role });
 
-    return { admin, token, refreshToken: newRefreshToken };
+    return { admin, token, refreshToken: rotated.refreshToken };
 };
 
-module.exports.invalidateRefreshToken = async (adminId) => {
-    // findByIdAndUpdate descarta chaves com valor undefined do objeto de update antes de
-    // montar o comando do Mongo — { refreshToken: undefined } vira um update vazio e o
-    // token antigo continuava válido depois do logout. $unset é o jeito correto de limpar.
-    await adminUserModel.findByIdAndUpdate(adminId, { $unset: { refreshToken: 1 } });
+module.exports.invalidateRefreshToken = async (adminId, refreshToken) => {
+    const authService = require('./auth.service');
+    if (refreshToken) {
+        await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
+        return;
+    }
+    // Sem o token em mãos (ex.: logout só com o access token), encerra todas as sessões
+    // deste admin — melhor amplo demais do que deixar uma sessão sobreviver ao "Sair".
+    await authService.revokeAllForUser({ userId: adminId, userType: 'admin', reason: 'logout' });
 };
 
 module.exports.logAction = async (logData) => {
@@ -363,8 +371,16 @@ module.exports.toggleUserBlock = async (userId, isBlocked, reason, admin, ip) =>
     // continuava autenticando normalmente por até 10 minutos — e um recém-desbloqueado
     // continuava sendo rejeitado pelo mesmo motivo, na direção contrária.
     deleteByPrefix(`profile:user:${userId}`);
-    if (isBlocked && user.socketId) {
-        disconnectSocket(user.socketId);
+    if (isBlocked) {
+        if (user.socketId) {
+            disconnectSocket(user.socketId);
+        }
+        // Auditoria de sessão persistente (2026-08-02): com refresh token de longa
+        // duração, bloquear sem revogar deixaria o usuário renovando a sessão para
+        // sempre. O middleware já barra o acesso (403), mas a sessão em si precisa
+        // morrer — senão um desbloqueio futuro reviveria uma sessão antiga.
+        const authService = require('./auth.service');
+        await authService.revokeAllForUser({ userId, userType: 'user', reason: 'blocked' });
     }
 
     await module.exports.logAction({
@@ -560,6 +576,9 @@ module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, 
         if (captain.socketId) {
             disconnectSocket(captain.socketId);
         }
+        // Ver o comentário equivalente em toggleUserBlock.
+        const authService = require('./auth.service');
+        await authService.revokeAllForUser({ userId: captainId, userType: 'captain', reason: 'blocked' });
     }
 
     await module.exports.logAction({

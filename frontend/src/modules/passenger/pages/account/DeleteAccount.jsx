@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useToast } from '@/contexts/ToastContext';
 import Button from '@/shared/components/ui/Button';
+import { clearSession } from '@/services/session';
 
 const DeleteAccount = () => {
     const navigate = useNavigate();
@@ -22,8 +23,9 @@ const DeleteAccount = () => {
                 data: { password } // Enviando senha para confirmação no backend
             });
             addToast('Conta excluída com sucesso.', 'success');
-            // Remove token and redirect to start
-            localStorage.removeItem('token');
+            // Remove a sessão inteira (access + refresh) e redireciona — sem limpar o
+            // refresh token aqui, a sessão de longa duração sobreviveria à exclusão da conta.
+            clearSession('user');
             setTimeout(() => navigate('/'), 2000);
         } catch (error) {
             addToast('Falha ao excluir (API offline)', 'error');

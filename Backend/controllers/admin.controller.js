@@ -60,12 +60,32 @@ module.exports.refresh = async (req, res, next) => {
     }
 };
 
+// Auditoria de sessão persistente (2026-08-02, achado A1): o painel confiava no
+// localStorage no boot — se o admin tivesse sido desativado ou a sessão revogada, a UI
+// renderizava como autenticada até a primeira chamada falhar. Este endpoint deixa o
+// frontend confirmar a sessão contra o servidor antes de mostrar qualquer coisa.
+// authAdmin já valida token + existência + `active`; se chegou aqui, é válido.
+module.exports.me = async (req, res) => {
+    res.status(200).json({
+        admin: {
+            _id: req.admin._id,
+            name: req.admin.name,
+            email: req.admin.email,
+            role: req.admin.role,
+        }
+    });
+};
+
 module.exports.logout = async (req, res, next) => {
     try {
+        // Revoga só a sessão deste dispositivo quando o refresh token vem junto; sem
+        // ele, encerra todas as sessões do admin (ver invalidateRefreshToken).
+        const refreshToken = req.cookies?.adminRefreshToken || req.body?.refreshToken;
         if (req.admin) {
-            await adminService.invalidateRefreshToken(req.admin._id);
+            await adminService.invalidateRefreshToken(req.admin._id, refreshToken);
         }
         res.clearCookie('adminToken');
+        res.clearCookie('adminRefreshToken');
         res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
         next(error);

@@ -7,6 +7,7 @@ const { loginLimiter } = require('../middlewares/rateLimiter');
 // Auth Routes
 router.post('/login', loginLimiter, adminController.login);
 router.post('/refresh', adminController.refresh);
+router.get('/me', authAdmin, adminController.me);
 router.post('/logout', authAdmin, adminController.logout);
 
 // Dashboard Route

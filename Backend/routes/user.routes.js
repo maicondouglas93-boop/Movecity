@@ -26,6 +26,10 @@ router.post('/login', [
 
 router.get('/profile', authMiddleware.authUser, userController.getUserProfile)
 
+// Sem authUser de propósito: o ponto do refresh é justamente renovar quando o access
+// token já expirou. A autenticação aqui é o próprio refresh token.
+router.post('/refresh', userController.refreshUserSession)
+
 router.get('/logout', authMiddleware.authUser, userController.logoutUser)
 
 

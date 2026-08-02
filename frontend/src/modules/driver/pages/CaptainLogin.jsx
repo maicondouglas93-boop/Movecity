@@ -6,6 +6,7 @@ import { CaptainDataContext } from '@/contexts/CaptainContext'
 import Button from '@/shared/components/ui/Button'
 
 import { useToast } from '@/contexts/ToastContext'
+import { saveSession } from '@/services/session'
 
 const Captainlogin = () => {
 
@@ -38,7 +39,7 @@ const Captainlogin = () => {
         const data = response.data
 
         setCaptain(data.captain)
-        localStorage.setItem('captain-token', data.token)
+        saveSession('captain', data)
         addToast(`Bem-vindo online, Motorista ${data.captain.fullname.firstname}! 🚗`, 'success')
         navigate('/captain-home')
       }

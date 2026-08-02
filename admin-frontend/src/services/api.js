@@ -24,10 +24,14 @@ const forceLogout = () => {
 };
 
 // Auditoria de sessão (2026-08-02, S6): antes, qualquer 401 derrubava a sessão na hora,
-// mesmo o access token tendo só 15min de vida e existindo um refresh token válido por
-// 7 dias. Agora tenta renovar uma vez antes de deslogar. isRefreshing + refreshSubscribers
+// mesmo o access token tendo só 15min de vida e existindo um refresh token de longa
+// duração. Agora tenta renovar uma vez antes de deslogar. isRefreshing + refreshSubscribers
 // evitam que N requisições que falhem juntas (ex: várias queries do Dashboard) disparem
 // N chamadas de refresh — só a primeira renova, as outras esperam e reusam o token novo.
+//
+// Auditoria de sessão persistente (2026-08-02): o `!response` no filtro abaixo é o que
+// impede deslogar por erro de rede/timeout/servidor fora — sem resposta HTTP não há
+// como afirmar que a sessão é inválida.
 let isRefreshing = false;
 let refreshSubscribers = [];
 

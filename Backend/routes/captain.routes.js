@@ -39,6 +39,9 @@ router.post('/login', [
 
 router.get('/profile', authMiddleware.authCaptain, captainController.getCaptainProfile)
 
+// Sem authCaptain de propósito — ver o comentário equivalente em user.routes.js.
+router.post('/refresh', captainController.refreshCaptainSession)
+
 router.patch('/documents',
     authMiddleware.authCaptain,
     body('docType').isIn(['cnhFront', 'cnhBack', 'crlv', 'vehicleFront', 'selfie']).withMessage('Invalid document type'),

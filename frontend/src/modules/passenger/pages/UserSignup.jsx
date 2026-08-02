@@ -8,6 +8,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { app } from '@/services/firebase';
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
+import { saveSession } from '@/services/session'
 
 const UserSignup = () => {
   const [ email, setEmail ] = useState('')
@@ -43,7 +44,7 @@ const UserSignup = () => {
       if (response.status === 200 || response.status === 201) {
         const data = response.data
         setUser(data.user)
-        localStorage.setItem('token', data.token)
+        saveSession('user', data)
         addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
         navigate('/home')
       }
@@ -75,7 +76,7 @@ const UserSignup = () => {
       if (response.status === 201) {
         const data = response.data
         setUser(data.user)
-        localStorage.setItem('token', data.token)
+        saveSession('user', data)
         addToast(`Conta criada com sucesso! Bem-vindo, ${data.user.fullname.firstname}! 🎉`, 'success')
         navigate('/home')
       }

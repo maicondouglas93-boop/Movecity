@@ -1,8 +1,34 @@
 const captainModel = require('../models/captain.model');
 const captainService = require('../services/captain.service');
 const blackListTokenModel = require('../models/blacklistToken.model');
+const authService = require('../services/auth.service');
 const { validationResult } = require('express-validator');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
+
+// Auditoria de sessão (2026-08-02): ver o comentário equivalente em user.controller.js.
+// O motorista tinha exatamente o mesmo problema — token de 24h e nenhuma renovação.
+const COOKIE_OPTIONS = () => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    return {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: authService.ACCESS_TOKEN_TTL_SECONDS * 1000
+    };
+};
+
+async function respondWithCaptainSession(res, { captain, ip, statusCode = 200 }) {
+    const { accessToken, refreshToken } = await authService.issueTokenPair({
+        userId: captain._id,
+        userType: 'captain',
+        ip
+    });
+
+    res.cookie('token', accessToken, COOKIE_OPTIONS());
+    res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+
+    return res.status(statusCode).json({ token: accessToken, refreshToken, captain });
+}
 
 
 module.exports.registerCaptain = async (req, res, next) => {
@@ -52,9 +78,7 @@ module.exports.registerCaptain = async (req, res, next) => {
         pixKey: pix.key
     });
 
-    const token = captain.generateAuthToken();
-
-    res.status(201).json({ token, captain });
+    return await respondWithCaptainSession(res, { captain, ip: req.ip, statusCode: 201 });
 
 }
 
@@ -78,12 +102,38 @@ module.exports.loginCaptain = async (req, res, next) => {
         return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    const token = captain.generateAuthToken();
-
-    res.cookie('token', token);
-
-    res.status(200).json({ token, captain });
+    return await respondWithCaptainSession(res, { captain, ip: req.ip });
 }
+
+// Auditoria de sessão (2026-08-02): endpoint novo — o motorista não tinha renovação
+// nenhuma. Um motorista em corrida com o token expirando perdia a sessão no meio do
+// trabalho.
+module.exports.refreshCaptainSession = async (req, res) => {
+    try {
+        const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
+        const { userId, refreshToken } = await authService.rotateRefreshToken({
+            refreshToken: presentedToken,
+            ip: req.ip
+        });
+
+        const captain = await captainService.getCaptainProfile(userId);
+        if (!captain) {
+            return res.status(401).json({ message: 'Sessão inválida' });
+        }
+        if (captain.isBlocked) {
+            await authService.revokeAllForUser({ userId, userType: 'captain', reason: 'blocked' });
+            return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+        }
+
+        const accessToken = authService.generateAccessToken(userId);
+        res.cookie('token', accessToken, COOKIE_OPTIONS());
+        res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+
+        return res.status(200).json({ token: accessToken, refreshToken, captain });
+    } catch (err) {
+        return res.status(401).json({ message: err.message || 'Sessão inválida' });
+    }
+};
 
 module.exports.getCaptainProfile = async (req, res, next) => {
     res.status(200).json({ captain: req.captain });
@@ -123,9 +173,23 @@ module.exports.updateDocument = async (req, res, next) => {
 module.exports.logoutCaptain = async (req, res, next) => {
     const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
 
-    await blackListTokenModel.create({ token });
+    if (token) {
+        await blackListTokenModel.create({ token }).catch(() => {});
+    }
 
-    res.clearCookie('token');
+    const { maxAge, ...accessClearOptions } = COOKIE_OPTIONS();
+    res.clearCookie('token', accessClearOptions);
+    res.clearCookie('refreshToken', authService.clearCookieOptions());
+
+    // Auditoria de sessão (2026-08-02): sem isto, o refresh token sobrevivia ao logout
+    // e podia gerar access tokens novos depois do "Sair".
+    // Rota GET — ver comentário equivalente em user.controller.js: logoutUser.
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+    if (refreshToken) {
+        await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
+    } else if (req.captain?._id) {
+        await authService.revokeAllForUser({ userId: req.captain._id, userType: 'captain', reason: 'logout' });
+    }
 
     res.status(200).json({ message: 'Logout successfully' });
 }

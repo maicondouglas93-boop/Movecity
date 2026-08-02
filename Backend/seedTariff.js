@@ -31,10 +31,15 @@ async function seed() {
         }
 
         // 2. VehicleCategories (car, moto, auto)
+        // iconKey precisa ser explícito: o schema tem default 'car', então omitir aqui
+        // fazia TODAS as categorias serem gravadas com ícone de carro — a "Moto Rápida"
+        // aparecia com desenho de carro na tela de escolha de veículo do passageiro.
+        // 'auto' nasce inativa: o TukTuk não faz parte da frota (pode ser reativado pelo
+        // painel admin, aba Tarifas, se um dia entrar).
         const categories = [
-            { name: 'car', displayName: 'Carro Econômico', baseFare: 50, perKmRate: 15, perMinuteRate: 3, minFare: 20 },
-            { name: 'moto', displayName: 'Moto Rápida', baseFare: 20, perKmRate: 8, perMinuteRate: 1.5, minFare: 10 },
-            { name: 'auto', displayName: 'TukTuk (Auto)', baseFare: 30, perKmRate: 10, perMinuteRate: 2, minFare: 15 }
+            { name: 'car', displayName: 'Carro Econômico', iconKey: 'car', baseFare: 50, perKmRate: 15, perMinuteRate: 3, minFare: 20 },
+            { name: 'moto', displayName: 'Moto Rápida', iconKey: 'moto', baseFare: 20, perKmRate: 8, perMinuteRate: 1.5, minFare: 10 },
+            { name: 'auto', displayName: 'TukTuk (Auto)', iconKey: 'auto', baseFare: 30, perKmRate: 10, perMinuteRate: 2, minFare: 15, isActive: false }
         ];
 
         for (const cat of categories) {

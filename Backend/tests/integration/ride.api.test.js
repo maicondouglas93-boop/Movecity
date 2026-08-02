@@ -43,7 +43,7 @@ describe('Ride API Integration Tests', () => {
                     pickup: 'Avenida Paulista, 1000',
                     destination: 'Avenida Faria Lima, 2000',
                     vehicleType: 'car',
-                    paymentMethod: 'Pix'
+                    paymentMethod: 'pix'
                 });
 
             expect(res.statusCode).toBe(201); // or 200 depending on controller
@@ -262,6 +262,120 @@ describe('Ride API Integration Tests', () => {
             // conseguiu gravar nada (nem status, nem o novo captain).
             const unchanged = await rideModel.findById(secondRide._id);
             expect(unchanged.status).toBe('requested');
+        });
+    });
+
+    describe('GET /rides/captain-current (auditoria de UX, 2026-08-02)', () => {
+        it('retorna 404 quando o motorista não tem corrida ativa', async () => {
+            const res = await request(app)
+                .get('/rides/captain-current')
+                .set('Authorization', `Bearer ${captainToken}`);
+
+            expect(res.statusCode).toBe(404);
+        });
+
+        it('retorna a corrida ativa do motorista', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'going_to_pickup' });
+
+            const res = await request(app)
+                .get('/rides/captain-current')
+                .set('Authorization', `Bearer ${captainToken}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body._id.toString()).toBe(ride._id.toString());
+        });
+
+        it('não retorna corrida de outro motorista', async () => {
+            const otherCaptain = await createCaptain();
+            const otherCaptainToken = generateAuthToken(otherCaptain, 'captain');
+            await createRide({ user: user._id, captain: captain._id, status: 'accepted' });
+
+            const res = await request(app)
+                .get('/rides/captain-current')
+                .set('Authorization', `Bearer ${otherCaptainToken}`);
+
+            expect(res.statusCode).toBe(404);
+        });
+    });
+
+    describe('POST /rides/captain-cancel (auditoria de UX, 2026-08-02)', () => {
+        it('devolve a corrida para requested, sem motorista nem OTP', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'accepted', otp: '999999' });
+
+            const res = await request(app)
+                .post('/rides/captain-cancel')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id });
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.status).toBe('requested');
+            expect(res.body.captain).toBeFalsy();
+
+            const persisted = await rideModel.findById(ride._id).select('+otp');
+            expect(persisted.status).toBe('requested');
+            expect(persisted.captain).toBeFalsy();
+            expect(persisted.otp).toBeFalsy();
+        });
+
+        it('rejeita cancelar corrida de outro motorista', async () => {
+            const otherCaptain = await createCaptain();
+            const otherCaptainToken = generateAuthToken(otherCaptain, 'captain');
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'accepted' });
+
+            const res = await request(app)
+                .post('/rides/captain-cancel')
+                .set('Authorization', `Bearer ${otherCaptainToken}`)
+                .send({ rideId: ride._id });
+
+            expect(res.statusCode).toBe(404);
+
+            const unchanged = await rideModel.findById(ride._id);
+            expect(unchanged.status).toBe('accepted');
+        });
+
+        it('rejeita cancelar corrida já iniciada (só endRide cobre esse estado)', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'started' });
+
+            const res = await request(app)
+                .post('/rides/captain-cancel')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id });
+
+            expect(res.statusCode).toBe(409);
+
+            const unchanged = await rideModel.findById(ride._id);
+            expect(unchanged.status).toBe('started');
+        });
+
+        it('a corrida devolvida é redespachada — outro motorista compatível recebe new-ride', async () => {
+            const ride = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'accepted',
+                pickup: 'Avenida Paulista, 1000',
+                vehicleType: 'car'
+            });
+
+            // Motorista candidato ao redespacho: online, mesmo tipo de veículo, com socketId.
+            const otherCaptain = await createCaptain({
+                isOnline: true,
+                socketId: 'socket-redespacho-teste',
+                location: { ltd: -23.5613, lng: -46.6565 },
+                locationGeoJSON: { type: 'Point', coordinates: [-46.6565, -23.5613] },
+                vehicle: { color: 'Preto', plate: 'RED1234', capacity: 4, vehicleType: 'car' }
+            });
+
+            const res = await request(app)
+                .post('/rides/captain-cancel')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .send({ rideId: ride._id });
+
+            expect(res.statusCode).toBe(200);
+            // O redespacho não falha mesmo sem socket.io inicializado neste processo de
+            // teste (dispatchRideToCaptains tolera isso) — a asserção real é que a corrida
+            // ficou disponível de novo para qualquer motorista compatível encontrá-la.
+            const requeued = await rideModel.findOne({ _id: ride._id, status: 'requested' });
+            expect(requeued).toBeTruthy();
         });
     });
 });

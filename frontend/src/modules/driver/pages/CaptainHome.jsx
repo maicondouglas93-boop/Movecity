@@ -30,8 +30,20 @@ const CaptainHome = () => {
 
     const { socket } = useContext(SocketContext)
     const { captain } = useContext(CaptainDataContext)
-    const { locationRef } = useContext(LocationContext)
+    const { locationRef, locationError } = useContext(LocationContext)
     const { addToast } = useToast()
+
+    // Auditoria de UX do motorista (2026-08-02, §2.5): sem GPS, updateLocation() (efeito
+    // abaixo) simplesmente retorna cedo e a posição do motorista para de ser atualizada
+    // no servidor — ele some do raio de despacho enquanto a tela continua dizendo
+    // "Procurando corridas...". Sem isso, o motorista não tinha como saber por que não
+    // estava recebendo nada. Edge-triggered (só quando o erro aparece), pra não repetir
+    // o toast a cada render enquanto o problema persiste.
+    useEffect(() => {
+        if (locationError) {
+            addToast(`Sem sinal de GPS: ${locationError} Você pode não estar recebendo corridas.`, 'error')
+        }
+    }, [locationError])
 
     useEffect(() => {
         const setupFCM = async () => {

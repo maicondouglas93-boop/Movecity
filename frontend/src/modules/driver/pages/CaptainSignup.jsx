@@ -45,12 +45,19 @@ const CaptainSignup = () => {
   const [ vehicleCapacity, setVehicleCapacity ] = useState('')
   const [ vehicleType, setVehicleType ] = useState('')
 
-  // Uploads (UI only)
+  // Uploads
   const [ cnhFrontFile, setCnhFrontFile ] = useState(null)
   const [ cnhBackFile, setCnhBackFile ] = useState(null)
   const [ crlvFile, setCrlvFile ] = useState(null)
   const [ vehicleFrontFile, setVehicleFrontFile ] = useState(null)
   const [ selfieFile, setSelfieFile ] = useState(null)
+
+  // Auditoria de UX do motorista (2026-08-02, §2.2): antes os 5 arquivos abaixo eram
+  // aceitos pelo formulário e simplesmente descartados — o comentário original dizia
+  // "Future integration note: aqui subiríamos os arquivos". Nenhum motorista conseguia
+  // ser aprovado pelo próprio app porque os documentos nunca chegavam ao backend.
+  const [ submitting, setSubmitting ] = useState(false)
+  const [ uploadStep, setUploadStep ] = useState(null) // { current, total, label } | null
 
   const { captain, setCaptain } = React.useContext(CaptainDataContext)
   const { addToast } = useToast()
@@ -64,10 +71,8 @@ const CaptainSignup = () => {
 
   const submitHandler = async (e) => {
     e.preventDefault()
-    
-    // Future integration note: Here we would typically upload the files to S3/Cloudinary
-    // and retrieve the URLs to send in the captainData.
-    
+    setSubmitting(true)
+
     const captainData = {
       fullname: {
         firstname: firstName,
@@ -107,11 +112,54 @@ const CaptainSignup = () => {
         const data = response.data
         setCaptain(data.captain)
         localStorage.setItem('captain-token', data.token)
-        addToast(`Cadastro enviado! Sua conta está em análise, ${data.captain.fullname.firstname}. 🚀`, 'success')
+
+        // A conta já foi criada neste ponto — uma falha de upload não deve travar o
+        // cadastro nem derrubar o motorista de volta pro formulário. Sequencial (não em
+        // paralelo) pra poder mostrar "Enviando documento X de Y..." com precisão.
+        const documents = [
+          { docType: 'cnhFront', file: cnhFrontFile, label: 'CNH (frente)' },
+          { docType: 'cnhBack', file: cnhBackFile, label: 'CNH (verso)' },
+          { docType: 'crlv', file: crlvFile, label: 'CRLV' },
+          { docType: 'vehicleFront', file: vehicleFrontFile, label: 'Foto do veículo' },
+          { docType: 'selfie', file: selfieFile, label: 'Selfie com a CNH' },
+        ].filter(doc => doc.file)
+
+        const failedLabels = []
+        for (let i = 0; i < documents.length; i++) {
+          const doc = documents[i]
+          setUploadStep({ current: i + 1, total: documents.length, label: doc.label })
+          try {
+            const formData = new FormData()
+            formData.append('image', doc.file)
+            formData.append('docType', doc.docType)
+            const uploadRes = await axios.post(`${import.meta.env.VITE_BASE_URL}/uploads/document`, formData, {
+              headers: { Authorization: `Bearer ${data.token}` }
+            })
+            await axios.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {
+              docType: doc.docType,
+              url: uploadRes.data.url
+            }, {
+              headers: { Authorization: `Bearer ${data.token}` }
+            })
+          } catch (uploadErr) {
+            console.error(`Falha ao enviar documento ${doc.docType}:`, uploadErr)
+            failedLabels.push(doc.label)
+          }
+        }
+        setUploadStep(null)
+
+        if (failedLabels.length > 0) {
+          addToast(`Cadastro criado, mas alguns documentos não foram enviados (${failedLabels.join(', ')}). Tente reenviá-los mais tarde.`, 'error')
+        } else {
+          addToast(`Cadastro enviado! Sua conta está em análise, ${data.captain.fullname.firstname}. 🚀`, 'success')
+        }
         navigate('/captain-home')
       }
     } catch (err) {
       addToast(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Falha no cadastro', 'error')
+    } finally {
+      setSubmitting(false)
+      setUploadStep(null)
     }
   }
 
@@ -229,8 +277,13 @@ const CaptainSignup = () => {
           </section>
 
           <button
-            className='bg-green-500 hover:bg-green-600 text-white font-bold mb-3 rounded-xl px-4 py-4 w-full text-lg transition-colors shadow-lg shadow-green-500/20'
-          >Enviar Cadastro</button>
+            disabled={submitting}
+            className='bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white font-bold mb-3 rounded-xl px-4 py-4 w-full text-lg transition-colors shadow-lg shadow-green-500/20'
+          >
+            {uploadStep
+              ? `Enviando documento ${uploadStep.current} de ${uploadStep.total}...`
+              : submitting ? 'Enviando cadastro...' : 'Enviar Cadastro'}
+          </button>
 
         </form>
         <p className='text-center text-gray-500 mt-6'>Já tem uma conta? <Link to='/captain-login' className='text-green-600 font-medium'>Faça login aqui</Link></p>

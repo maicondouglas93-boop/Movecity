@@ -7,9 +7,61 @@ const { getCache, setCache, deleteCache, deleteByPrefix } = require('../cache/ca
 const notificationService = require('../services/notification.service');
 
 
+// Busca motoristas compatíveis no raio de despacho e emite 'new-ride' para cada um.
+// Extraído de createRide (auditoria de UX do motorista, 2026-08-02) para ser reaproveitado
+// por captainCancelRide — quando um motorista desiste de uma corrida já aceita, ela
+// precisa ser redespachada exatamente da mesma forma que uma corrida recém-criada,
+// exceto que o motorista que acabou de desistir não deve ser candidato de novo.
+async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
+    const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
+    // 15km: raio de busca de motoristas a partir do ponto de embarque.
+    const CAPTAIN_SEARCH_RADIUS_KM = 15;
+    const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, CAPTAIN_SEARCH_RADIUS_KM, TRACE_ID);
+
+    console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
+    console.log(`[AUDIT][${TRACE_ID}] Captains no raio inicial:`, captainsInRadius.length);
+
+    const matchingCaptains = captainsInRadius.filter(captain => {
+        if (excludeCaptainId && captain._id.toString() === excludeCaptainId.toString()) {
+            return false;
+        }
+        if (!captain.vehicle || !captain.vehicle.vehicleType) {
+            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Sem veículo definido)`);
+            return false;
+        }
+        const capType = captain.vehicle.vehicleType;
+        const isMatch = capType === vehicleType;
+
+        if (!isMatch) {
+            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
+        } else {
+            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} aprovado para receber!`);
+        }
+        return isMatch;
+    });
+
+    console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
+
+    const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
+
+    matchingCaptains.forEach(captain => {
+        // Put captain in a room for this specific ride
+        addSocketToRoom(captain.socketId, `ride_${ride._id}`);
+
+        console.log(`[AUDIT][${TRACE_ID}] Emitindo 'new-ride' para socketId ${captain.socketId} (Captain: ${captain._id})`);
+        sendMessageToSocketId(captain.socketId, {
+            event: 'new-ride',
+            data: rideWithUser
+        });
+        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID);
+    });
+
+    return matchingCaptains.length;
+}
+
 module.exports.createRide = async (req, res) => {
     console.log(`[AUDIT] /rides/create HIT. Body:`, req.body);
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         console.log(`[AUDIT] /rides/create Validation Errors:`, errors.array());
@@ -22,10 +74,10 @@ module.exports.createRide = async (req, res) => {
         if (!req.user || !req.user._id) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
-        const ride = await rideService.createRide({ 
-            user: req.user._id, 
-            pickup, 
-            destination, 
+        const ride = await rideService.createRide({
+            user: req.user._id,
+            pickup,
+            destination,
             vehicleType,
             paymentMethod,
             optionals,
@@ -37,46 +89,7 @@ module.exports.createRide = async (req, res) => {
         const TRACE_ID = `Ride:${ride._id}`;
         console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
-        const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
-        // 15km: raio de busca de motoristas a partir do ponto de embarque.
-        const CAPTAIN_SEARCH_RADIUS_KM = 15;
-        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, CAPTAIN_SEARCH_RADIUS_KM, TRACE_ID);
-        
-        console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
-        console.log(`[AUDIT][${TRACE_ID}] Captains no raio inicial:`, captainsInRadius.length);
-
-        // Filter captains by matching vehicle type
-        const matchingCaptains = captainsInRadius.filter(captain => {
-            if (!captain.vehicle || !captain.vehicle.vehicleType) {
-                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Sem veículo definido)`);
-                return false;
-            }
-            const capType = captain.vehicle.vehicleType;
-            const isMatch = capType === vehicleType;
-
-            if (!isMatch) {
-                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
-            } else {
-                console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} aprovado para receber!`);
-            }
-            return isMatch;
-        });
-
-        console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
-
-        const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
-
-        matchingCaptains.map(captain => {
-            // Put captain in a room for this specific ride
-            addSocketToRoom(captain.socketId, `ride_${ride._id}`);
-            
-            console.log(`[AUDIT][${TRACE_ID}] Emitindo 'new-ride' para socketId ${captain.socketId} (Captain: ${captain._id})`);
-            sendMessageToSocketId(captain.socketId, {
-                event: 'new-ride',
-                data: rideWithUser
-            });
-            notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID);
-        });
+        await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
 
         // Invalidate dashboard and user history cache
         deleteCache('dashboard:today');
@@ -421,6 +434,63 @@ module.exports.getCurrentRide = async (req, res) => {
         }
         return res.status(200).json(ride);
     } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
+// Auditoria de UX do motorista (2026-08-02): equivalente a getCurrentRide, mas para o
+// motorista — usado por CaptainRiding.jsx para se recuperar de um refresh de página
+// sem depender só do location.state do react-router (que se perde em qualquer reload).
+module.exports.getCurrentRideForCaptain = async (req, res) => {
+    try {
+        const ride = await rideService.getCurrentRideForCaptain({ captain: req.captain._id });
+        if (!ride) {
+            return res.status(404).json({ message: 'No active ride found' });
+        }
+        return res.status(200).json(ride);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
+// Auditoria de UX do motorista (2026-08-02): motorista desiste de uma corrida já
+// aceita (mas não iniciada) — a corrida volta ao pool de despacho em vez de terminar,
+// pra não obrigar o passageiro a pedir tudo de novo (decisão do usuário do produto).
+module.exports.captainCancelRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const ride = await rideService.cancelRideByCaptain({ rideId, captain: req.captain._id });
+
+        const TRACE_ID = `Ride:${ride._id}`;
+
+        sendMessageToRoom(`ride_${ride._id}`, {
+            event: 'ride-cancelled-by-captain',
+            data: { rideId: ride._id }
+        });
+
+        await dispatchRideToCaptains(ride, {
+            pickup: ride.pickup,
+            vehicleType: ride.vehicleType,
+            TRACE_ID,
+            excludeCaptainId: req.captain._id
+        });
+
+        deleteCache('dashboard:today');
+
+        return res.status(200).json(ride);
+    } catch (err) {
+        if (err.message === 'Ride not found') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.message === 'Ride cannot be cancelled at this stage') {
+            return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }

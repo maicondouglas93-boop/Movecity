@@ -19,7 +19,14 @@ const CaptainRiding = () => {
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
     const finishRidePanelRef = useRef(null)
     const location = useLocation()
-    const rideData = location.state?.ride
+    // Auditoria de UX do motorista (2026-08-02, §2.6): rideData vivia só em
+    // location.state, que não sobrevive a um refresh de página nem ao app sendo
+    // derrubado em segundo plano — nesses casos o motorista ficava no meio de uma
+    // corrida (com o passageiro no carro) e a tela perdia tudo: passageiro, destino,
+    // valor, mapa vazio. Agora começa com o state (otimização — resposta imediata) e,
+    // se ele vier vazio, busca a corrida ativa de verdade no servidor.
+    const [ rideData, setRideData ] = useState(location.state?.ride || null)
+    const [ rehydrating, setRehydrating ] = useState(!location.state?.ride)
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
@@ -27,6 +34,30 @@ const CaptainRiding = () => {
     const { addToast } = useToast()
     const [ isChatOpen, setIsChatOpen ] = useState(false)
     const [ unreadCount, setUnreadCount ] = useState(0)
+
+    useEffect(() => {
+        if (rideData) {
+            setRehydrating(false)
+            return
+        }
+
+        let cancelled = false
+        axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-current`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+        }).then(response => {
+            if (cancelled) return
+            setRideData(response.data)
+        }).catch(() => {
+            if (cancelled) return
+            addToast('Nenhuma corrida em andamento encontrada.', 'info')
+            navigate('/captain-home')
+        }).finally(() => {
+            if (!cancelled) setRehydrating(false)
+        })
+
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     const showBrowserNotification = (title, body) => {
         if ('Notification' in window && Notification.permission === 'granted') {
@@ -154,6 +185,14 @@ const CaptainRiding = () => {
     const vType = rideData?.vehicleType || 'car'
     const vehicleLabel = vehicleLabels[vType] || 'MoveGo'
     const vehicleImg = vehicleImages[vType] || vehicleImages.car
+
+    if (rehydrating) {
+        return (
+            <div className='h-screen flex items-center justify-center bg-gray-50'>
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600"></div>
+            </div>
+        )
+    }
 
     return (
         <div className='h-screen relative overflow-hidden'>

@@ -89,6 +89,37 @@ module.exports.getCaptainProfile = async (req, res, next) => {
     res.status(200).json({ captain: req.captain });
 }
 
+const DOCUMENT_TYPES = [ 'cnhFront', 'cnhBack', 'crlv', 'vehicleFront', 'selfie' ];
+
+// Auditoria de UX do motorista (2026-08-02): POST /uploads/document devolve a URL do
+// arquivo mas nunca a grava em lugar nenhum — o cadastro completo do motorista
+// (CNH, CRLV, selfie) ficava perdido depois do upload. Este endpoint fecha esse elo,
+// chamado pelo frontend logo após cada upload bem-sucedido.
+module.exports.updateDocument = async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { docType, url } = req.body;
+    if (!DOCUMENT_TYPES.includes(docType)) {
+        return res.status(400).json({ message: 'Tipo de documento inválido' });
+    }
+
+    // verified:false explícito — um reenvio deve voltar a exigir conferência do admin,
+    // mesmo que o documento anterior já estivesse verificado.
+    const captain = await captainModel.findByIdAndUpdate(
+        req.captain._id,
+        {
+            [`documents.${docType}.url`]: url,
+            [`documents.${docType}.verified`]: false
+        },
+        { new: true }
+    );
+
+    res.status(200).json({ captain });
+}
+
 module.exports.logoutCaptain = async (req, res, next) => {
     const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
 

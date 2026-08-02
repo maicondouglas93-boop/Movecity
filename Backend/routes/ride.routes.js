@@ -24,6 +24,17 @@ router.post('/cancel',
     rideController.cancelRide
 )
 
+router.get('/captain-current',
+    authMiddleware.authCaptain,
+    rideController.getCurrentRideForCaptain
+)
+
+router.post('/captain-cancel',
+    authMiddleware.authCaptain,
+    body('rideId').isMongoId().withMessage('Invalid ride id'),
+    rideController.captainCancelRide
+)
+
 router.get('/get-fare',
     authMiddleware.authUser,
     query('pickup').isString().isLength({ min: 3 }).withMessage('Invalid pickup address'),

@@ -34,15 +34,11 @@ const CaptainEarnings = () => {
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                     <h3 className="font-semibold text-gray-800 mb-4">Desempenho</h3>
                     <div className="space-y-4">
-                        <div>
-                            <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-600">Taxa de Aceitação</span>
-                                <span className="font-medium text-green-600">{captain?.acceptanceRate || 100}%</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2">
-                                <div className="bg-green-500 h-2 rounded-full" style={{ width: `${captain?.acceptanceRate || 100}%` }}></div>
-                            </div>
-                        </div>
+                        {/* Auditoria de UX do motorista (2026-08-02): "Taxa de Aceitação" foi
+                            removida daqui — o backend nunca calcula esse número (fica sempre
+                            no valor padrão do schema, 100%, para todo motorista, sempre).
+                            Mostrar isso seria fabricar um dado, não exibir um dado real. O
+                            cálculo de verdade fica para uma etapa futura (fora deste escopo). */}
                         <div>
                             <div className="flex justify-between text-sm mb-1">
                                 <span className="text-gray-600">Taxa de Cancelamento</span>

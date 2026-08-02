@@ -14,10 +14,20 @@ const FinishRide = (props) => {
     // servidor. A fila offline (P1.2 da auditoria de concorrência) avisa por toast quando
     // sincronizar de verdade; aqui só evitamos comemorar "Pagamento Confirmado!" antes da hora.
     const [pendingSync, setPendingSync] = useState(false)
+    // Auditoria de UX do motorista (2026-08-02, §2.3): a corrida devolvida pelo end-ride
+    // tem o valor FINAL (finalPrice + taxa de espera, recalculado com distância/tempo
+    // reais) — diferente de props.ride.fare, que é só a estimativa de antes da corrida
+    // começar. Cobrar do passageiro com base na estimativa fazia o motorista receber a
+    // menos sempre que a corrida real foi mais longa/demorada que a estimada.
+    const [endedRide, setEndedRide] = useState(null)
     const navigate = useNavigate()
 
-    const commissionAmount = props.ride?.commissionAmount || 0
-    const driverKeeps = (props.ride?.fare || 0) - commissionAmount
+    // Antes de finalizar, mostra a estimativa (ainda não existe valor final). Depois de
+    // finalizar, usa a corrida real devolvida pelo servidor.
+    const chargeRide = endedRide || props.ride
+    const finalAmount = endedRide?.finalPrice ?? props.ride?.fare ?? 0
+    const commissionAmount = chargeRide?.commissionAmount || 0
+    const driverKeeps = finalAmount - commissionAmount
 
     const queryClient = useQueryClient();
 
@@ -32,8 +42,9 @@ const FinishRide = (props) => {
             })
             return response.data;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             setEnded(true)
+            setEndedRide(data)
             queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
         },
         onError: (err) => {
@@ -44,7 +55,8 @@ const FinishRide = (props) => {
                     rideId: props.ride._id,
                     payload: { rideId: props.ride._id }
                 }).catch(e => console.error(e));
-                setEnded(true); // Optimistic
+                setEnded(true); // Optimistic — sem valor final do servidor ainda, usa a estimativa
+                setEndedRide(props.ride);
             } else {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
@@ -180,8 +192,8 @@ const FinishRide = (props) => {
                     {/* Payment Summary */}
                     <div className='bg-gray-50 rounded-2xl p-5 border border-gray-200 mb-5'>
                         <div className='flex justify-between items-center mb-3 pb-3 border-b border-gray-200'>
-                            <span className='text-gray-600'>Valor da corrida</span>
-                            <span className='text-xl font-bold'>R$ {(props.ride?.fare || 0).toFixed(2)}</span>
+                            <span className='text-gray-600'>Valor final da corrida</span>
+                            <span className='text-xl font-bold'>R$ {finalAmount.toFixed(2)}</span>
                         </div>
                         <div className='flex justify-between items-center mb-3 pb-3 border-b border-gray-200'>
                             <span className='text-gray-600'>Comissão ({props.ride?.commissionPercent ?? '—'}%)</span>

@@ -24,20 +24,30 @@ const VALID_ORIGINS_BY_TARGET = {
     started: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     finished: ['started'],
     cancelled: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
+    // Única reversão da máquina (todo o resto é progressão linear ou término): motorista
+    // desiste de uma corrida já aceita, mas antes de iniciar (auditoria de UX, 2026-08-02).
+    // Não é um avanço nem um estado terminal — devolve a corrida ao pool de despacho pra
+    // outro motorista aceitar, em vez de forçar o passageiro a pedir tudo de novo.
+    requested: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
 };
 
 // `extraFilter` permite exigir dono (captain/user) e outras condições (ex.: OTP) no
-// mesmo `findOneAndUpdate` atômico — não só o status. Retorna `null` quando a transição
-// não é válida a partir do estado atual (ou quando `extraFilter` não bate), e quem chama
-// decide a mensagem/status HTTP certo a partir disso.
-async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}) {
+// mesmo `findOneAndUpdate` atômico — não só o status. `extraUnset` cobre o caso do
+// motorista desistindo (acima): `captain` e `otp` precisam sair do documento, não só
+// mudar de valor. Retorna `null` quando a transição não é válida a partir do estado
+// atual (ou quando `extraFilter` não bate), e quem chama decide a mensagem/status HTTP.
+async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}) {
     const validOrigins = VALID_ORIGINS_BY_TARGET[toStatus];
     if (!validOrigins) {
         throw new Error(`Transição de status desconhecida: ${toStatus}`);
     }
+    const update = { $set: { status: toStatus, ...extraSet } };
+    if (Object.keys(extraUnset).length > 0) {
+        update.$unset = extraUnset;
+    }
     return rideModel.findOneAndUpdate(
         { _id: rideId, status: { $in: validOrigins }, ...extraFilter },
-        { $set: { status: toStatus, ...extraSet } },
+        update,
         { new: true }
     );
 }
@@ -585,6 +595,57 @@ module.exports.getCurrentRide = async ({ user }) => {
     }
 
     return ride;
+}
+
+// Auditoria de UX do motorista (2026-08-02): não existia equivalente de getCurrentRide
+// para o motorista — um refresh de página (ou o app derrubado em segundo plano) durante
+// uma corrida ativa perdia todo o estado, porque CaptainRiding.jsx dependia só do
+// location.state do react-router, que não sobrevive a um reload.
+module.exports.getCurrentRideForCaptain = async ({ captain }) => {
+    if (!captain) {
+        throw new Error('Captain is required');
+    }
+
+    const ride = await rideModel.findOne({
+        captain,
+        status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] }
+    }).populate('user').populate('captain');
+
+    return ride;
+}
+
+// Auditoria de UX do motorista (2026-08-02): o botão "Cancelar" do ConfirmRidePopUp só
+// fechava os painéis no frontend — a corrida continuava atribuída a esse motorista no
+// banco (e, com o índice único de corrida ativa por motorista, ele ficava impedido de
+// aceitar qualquer outra corrida). Diferente de cancelRide (passageiro), aqui a corrida
+// NÃO termina: volta para 'requested' sem motorista nem OTP, pra reentrar no despacho.
+// Sem taxa de cancelamento — desistir é responsabilidade do motorista, não do passageiro.
+module.exports.cancelRideByCaptain = async ({ rideId, captain }) => {
+    if (!rideId || !captain) {
+        throw new Error('Ride id and captain are required');
+    }
+
+    const ride = await rideModel.findOne({ _id: rideId, captain });
+    if (!ride) {
+        throw new Error('Ride not found');
+    }
+
+    if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
+        throw new Error('Ride cannot be cancelled at this stage');
+    }
+
+    const updated = await transitionRide(
+        rideId,
+        'requested',
+        { captain },
+        {},
+        { captain: 1, otp: 1 }
+    );
+    if (!updated) {
+        throw new Error('Ride cannot be cancelled at this stage');
+    }
+
+    return updated;
 }
 
 module.exports.cancelRide = async ({ rideId, user }) => {

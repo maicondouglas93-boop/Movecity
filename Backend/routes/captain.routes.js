@@ -39,6 +39,13 @@ router.post('/login', [
 
 router.get('/profile', authMiddleware.authCaptain, captainController.getCaptainProfile)
 
+router.patch('/documents',
+    authMiddleware.authCaptain,
+    body('docType').isIn(['cnhFront', 'cnhBack', 'crlv', 'vehicleFront', 'selfie']).withMessage('Invalid document type'),
+    body('url').isURL().withMessage('Invalid URL'),
+    captainController.updateDocument
+)
+
 router.get('/logout', authMiddleware.authCaptain, captainController.logoutCaptain)
 
 router.get('/wallet', authMiddleware.authCaptain, captainController.getWallet)

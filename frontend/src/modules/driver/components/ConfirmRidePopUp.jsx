@@ -4,13 +4,41 @@ import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
 import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
+import { useToast } from '@/contexts/ToastContext'
 
 const ConfirmRidePopUp = (props) => {
     const [otp, setOtp] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
     const [rideStatus, setRideStatus] = useState('accepted')
+    const [cancelling, setCancelling] = useState(false)
     const navigate = useNavigate()
+    const { addToast } = useToast()
+
+    // Auditoria de UX do motorista (2026-08-02, §2.4): antes este botão só fechava os
+    // painéis — a corrida continuava atribuída a este motorista no banco, travando-o
+    // (pelo índice único de corrida ativa) sem que ele soubesse o motivo. Agora chama o
+    // endpoint atômico que devolve a corrida ao despacho pra outro motorista aceitar.
+    const cancelRide = async () => {
+        setCancelling(true)
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`, {
+                rideId: props.ride._id
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                }
+            })
+            addToast('Corrida liberada — buscando outro motorista para o passageiro.', 'info')
+            props.setConfirmRidePopupPanel(false)
+            props.setRidePopupPanel(false)
+        } catch (err) {
+            console.error('Captain cancel error:', err)
+            addToast(err.response?.data?.message || 'Não foi possível cancelar. Tente novamente.', 'error')
+        } finally {
+            setCancelling(false)
+        }
+    }
 
     const updateStatus = async (status) => {
         setLoading(true)
@@ -98,7 +126,7 @@ const ConfirmRidePopUp = (props) => {
                         <p className='text-xs text-gray-500 font-medium'>Passageiro</p>
                     </div>
                 </div>
-                <h5 className='text-lg font-bold text-gray-800'>{props.ride?.distance ? (props.ride.distance / 1000).toFixed(1) : '2.2'} KM</h5>
+                <h5 className='text-lg font-bold text-gray-800'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
             </div>
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>
@@ -190,12 +218,10 @@ const ConfirmRidePopUp = (props) => {
 
                     <button
                         type="button"
-                        onClick={() => {
-                            props.setConfirmRidePopupPanel(false)
-                            props.setRidePopupPanel(false)
-                        }}
-                        className='w-full mt-2 bg-white border-2 border-gray-200 hover:bg-gray-50 text-lg text-gray-700 font-bold p-3 rounded-xl transition-colors'
-                    >Cancelar</button>
+                        onClick={cancelRide}
+                        disabled={cancelling}
+                        className='w-full mt-2 bg-white border-2 border-gray-200 hover:bg-gray-50 disabled:opacity-60 text-lg text-gray-700 font-bold p-3 rounded-xl transition-colors'
+                    >{cancelling ? 'Cancelando...' : 'Cancelar'}</button>
                 </div>
             </div>
         </div>

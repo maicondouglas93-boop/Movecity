@@ -46,7 +46,7 @@ export default function Users() {
       await api.put(`/admin/users/${userId}/block`, { isBlocked, reason });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       setBlockModal({ isOpen: false, type: '', userId: null, reason: '', isBulk: false });
       toast.success('Passageiro atualizado com sucesso!');
     },
@@ -58,7 +58,7 @@ export default function Users() {
       await api.post(`/admin/users/bulk-action`, { userIds, actionType, reason });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       setSelectedUsers([]);
       setBlockModal({ isOpen: false, type: '', userId: null, reason: '', isBulk: false });
       toast.success('Passageiros atualizados com sucesso!');

@@ -29,7 +29,7 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['userDetails', userId]);
+      queryClient.invalidateQueries({ queryKey: ['userDetails', userId] });
       setNewObs('');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao adicionar observação')
@@ -41,8 +41,8 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['userDetails', userId]);
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['userDetails', userId] });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar bandeiras do passageiro')
   });

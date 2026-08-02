@@ -58,7 +58,7 @@ export default function Promotions() {
     onSuccess: () => {
       toast.success('Promoção criada com sucesso!');
       reset();
-      queryClient.invalidateQueries(['promotions']);
+      queryClient.invalidateQueries({ queryKey: ['promotions'] });
       setActiveTab('list');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar promoção')
@@ -68,7 +68,7 @@ export default function Promotions() {
     mutationFn: async ({ id, status }) => await api.put(`/admin/promotions/${id}/status`, { status }),
     onSuccess: () => {
       toast.success('Status atualizado!');
-      queryClient.invalidateQueries(['promotions']);
+      queryClient.invalidateQueries({ queryKey: ['promotions'] });
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar status da promoção')
   });

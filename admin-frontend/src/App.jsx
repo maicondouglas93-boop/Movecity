@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
@@ -6,22 +6,31 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import Unauthorized from './pages/Unauthorized';
-import Dashboard from './pages/Dashboard';
-import Users from './pages/Users';
-import Captains from './pages/Captains';
-import Rides from './pages/Rides';
-import Finance from './pages/Finance';
-import Tariffs from './pages/Tariffs';
-import Logs from './pages/Logs';
-import Notifications from './pages/Notifications';
-import Promotions from './pages/Promotions';
-import Reports from './pages/Reports';
+
+// Bloco J (2026-08-02, achado R29): as 11 páginas eram importadas estaticamente — o
+// bundle inicial (1,24MB) carregava Leaflet e Recharts mesmo pra quem só abre o
+// Dashboard. Login/Unauthorized ficam eager (tela de entrada, não valem a divisão).
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Users = lazy(() => import('./pages/Users'));
+const Captains = lazy(() => import('./pages/Captains'));
+const Rides = lazy(() => import('./pages/Rides'));
+const Finance = lazy(() => import('./pages/Finance'));
+const Tariffs = lazy(() => import('./pages/Tariffs'));
+const Logs = lazy(() => import('./pages/Logs'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Promotions = lazy(() => import('./pages/Promotions'));
+const Reports = lazy(() => import('./pages/Reports'));
+
+const PageLoading = () => (
+  <div className="min-h-[50vh] flex items-center justify-center text-text-muted text-sm">Carregando...</div>
+);
 
 function App() {
   return (
     <AuthProvider>
       <SocketProvider>
         <BrowserRouter>
+        <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
@@ -63,6 +72,7 @@ function App() {
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
       </SocketProvider>
     </AuthProvider>

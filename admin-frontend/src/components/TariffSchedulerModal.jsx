@@ -21,7 +21,7 @@ export default function TariffSchedulerModal({ isOpen, onClose, categoryId, cate
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['tariffHistory']);
+      queryClient.invalidateQueries({ queryKey: ['tariffHistory'] });
       toast.success('Tarifas agendadas com sucesso!');
       onClose();
     },

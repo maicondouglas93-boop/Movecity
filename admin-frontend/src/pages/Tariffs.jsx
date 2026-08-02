@@ -110,7 +110,7 @@ export default function Tariffs() {
         <NewCategoryModal
           onClose={() => setNewCategoryModalOpen(false)}
           onCreated={(newCat) => {
-            queryClient.invalidateQueries(['vehicleCategories']);
+            queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
             setActiveTab(newCat._id);
             setNewCategoryModalOpen(false);
           }}
@@ -170,7 +170,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['globalTariffs']);
+      queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
       toast.success('Configurações globais atualizadas com sucesso!');
     },
     onError: (err) => {
@@ -178,7 +178,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       // desta tela e este clique — recarrega os dados em cache (não o form em edição,
       // pra não descartar o que o admin estava digitando sem avisar) e explica o motivo.
       if (err.response?.status === 409) {
-        queryClient.invalidateQueries(['globalTariffs']);
+        queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
       }
       toast.error(err.response?.data?.message || 'Erro ao salvar configurações globais — verifique se você tem permissão de super_admin');
     }
@@ -293,8 +293,8 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['vehicleCategories']);
-      queryClient.invalidateQueries(['tariffHistory']);
+      queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
+      queryClient.invalidateQueries({ queryKey: ['tariffHistory'] });
       toast.success(`Tarifas da categoria ${category.displayName} atualizadas!`);
       setPreviewOpen(false);
       reset(getValues()); // resets isDirty state
@@ -303,7 +303,7 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
       // Bloco E (2026-08-02, achado C1): mesmo raciocínio de GlobalSettingsCard — em
       // conflito de versão, atualiza o cache (não o form aberto) e explica o motivo.
       if (err.response?.status === 409) {
-        queryClient.invalidateQueries(['vehicleCategories']);
+        queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
       }
       toast.error(err.response?.data?.message || 'Erro ao salvar tarifas — verifique se você tem permissão de super_admin');
     }
@@ -315,7 +315,7 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
       return res.data;
     },
     onSuccess: (newCat) => {
-      queryClient.invalidateQueries(['vehicleCategories']);
+      queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
       toast.success(`Categoria duplicada como: ${newCat.displayName}`);
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao duplicar categoria')

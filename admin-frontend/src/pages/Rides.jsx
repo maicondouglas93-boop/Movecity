@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useEffect, useMemo, memo } from 'react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
+import { buildCsv, downloadCsv } from '../utils/csv';
 import {
   Search, MapPin, Navigation, MoreVertical, X, Clock, CreditCard, User, Car, Download,
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, RotateCcw, AlertTriangle, ShieldAlert
@@ -84,7 +85,7 @@ export default function Rides() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rides', page, filters],
     queryFn: fetchRides,
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     refetchInterval: 60000 // 60s
   });
 
@@ -105,7 +106,7 @@ export default function Rides() {
   const cancelMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/rides/${data.id}/cancel`, { reason: data.reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['rides']);
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
       toast.success('Corrida cancelada.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar corrida')
@@ -114,7 +115,7 @@ export default function Rides() {
   const reassignMutation = useMutation({
     mutationFn: (id) => api.put(`/admin/rides/${id}/reassign`),
     onSuccess: () => {
-      queryClient.invalidateQueries(['rides']);
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
       toast.success('Corrida voltou para a fila de busca.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao reatribuir corrida')
@@ -124,7 +125,7 @@ export default function Rides() {
     mutationFn: (data) => api.post(`/admin/rides/bulk-action`, data),
     onSuccess: () => {
       setSelectedRides([]);
-      queryClient.invalidateQueries(['rides']);
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
       toast.success('Ação em lote aplicada.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao aplicar ação em lote')
@@ -152,18 +153,12 @@ export default function Rides() {
   const exportCSV = () => {
     if (!data?.rides) return;
     const items = selectedRides.length > 0 ? data.rides.filter(r => selectedRides.includes(r._id)) : data.rides;
-    
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "ID,Passageiro,Motorista,Status,Valor,Data\n"
-      + items.map(r => `${r._id},${r.user?.fullname?.firstname},${r.captain?.fullname?.firstname || '-'},${r.status},${r.fare},${new Date(r.createdAt).toISOString()}`).join("\n");
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `corridas_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    const csvUri = buildCsv(
+      ['ID', 'Passageiro', 'Motorista', 'Status', 'Valor', 'Data'],
+      items.map(r => [r._id, r.user?.fullname?.firstname, r.captain?.fullname?.firstname || '-', r.status, r.fare, new Date(r.createdAt).toISOString()])
+    );
+    downloadCsv(csvUri, `corridas_${new Date().getTime()}.csv`);
   };
 
   const handleAction = async (ride, actionType) => {
@@ -305,55 +300,16 @@ export default function Rides() {
               ) : data?.rides?.length === 0 ? (
                 <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Nenhuma corrida encontrada.</td></tr>
               ) : (
-                data?.rides?.map((ride) => {
-                  const isSelected = selectedRides.includes(ride._id);
-                  return (
-                    <tr key={ride._id} onClick={() => setActiveRideDrawer(ride)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
-                      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => toggleSelect(ride._id)}>
-                          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
-                        </button>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
-                            <User className="w-4 h-4 text-text-muted" />
-                          </div>
-                          <div>
-                            <p className="font-medium">{ride.user?.fullname?.firstname || 'Passageiro'}</p>
-                            <p className="text-xs text-text-muted">{ride.captain?.fullname?.firstname ? `Motorista: ${ride.captain.fullname.firstname}` : 'Buscando motorista...'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-background rounded border border-border capitalize">
-                            <Car className="w-3 h-3 text-text-muted" /> {ride.vehicleType}
-                          </span>
-                          <span className="inline-flex items-center gap-1 text-xs text-text-muted capitalize">
-                            <CreditCard className="w-3 h-3" /> {ride.paymentMethod}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</p>
-                        <p className="text-xs text-text-muted">Comis: R$ {ride.commissionAmount ? ride.commissionAmount.toFixed(2) : '-'}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusColors[ride.status] || 'bg-background'}`}>
-                          {statusNames[ride.status] || ride.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-xs">
-                        <p className="text-text">{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                        <p className="text-text-muted">{timeAgo(ride.createdAt)}</p>
-                      </td>
-                      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <RideActionMenu ride={ride} onAction={handleAction} />
-                      </td>
-                    </tr>
-                  )
-                })
+                data?.rides?.map((ride) => (
+                  <RideRow
+                    key={ride._id}
+                    ride={ride}
+                    isSelected={selectedRides.includes(ride._id)}
+                    onToggleSelect={toggleSelect}
+                    onOpenDrawer={setActiveRideDrawer}
+                    onAction={handleAction}
+                  />
+                ))
               )}
             </tbody>
           </table>
@@ -408,6 +364,59 @@ export default function Rides() {
 // ==========================================
 // SUBCOMPONENTS
 // ==========================================
+
+// Bloco J (2026-08-02, achado R33): mesmo raciocínio de CaptainRow em Captains.jsx —
+// cada ping de GPS recriava liveDrivers e re-renderizava a tabela inteira, mesmo essa
+// linha não exibindo nenhum dado de liveDrivers diretamente. React.memo evita refazer
+// o trabalho de render de todas as linhas não afetadas.
+const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpenDrawer, onAction }) {
+  return (
+    <tr onClick={() => onOpenDrawer(ride)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => onToggleSelect(ride._id)}>
+          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
+        </button>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
+            <User className="w-4 h-4 text-text-muted" />
+          </div>
+          <div>
+            <p className="font-medium">{ride.user?.fullname?.firstname || 'Passageiro'}</p>
+            <p className="text-xs text-text-muted">{ride.captain?.fullname?.firstname ? `Motorista: ${ride.captain.fullname.firstname}` : 'Buscando motorista...'}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex flex-col gap-1">
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-background rounded border border-border capitalize">
+            <Car className="w-3 h-3 text-text-muted" /> {ride.vehicleType}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs text-text-muted capitalize">
+            <CreditCard className="w-3 h-3" /> {ride.paymentMethod}
+          </span>
+        </div>
+      </td>
+      <td className="px-4 py-4">
+        <p className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</p>
+        <p className="text-xs text-text-muted">Comis: R$ {ride.commissionAmount ? ride.commissionAmount.toFixed(2) : '-'}</p>
+      </td>
+      <td className="px-4 py-4">
+        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusColors[ride.status] || 'bg-background'}`}>
+          {statusNames[ride.status] || ride.status}
+        </span>
+      </td>
+      <td className="px-4 py-4 text-xs">
+        <p className="text-text">{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        <p className="text-text-muted">{timeAgo(ride.createdAt)}</p>
+      </td>
+      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+        <RideActionMenu ride={ride} onAction={onAction} />
+      </td>
+    </tr>
+  );
+});
 
 function RideActionMenu({ ride, onAction }) {
   const [open, setOpen] = useState(false);

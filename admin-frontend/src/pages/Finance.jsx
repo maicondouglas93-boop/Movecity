@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import {
   Search, CheckCircle, XCircle, MoreVertical, FileText, Lock, ShieldAlert,
@@ -9,6 +9,7 @@ import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianG
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
+import { buildCsv, downloadCsv } from '../utils/csv';
 
 const statusColors = {
   requested: 'bg-border text-text',
@@ -45,7 +46,7 @@ export default function Finance() {
       const { data } = await api.get(`/admin/payouts?${params.toString()}`);
       return data;
     },
-    keepPreviousData: true
+    placeholderData: keepPreviousData
   });
 
   const handleSearch = (e) => {
@@ -74,7 +75,7 @@ export default function Finance() {
     onSuccess: (res) => {
       toast.success(`Sucesso! ${res.approvedCount} repasses foram aprovados.`);
       setSelectedPayouts([]);
-      queryClient.invalidateQueries(['payouts']);
+      queryClient.invalidateQueries({ queryKey: ['payouts'] });
     },
     onError: (err) => {
       toast.error(err.response?.data?.message || err.message || 'Erro ao aprovar repasses em lote');
@@ -84,18 +85,12 @@ export default function Finance() {
   const exportCSV = () => {
     if (!data?.payouts) return;
     const items = selectedPayouts.length > 0 ? data.payouts.filter(p => selectedPayouts.includes(p._id)) : data.payouts;
-    
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "ID,Motorista,Valor,ChavePix,Status,Data\n"
-      + items.map(p => `${p._id},${p.captainId?.fullname?.firstname},${p.amount},${p.captainId?.pixKey},${p.status},${new Date(p.createdAt).toISOString()}`).join("\n");
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `financeiro_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    const csvUri = buildCsv(
+      ['ID', 'Motorista', 'Valor', 'ChavePix', 'Status', 'Data'],
+      items.map(p => [p._id, p.captainId?.fullname?.firstname, p.amount, p.captainId?.pixKey, p.status, new Date(p.createdAt).toISOString()])
+    );
+    downloadCsv(csvUri, `financeiro_${new Date().getTime()}.csv`);
   };
 
   // Mock data for the chart
@@ -342,8 +337,8 @@ function PayoutDrawer({ payoutId, onClose }) {
   const approveMutation = useMutation({
     mutationFn: (id) => api.put(`/admin/payouts/${id}/approve`),
     onSuccess: () => {
-      queryClient.invalidateQueries(['payouts']);
-      queryClient.invalidateQueries(['payout-details', payoutId]);
+      queryClient.invalidateQueries({ queryKey: ['payouts'] });
+      queryClient.invalidateQueries({ queryKey: ['payout-details', payoutId] });
       toast.success('Repasse aprovado — valor debitado da carteira do motorista, aguardando confirmação de pagamento.');
     },
     onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao aprovar repasse')
@@ -352,8 +347,8 @@ function PayoutDrawer({ payoutId, onClose }) {
   const confirmPaidMutation = useMutation({
     mutationFn: (id) => api.put(`/admin/payouts/${id}/confirm-paid`),
     onSuccess: () => {
-      queryClient.invalidateQueries(['payouts']);
-      queryClient.invalidateQueries(['payout-details', payoutId]);
+      queryClient.invalidateQueries({ queryKey: ['payouts'] });
+      queryClient.invalidateQueries({ queryKey: ['payout-details', payoutId] });
       toast.success('Pagamento confirmado.');
     },
     onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao confirmar pagamento')
@@ -362,8 +357,8 @@ function PayoutDrawer({ payoutId, onClose }) {
   const rejectMutation = useMutation({
     mutationFn: ({ id, reason }) => api.put(`/admin/payouts/${id}/reject`, { reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries(['payouts']);
-      queryClient.invalidateQueries(['payout-details', payoutId]);
+      queryClient.invalidateQueries({ queryKey: ['payouts'] });
+      queryClient.invalidateQueries({ queryKey: ['payout-details', payoutId] });
       toast.success('Solicitação rejeitada com sucesso.');
     },
     onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao rejeitar repasse')

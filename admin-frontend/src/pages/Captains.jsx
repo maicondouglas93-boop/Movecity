@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useEffect, memo } from 'react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
+import { buildCsv, downloadCsv } from '../utils/csv';
 import { 
   Search, MapPin, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, 
@@ -90,7 +91,7 @@ export default function Captains() {
       const { data } = await api.get(`/admin/captains?${params.toString()}`);
       return data;
     },
-    keepPreviousData: true
+    placeholderData: keepPreviousData
   });
 
   const handleSearch = (e) => {
@@ -114,18 +115,12 @@ export default function Captains() {
   const exportCSV = () => {
     if (!data?.captains) return;
     const items = selectedCaptains.length > 0 ? data.captains.filter(c => selectedCaptains.includes(c._id)) : data.captains;
-    
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "ID,Nome,Email,Placa,Status,Online,Avaliacao,Corridas\n"
-      + items.map(c => `${c._id},${c.fullname?.firstname},${c.email},${c.vehicle?.plate},${c.approvalStatus},${c.isOnline ? 'Sim' : 'Nao'},${c.rating},${c.totalRides}`).join("\n");
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `frota_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    const csvUri = buildCsv(
+      ['ID', 'Nome', 'Email', 'Placa', 'Status', 'Online', 'Avaliacao', 'Corridas'],
+      items.map(c => [c._id, c.fullname?.firstname, c.email, c.vehicle?.plate, c.approvalStatus, c.isOnline ? 'Sim' : 'Nao', c.rating, c.totalRides])
+    );
+    downloadCsv(csvUri, `frota_${new Date().getTime()}.csv`);
   };
 
   return (
@@ -241,70 +236,16 @@ export default function Captains() {
               ) : data?.captains?.length === 0 ? (
                 <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Nenhum motorista encontrado.</td></tr>
               ) : (
-                data?.captains?.map((captain) => {
-                  const isSelected = selectedCaptains.includes(captain._id);
-                  const isLive = liveDrivers[captain._id] || captain.isOnline;
-                  const walletColor = captain.earnings < 0 ? 'text-danger' : captain.earnings > 0 ? 'text-primary' : 'text-text-muted';
-                  return (
-                    <tr key={captain._id} onClick={() => setActiveCaptainDrawer(captain)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''} ${captain.isBlocked ? 'opacity-70' : ''}`}>
-                      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => toggleSelect(captain._id)}>
-                          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
-                        </button>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <div className="w-10 h-10 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
-                              <User className="w-5 h-5 text-text-muted" />
-                            </div>
-                            {isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-surface rounded-full"></div>}
-                            {!isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-border border-2 border-surface rounded-full"></div>}
-                          </div>
-                          <div>
-                            <p className="font-medium text-text">{captain.fullname?.firstname} {captain.fullname?.lastname}</p>
-                            <p className="text-xs text-text-muted">{captain.phone || captain.email}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex w-fit items-center gap-1 text-xs px-2 py-0.5 bg-background rounded border border-border capitalize">
-                            <Car className="w-3 h-3 text-text-muted" /> {captain.vehicle?.vehicleType || 'N/A'}
-                          </span>
-                          <span className="text-xs text-text uppercase font-medium">{captain.vehicle?.plate || 'S/ PLACA'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-1 mb-1">
-                          <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                          <span className="font-medium">{captain.rating?.toFixed(1) || '5.0'}</span>
-                        </div>
-                        <p className="text-xs text-text-muted">{captain.totalRides || 0} corridas</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className={`font-medium ${walletColor}`}>R$ {captain.earnings?.toFixed(2) || '0.00'}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col gap-2 items-start">
-                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[captain.approvalStatus] || 'bg-background'}`}>
-                             {statusNames[captain.approvalStatus] || captain.approvalStatus}
-                           </span>
-                           {captain.isBlocked && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border bg-danger/10 text-danger border-danger/20`}>
-                                <Lock className="w-2.5 h-2.5 mr-1"/> Bloqueado
-                              </span>
-                           )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <CaptainActionMenu captain={captain} onAction={(action) => {
-                          if (action === 'view') setActiveCaptainDrawer(captain);
-                        }} />
-                      </td>
-                    </tr>
-                  )
-                })
+                data?.captains?.map((captain) => (
+                  <CaptainRow
+                    key={captain._id}
+                    captain={captain}
+                    isSelected={selectedCaptains.includes(captain._id)}
+                    isLive={!!(liveDrivers[captain._id] || captain.isOnline)}
+                    onToggleSelect={toggleSelect}
+                    onOpenDrawer={setActiveCaptainDrawer}
+                  />
+                ))
               )}
             </tbody>
           </table>
@@ -333,6 +274,76 @@ export default function Captains() {
 // ==========================================
 // SUBCOMPONENTS
 // ==========================================
+
+// Bloco J (2026-08-02, achado R33): antes, cada ping de GPS (admin-captain-location-
+// updated) recriava liveDrivers e re-renderizava a tabela inteira — com 50 motoristas
+// online enviando posição a cada poucos segundos, isso é ~10 re-renders completos de
+// 15 linhas por segundo. React.memo faz React pular a linha inteira quando nenhuma das
+// props mudou; isLive é passado como boolean já calculado (não o objeto liveDrivers
+// inteiro), então a maioria dos pings — que não mudam se um motorista está online ou
+// não, só a posição, que esta linha nem exibe — não recalcula nada aqui.
+const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onToggleSelect, onOpenDrawer }) {
+  const walletColor = captain.earnings < 0 ? 'text-danger' : captain.earnings > 0 ? 'text-primary' : 'text-text-muted';
+  return (
+    <tr onClick={() => onOpenDrawer(captain)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''} ${captain.isBlocked ? 'opacity-70' : ''}`}>
+      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => onToggleSelect(captain._id)}>
+          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
+        </button>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <div className="w-10 h-10 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
+              <User className="w-5 h-5 text-text-muted" />
+            </div>
+            {isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-surface rounded-full"></div>}
+            {!isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-border border-2 border-surface rounded-full"></div>}
+          </div>
+          <div>
+            <p className="font-medium text-text">{captain.fullname?.firstname} {captain.fullname?.lastname}</p>
+            <p className="text-xs text-text-muted">{captain.phone || captain.email}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex flex-col gap-1">
+          <span className="inline-flex w-fit items-center gap-1 text-xs px-2 py-0.5 bg-background rounded border border-border capitalize">
+            <Car className="w-3 h-3 text-text-muted" /> {captain.vehicle?.vehicleType || 'N/A'}
+          </span>
+          <span className="text-xs text-text uppercase font-medium">{captain.vehicle?.plate || 'S/ PLACA'}</span>
+        </div>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex items-center gap-1 mb-1">
+          <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+          <span className="font-medium">{captain.rating?.toFixed(1) || '5.0'}</span>
+        </div>
+        <p className="text-xs text-text-muted">{captain.totalRides || 0} corridas</p>
+      </td>
+      <td className="px-4 py-4">
+        <p className={`font-medium ${walletColor}`}>R$ {captain.earnings?.toFixed(2) || '0.00'}</p>
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex flex-col gap-2 items-start">
+           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[captain.approvalStatus] || 'bg-background'}`}>
+             {statusNames[captain.approvalStatus] || captain.approvalStatus}
+           </span>
+           {captain.isBlocked && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border bg-danger/10 text-danger border-danger/20`}>
+                <Lock className="w-2.5 h-2.5 mr-1"/> Bloqueado
+              </span>
+           )}
+        </div>
+      </td>
+      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+        <CaptainActionMenu captain={captain} onAction={(action) => {
+          if (action === 'view') onOpenDrawer(captain);
+        }} />
+      </td>
+    </tr>
+  );
+});
 
 function CaptainActionMenu({ captain, onAction }) {
   const [open, setOpen] = useState(false);
@@ -370,7 +381,7 @@ function CaptainDrawer({ captain, onClose, liveDrivers }) {
   const approvalMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/captains/${captain._id}/approval`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries(['captains']);
+      queryClient.invalidateQueries({ queryKey: ['captains'] });
       toast.success('Cadastro aprovado com sucesso.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao aprovar cadastro')
@@ -379,7 +390,7 @@ function CaptainDrawer({ captain, onClose, liveDrivers }) {
   const blockMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/captains/${captain._id}/block`, data),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries(['captains']);
+      queryClient.invalidateQueries({ queryKey: ['captains'] });
       toast.success(variables.isBlocked ? 'Motorista bloqueado.' : 'Motorista desbloqueado.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao alterar bloqueio do motorista')
@@ -553,7 +564,7 @@ function TabDocuments({ captainId }) {
   const verifyMutation = useMutation({
     mutationFn: ({ docType, verified, reason }) => api.put(`/admin/captains/${captainId}/documents/${docType}`, { verified, reason }),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries(['captain-documents', captainId]);
+      queryClient.invalidateQueries({ queryKey: ['captain-documents', captainId] });
       toast.success(variables.verified ? 'Documento aprovado.' : 'Documento rejeitado.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao verificar documento')

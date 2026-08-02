@@ -90,7 +90,7 @@ export default function Notifications() {
       toast.success('Campanha criada com sucesso!');
       setConfirmModal({ isOpen: false, data: null });
       reset();
-      queryClient.invalidateQueries(['campaigns']);
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] });
       setActiveTab('history');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar campanha')
@@ -100,7 +100,7 @@ export default function Notifications() {
     mutationFn: async (id) => await api.post(`/admin/campaigns/${id}/cancel`),
     onSuccess: () => {
       toast.success('Campanha agendada foi cancelada.');
-      queryClient.invalidateQueries(['campaigns']);
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] });
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar campanha')
   });

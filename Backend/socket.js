@@ -1,7 +1,9 @@
 const socketIo = require('socket.io');
+const jwt = require('jsonwebtoken');
 const userModel = require('./models/user.model');
 const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
+const adminUserModel = require('./models/adminUser.model');
 const mapService = require('./services/maps.service');
 
 let io;
@@ -35,7 +37,28 @@ function initializeSocket(server) {
                 await captainModel.findByIdAndUpdate(userId, { socketId: socket.id });
                 console.log(`[AUDIT] Captain ${userId} atualizou socketId para ${socket.id}`);
             } else if (userType === 'admin') {
-                socket.join('admin_room');
+                // Auditoria de segurança (2026-08-02, S1): a sala admin_room recebe GPS
+                // em tempo real de toda a frota. Sem checar o token aqui, qualquer cliente
+                // de socket podia entrar mandando { userType: 'admin' } e escutar a
+                // localização de todos os motoristas online.
+                const { token } = data;
+                if (!token) {
+                    console.log(`[AUDIT] JOIN admin rejeitado (sem token) no socket ${socket.id}`);
+                    return socket.emit('unauthorized', { message: 'Token de admin ausente' });
+                }
+                try {
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    const admin = await adminUserModel.findById(decoded._id);
+                    if (!admin || !admin.active) {
+                        console.log(`[AUDIT] JOIN admin rejeitado (inativo/inexistente) no socket ${socket.id}`);
+                        return socket.emit('unauthorized', { message: 'Admin inválido' });
+                    }
+                    socket.join('admin_room');
+                    console.log(`[AUDIT] Admin ${admin.email} entrou em admin_room via socket ${socket.id}`);
+                } catch (err) {
+                    console.log(`[AUDIT] JOIN admin rejeitado (token inválido) no socket ${socket.id}`);
+                    return socket.emit('unauthorized', { message: 'Token de admin inválido' });
+                }
             }
         });
 

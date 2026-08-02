@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+// optimisticConcurrency: ver comentário em tariffSetting.model.js (Bloco E, achado C1).
 const vehicleCategorySchema = new mongoose.Schema({
     name: {
         type: String,
@@ -75,6 +76,6 @@ const vehicleCategorySchema = new mongoose.Schema({
         default: 1.0,
         description: "Multiplicador específico de chuva para esta categoria"
     }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 module.exports = mongoose.model('vehicleCategory', vehicleCategorySchema);

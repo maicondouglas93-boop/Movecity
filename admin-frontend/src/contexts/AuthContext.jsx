@@ -20,17 +20,21 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await api.post('/admin/login', { email, password });
-      const { admin, token } = response.data;
-      
+      const { admin, token, refreshToken } = response.data;
+
       localStorage.setItem('adminToken', token);
+      // Auditoria de sessão (2026-08-02, S6): antes o refresh token vinha na resposta
+      // do login e era descartado — sem ele guardado, não tinha como renovar o access
+      // token depois de 15min, e a sessão morria com reload duro no meio do trabalho.
+      localStorage.setItem('adminRefreshToken', refreshToken);
       localStorage.setItem('adminUser', JSON.stringify(admin));
-      
+
       setUser(admin);
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        message: error.response?.data?.message || 'Erro ao realizar login' 
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao realizar login'
       };
     }
   };
@@ -42,6 +46,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout error', e);
     } finally {
       localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminRefreshToken');
       localStorage.removeItem('adminUser');
       setUser(null);
     }

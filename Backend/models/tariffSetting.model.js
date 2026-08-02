@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
 
+// Auditoria de concorrência do painel administrativo (2026-08-02, Bloco E, achado C1):
+// dois admins editando a mesma tarifa ao mesmo tempo — o segundo save() sobrescrevia o
+// primeiro sem aviso nenhum. optimisticConcurrency faz o save() usar o __v lido como
+// filtro da escrita: se alguém mudou o documento entre a leitura e a gravação, o
+// segundo save() lança VersionError em vez de sobrescrever silenciosamente.
 const tariffSettingSchema = new mongoose.Schema({
     minDistanceIncluded: {
         type: Number,
@@ -76,6 +81,6 @@ const tariffSettingSchema = new mongoose.Schema({
         default: false,
         description: "Ativar taxa de chuva manualmente pelo painel"
     }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 module.exports = mongoose.model('tariffSetting', tariffSettingSchema);

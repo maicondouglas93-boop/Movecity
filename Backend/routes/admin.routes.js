@@ -6,6 +6,7 @@ const { loginLimiter } = require('../middlewares/rateLimiter');
 
 // Auth Routes
 router.post('/login', loginLimiter, adminController.login);
+router.post('/refresh', adminController.refresh);
 router.post('/logout', authAdmin, adminController.logout);
 
 // Dashboard Route
@@ -44,6 +45,7 @@ router.get('/captains', authAdmin, adminController.getCaptains);
 router.put('/captains/:id/approval', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainApproval);
 router.put('/captains/:id/block', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.toggleCaptainBlock);
 router.get('/captains/:id/documents', authAdmin, adminController.getCaptainDocuments);
+router.get('/captains/:id/documents/:docType/url', authAdmin, adminController.getCaptainDocumentUrl);
 router.put('/captains/:id/documents/:docType', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainDocument);
 router.get('/captains/:id/recent-rides', authAdmin, adminController.getCaptainRecentRides);
 router.get('/captains/:id/wallet', authAdmin, adminController.getCaptainWallet);
@@ -60,6 +62,7 @@ router.post('/rides/bulk-action', authAdmin, authorizeRoles('super_admin', 'oper
 router.get('/payouts', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.getPayouts);
 router.get('/payouts/:id', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.getPayoutDetails);
 router.put('/payouts/:id/approve', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.approvePayout);
+router.put('/payouts/:id/confirm-paid', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.confirmPayoutPaid);
 router.put('/payouts/:id/reject', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.rejectPayout);
 router.post('/payouts/bulk-approve', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.bulkApprovePayouts);
 router.get('/captains/:id/financial-history', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.getCaptainFinancialHistory);

@@ -4,10 +4,12 @@ import { useForm, Controller } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import api from '../services/api';
-import { 
-  Bell, Send, Users, Car, Globe, Info, Clock, CheckCircle2, 
+import {
+  Bell, Send, Users, Car, Globe, Info, Clock, CheckCircle2,
   XCircle, Copy, Calendar, MessageSquare, AlertCircle, Trash2, Tag, Play, CheckSquare, Plus, Smartphone, X, Image as ImageIcon
 } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 const schema = z.object({
   title: z.string().min(3, 'O título deve ter no mínimo 3 caracteres').max(50, 'Máximo 50 caracteres'),
@@ -38,8 +40,9 @@ export default function Notifications() {
   const [previewTab, setPreviewTab] = useState('ios');
   const [estimatedCount, setEstimatedCount] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, data: null });
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const { register, handleSubmit, watch, control, setValue, reset, formState: { errors } } = useForm({
     resolver: zodResolver(schema),
@@ -84,31 +87,27 @@ export default function Notifications() {
       return await api.post('/admin/campaigns', data);
     },
     onSuccess: () => {
-      showToast('Campanha criada com sucesso!');
+      toast.success('Campanha criada com sucesso!');
       setConfirmModal({ isOpen: false, data: null });
       reset();
       queryClient.invalidateQueries(['campaigns']);
       setActiveTab('history');
     },
-    onError: (err) => showToast(err.response?.data?.message || 'Erro ao criar campanha', 'error')
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar campanha')
   });
 
   const cancelMutation = useMutation({
     mutationFn: async (id) => await api.post(`/admin/campaigns/${id}/cancel`),
     onSuccess: () => {
-      showToast('Campanha agendada foi cancelada.');
+      toast.success('Campanha agendada foi cancelada.');
       queryClient.invalidateQueries(['campaigns']);
-    }
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar campanha')
   });
-
-  const showToast = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 4000);
-  };
 
   const onSubmit = (data) => {
     if (data.isScheduled && !data.scheduledAt) {
-      return showToast('Preencha a data de agendamento', 'error');
+      return toast.error('Preencha a data de agendamento');
     }
     setConfirmModal({ isOpen: true, data });
   };
@@ -129,18 +128,11 @@ export default function Notifications() {
     setValue('targetRules', camp.targetRules);
     setValue('isScheduled', false);
     setActiveTab('new');
-    showToast('Campanha duplicada para o formulário. Ajuste e envie.');
+    toast.success('Campanha duplicada para o formulário. Ajuste e envie.');
   };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 relative pb-20">
-      {toast.show && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-3 rounded-lg shadow-2xl flex items-center gap-3 animate-slide-up font-medium text-white ${toast.type === 'error' ? 'bg-danger' : 'bg-success'}`}>
-          {toast.type === 'error' ? <XCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-          {toast.message}
-        </div>
-      )}
-
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Central de Comunicação</h1>
         <p className="text-text-muted mt-1">Crie, segmente e gerencie campanhas de Push Notification.</p>
@@ -440,7 +432,7 @@ export default function Notifications() {
                             <Copy className="w-4 h-4" />
                           </button>
                           {camp.status === 'scheduled' && (
-                            <button onClick={() => { if(window.confirm('Cancelar agendamento?')) cancelMutation.mutate(camp._id) }} className="p-2 text-text-muted hover:text-danger transition-colors" title="Cancelar Agendamento">
+                            <button onClick={async () => { if (await confirm('Cancelar agendamento?')) cancelMutation.mutate(camp._id) }} className="p-2 text-text-muted hover:text-danger transition-colors" title="Cancelar Agendamento">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}

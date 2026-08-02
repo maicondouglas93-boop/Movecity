@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+// optimisticConcurrency: ver comentário em tariffSetting.model.js (Bloco E, achado C1).
 const globalSettingSchema = new mongoose.Schema({
     platformCommission: {
         type: Number,
@@ -42,6 +43,6 @@ const globalSettingSchema = new mongoose.Schema({
     automaticPayout: { type: Boolean, default: false },
     paymentGateway: { type: String, enum: ['asaas', 'stripe', 'mercado_pago'], default: 'asaas' },
     platformPixKey: { type: String, default: '' }
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
 module.exports = mongoose.model('globalSetting', globalSettingSchema);

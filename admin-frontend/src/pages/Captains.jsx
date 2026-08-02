@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
+import { usePrompt } from '../contexts/PromptContext';
 import { 
   Search, MapPin, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, 
@@ -357,30 +360,45 @@ function CaptainActionMenu({ captain, onAction }) {
 
 function CaptainDrawer({ captain, onClose, liveDrivers }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
   const [activeTab, setActiveTab] = useState('perfil');
   const isLive = liveDrivers[captain._id] || captain.isOnline;
 
   // Mutations for quick actions
   const approvalMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/captains/${captain._id}/approval`, data),
-    onSuccess: () => queryClient.invalidateQueries(['captains'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['captains']);
+      toast.success('Cadastro aprovado com sucesso.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao aprovar cadastro')
   });
 
   const blockMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/captains/${captain._id}/block`, data),
-    onSuccess: () => queryClient.invalidateQueries(['captains'])
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries(['captains']);
+      toast.success(variables.isBlocked ? 'Motorista bloqueado.' : 'Motorista desbloqueado.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao alterar bloqueio do motorista')
   });
 
-  const handleBlock = () => {
-    const reason = window.prompt(captain.isBlocked ? "Motivo do desbloqueio:" : "Motivo do bloqueio:");
+  const handleBlock = async () => {
+    const reason = await prompt({
+      title: captain.isBlocked ? 'Desbloquear motorista' : 'Bloquear motorista',
+      message: captain.isBlocked ? 'Motivo do desbloqueio:' : 'Motivo do bloqueio:',
+      required: true
+    });
     if (reason !== null) {
       blockMutation.mutate({ isBlocked: !captain.isBlocked, reason });
       onClose(); // Optional: close or just let it update behind
     }
   };
 
-  const handleApprove = () => {
-    if(window.confirm("Aprovar o cadastro deste motorista?")) {
+  const handleApprove = async () => {
+    if (await confirm('Aprovar o cadastro deste motorista?')) {
       approvalMutation.mutate({ approvalStatus: 'aprovado', reason: 'Aprovado via painel CRM' });
     }
   };
@@ -442,7 +460,7 @@ function CaptainDrawer({ captain, onClose, liveDrivers }) {
            {activeTab === 'perfil' && <TabProfile captain={captain} liveDrivers={liveDrivers} />}
            {activeTab === 'documentos' && <TabDocuments captainId={captain._id} />}
            {activeTab === 'corridas' && <TabRides captainId={captain._id} />}
-           {activeTab === 'financeiro' && <TabFinance captainId={captain._id} />}
+           {activeTab === 'financeiro' && <TabFinance captainId={captain._id} captainName={`${captain.fullname?.firstname || ''} ${captain.fullname?.lastname || ''}`.trim()} />}
            {activeTab === 'auditoria' && <TabAudit captainId={captain._id} />}
         </div>
       </div>
@@ -525,6 +543,8 @@ function TabProfile({ captain, liveDrivers }) {
 
 function TabDocuments({ captainId }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const prompt = usePrompt();
   const { data: docs, isLoading } = useQuery({
     queryKey: ['captain-documents', captainId],
     queryFn: async () => { const { data } = await api.get(`/admin/captains/${captainId}/documents`); return data; }
@@ -532,53 +552,86 @@ function TabDocuments({ captainId }) {
 
   const verifyMutation = useMutation({
     mutationFn: ({ docType, verified, reason }) => api.put(`/admin/captains/${captainId}/documents/${docType}`, { verified, reason }),
-    onSuccess: () => queryClient.invalidateQueries(['captain-documents', captainId])
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries(['captain-documents', captainId]);
+      toast.success(variables.verified ? 'Documento aprovado.' : 'Documento rejeitado.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao verificar documento')
   });
 
   if (isLoading) return <div className="p-6 text-center text-text-muted">Carregando documentos...</div>;
   if (!docs) return <div className="p-6 text-center text-text-muted">Nenhum documento encontrado.</div>;
 
-  const handleVerify = (docType, isVerified) => {
-    const reason = window.prompt(isVerified ? "Observação da aprovação (opcional):" : "Motivo da rejeição:");
+  const handleVerify = async (docType, isVerified) => {
+    const reason = await prompt({
+      title: isVerified ? 'Aprovar documento' : 'Rejeitar documento',
+      message: isVerified ? 'Observação da aprovação (opcional):' : 'Motivo da rejeição:',
+      required: !isVerified
+    });
+    if (reason === null) return; // cancelado
     if (!isVerified && !reason) return; // reason is required for rejection
     verifyMutation.mutate({ docType, verified: isVerified, reason });
-  }
-
-  const DocumentRow = ({ title, docKey, docData }) => {
-    if (!docData || !docData.url) return (
-      <div className="flex items-center justify-between p-4 bg-surface rounded-xl border border-border">
-         <div className="flex items-center gap-3"><FileText className="w-5 h-5 text-border" /><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-border">Não enviado</p></div></div>
-      </div>
-    );
-    return (
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 bg-surface rounded-xl border border-border gap-4">
-         <div className="flex items-center gap-4">
-            <a href={docData.url} target="_blank" rel="noreferrer" className="w-16 h-12 bg-background border border-border rounded overflow-hidden flex items-center justify-center hover:opacity-80 transition-opacity">
-              <img src={docData.url} alt={title} className="w-full h-full object-cover" />
-            </a>
-            <div>
-               <p className="text-sm font-medium">{title}</p>
-               <span className={`text-xs inline-flex items-center gap-1 font-medium mt-1 ${docData.verified ? 'text-primary' : 'text-warning'}`}>
-                 {docData.verified ? <><Check className="w-3 h-3"/> Aprovado</> : <><Clock className="w-3 h-3"/> Pendente Verificação</>}
-               </span>
-            </div>
-         </div>
-         <div className="flex gap-2 w-full md:w-auto">
-            <button onClick={() => handleVerify(docKey, true)} className="flex-1 md:flex-none px-3 py-1.5 bg-primary/10 text-primary text-xs font-medium rounded hover:bg-primary/20 transition-colors border border-primary/20">Aprovar</button>
-            <button onClick={() => handleVerify(docKey, false)} className="flex-1 md:flex-none px-3 py-1.5 bg-danger/10 text-danger text-xs font-medium rounded hover:bg-danger/20 transition-colors border border-danger/20">Rejeitar</button>
-         </div>
-      </div>
-    )
   }
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Checklist Operacional</h3>
-      <DocumentRow title="CNH Frente" docKey="cnhFront" docData={docs.cnhFront} />
-      <DocumentRow title="CNH Verso" docKey="cnhBack" docData={docs.cnhBack} />
-      <DocumentRow title="CRLV (Documento Veículo)" docKey="crlv" docData={docs.crlv} />
-      <DocumentRow title="Foto do Veículo (Frente)" docKey="vehicleFront" docData={docs.vehicleFront} />
-      <DocumentRow title="Selfie de Segurança" docKey="selfie" docData={docs.selfie} />
+      <DocumentRow captainId={captainId} title="CNH Frente" docKey="cnhFront" docData={docs.cnhFront} onVerify={handleVerify} />
+      <DocumentRow captainId={captainId} title="CNH Verso" docKey="cnhBack" docData={docs.cnhBack} onVerify={handleVerify} />
+      <DocumentRow captainId={captainId} title="CRLV (Documento Veículo)" docKey="crlv" docData={docs.crlv} onVerify={handleVerify} />
+      <DocumentRow captainId={captainId} title="Foto do Veículo (Frente)" docKey="vehicleFront" docData={docs.vehicleFront} onVerify={handleVerify} />
+      <DocumentRow captainId={captainId} title="Selfie de Segurança" docKey="selfie" docData={docs.selfie} onVerify={handleVerify} />
+    </div>
+  )
+}
+
+// Auditoria de segurança (2026-08-02, S9): documentos de identidade não ficam mais em
+// URL pública, então cada linha busca sua própria URL assinada (expira em 5min) em vez
+// de usar docData.url direto. Componente de nível superior (não mais aninhado em
+// TabDocuments) para não perder o cache da query a cada render do pai.
+function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
+  const { data: signedUrl, isLoading: loadingUrl } = useQuery({
+    queryKey: ['captain-document-url', captainId, docKey],
+    queryFn: async () => {
+      const { data } = await api.get(`/admin/captains/${captainId}/documents/${docKey}/url`);
+      return data.url;
+    },
+    enabled: !!docData?.url,
+    staleTime: 4 * 60 * 1000 // URL assinada expira em 5min no backend
+  });
+
+  if (!docData || !docData.url) return (
+    <div className="flex items-center justify-between p-4 bg-surface rounded-xl border border-border">
+       <div className="flex items-center gap-3"><FileText className="w-5 h-5 text-border" /><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-border">Não enviado</p></div></div>
+    </div>
+  );
+  return (
+    <div className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 bg-surface rounded-xl border border-border gap-4">
+       <div className="flex items-center gap-4">
+          <a
+            href={signedUrl || undefined}
+            target="_blank"
+            rel="noreferrer"
+            className="w-16 h-12 bg-background border border-border rounded overflow-hidden flex items-center justify-center hover:opacity-80 transition-opacity"
+            onClick={(e) => { if (!signedUrl) e.preventDefault(); }}
+          >
+            {loadingUrl || !signedUrl ? (
+              <Clock className="w-4 h-4 text-text-muted animate-pulse" />
+            ) : (
+              <img src={signedUrl} alt={title} className="w-full h-full object-cover" />
+            )}
+          </a>
+          <div>
+             <p className="text-sm font-medium">{title}</p>
+             <span className={`text-xs inline-flex items-center gap-1 font-medium mt-1 ${docData.verified ? 'text-primary' : 'text-warning'}`}>
+               {docData.verified ? <><Check className="w-3 h-3"/> Aprovado</> : <><Clock className="w-3 h-3"/> Pendente Verificação</>}
+             </span>
+          </div>
+       </div>
+       <div className="flex gap-2 w-full md:w-auto">
+          <button onClick={() => onVerify(docKey, true)} className="flex-1 md:flex-none px-3 py-1.5 bg-primary/10 text-primary text-xs font-medium rounded hover:bg-primary/20 transition-colors border border-primary/20">Aprovar</button>
+          <button onClick={() => onVerify(docKey, false)} className="flex-1 md:flex-none px-3 py-1.5 bg-danger/10 text-danger text-xs font-medium rounded hover:bg-danger/20 transition-colors border border-danger/20">Rejeitar</button>
+       </div>
     </div>
   )
 }
@@ -622,6 +675,8 @@ function TabRides({ captainId }) {
 
 function TabFinance({ captainId, captainName }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustType, setAdjustType] = useState('credit');
@@ -643,26 +698,27 @@ function TabFinance({ captainId, captainName }) {
           transactions: [res.data.transaction, ...(old.transactions || [])]
         };
       });
-      alert('Saldo atualizado com sucesso!');
+      toast.success('Saldo atualizado com sucesso!');
       setShowAdjustModal(false);
       setAdjustAmount('');
       setAdjustReason('');
     },
     onError: (err) => {
-      alert(err.response?.data?.message || 'Erro ao ajustar saldo');
+      toast.error(err.response?.data?.message || 'Erro ao ajustar saldo');
     }
   });
 
-  const handleAdjust = (e) => {
+  const handleAdjust = async (e) => {
     e.preventDefault();
-    if (!adjustAmount || Number(adjustAmount) <= 0) return alert('Insira um valor válido');
-    if (!adjustReason) return alert('Insira o motivo');
+    if (!adjustAmount || Number(adjustAmount) <= 0) return toast.error('Insira um valor válido');
+    if (!adjustReason) return toast.error('Insira o motivo');
 
     const amount = Number(adjustAmount);
-    if (amount > 10000) return alert('O valor excede o limite (R$ 10.000)');
+    if (amount > 10000) return toast.error('O valor excede o limite (R$ 10.000)');
 
-    const confirmMsg = `Você está adicionando um ${adjustType === 'credit' ? 'Crédito' : 'Débito'} de R$ ${amount.toFixed(2)} ao motorista ${captainName || ''}.\n\nMotivo: ${adjustReason}\n\nConfirmar?`;
-    if (!window.confirm(confirmMsg)) return;
+    const confirmMsg = `Você está adicionando um ${adjustType === 'credit' ? 'Crédito' : 'Débito'} de R$ ${amount.toFixed(2)} ao motorista ${captainName || ''}.\n\nMotivo: ${adjustReason}`;
+    const ok = await confirm({ title: 'Confirmar ajuste de saldo', message: confirmMsg, tone: 'danger', confirmLabel: 'Confirmar ajuste' });
+    if (!ok) return;
 
     adjustMutation.mutate({ amount, type: adjustType, reason: adjustReason });
   };

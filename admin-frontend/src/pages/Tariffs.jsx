@@ -8,6 +8,8 @@ import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
 import TariffHistory from '../components/TariffHistory';
 import TariffSchedulerModal from '../components/TariffSchedulerModal';
 import TariffComparisonTable from '../components/TariffComparisonTable';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 const fetchGlobalTariffs = async () => {
   const { data } = await api.get('/admin/tariffs');
@@ -146,7 +148,8 @@ export default function Tariffs() {
 }
 
 function GlobalSettingsCard({ settings, queryClient, testMode }) {
-  const { register, handleSubmit, reset, formState: { isSubmitting, isDirty } } = useForm({
+  const toast = useToast();
+  const { register, handleSubmit, reset, formState: { isDirty } } = useForm({
     defaultValues: {
       cancellationFee: settings.cancellationFee,
       perMinuteWaitFee: settings.perMinuteWaitFee,
@@ -167,12 +170,24 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['globalTariffs']);
-      alert('Configurações globais atualizadas com sucesso!');
+      toast.success('Configurações globais atualizadas com sucesso!');
+    },
+    onError: (err) => {
+      // Bloco E (2026-08-02, achado C1): 409 = outro admin salvou entre o carregamento
+      // desta tela e este clique — recarrega os dados em cache (não o form em edição,
+      // pra não descartar o que o admin estava digitando sem avisar) e explica o motivo.
+      if (err.response?.status === 409) {
+        queryClient.invalidateQueries(['globalTariffs']);
+      }
+      toast.error(err.response?.data?.message || 'Erro ao salvar configurações globais — verifique se você tem permissão de super_admin');
     }
   });
 
   return (
-    <form onSubmit={handleSubmit(updateMutation.mutate)} className="bg-surface rounded-xl border border-border overflow-hidden">
+    <form
+      onSubmit={handleSubmit((data) => updateMutation.mutate({ ...data, __tariffVersion: settings.__tariffVersion, __globalSettingVersion: settings.__globalSettingVersion }))}
+      className="bg-surface rounded-xl border border-border overflow-hidden"
+    >
       <div className="bg-background/50 border-b border-border p-4">
         <h3 className="font-semibold text-lg">Taxas e Regras Globais</h3>
       </div>
@@ -227,9 +242,9 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
           <RotateCcw className="w-4 h-4" />
           Restaurar
         </button>
-        <button type="submit" disabled={!isDirty || isSubmitting || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+        <button type="submit" disabled={!isDirty || updateMutation.isPending || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
           <Save className="w-4 h-4" />
-          {isSubmitting ? 'Salvando...' : 'Salvar Alterações'}
+          {updateMutation.isPending ? 'Salvando...' : 'Salvar Alterações'}
         </button>
       </div>
     </form>
@@ -237,10 +252,12 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
 }
 
 function CategorySettingsCard({ category, queryClient, testMode, platformCommission }) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  
-  const { register, handleSubmit, watch, reset, getValues, formState: { isSubmitting, isDirty } } = useForm({
+
+  const { register, handleSubmit, watch, reset, getValues, formState: { isDirty } } = useForm({
     defaultValues: {
       displayName: category.displayName,
       description: category.description || '',
@@ -267,9 +284,17 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
     onSuccess: () => {
       queryClient.invalidateQueries(['vehicleCategories']);
       queryClient.invalidateQueries(['tariffHistory']);
-      alert(`Tarifas da categoria ${category.displayName} atualizadas!`);
+      toast.success(`Tarifas da categoria ${category.displayName} atualizadas!`);
       setPreviewOpen(false);
       reset(getValues()); // resets isDirty state
+    },
+    onError: (err) => {
+      // Bloco E (2026-08-02, achado C1): mesmo raciocínio de GlobalSettingsCard — em
+      // conflito de versão, atualiza o cache (não o form aberto) e explica o motivo.
+      if (err.response?.status === 409) {
+        queryClient.invalidateQueries(['vehicleCategories']);
+      }
+      toast.error(err.response?.data?.message || 'Erro ao salvar tarifas — verifique se você tem permissão de super_admin');
     }
   });
 
@@ -280,8 +305,9 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
     },
     onSuccess: (newCat) => {
       queryClient.invalidateQueries(['vehicleCategories']);
-      alert(`Categoria duplicada como: ${newCat.displayName}`);
-    }
+      toast.success(`Categoria duplicada como: ${newCat.displayName}`);
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao duplicar categoria')
   });
 
   const onPreviewSubmit = (e) => {
@@ -297,15 +323,16 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
             <div className="bg-background/50 border-b border-border p-4 flex flex-wrap gap-4 justify-between items-center">
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold text-lg">{category.displayName}</h3>
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    if(confirm(`Tem certeza que deseja duplicar a categoria ${category.displayName}?`)) {
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (await confirm(`Tem certeza que deseja duplicar a categoria ${category.displayName}?`)) {
                       duplicateMutation.mutate();
                     }
                   }}
+                  disabled={duplicateMutation.isPending}
                   title="Duplicar Categoria"
-                  className="p-1.5 bg-background border border-border rounded-lg text-text-muted hover:text-text transition-colors"
+                  className="p-1.5 bg-background border border-border rounded-lg text-text-muted hover:text-text transition-colors disabled:opacity-50"
                 >
                   <Copy className="w-4 h-4" />
                 </button>
@@ -390,9 +417,9 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
                 Agendar
               </button>
               
-              <button 
-                type="submit" 
-                disabled={!isDirty || isSubmitting || testMode} 
+              <button
+                type="submit"
+                disabled={!isDirty || testMode}
                 className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
               >
                 <FileSearch className="w-4 h-4" />
@@ -451,14 +478,14 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
               >
                 Cancelar
               </button>
-              <button 
-                type="button" 
-                onClick={() => updateMutation.mutate(liveValues)}
-                disabled={isSubmitting}
+              <button
+                type="button"
+                onClick={() => updateMutation.mutate({ ...liveValues, __v: category.__v })}
+                disabled={updateMutation.isPending}
                 className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 <Save className="w-4 h-4" />
-                {isSubmitting ? 'Aplicando...' : 'Aplicar Tarifas'}
+                {updateMutation.isPending ? 'Aplicando...' : 'Aplicar Tarifas'}
               </button>
             </div>
           </div>
@@ -469,7 +496,8 @@ function CategorySettingsCard({ category, queryClient, testMode, platformCommiss
 }
 
 function NewCategoryModal({ onClose, onCreated }) {
-  const { register, handleSubmit, formState: { isSubmitting, errors } } = useForm({
+  const toast = useToast();
+  const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: { name: '', displayName: '', description: '', capacity: 4, iconKey: 'car' }
   });
 
@@ -479,10 +507,11 @@ function NewCategoryModal({ onClose, onCreated }) {
       return res.data;
     },
     onSuccess: (newCat) => {
+      toast.success(`Categoria ${newCat.displayName} criada com sucesso!`);
       onCreated(newCat);
     },
     onError: (err) => {
-      alert(err.response?.data?.message || 'Erro ao criar categoria');
+      toast.error(err.response?.data?.message || 'Erro ao criar categoria');
     }
   });
 
@@ -548,11 +577,11 @@ function NewCategoryModal({ onClose, onCreated }) {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={createMutation.isPending}
               className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              {isSubmitting ? 'Criando...' : 'Criar Categoria'}
+              {createMutation.isPending ? 'Criando...' : 'Criar Categoria'}
             </button>
           </div>
         </form>

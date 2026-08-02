@@ -34,8 +34,37 @@ module.exports.login = async (req, res, next) => {
     }
 };
 
-module.exports.logout = (req, res, next) => {
+module.exports.refresh = async (req, res, next) => {
     try {
+        const { refreshToken } = req.body;
+        const { admin, token, refreshToken: newRefreshToken } = await adminService.refreshAccessToken(refreshToken);
+
+        res.cookie('adminToken', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 15 * 60 * 1000 // 15 minutes
+        });
+
+        res.status(200).json({
+            admin: {
+                _id: admin._id,
+                name: admin.name,
+                email: admin.email,
+                role: admin.role,
+            },
+            token,
+            refreshToken: newRefreshToken
+        });
+    } catch (error) {
+        return res.status(401).json({ message: error.message || 'Refresh token inválido' });
+    }
+};
+
+module.exports.logout = async (req, res, next) => {
+    try {
+        if (req.admin) {
+            await adminService.invalidateRefreshToken(req.admin._id);
+        }
         res.clearCookie('adminToken');
         res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
@@ -449,6 +478,16 @@ module.exports.getCaptainDocuments = async (req, res, next) => {
     }
 };
 
+module.exports.getCaptainDocumentUrl = async (req, res, next) => {
+    try {
+        const { id, docType } = req.params;
+        const url = await adminService.getCaptainDocumentSignedUrl(id, docType);
+        res.status(200).json({ url });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports.updateCaptainDocument = async (req, res, next) => {
     try {
         const { id, docType } = req.params;
@@ -525,9 +564,33 @@ module.exports.cancelRide = async (req, res, next) => {
 module.exports.reassignRide = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const result = await adminService.reassignRide(id, req.admin);
-        res.status(200).json(result);
+        const { ride, previousCaptain } = await adminService.reassignRide(id, req.admin, req.ip);
+
+        // Bloco E (2026-08-02): antes disto, ninguém era avisado da reatribuição — nem o
+        // motorista removido (continuava vendo a corrida como sua até o próximo refresh),
+        // nem outros motoristas (a corrida voltava a 'requested' mas não era redespachada).
+        const { sendMessageToRoom } = require('../socket');
+        sendMessageToRoom(`ride_${ride._id}`, {
+            event: 'ride-reassigned-by-admin',
+            data: { rideId: ride._id }
+        });
+
+        const { dispatchRideToCaptains } = require('./ride.controller');
+        await dispatchRideToCaptains(ride, {
+            pickup: ride.pickup,
+            vehicleType: ride.vehicleType,
+            TRACE_ID: `Ride:${ride._id}:AdminReassign`,
+            excludeCaptainId: previousCaptain
+        });
+
+        res.status(200).json(ride);
     } catch (error) {
+        if (error.message === 'Corrida não encontrada') {
+            return res.status(404).json({ message: error.message });
+        }
+        if (error.message.includes('não pode ser reatribuída')) {
+            return res.status(409).json({ message: error.message });
+        }
         next(error);
     }
 };
@@ -568,7 +631,21 @@ module.exports.approvePayout = async (req, res, next) => {
         const result = await adminService.approvePayout(id, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
-        next(error);
+        // Erros de regra de negócio (saldo insuficiente, corrida perdida pro CAS, motorista
+        // bloqueado etc.) precisam do err.message de verdade — em produção, next(error) cairia
+        // no handler global e viraria "Internal Server Error" genérico (ver app.js), escondendo
+        // exatamente a mensagem que o admin precisa ver.
+        res.status(400).json({ message: error.message });
+    }
+};
+
+module.exports.confirmPayoutPaid = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const result = await adminService.confirmPayoutPaid(id, req.admin, req.ip);
+        res.status(200).json(result);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
     }
 };
 
@@ -579,7 +656,7 @@ module.exports.rejectPayout = async (req, res, next) => {
         const result = await adminService.rejectPayout(id, reason, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
-        next(error);
+        res.status(400).json({ message: error.message });
     }
 };
 
@@ -631,6 +708,12 @@ module.exports.updateTariff = async (req, res, next) => {
         
         res.status(200).json(tariff);
     } catch (error) {
+        // Bloco E (2026-08-02, achado C1): conflito de edição concorrente — nosso próprio
+        // erro marcado (err.statusCode) ou o VersionError nativo do Mongoose no caso raro
+        // de dois PUTs colidindo dentro da janela entre a pré-checagem e o save().
+        if (error.statusCode === 409 || error.name === 'VersionError') {
+            return res.status(409).json({ message: error.statusCode === 409 ? error.message : 'As configurações foram alteradas por outro administrador enquanto você editava. Recarregue a página para ver os valores atuais antes de salvar.' });
+        }
         next(error);
     }
 };
@@ -687,6 +770,9 @@ module.exports.updateVehicleCategory = async (req, res, next) => {
         
         res.status(200).json(category);
     } catch (error) {
+        if (error.statusCode === 409) {
+            return res.status(409).json({ message: error.message });
+        }
         next(error);
     }
 };

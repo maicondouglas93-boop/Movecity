@@ -16,19 +16,79 @@ api.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
+const forceLogout = () => {
+  localStorage.removeItem('adminToken');
+  localStorage.removeItem('adminRefreshToken');
+  localStorage.removeItem('adminUser');
+  window.location.href = '/login';
+};
+
+// Auditoria de sessão (2026-08-02, S6): antes, qualquer 401 derrubava a sessão na hora,
+// mesmo o access token tendo só 15min de vida e existindo um refresh token válido por
+// 7 dias. Agora tenta renovar uma vez antes de deslogar. isRefreshing + refreshSubscribers
+// evitam que N requisições que falhem juntas (ex: várias queries do Dashboard) disparem
+// N chamadas de refresh — só a primeira renova, as outras esperam e reusam o token novo.
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+const subscribeTokenRefresh = (cb) => refreshSubscribers.push(cb);
+const onRefreshed = (newToken) => {
+  refreshSubscribers.forEach((cb) => cb(newToken));
+  refreshSubscribers = [];
+};
+
 // Interceptor para tratamento de erros genéricos (ex: 401 Unauthorized)
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      // Se não for rota de login, deslogar
-      if (!error.config.url.includes('/admin/login')) {
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('adminUser');
-        window.location.href = '/login';
+  async (error) => {
+    const { config, response } = error;
+
+    if (!response || response.status !== 401) {
+      return Promise.reject(error);
+    }
+
+    const isAuthRoute = config.url.includes('/admin/login') || config.url.includes('/admin/refresh');
+    if (isAuthRoute) {
+      if (config.url.includes('/admin/refresh')) forceLogout();
+      return Promise.reject(error);
+    }
+
+    // Já tentamos renovar uma vez para esta requisição e o token novo ainda voltou 401
+    // (ex: admin foi desativado no meio da sessão) — não insistir num loop.
+    if (config._retriedAfterRefresh) {
+      forceLogout();
+      return Promise.reject(error);
+    }
+
+    const refreshToken = localStorage.getItem('adminRefreshToken');
+    if (!refreshToken) {
+      forceLogout();
+      return Promise.reject(error);
+    }
+
+    if (!isRefreshing) {
+      isRefreshing = true;
+      try {
+        const { data } = await api.post('/admin/refresh', { refreshToken });
+        localStorage.setItem('adminToken', data.token);
+        localStorage.setItem('adminRefreshToken', data.refreshToken);
+        isRefreshing = false;
+        onRefreshed(data.token);
+      } catch (refreshError) {
+        isRefreshing = false;
+        refreshSubscribers = [];
+        forceLogout();
+        return Promise.reject(error);
       }
     }
-    return Promise.reject(error);
+
+    return new Promise((resolve) => {
+      subscribeTokenRefresh((newToken) => {
+        config._retriedAfterRefresh = true;
+        config.headers.Authorization = `Bearer ${newToken}`;
+        resolve(api(config));
+      });
+    });
   }
 );
 

@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 const adminUserModel = require('../models/adminUser.model');
 const adminLogModel = require('../models/adminLog.model');
 const rideModel = require('../models/ride.model');
@@ -5,8 +7,11 @@ const captainModel = require('../models/captain.model');
 const userModel = require('../models/user.model');
 const transactionModel = require('../models/transaction.model');
 const payoutModel = require('../models/payout.model');
+const walletModel = require('../models/wallet.model');
 const { deleteByPrefix } = require('../cache/cache');
 const { disconnectSocket } = require('../socket');
+const uploadService = require('./upload.service');
+const walletService = require('./wallet.service');
 
 module.exports.login = async (email, password) => {
     const admin = await adminUserModel.findOne({ email }).select('+password');
@@ -30,6 +35,40 @@ module.exports.login = async (email, password) => {
     await admin.save();
 
     return { admin, token, refreshToken };
+};
+
+// Auditoria de sessão (2026-08-02, S6): o refresh token já era gerado e salvo no login,
+// mas não existia rota para trocá-lo por um access token novo — a sessão do admin
+// morria a cada 15min sem chance de renovação silenciosa. Rotaciona o refresh token a
+// cada uso (o antigo para de valer assim que um novo é emitido).
+module.exports.refreshAccessToken = async (refreshToken) => {
+    if (!refreshToken) throw new Error('Refresh token ausente');
+
+    let decoded;
+    try {
+        decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    } catch (err) {
+        throw new Error('Refresh token inválido ou expirado');
+    }
+
+    const admin = await adminUserModel.findById(decoded._id).select('+refreshToken');
+    if (!admin || !admin.active || admin.refreshToken !== refreshToken) {
+        throw new Error('Refresh token inválido');
+    }
+
+    const token = admin.generateAuthToken();
+    const newRefreshToken = admin.generateRefreshToken();
+    admin.refreshToken = newRefreshToken;
+    await admin.save();
+
+    return { admin, token, refreshToken: newRefreshToken };
+};
+
+module.exports.invalidateRefreshToken = async (adminId) => {
+    // findByIdAndUpdate descarta chaves com valor undefined do objeto de update antes de
+    // montar o comando do Mongo — { refreshToken: undefined } vira um update vazio e o
+    // token antigo continuava válido depois do logout. $unset é o jeito correto de limpar.
+    await adminUserModel.findByIdAndUpdate(adminId, { $unset: { refreshToken: 1 } });
 };
 
 module.exports.logAction = async (logData) => {
@@ -534,6 +573,19 @@ module.exports.getCaptainDocuments = async (captainId) => {
     return captain.documents;
 };
 
+// Auditoria de segurança (2026-08-02, S9): o painel não pode mais usar a URL salva
+// no banco direto (deixou de ser pública) — precisa pedir uma URL assinada de curta duração.
+module.exports.getCaptainDocumentSignedUrl = async (captainId, docType) => {
+    const captain = await captainModel.findById(captainId).select('documents');
+    if (!captain || !captain.documents || !captain.documents[docType]) {
+        throw new Error('Documento não encontrado');
+    }
+    const fileUrl = captain.documents[docType].url;
+    if (!fileUrl) throw new Error('Documento não enviado');
+
+    return uploadService.getSignedDocumentUrl(fileUrl);
+};
+
 module.exports.updateCaptainDocument = async (captainId, docType, verified, reason, admin) => {
     const captain = await captainModel.findById(captainId);
     if (!captain || !captain.documents || !captain.documents[docType]) {
@@ -722,16 +774,28 @@ module.exports.cancelRide = async (id, reason, admin) => {
     return ride;
 };
 
-module.exports.reassignRide = async (id, admin) => {
-    const ride = await rideModel.findById(id);
-    if (!ride) throw new Error('Corrida não encontrada');
-    if (['finished', 'cancelled'].includes(ride.status)) throw new Error('Corrida não pode ser reatribuída');
+// Auditoria de concorrência do painel administrativo (2026-08-02, Bloco E, achados
+// C4/C5/C6): antes, isto fazia `ride.captain = null; ride.status = 'requested';
+// ride.save()` direto — sem passar pela máquina de estados (`transitionRide` em
+// ride.service.js), aceitava reatribuir uma corrida `started` (passageiro dentro do
+// carro) e não notificava nem redespachava a corrida pra ninguém, deixando-a travada em
+// 'requested' pra sempre. A transição segura e o redespacho agora vivem em
+// ride.service.js/ride.controller.js — aqui só orquestra e audita.
+module.exports.reassignRide = async (id, admin, ip) => {
+    const rideService = require('./ride.service');
 
-    // Desvincula o motorista atual e volta para requested
-    const oldCaptain = ride.captain;
-    ride.captain = null;
-    ride.status = 'requested';
-    await ride.save();
+    let result;
+    try {
+        result = await rideService.reassignRideByAdmin(id);
+    } catch (err) {
+        if (err.message === 'Ride not found') throw new Error('Corrida não encontrada');
+        if (err.message === 'Ride cannot be reassigned at this stage') {
+            throw new Error('Esta corrida não pode ser reatribuída neste estágio (já em andamento, finalizada ou cancelada)');
+        }
+        throw err;
+    }
+
+    const { ride, previousCaptain } = result;
 
     await module.exports.logAction({
         adminId: admin._id,
@@ -739,12 +803,12 @@ module.exports.reassignRide = async (id, admin) => {
         action: 'reassign_ride',
         targetId: ride._id.toString(),
         targetModel: 'Ride',
-        reason: 'Corrida reatribuída para busca de novo motorista',
-        oldValue: { captain: oldCaptain },
-        ipAddress: '0.0.0.0'
+        reason: 'Corrida reatribuída para busca de novo motorista pelo painel administrativo',
+        oldValue: { captain: previousCaptain },
+        ipAddress: ip || '0.0.0.0'
     });
 
-    return ride;
+    return { ride, previousCaptain };
 };
 
 module.exports.bulkActionRides = async (rideIds, actionType, reason, admin) => {
@@ -838,40 +902,84 @@ module.exports.getPayoutDetails = async (payoutId) => {
     const payout = await payoutModel.findById(payoutId)
         .populate('captainId', 'fullname email phone pixKey status isBlocked approvalStatus earnings')
         .populate('operatorId', 'name email');
-    
+
     if (!payout) throw new Error('Repasse não encontrado');
-    
+
     // Get timeline logs for this specific payout
     const logs = await adminLogModel.find({ targetId: payoutId, targetModel: 'Payout' }).sort({ createdAt: 1 });
-    
-    return { payout, logs };
+
+    // Auditoria financeira (2026-08-02, Bloco B): o drawer mostrava captain.earnings
+    // como "saldo do motorista" — métrica de ganhos vitalícios, não o saldo que o
+    // repasse de fato debita. wallet.pendingBalance é o número real.
+    const wallet = payout.captainId ? await walletModel.findOne({ captainId: payout.captainId._id }) : null;
+
+    return { payout, logs, wallet };
 };
 
-module.exports.approvePayout = async (payoutId, admin, ip) => {
+// Auditoria financeira (2026-08-02, Bloco B): núcleo compartilhado entre approvePayout
+// e bulkApprovePayouts. Reivindica o repasse atomicamente (CAS via findOneAndUpdate
+// dentro de uma transação Mongo — mesmo padrão de confirmPaymentReceived em
+// ride.service.js) e só então debita a carteira real do motorista. Duas aprovações
+// concorrentes do mesmo repasse: só uma ganha a corrida pelo CAS: a outra recebe null
+// e sabe que não deve debitar nada.
+async function claimAndDebitPayout(payoutId, admin) {
     const payout = await payoutModel.findById(payoutId).populate('captainId');
     if (!payout) throw new Error('Repasse não encontrado');
-    if (payout.status === 'paid' || payout.status === 'rejected') throw new Error('Este repasse já foi finalizado');
-    
+
     const captain = payout.captainId;
+    if (!captain) throw new Error('Motorista do repasse não encontrado');
     if (captain.isBlocked) throw new Error('Não é possível aprovar: Motorista está bloqueado');
     if (captain.approvalStatus !== 'aprovado') throw new Error('Não é possível aprovar: Motorista não está com cadastro aprovado');
-    // MOCK: Checking if pixKey exists, for real app we'd check captain.pix.key
     if (!payout.bankDetailsSnapshot || !payout.bankDetailsSnapshot.pixKey) {
         throw new Error('Não é possível aprovar: Chave PIX não encontrada para este motorista');
     }
-    // MOCK: check sufficient balance (simulated)
-    // if (captain.earnings < payout.amount) throw new Error('Saldo insuficiente');
 
-    // Update status to paid (simulate manual instant payment for now)
-    payout.status = 'paid';
-    payout.paidAt = new Date();
-    payout.adminId = admin.email;
-    payout.operatorId = admin._id;
-    await payout.save();
-    
-    // Deduct from captain earnings (simulate)
-    captain.earnings -= payout.amount;
-    await captain.save();
+    const session = await mongoose.startSession();
+    let applySideEffects = null;
+    let claimed = null;
+
+    try {
+        await session.withTransaction(async () => {
+            claimed = await payoutModel.findOneAndUpdate(
+                { _id: payoutId, status: { $in: ['requested', 'in_analysis', 'approved'] } },
+                { $set: { status: 'processing', operatorId: admin._id, adminId: admin.email } },
+                { new: true, session }
+            );
+            if (!claimed) {
+                throw new Error('Este repasse já foi processado por outra ação ou não está em um estado aprovável');
+            }
+
+            const wallet = await walletModel.findOne({ captainId: captain._id }).session(session);
+            if (!wallet || wallet.pendingBalance < claimed.amount) {
+                throw new Error('Saldo insuficiente na carteira do motorista para este repasse');
+            }
+
+            const result = await walletService.createTransaction({
+                captainId: captain._id,
+                type: 'payout',
+                paymentMethod: 'pix',
+                amount: claimed.amount,
+                description: `Repasse aprovado #${claimed._id.toString().slice(-6)}`,
+                adminId: admin.email,
+                reason: 'Repasse aprovado via painel administrativo',
+                session
+            });
+            applySideEffects = result.applySideEffects;
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    // Efeitos colaterais (socket, cache) só depois do commit — mesmo motivo de
+    // confirmPaymentReceived: emiti-los antes avisaria de um dinheiro que pode nunca
+    // ter sido efetivado, se a transação abortasse.
+    if (applySideEffects) await applySideEffects();
+
+    return claimed;
+}
+
+module.exports.approvePayout = async (payoutId, admin, ip) => {
+    const payout = await claimAndDebitPayout(payoutId, admin);
 
     await module.exports.logAction({
         adminId: admin._id,
@@ -879,8 +987,33 @@ module.exports.approvePayout = async (payoutId, admin, ip) => {
         action: 'approve_payout',
         targetId: payout._id.toString(),
         targetModel: 'Payout',
-        reason: 'Repasse aprovado e processado manualmente',
-        newValue: { status: 'paid', amount: payout.amount },
+        reason: 'Repasse aprovado — valor debitado da carteira, aguardando confirmação de pagamento',
+        newValue: { status: 'processing', amount: payout.amount },
+        ipAddress: ip || '0.0.0.0'
+    });
+
+    return payout;
+};
+
+// Auditoria financeira (2026-08-02, Bloco B): segundo passo deliberado — o financeiro
+// confirma manualmente (fora do sistema, olhando o extrato bancário real) que o PIX
+// efetivamente saiu. Não existe gateway integrado para automatizar esta confirmação.
+module.exports.confirmPayoutPaid = async (payoutId, admin, ip) => {
+    const payout = await payoutModel.findOneAndUpdate(
+        { _id: payoutId, status: 'processing' },
+        { $set: { status: 'paid', paidAt: new Date() } },
+        { new: true }
+    );
+    if (!payout) throw new Error('Este repasse não está aguardando confirmação de pagamento');
+
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'confirm_payout_paid',
+        targetId: payout._id.toString(),
+        targetModel: 'Payout',
+        reason: 'Pagamento confirmado manualmente pelo financeiro',
+        newValue: { status: 'paid' },
         ipAddress: ip || '0.0.0.0'
     });
 
@@ -889,15 +1022,22 @@ module.exports.approvePayout = async (payoutId, admin, ip) => {
 
 module.exports.rejectPayout = async (payoutId, reason, admin, ip) => {
     if (!reason) throw new Error('Motivo da rejeição é obrigatório');
-    
-    const payout = await payoutModel.findById(payoutId);
-    if (!payout) throw new Error('Repasse não encontrado');
-    if (payout.status === 'paid' || payout.status === 'rejected') throw new Error('Este repasse já foi finalizado');
-    
-    payout.status = 'rejected';
-    payout.reason = reason;
-    payout.operatorId = admin._id;
-    await payout.save();
+
+    const existing = await payoutModel.findById(payoutId);
+    if (!existing) throw new Error('Repasse não encontrado');
+    if (existing.status === 'processing') {
+        throw new Error('Este repasse já teve o valor debitado da carteira do motorista e não pode mais ser rejeitado por aqui — é necessário um estorno manual');
+    }
+    if (existing.status === 'paid' || existing.status === 'rejected') {
+        throw new Error('Este repasse já foi finalizado');
+    }
+
+    const payout = await payoutModel.findOneAndUpdate(
+        { _id: payoutId, status: { $in: ['requested', 'in_analysis', 'approved'] } },
+        { $set: { status: 'rejected', reason, operatorId: admin._id } },
+        { new: true }
+    );
+    if (!payout) throw new Error('Este repasse já foi processado por outra ação');
 
     await module.exports.logAction({
         adminId: admin._id,
@@ -916,25 +1056,19 @@ module.exports.rejectPayout = async (payoutId, reason, admin, ip) => {
 module.exports.bulkApprovePayouts = async (payoutIds, admin, ip) => {
     if (!payoutIds || !payoutIds.length) throw new Error('Nenhum repasse selecionado');
 
-    const payouts = await payoutModel.find({ _id: { $in: payoutIds }, status: { $nin: ['paid', 'rejected'] } }).populate('captainId');
     let approvedCount = 0;
-    
-    for (const payout of payouts) {
-        const captain = payout.captainId;
-        // Skip invalid payouts
-        if (captain.isBlocked || captain.approvalStatus !== 'aprovado' || !payout.bankDetailsSnapshot?.pixKey) continue;
-        
-        payout.status = 'paid';
-        payout.paidAt = new Date();
-        payout.operatorId = admin._id;
-        await payout.save();
-        
-        captain.earnings -= payout.amount;
-        await captain.save();
-        
-        approvedCount++;
+
+    for (const payoutId of payoutIds) {
+        try {
+            await claimAndDebitPayout(payoutId, admin);
+            approvedCount++;
+        } catch (err) {
+            // Item inválido (bloqueado, sem Pix, saldo insuficiente, já processado) —
+            // pula e segue com o resto do lote, igual ao comportamento anterior.
+            continue;
+        }
     }
-    
+
     if (approvedCount > 0) {
         await module.exports.logAction({
             adminId: admin._id,
@@ -995,21 +1129,42 @@ module.exports.getTariffs = async () => {
     GLOBAL_SETTING_FIELDS.forEach(field => {
         merged[field] = globalSetting[field];
     });
+    // Bloco E (2026-08-02, achado C1): o painel mescla dois documentos num só objeto
+    // pra tela de "Tarifas Globais" — o admin precisa devolver a versão de CADA um
+    // separadamente no PUT, porque updateGlobalSettings vai checar os dois.
+    merged.__tariffVersion = tariff.__v;
+    merged.__globalSettingVersion = globalSetting.__v;
     return merged;
 };
 
+// Bloco E (2026-08-02, achado C1): dois admins abrindo a tela de Tarifas Globais ao
+// mesmo tempo — o segundo a salvar sobrescrevia tudo o que o primeiro tinha acabado de
+// mudar, sem aviso nenhum. `__tariffVersion`/`__globalSettingVersion` são o __v que o
+// admin leu quando a tela carregou (ver getTariffs); se o documento já mudou desde
+// então, recusa com 409 em vez de aplicar por cima.
+function assertVersionMatches(expected, actual, message) {
+    if (expected !== undefined && expected !== actual) {
+        const err = new Error(`${message} Recarregue a página para ver os valores atuais antes de salvar.`);
+        err.statusCode = 409;
+        throw err;
+    }
+}
+
 module.exports.updateGlobalSettings = async (data) => {
+    const { __tariffVersion, __globalSettingVersion, ...rest } = data;
+
     const globalFields = {};
-    const tariffFields = { ...data };
+    const tariffFields = { ...rest };
     GLOBAL_SETTING_FIELDS.forEach(field => {
-        if (data[field] !== undefined) {
-            globalFields[field] = data[field];
+        if (rest[field] !== undefined) {
+            globalFields[field] = rest[field];
             delete tariffFields[field];
         }
     });
 
     let tariff = await tariffSettingModel.findOne();
     if (tariff) {
+        assertVersionMatches(__tariffVersion, tariff.__v, 'As configurações de tarifa foram alteradas por outro administrador enquanto você editava.');
         Object.assign(tariff, tariffFields);
         await tariff.save();
     } else {
@@ -1019,6 +1174,7 @@ module.exports.updateGlobalSettings = async (data) => {
     let globalSetting = await globalSettingModel.findOne();
     if (Object.keys(globalFields).length > 0) {
         if (globalSetting) {
+            assertVersionMatches(__globalSettingVersion, globalSetting.__v, 'As configurações financeiras globais foram alteradas por outro administrador enquanto você editava.');
             Object.assign(globalSetting, globalFields);
             await globalSetting.save();
         } else {
@@ -1030,6 +1186,8 @@ module.exports.updateGlobalSettings = async (data) => {
     GLOBAL_SETTING_FIELDS.forEach(field => {
         merged[field] = globalSetting ? globalSetting[field] : undefined;
     });
+    merged.__tariffVersion = tariff.__v;
+    merged.__globalSettingVersion = globalSetting ? globalSetting.__v : undefined;
     return merged;
 };
 
@@ -1038,9 +1196,16 @@ module.exports.getVehicleCategories = async () => {
     return categories;
 };
 
+// Bloco E (2026-08-02, achado C1): esta função sempre usou findByIdAndUpdate direto —
+// optimisticConcurrency (ativado no schema) só entra em ação em .save(), então aqui a
+// checagem de versão precisa ser manual, dos dois lados: uma pré-checagem (mensagem
+// rápida e clara pro caso comum) e o próprio __v no filtro do findOneAndUpdate (garantia
+// atômica de verdade pro caso raro de dois PUTs chegando quase juntos).
 module.exports.updateVehicleCategory = async (id, data) => {
     const oldCategory = await vehicleCategoryModel.findById(id).lean();
     if (!oldCategory) throw new Error('Categoria não encontrada');
+
+    assertVersionMatches(data.__v, oldCategory.__v, 'Esta categoria de veículo foi alterada por outro administrador enquanto você editava.');
 
     // extrair campos permitidos
     const updateData = {
@@ -1058,7 +1223,19 @@ module.exports.updateVehicleCategory = async (id, data) => {
         isActive: data.isActive !== undefined ? data.isActive : oldCategory.isActive
     };
 
-    const category = await vehicleCategoryModel.findByIdAndUpdate(id, updateData, { new: true });
+    const filter = { _id: id };
+    if (data.__v !== undefined) filter.__v = data.__v;
+
+    const category = await vehicleCategoryModel.findOneAndUpdate(
+        filter,
+        { $set: updateData, $inc: { __v: 1 } },
+        { new: true }
+    );
+    if (!category) {
+        const err = new Error('Esta categoria de veículo foi alterada por outro administrador enquanto você editava. Recarregue a página para ver os valores atuais antes de salvar.');
+        err.statusCode = 409;
+        throw err;
+    }
 
     return { category, oldValue: oldCategory };
 };

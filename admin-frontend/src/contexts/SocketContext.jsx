@@ -17,8 +17,8 @@ export const SocketProvider = ({ children }) => {
 
       newSocket.on('connect', () => {
         console.log('Connected to socket', newSocket.id);
-        // Join admin room
-        newSocket.emit('join', { userId: user._id, userType: 'admin' });
+        // Join admin room (token exigido pelo backend — ver socket.js, S1 da auditoria)
+        newSocket.emit('join', { userId: user._id, userType: 'admin', token: localStorage.getItem('adminToken') });
       });
 
       setSocket(newSocket);

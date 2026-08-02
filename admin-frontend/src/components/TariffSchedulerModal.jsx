@@ -3,10 +3,12 @@ import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { Calendar, X } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function TariffSchedulerModal({ isOpen, onClose, categoryId, categoryName, pendingChanges }) {
   const queryClient = useQueryClient();
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
+  const toast = useToast();
+  const { register, handleSubmit } = useForm();
 
   const scheduleMutation = useMutation({
     mutationFn: async (data) => {
@@ -20,9 +22,10 @@ export default function TariffSchedulerModal({ isOpen, onClose, categoryId, cate
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['tariffHistory']);
-      alert('Tarifas agendadas com sucesso!');
+      toast.success('Tarifas agendadas com sucesso!');
       onClose();
-    }
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao agendar tarifas')
   });
 
   if (!isOpen) return null;
@@ -45,7 +48,7 @@ export default function TariffSchedulerModal({ isOpen, onClose, categoryId, cate
           </button>
         </div>
         
-        <form onSubmit={handleSubmit(scheduleMutation.mutate)} className="p-5">
+        <form onSubmit={handleSubmit((data) => scheduleMutation.mutate(data))} className="p-5">
           <p className="text-sm text-text-muted mb-4">
             Em vez de salvar as alterações imediatamente, você pode agendar para que entrem em vigor em uma data e hora específicas.
           </p>
@@ -68,12 +71,12 @@ export default function TariffSchedulerModal({ isOpen, onClose, categoryId, cate
             >
               Cancelar
             </button>
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
+            <button
+              type="submit"
+              disabled={scheduleMutation.isPending}
               className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
-              {isSubmitting ? 'Agendando...' : 'Confirmar Agendamento'}
+              {scheduleMutation.isPending ? 'Agendando...' : 'Confirmar Agendamento'}
             </button>
           </div>
         </form>

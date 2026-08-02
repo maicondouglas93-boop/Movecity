@@ -2,17 +2,18 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import api from '../services/api';
-import { 
-  Gift, Tag, DollarSign, Users, MapPin, Clock, Calendar, 
-  CheckCircle2, XCircle, Calculator, MoreVertical, Copy, 
+import {
+  Gift, Tag, DollarSign, Users, MapPin, Clock, Calendar,
+  CheckCircle2, XCircle, Calculator, MoreVertical, Copy,
   PauseCircle, PlayCircle, BarChart3, TrendingUp, Wallet
 } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Promotions() {
   const [activeTab, setActiveTab] = useState('new');
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [simulation, setSimulation] = useState({ rideValue: 50, result: null });
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   const { register, handleSubmit, watch, setValue, reset } = useForm({
     defaultValues: {
@@ -55,31 +56,28 @@ export default function Promotions() {
   const createMutation = useMutation({
     mutationFn: async (data) => await api.post('/admin/promotions', data),
     onSuccess: () => {
-      showToast('Promoção criada com sucesso!');
+      toast.success('Promoção criada com sucesso!');
       reset();
       queryClient.invalidateQueries(['promotions']);
       setActiveTab('list');
     },
-    onError: (err) => showToast(err.response?.data?.message || 'Erro ao criar', 'error')
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar promoção')
   });
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }) => await api.put(`/admin/promotions/${id}/status`, { status }),
     onSuccess: () => {
-      showToast('Status atualizado!');
+      toast.success('Status atualizado!');
       queryClient.invalidateQueries(['promotions']);
-    }
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar status da promoção')
   });
 
   const simulateMutation = useMutation({
     mutationFn: async (data) => await api.post('/admin/promotions/simulate', data),
-    onSuccess: (res) => setSimulation(prev => ({ ...prev, result: res.data }))
+    onSuccess: (res) => setSimulation(prev => ({ ...prev, result: res.data })),
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao simular impacto da promoção')
   });
-
-  const showToast = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 4000);
-  };
 
   const onSubmit = (data) => {
     const payload = { ...data };
@@ -117,18 +115,11 @@ export default function Promotions() {
       }
     });
     setActiveTab('new');
-    showToast('Promoção carregada no formulário!');
+    toast.success('Promoção carregada no formulário!');
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-20">
-      {toast.show && (
-        <div className={`fixed bottom-6 right-6 z-50 px-6 py-3 rounded-lg shadow-2xl flex items-center gap-3 animate-slide-up font-medium text-white ${toast.type === 'error' ? 'bg-danger' : 'bg-success'}`}>
-          {toast.type === 'error' ? <XCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-          {toast.message}
-        </div>
-      )}
-
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Motor de Growth & Promoções</h1>
         <p className="text-text-muted mt-1">Gerencie cupons, cashbacks, limites orçamentários e regras por cidade.</p>

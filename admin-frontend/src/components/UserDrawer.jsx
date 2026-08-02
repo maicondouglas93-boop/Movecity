@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { 
-  X, User, MapPin, Calendar, CreditCard, Clock, Map, 
+import {
+  X, User, MapPin, Calendar, CreditCard, Clock, Map,
   AlertTriangle, Shield, CheckCircle, Ticket, Plus, Tag
 } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function UserDrawer({ userId, isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [newObs, setNewObs] = useState('');
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   const { data, isLoading } = useQuery({
     queryKey: ['userDetails', userId],
@@ -29,7 +31,8 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries(['userDetails', userId]);
       setNewObs('');
-    }
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao adicionar observação')
   });
 
   const tagsMutation = useMutation({
@@ -40,7 +43,8 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries(['userDetails', userId]);
       queryClient.invalidateQueries(['users']);
-    }
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar bandeiras do passageiro')
   });
 
   const handleToggleTag = (tag) => {
@@ -234,9 +238,10 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
                       <button
                         key={tag}
                         onClick={() => handleToggleTag(tag)}
-                        className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors border ${
-                          isActive 
-                            ? 'bg-primary/20 border-primary text-primary' 
+                        disabled={tagsMutation.isPending}
+                        className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors border disabled:opacity-50 ${
+                          isActive
+                            ? 'bg-primary/20 border-primary text-primary'
                             : 'bg-background border-border text-text-muted hover:text-text'
                         }`}
                       >

@@ -147,6 +147,17 @@ module.exports.getWallet = async (req, res, next) => {
     }
 }
 
+module.exports.requestPayout = async (req, res, next) => {
+    try {
+        const walletService = require('../services/wallet.service');
+        const payout = await walletService.requestPayout(req.captain._id);
+        deleteByPrefix(`wallet:${req.captain._id}`);
+        res.status(201).json({ payout });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+}
+
 module.exports.getTransactions = async (req, res, next) => {
     try {
         const limit = parseInt(req.query.limit) || 50;

@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { 
+import {
   Search, CheckCircle, XCircle, MoreVertical, FileText, Lock, ShieldAlert,
   Wallet, ArrowUpRight, ArrowDownRight, Clock, Building, Download, Square, CheckSquare, X
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
+import { usePrompt } from '../contexts/PromptContext';
 
 const statusColors = {
   requested: 'bg-border text-text',
@@ -27,6 +30,8 @@ const statusNames = {
 
 export default function Finance() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ period: 'all', status: '', search: '' });
   const [searchInput, setSearchInput] = useState('');
@@ -67,12 +72,12 @@ export default function Finance() {
       return data;
     },
     onSuccess: (res) => {
-      alert(`Sucesso! ${res.approvedCount} repasses foram aprovados.`);
+      toast.success(`Sucesso! ${res.approvedCount} repasses foram aprovados.`);
       setSelectedPayouts([]);
       queryClient.invalidateQueries(['payouts']);
     },
     onError: (err) => {
-      alert(`Erro: ${err.response?.data?.message || err.message}`);
+      toast.error(err.response?.data?.message || err.message || 'Erro ao aprovar repasses em lote');
     }
   });
 
@@ -202,11 +207,16 @@ export default function Finance() {
             <div className="flex items-center gap-3 p-3 bg-primary/10 border border-primary/20 rounded-lg animate-fade-in">
               <span className="text-sm font-medium text-primary">{selectedPayouts.length} selecionados</span>
               <div className="h-4 w-px bg-primary/20"></div>
-              <button 
-                onClick={() => { if(window.confirm(`Aprovar e processar ${selectedPayouts.length} repasses selecionados?`)) bulkApproveMutation.mutate(selectedPayouts); }}
-                className="text-sm px-3 py-1 bg-primary text-background rounded font-medium flex items-center gap-2 hover:bg-primary/90"
+              <button
+                onClick={async () => {
+                  if (await confirm(`Aprovar e processar ${selectedPayouts.length} repasses selecionados?`)) {
+                    bulkApproveMutation.mutate(selectedPayouts);
+                  }
+                }}
+                disabled={bulkApproveMutation.isPending}
+                className="text-sm px-3 py-1 bg-primary text-background rounded font-medium flex items-center gap-2 hover:bg-primary/90 disabled:opacity-50"
               >
-                <CheckCircle className="w-4 h-4" /> Aprovar Selecionados
+                <CheckCircle className="w-4 h-4" /> {bulkApproveMutation.isPending ? 'Aprovando...' : 'Aprovar Selecionados'}
               </button>
               <button onClick={exportCSV} className="text-sm px-3 py-1 bg-background rounded border border-border flex items-center gap-2 hover:bg-background/80">
                 <Download className="w-4 h-4" /> Exportar CSV
@@ -310,7 +320,10 @@ export default function Finance() {
 
 function PayoutDrawer({ payoutId, onClose }) {
   const queryClient = useQueryClient();
-  
+  const toast = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
+
   const { data, isLoading } = useQuery({
     queryKey: ['payout-details', payoutId],
     queryFn: async () => {
@@ -324,9 +337,19 @@ function PayoutDrawer({ payoutId, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries(['payouts']);
       queryClient.invalidateQueries(['payout-details', payoutId]);
-      alert("Pagamento aprovado e processado.");
+      toast.success('Repasse aprovado — valor debitado da carteira do motorista, aguardando confirmação de pagamento.');
     },
-    onError: (err) => alert(`Erro: ${err.response?.data?.message || err.message}`)
+    onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao aprovar repasse')
+  });
+
+  const confirmPaidMutation = useMutation({
+    mutationFn: (id) => api.put(`/admin/payouts/${id}/confirm-paid`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['payouts']);
+      queryClient.invalidateQueries(['payout-details', payoutId]);
+      toast.success('Pagamento confirmado.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao confirmar pagamento')
   });
 
   const rejectMutation = useMutation({
@@ -334,9 +357,9 @@ function PayoutDrawer({ payoutId, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries(['payouts']);
       queryClient.invalidateQueries(['payout-details', payoutId]);
-      alert("Solicitação rejeitada com sucesso.");
+      toast.success('Solicitação rejeitada com sucesso.');
     },
-    onError: (err) => alert(`Erro: ${err.response?.data?.message || err.message}`)
+    onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao rejeitar repasse')
   });
 
   if (isLoading) {
@@ -353,15 +376,22 @@ function PayoutDrawer({ payoutId, onClose }) {
   const payout = data?.payout;
   const logs = data?.logs || [];
   const captain = payout?.captainId;
+  const wallet = data?.wallet;
 
-  const handleApprove = () => {
-    if(window.confirm("Aprovar este repasse? O saldo do motorista será debitado.")) {
+  const handleApprove = async () => {
+    if (await confirm({ message: 'Aprovar este repasse? O valor será debitado agora da carteira do motorista — o pagamento em si (PIX) precisa ser confirmado manualmente depois, pois não há gateway integrado.', tone: 'danger', confirmLabel: 'Aprovar e debitar' })) {
       approveMutation.mutate(payout._id);
     }
   };
 
-  const handleReject = () => {
-    const reason = window.prompt("Motivo da rejeição (Obrigatório):");
+  const handleConfirmPaid = async () => {
+    if (await confirm({ message: 'Confirmar que o PIX foi efetivamente enviado ao motorista? Use apenas depois de verificar no extrato bancário real.', confirmLabel: 'Confirmar pagamento' })) {
+      confirmPaidMutation.mutate(payout._id);
+    }
+  };
+
+  const handleReject = async () => {
+    const reason = await prompt({ message: 'Motivo da rejeição:', required: true });
     if (reason) {
       rejectMutation.mutate({ id: payout._id, reason });
     }
@@ -387,13 +417,21 @@ function PayoutDrawer({ payoutId, onClose }) {
         </div>
 
         {/* Action Bar */}
-        {!['paid', 'rejected'].includes(payout.status) && (
+        {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
           <div className="bg-surface border-b border-border p-4 flex gap-3">
-             <button onClick={handleApprove} className="flex-1 py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2">
-                <CheckCircle className="w-5 h-5" /> Aprovar e Pagar
+             <button onClick={handleApprove} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+                <CheckCircle className="w-5 h-5" /> {approveMutation.isPending ? 'Processando...' : 'Aprovar e Debitar'}
              </button>
-             <button onClick={handleReject} className="flex-1 py-2 bg-danger/10 text-danger border border-danger/20 font-medium rounded hover:bg-danger/20 transition-colors flex justify-center items-center gap-2">
-                <XCircle className="w-5 h-5" /> Rejeitar
+             <button onClick={handleReject} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-danger/10 text-danger border border-danger/20 font-medium rounded hover:bg-danger/20 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+                <XCircle className="w-5 h-5" /> {rejectMutation.isPending ? 'Processando...' : 'Rejeitar'}
+             </button>
+          </div>
+        )}
+        {payout.status === 'processing' && (
+          <div className="bg-surface border-b border-border p-4 space-y-3">
+             <p className="text-xs text-text-muted">Valor já debitado da carteira do motorista. Confirme aqui só depois de verificar no extrato bancário real que o PIX foi enviado.</p>
+             <button onClick={handleConfirmPaid} disabled={confirmPaidMutation.isPending} className="w-full py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+                <CheckCircle className="w-5 h-5" /> {confirmPaidMutation.isPending ? 'Confirmando...' : 'Confirmar Pagamento Realizado'}
              </button>
           </div>
         )}
@@ -414,17 +452,24 @@ function PayoutDrawer({ payoutId, onClose }) {
               <div className="p-4 border-b border-border bg-background/50"><h3 className="text-sm font-bold uppercase tracking-wider text-text">Conferência Financeira</h3></div>
               <div className="p-4 grid grid-cols-2 gap-4">
                  <div>
-                    <p className="text-xs text-text-muted mb-1">Saldo Atual do Motorista</p>
-                    <p className="text-lg font-bold">R$ {captain?.earnings?.toFixed(2) || '0.00'}</p>
+                    <p className="text-xs text-text-muted mb-1">Saldo Pendente na Carteira</p>
+                    <p className="text-lg font-bold">R$ {wallet?.pendingBalance?.toFixed(2) ?? '0.00'}</p>
                  </div>
                  <div>
                     <p className="text-xs text-text-muted mb-1">Valor Solicitado</p>
                     <p className="text-lg font-bold text-primary">R$ {payout.amount?.toFixed(2) || '0.00'}</p>
                  </div>
-                 <div className="col-span-2 pt-4 border-t border-border mt-2">
-                    <p className="text-xs text-text-muted mb-1">Saldo Restante (Pós-Pagamento)</p>
-                    <p className="text-lg font-bold">R$ {((captain?.earnings || 0) - payout.amount).toFixed(2)}</p>
-                 </div>
+                 {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
+                   <div className="col-span-2 pt-4 border-t border-border mt-2">
+                      <p className="text-xs text-text-muted mb-1">Saldo Restante Após o Débito</p>
+                      <p className={`text-lg font-bold ${((wallet?.pendingBalance || 0) - payout.amount) < 0 ? 'text-danger' : ''}`}>
+                        R$ {((wallet?.pendingBalance || 0) - payout.amount).toFixed(2)}
+                      </p>
+                      {((wallet?.pendingBalance || 0) - payout.amount) < 0 && (
+                        <p className="text-xs text-danger mt-1">Saldo insuficiente — a aprovação será recusada.</p>
+                      )}
+                   </div>
+                 )}
               </div>
            </div>
 

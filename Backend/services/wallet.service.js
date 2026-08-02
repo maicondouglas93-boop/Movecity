@@ -1,5 +1,6 @@
 const walletModel = require('../models/wallet.model');
 const transactionModel = require('../models/transaction.model');
+const payoutModel = require('../models/payout.model');
 const { deleteByPrefix } = require('../cache/cache');
 const captainModel = require('../models/captain.model');
 const globalSettingModel = require('../models/globalSetting.model');
@@ -126,4 +127,49 @@ const getTransactions = async (captainId, limit = 50) => {
         .limit(limit);
 };
 
-module.exports = { getWallet, createTransaction, getTransactions };
+// Auditoria do painel administrativo (2026-08-02, Bloco C): nada no backend criava um
+// `payout` — o Centro Financeiro do admin administrava uma coleção permanentemente
+// vazia porque não existia um jeito do motorista solicitar o saque do que já tinha
+// pendente. Solicita o saldo pendente inteiro (não um valor parcial escolhido à mão —
+// a UI já descreve esse saldo como "aguardando transferência bancária para você").
+const requestPayout = async (captainId) => {
+    const captain = await captainModel.findById(captainId);
+    if (!captain) throw new Error('Motorista não encontrado');
+    if (!captain.pix || !captain.pix.key) {
+        throw new Error('Cadastre uma chave Pix antes de solicitar o saque');
+    }
+
+    const settings = await globalSettingModel.findOne();
+    const minimumPayout = settings?.minimumPayout ?? 50;
+
+    const wallet = await getWallet(captainId);
+    if (wallet.pendingBalance < minimumPayout) {
+        throw new Error(`Saldo insuficiente para saque. O valor mínimo é R$ ${minimumPayout.toFixed(2)} (seu saldo pendente: R$ ${wallet.pendingBalance.toFixed(2)})`);
+    }
+
+    const existingPending = await payoutModel.findOne({
+        captainId,
+        status: { $in: ['requested', 'in_analysis', 'approved', 'processing'] }
+    });
+    if (existingPending) {
+        throw new Error('Você já tem uma solicitação de saque em andamento');
+    }
+
+    const payout = await payoutModel.create({
+        captainId,
+        amount: wallet.pendingBalance,
+        status: 'requested',
+        bankDetailsSnapshot: {
+            pixKey: captain.pix.key,
+            bankName: captain.bankDetails?.bankName,
+            bankAgency: captain.bankDetails?.bankAgency,
+            bankAccount: captain.bankDetails?.bankAccount,
+            accountType: captain.bankDetails?.accountType
+        },
+        gateway: 'manual'
+    });
+
+    return payout;
+};
+
+module.exports = { getWallet, createTransaction, getTransactions, requestPayout };

@@ -6,6 +6,7 @@ import {
   Filter, MoreVertical, ShieldAlert, Download, CheckSquare, Square
 } from 'lucide-react';
 import UserDrawer from '../components/UserDrawer';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Users() {
   const [page, setPage] = useState(1);
@@ -18,6 +19,7 @@ export default function Users() {
   const [blockModal, setBlockModal] = useState({ isOpen: false, type: '', userId: null, reason: '', isBulk: false });
   
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   // Debounce search
   useEffect(() => {
@@ -46,8 +48,9 @@ export default function Users() {
     onSuccess: () => {
       queryClient.invalidateQueries(['users']);
       setBlockModal({ isOpen: false, type: '', userId: null, reason: '', isBulk: false });
-      alert('Passageiro atualizado com sucesso!'); // TODO: Use toast
-    }
+      toast.success('Passageiro atualizado com sucesso!');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar passageiro')
   });
 
   const bulkBlockMutation = useMutation({
@@ -58,8 +61,9 @@ export default function Users() {
       queryClient.invalidateQueries(['users']);
       setSelectedUsers([]);
       setBlockModal({ isOpen: false, type: '', userId: null, reason: '', isBulk: false });
-      alert('Passageiros atualizados com sucesso!');
-    }
+      toast.success('Passageiros atualizados com sucesso!');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar passageiros em lote')
   });
 
   const handleSelectAll = (e) => {
@@ -85,7 +89,7 @@ export default function Users() {
   };
 
   const handleExport = () => {
-    alert('Exportando CSV da lista filtrada...');
+    toast.error('Exportação de CSV ainda não implementada nesta lista.');
     // Real implementation would trigger download from backend or generate CSV blob
   };
 
@@ -354,7 +358,7 @@ export default function Users() {
               </button>
               <button 
                 onClick={() => {
-                  if(!blockModal.reason.trim()) return alert('O motivo é obrigatório');
+                  if (!blockModal.reason.trim()) return toast.error('O motivo é obrigatório');
                   if (blockModal.isBulk) {
                     bulkBlockMutation.mutate({ userIds: selectedUsers, actionType: blockModal.type, reason: blockModal.reason });
                   } else {

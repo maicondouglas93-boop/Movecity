@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { SocketContext } from '@/contexts/SocketContext'
 import CaptainHeader from '@/modules/driver/components/CaptainHeader'
@@ -16,6 +16,7 @@ const CaptainWallet = () => {
     const queryClient = useQueryClient();
 
     const [showRechargeModal, setShowRechargeModal] = useState(false);
+    const [payoutFeedback, setPayoutFeedback] = useState(null); // { type: 'success' | 'error', message }
 
     // Queries
     const { data: walletData, isLoading: walletLoading } = useQuery({
@@ -39,6 +40,25 @@ const CaptainWallet = () => {
     const loading = walletLoading || transLoading;
     const wallet = walletData;
     const transactions = transactionsData || [];
+
+    // Auditoria do painel administrativo (2026-08-02, Bloco C): antes não existia
+    // nenhum jeito do motorista solicitar o saque do saldo pendente — o Centro
+    // Financeiro do admin administrava uma lista de repasses que nada nunca criava.
+    const requestPayoutMutation = useMutation({
+        mutationFn: async () => {
+            const token = localStorage.getItem('captain-token')
+            const res = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/payouts`, {}, { headers: { Authorization: `Bearer ${token}` } })
+            return res.data
+        },
+        onSuccess: () => {
+            setPayoutFeedback({ type: 'success', message: 'Saque solicitado! Acompanhe o status no seu extrato — a MoveCity vai transferir via Pix após aprovação.' })
+            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
+            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
+        },
+        onError: (err) => {
+            setPayoutFeedback({ type: 'error', message: err.response?.data?.message || 'Não foi possível solicitar o saque.' })
+        }
+    })
 
     // Socket invalidation
     useEffect(() => {
@@ -118,8 +138,31 @@ const CaptainWallet = () => {
                             <i className="ri-bank-card-fill"></i> Repasses Pendentes
                         </p>
                         <h2 className='text-3xl font-bold text-blue-900 mb-1'>R$ {pendingBalance.toFixed(2)}</h2>
-                        <p className='text-xs text-blue-600 opacity-80'>Valor retido de corridas no cartão aguardando transferência bancária para você.</p>
+                        <p className='text-xs text-blue-600 opacity-80 mb-4'>Valor retido de corridas no cartão aguardando transferência bancária para você.</p>
+
+                        <button
+                            type="button"
+                            onClick={() => { setPayoutFeedback(null); requestPayoutMutation.mutate(); }}
+                            disabled={pendingBalance <= 0 || requestPayoutMutation.isPending}
+                            className='w-full bg-blue-600 text-white font-semibold py-3 rounded-panel flex items-center justify-center gap-2 hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed'
+                        >
+                            <i className="ri-send-plane-fill"></i> {requestPayoutMutation.isPending ? 'Solicitando...' : 'Solicitar Saque'}
+                        </button>
                     </div>
+
+                    {payoutFeedback && (
+                        <div className={`p-4 rounded-panel text-sm flex items-start gap-3 shadow-raised border ${
+                            payoutFeedback.type === 'success'
+                                ? 'bg-brand-50 border-brand-500/30 text-brand-600'
+                                : 'bg-danger-50 border-danger-500/30 text-danger-600'
+                        }`}>
+                            <i className={`text-xl ${payoutFeedback.type === 'success' ? 'ri-checkbox-circle-fill' : 'ri-error-warning-fill'}`}></i>
+                            <p className='flex-1'>{payoutFeedback.message}</p>
+                            <button type="button" onClick={() => setPayoutFeedback(null)} aria-label="Fechar" className='text-current opacity-60 hover:opacity-100'>
+                                <i className="ri-close-line"></i>
+                            </button>
+                        </div>
+                    )}
 
                 </div>
 

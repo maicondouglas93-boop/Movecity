@@ -648,6 +648,43 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain }) => {
     return updated;
 }
 
+// Auditoria de concorrência do painel administrativo (2026-08-02, Bloco E): antes,
+// admin.service.js fazia `ride.captain = null; ride.status = 'requested'; ride.save()`
+// direto — sem passar pela máquina de estados, aceitava reatribuir uma corrida em
+// `started` (com o passageiro dentro do carro) e não redespachava pra ninguém, deixando
+// a corrida travada em `requested` pra sempre. Reaproveita a mesma transição de
+// cancelRideByCaptain (volta pra 'requested', limpa captain/otp), mas sem o filtro de
+// dono — o admin pode forçar a reatribuição de qualquer corrida, não só a sua própria.
+// VALID_ORIGINS_BY_TARGET.requested não inclui 'started', então essa transição sozinha
+// já barra a reatribuição de uma corrida em andamento.
+module.exports.reassignRideByAdmin = async (rideId) => {
+    if (!rideId) {
+        throw new Error('Ride id is required');
+    }
+
+    const ride = await rideModel.findById(rideId);
+    if (!ride) {
+        throw new Error('Ride not found');
+    }
+    if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
+        throw new Error('Ride cannot be reassigned at this stage');
+    }
+    const previousCaptain = ride.captain;
+
+    const updated = await transitionRide(
+        rideId,
+        'requested',
+        {},
+        {},
+        { captain: 1, otp: 1 }
+    );
+    if (!updated) {
+        throw new Error('Ride cannot be reassigned at this stage');
+    }
+
+    return { ride: updated, previousCaptain };
+};
+
 module.exports.cancelRide = async ({ rideId, user }) => {
     if (!rideId || !user) {
         throw new Error('Ride id and user are required');

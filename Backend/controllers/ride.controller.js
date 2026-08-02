@@ -12,6 +12,9 @@ const notificationService = require('../services/notification.service');
 // por captainCancelRide — quando um motorista desiste de uma corrida já aceita, ela
 // precisa ser redespachada exatamente da mesma forma que uma corrida recém-criada,
 // exceto que o motorista que acabou de desistir não deve ser candidato de novo.
+// Exportada além de usada internamente (Bloco E da auditoria administrativa, 2026-08-02):
+// a reatribuição de corrida pelo painel admin precisa do mesmo redespacho — sem isso,
+// a corrida voltava a 'requested' mas nenhum motorista era notificado, ficando travada.
 async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
     const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
     // 15km: raio de busca de motoristas a partir do ponto de embarque.
@@ -577,4 +580,5 @@ module.exports.submitCaptainReview = async (req, res) => {
         }
         return res.status(400).json({ message: err.message });
     }
-}
+}
+module.exports.dispatchRideToCaptains = dispatchRideToCaptains;

@@ -2,8 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
-import { 
-  Search, MapPin, Navigation, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
+import { usePrompt } from '../contexts/PromptContext';
+import {
+  Search, MapPin, Navigation, MoreVertical, X, Clock, CreditCard, User, Car, Download,
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, RotateCcw, AlertTriangle, ShieldAlert
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
@@ -64,6 +67,9 @@ const fetchRides = async ({ queryKey }) => {
 export default function Rides() {
   const queryClient = useQueryClient();
   const { socket } = useSocket();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
 
   // States
   const [page, setPage] = useState(1);
@@ -98,12 +104,20 @@ export default function Rides() {
   // Actions
   const cancelMutation = useMutation({
     mutationFn: (data) => api.put(`/admin/rides/${data.id}/cancel`, { reason: data.reason }),
-    onSuccess: () => queryClient.invalidateQueries(['rides'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['rides']);
+      toast.success('Corrida cancelada.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar corrida')
   });
 
   const reassignMutation = useMutation({
     mutationFn: (id) => api.put(`/admin/rides/${id}/reassign`),
-    onSuccess: () => queryClient.invalidateQueries(['rides'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['rides']);
+      toast.success('Corrida voltou para a fila de busca.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao reatribuir corrida')
   });
 
   const bulkActionMutation = useMutation({
@@ -111,7 +125,9 @@ export default function Rides() {
     onSuccess: () => {
       setSelectedRides([]);
       queryClient.invalidateQueries(['rides']);
-    }
+      toast.success('Ação em lote aplicada.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao aplicar ação em lote')
   });
 
   // Handlers
@@ -150,14 +166,17 @@ export default function Rides() {
     document.body.removeChild(link);
   };
 
-  const handleAction = (ride, actionType) => {
+  const handleAction = async (ride, actionType) => {
     if (actionType === 'cancel') {
-      const reason = window.prompt("Motivo do cancelamento:");
+      const reason = await prompt({ message: 'Motivo do cancelamento:', required: true });
       if (reason !== null) cancelMutation.mutate({ id: ride._id, reason });
     } else if (actionType === 'reassign') {
-      if (window.confirm("Deseja voltar esta corrida para a fila de busca? O motorista atual será removido.")) {
-        reassignMutation.mutate(ride._id);
-      }
+      const ok = await confirm({
+        message: 'Deseja voltar esta corrida para a fila de busca? O motorista atual será removido.',
+        tone: 'danger',
+        confirmLabel: 'Reatribuir'
+      });
+      if (ok) reassignMutation.mutate(ride._id);
     } else if (actionType === 'view') {
       setActiveRideDrawer(ride);
     }
@@ -251,11 +270,11 @@ export default function Rides() {
               <button onClick={exportCSV} className="text-sm px-3 py-1 bg-background rounded border border-border flex items-center gap-2 hover:bg-background/80">
                 <Download className="w-4 h-4" /> Exportar
               </button>
-              <button onClick={() => {
-                const reason = window.prompt("Motivo para cancelamento em lote:");
-                if(reason) bulkActionMutation.mutate({ rideIds: selectedRides, actionType: 'cancel', reason });
-              }} className="text-sm px-3 py-1 bg-danger/10 text-danger rounded border border-danger/20 hover:bg-danger/20">
-                Cancelar Lote
+              <button onClick={async () => {
+                const reason = await prompt({ message: 'Motivo para cancelamento em lote:', required: true });
+                if (reason) bulkActionMutation.mutate({ rideIds: selectedRides, actionType: 'cancel', reason });
+              }} disabled={bulkActionMutation.isPending} className="text-sm px-3 py-1 bg-danger/10 text-danger rounded border border-danger/20 hover:bg-danger/20 disabled:opacity-50">
+                {bulkActionMutation.isPending ? 'Cancelando...' : 'Cancelar Lote'}
               </button>
             </div>
           )}

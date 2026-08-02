@@ -427,9 +427,9 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
     return { success: true, updatedCount };
 };
 
-module.exports.updateUserTags = async (userId, tags, admin) => {
+module.exports.updateUserTags = async (userId, tags, admin, ip) => {
     const user = await userModel.findByIdAndUpdate(userId, { tags }, { new: true });
-    
+
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,
@@ -438,28 +438,38 @@ module.exports.updateUserTags = async (userId, tags, admin) => {
         targetModel: 'User',
         reason: 'Atualização de tags de risco/perfil do passageiro',
         newValue: { tags },
-        ipAddress: '0.0.0.0'
+        ipAddress: ip || '0.0.0.0'
     });
-    
+
     return user;
 };
 
-module.exports.addUserObservation = async (userId, text, admin) => {
+module.exports.addUserObservation = async (userId, text, admin, ip) => {
     if (!text) throw new Error('O texto da observação não pode ser vazio');
-    
+
     const observation = {
         adminId: admin._id,
         adminName: admin.name,
         text,
         createdAt: new Date()
     };
-    
+
     const user = await userModel.findByIdAndUpdate(
-        userId, 
+        userId,
         { $push: { observations: { $each: [observation], $position: 0 } } },
         { new: true }
     );
-    
+
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'add_user_observation',
+        targetId: userId.toString(),
+        targetModel: 'User',
+        reason: text,
+        ipAddress: ip || '0.0.0.0'
+    });
+
     return user.observations;
 };
 
@@ -586,12 +596,12 @@ module.exports.getCaptainDocumentSignedUrl = async (captainId, docType) => {
     return uploadService.getSignedDocumentUrl(fileUrl);
 };
 
-module.exports.updateCaptainDocument = async (captainId, docType, verified, reason, admin) => {
+module.exports.updateCaptainDocument = async (captainId, docType, verified, reason, admin, ip) => {
     const captain = await captainModel.findById(captainId);
     if (!captain || !captain.documents || !captain.documents[docType]) {
         throw new Error('Documento não encontrado');
     }
-    
+
     captain.documents[docType].verified = verified;
     await captain.save();
 
@@ -603,7 +613,7 @@ module.exports.updateCaptainDocument = async (captainId, docType, verified, reas
         targetModel: 'Captain',
         reason: reason || `Verificação de documento: ${docType}`,
         newValue: { document: docType, verified },
-        ipAddress: '0.0.0.0'
+        ipAddress: ip || '0.0.0.0'
     });
 
     return captain.documents;
@@ -679,7 +689,12 @@ module.exports.adjustCaptainWallet = async (captainId, amount, type, reason, adm
 };
 
 module.exports.getCaptainTimeline = async (captainId) => {
-    const logs = await module.exports.getLogs(1, 50, '', { targetId: captainId.toString() });
+    // Bloco I (2026-08-02): bug real encontrado ao reescrever getLogs — a assinatura
+    // antiga era (page, limit) só; os dois argumentos extras aqui embaixo (o terceiro
+    // era um '' sobrando de uma versão anterior, o quarto o filtro por targetId) eram
+    // descartados silenciosamente. A aba "Auditoria" do CRM de motoristas mostrava os
+    // logs administrativos do sistema inteiro, não os deste motorista.
+    const logs = await module.exports.getLogs(1, 50, { targetId: captainId.toString() });
     return logs.logs;
 };
 
@@ -747,7 +762,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
     };
 };
 
-module.exports.cancelRide = async (id, reason, admin) => {
+module.exports.cancelRide = async (id, reason, admin, ip) => {
     const ride = await rideModel.findById(id);
     if (!ride) throw new Error('Corrida não encontrada');
     if (['finished', 'cancelled'].includes(ride.status)) throw new Error('Corrida já finalizada ou cancelada');
@@ -768,7 +783,7 @@ module.exports.cancelRide = async (id, reason, admin) => {
         targetId: ride._id.toString(),
         targetModel: 'Ride',
         reason: reason || 'Cancelada pelo painel admin',
-        ipAddress: '0.0.0.0' // Should pass req.ip ideally
+        ipAddress: ip || '0.0.0.0'
     });
 
     return ride;
@@ -811,7 +826,7 @@ module.exports.reassignRide = async (id, admin, ip) => {
     return { ride, previousCaptain };
 };
 
-module.exports.bulkActionRides = async (rideIds, actionType, reason, admin) => {
+module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) => {
     if (!rideIds || !rideIds.length) throw new Error('Nenhuma corrida selecionada');
 
     let updatedCount = 0;
@@ -840,7 +855,7 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin) => {
             action: 'bulk_cancel_rides',
             targetModel: 'Ride',
             reason: `Cancelamento em lote de ${updatedCount} corridas. Motivo: ${reason}`,
-            ipAddress: '0.0.0.0'
+            ipAddress: ip || '0.0.0.0'
         });
     }
 
@@ -1278,10 +1293,26 @@ module.exports.createVehicleCategory = async (data) => {
     return category;
 };
 
-module.exports.getLogs = async (page = 1, limit = 15) => {
+// Bloco I (2026-08-02, §12): a tela de Logs não tinha filtro nenhum — inutilizável em
+// qualquer volume real de ações administrativas. filters aceita adminName (busca
+// parcial, case-insensitive), action, targetModel, targetId e um período (startDate/
+// endDate).
+module.exports.getLogs = async (page = 1, limit = 15, filters = {}) => {
     const skip = (page - 1) * limit;
-    const logs = await adminLogModel.find().skip(skip).limit(limit).sort({ createdAt: -1 });
-    const total = await adminLogModel.countDocuments();
+    const query = {};
+
+    if (filters.adminName) query.adminName = { $regex: filters.adminName, $options: 'i' };
+    if (filters.action) query.action = filters.action;
+    if (filters.targetModel) query.targetModel = filters.targetModel;
+    if (filters.targetId) query.targetId = filters.targetId;
+    if (filters.startDate || filters.endDate) {
+        query.createdAt = {};
+        if (filters.startDate) query.createdAt.$gte = new Date(filters.startDate);
+        if (filters.endDate) query.createdAt.$lte = new Date(filters.endDate);
+    }
+
+    const logs = await adminLogModel.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
+    const total = await adminLogModel.countDocuments(query);
     return { logs, total, pages: Math.ceil(total / limit) };
 };
 

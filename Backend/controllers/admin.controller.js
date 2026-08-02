@@ -143,7 +143,7 @@ module.exports.updateUserTags = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { tags } = req.body;
-        const result = await adminService.updateUserTags(id, tags, req.admin);
+        const result = await adminService.updateUserTags(id, tags, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -154,7 +154,7 @@ module.exports.addUserObservation = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { text } = req.body;
-        const result = await adminService.addUserObservation(id, text, req.admin);
+        const result = await adminService.addUserObservation(id, text, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -166,6 +166,17 @@ module.exports.sendNotification = async (req, res, next) => {
         const { target, title, message, data } = req.body;
         const notificationService = require('../services/notification.service');
         await notificationService.sendAdminNotification(target, title, message, data);
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'send_notification',
+            targetModel: 'Notification',
+            reason: `Notificação enviada para ${target}: "${title}"`,
+            newValue: { target, title, message },
+            ipAddress: req.ip
+        });
+
         res.status(200).json({ message: 'Notificação enviada com sucesso' });
     } catch (error) {
         next(error);
@@ -196,6 +207,17 @@ module.exports.createCampaign = async (req, res, next) => {
             const notificationService = require('../services/notification.service');
             notificationService.processCampaign(campaign._id).catch(console.error);
         }
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'create_campaign',
+            targetId: campaign._id.toString(),
+            targetModel: 'NotificationCampaign',
+            reason: `Campanha criada: "${title}"`,
+            newValue: { title, type, targetRules, scheduledAt },
+            ipAddress: req.ip
+        });
 
         res.status(201).json(campaign);
     } catch (error) {
@@ -246,6 +268,17 @@ module.exports.cancelCampaign = async (req, res, next) => {
         
         campaign.status = 'cancelled';
         await campaign.save();
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'cancel_campaign',
+            targetId: campaign._id.toString(),
+            targetModel: 'NotificationCampaign',
+            reason: `Campanha cancelada: "${campaign.title}"`,
+            ipAddress: req.ip
+        });
+
         res.status(200).json(campaign);
     } catch (error) {
         next(error);
@@ -312,6 +345,7 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
         const promotion = await Promotion.findById(id);
         if (!promotion) return res.status(404).json({ message: 'Promoção não encontrada' });
 
+        const previousStatus = promotion.status;
         promotion.status = status;
         promotion.auditLogs.push({
             adminId: req.admin._id,
@@ -321,6 +355,19 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
         });
 
         await promotion.save();
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'update_promotion_status',
+            targetId: promotion._id.toString(),
+            targetModel: 'Promotion',
+            reason: `Status da promoção "${promotion.title}" alterado de ${previousStatus} para ${status}`,
+            oldValue: { status: previousStatus },
+            newValue: { status },
+            ipAddress: req.ip
+        });
+
         res.status(200).json(promotion);
     } catch (error) {
         next(error);
@@ -480,7 +527,7 @@ module.exports.updateCaptainDocument = async (req, res, next) => {
     try {
         const { id, docType } = req.params;
         const { verified, reason } = req.body;
-        const result = await adminService.updateCaptainDocument(id, docType, verified, reason, req.admin);
+        const result = await adminService.updateCaptainDocument(id, docType, verified, reason, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -542,7 +589,7 @@ module.exports.cancelRide = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { reason } = req.body;
-        const result = await adminService.cancelRide(id, reason, req.admin);
+        const result = await adminService.cancelRide(id, reason, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -586,7 +633,7 @@ module.exports.reassignRide = async (req, res, next) => {
 module.exports.bulkActionRides = async (req, res, next) => {
     try {
         const { rideIds, actionType, reason } = req.body;
-        const result = await adminService.bulkActionRides(rideIds, actionType, reason, req.admin);
+        const result = await adminService.bulkActionRides(rideIds, actionType, reason, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -767,8 +814,10 @@ module.exports.updateVehicleCategory = async (req, res, next) => {
 
 module.exports.getLogs = async (req, res, next) => {
     try {
-        const { page = 1, limit = 15 } = req.query;
-        const result = await adminService.getLogs(Number(page), Number(limit));
+        const { page = 1, limit = 15, adminName, action, targetModel, targetId, startDate, endDate } = req.query;
+        const result = await adminService.getLogs(Number(page), Number(limit), {
+            adminName, action, targetModel, targetId, startDate, endDate
+        });
         res.status(200).json(result);
     } catch (error) {
         next(error);
@@ -807,7 +856,18 @@ module.exports.scheduleTariff = async (req, res, next) => {
             changes,
             createdBy: req.admin._id
         });
-        
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'schedule_tariff',
+            targetId: (categoryId || schedule._id).toString(),
+            targetModel: categoryId ? 'VehicleCategory' : 'TariffSetting',
+            reason: `Alteração de tarifas agendada para ${new Date(scheduledFor).toLocaleString()}`,
+            newValue: changes,
+            ipAddress: req.ip
+        });
+
         res.status(201).json(schedule);
     } catch (error) {
         next(error);

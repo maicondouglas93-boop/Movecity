@@ -41,4 +41,20 @@ Não removo a categoria do banco: corridas históricas referenciam `vehicleType:
 
 ## Detalhes da execução
 
-*(preenchido ao final)*
+1. **`Backend/seedTariff.js`**: `iconKey` explícito por categoria (`car`/`moto`/`auto`) e `isActive: false` na categoria `auto`. Corrige instalações novas.
+2. **`Backend/scripts/fix-vehicle-categories.js`** (novo): migração idempotente. Corrige `iconKey` de `moto` → `moto` e de `auto` → `auto` + `isActive: false` em documentos já existentes no banco. Não mexe em `car` (já nasce correta) nem apaga nada.
+3. **`frontend/src/modules/passenger/components/VehiclePanel.jsx`**: fallback do ícone passou de `vehicleImages[category.iconKey] || vehicleImages.car` para `vehicleImages[category.iconKey] || vehicleImages[category.name] || vehicleImages.car` — uma categoria futura sem `iconKey` cai no ícone pelo próprio `name` antes de cair em carro.
+
+### Verificação feita
+
+- Script de migração testado contra `MongoMemoryReplSet` (mesmo helper usado nos testes de integração, `Backend/tests/setup/testDatabase.js`): banco populado com o estado bugado real (3 categorias, todas com `iconKey: 'car'`, todas `isActive: true`), script executado como processo filho (`node scripts/fix-vehicle-categories.js`) apontando `DB_CONNECT` pro banco em memória.
+  - 1ª execução: `moto` → `iconKey: 'moto'`, `auto` → `iconKey: 'auto'` + `isActive: false`, `car` inalterada. Confirmado lendo o banco de volta após a execução.
+  - 2ª execução: saída confirma `Categorias atualizadas: 0` — idempotente.
+  - Script de verificação era um arquivo solto (`Backend/_verify_fix_vehicle_categories.js`), apagado depois de confirmar os resultados.
+- `npm run build` no `frontend`: build passou sem erros (aviso pré-existente de chunk size, não relacionado a esta mudança).
+
+### Pendente (fora do escopo deste código)
+
+O `fix-vehicle-categories.js` ainda precisa ser **rodado manualmente contra o banco real** (dev/produção) para corrigir os documentos já existentes — isso não foi feito nesta sessão, só a verificação em banco de memória. Rodar com `node Backend/scripts/fix-vehicle-categories.js` (usa `DB_CONNECT` do `.env`).
+
+Nada deste trabalho foi commitado — aguardando instrução explícita do usuário, conforme convenção da sessão.

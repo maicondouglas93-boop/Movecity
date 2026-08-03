@@ -15,7 +15,7 @@ Encontrei **3 problemas críticos**, sendo **dois deles vulnerabilidades de segu
 
 Nenhum desses três é sutil ou depende de condição de corrida rara — os dois de segurança são chamadas de socket sem nenhuma verificação, replicáveis a partir do próprio bundle JS público em texto claro.
 
-**Nota de prontidão para produção: 3/10.** Justificativa na seção final.
+**Nota de prontidão para produção: 3/10 no diagnóstico original, 8/10 após as correções desta sessão (ver "Status da implementação" e "Nota de prontidão para produção" no final).**
 
 ---
 
@@ -38,7 +38,26 @@ Nenhum desses três é sutil ou depende de condição de corrida rara — os doi
 - **A2** (`LocationContext.jsx`, `session.js`): o watcher de GPS (`enableHighAccuracy: true`) só liga quando existe sessão ativa (`hasActiveSession()`), reagindo em tempo real a login/logout via um evento próprio (`session.js: onSessionChanged`) — antes rodava desde a tela de login, antes de qualquer autenticação. Também desliga no logout (ganho extra de bateria não pedido explicitamente, mas consequência direta e correta da mesma mudança).
 - **A1** (`vite.config.js`, `App.jsx`, novo `shared/components/ui/UpdatePrompt.jsx`): `injectRegister` trocado de `'auto'` (registro passivo, sem aviso) para registro manual via `virtual:pwa-register/react` (`useRegisterSW`) — quando um novo deploy fica pronto, aparece um banner "Nova versão disponível" com botão "Atualizar"; o reload só acontece quando a pessoa toca, nunca automático (evita interromper uma corrida em andamento).
 
-**Ainda não implementado:** M1-M8, B1-B9 (ordem sugerida na seção "Plano de correção recomendado").
+**M1-M8 e B1, B3, B4, B5, B6, B7, B10 corrigidos e verificados** (build limpo; backend em 154/154 após B10; frontend sem novas falhas além do baseline documentado).
+
+- **M8**: `lang: 'pt-BR'` no manifest do `VitePWA` (`vite.config.js`) — estava em inglês por padrão do plugin, enquanto `index.html` já usava pt-BR.
+- **B1**: `shortcuts` no manifest — atalho de long-press "Pedir corrida" pro passageiro.
+- **M1**: `runtimeCaching` (`NetworkFirst`, timeout de 4s) só para `GET /vehicle-categories` — único endpoint verificado como público e não sensível; nenhum outro dado de corrida/usuário entra em Cache Storage.
+- **M2**: `ConnectionBanner` adicionado em `Riding.jsx` (passageiro) — única tela de corrida em tempo real que não tinha.
+- **M6**: `LocationContext.jsx` agora distingue `PERMISSION_DENIED`/`POSITION_UNAVAILABLE`/`TIMEOUT` com mensagens específicas.
+- **M5**: o listener de Firebase em primeiro plano (`CaptainHome.jsx`) ignora `data.type === 'NEW_RIDE'` — esse evento já tem aviso completo (som/vibração/notificação nativa) via Socket.IO; evita toast duplicado pra mesma corrida.
+- **B3**: `useWakeLock.js` agora remove o listener `'release'` do `WakeLockSentinel` antes de soltar a referência.
+- **B4**: `ToastContext.jsx` guarda e limpa o id do `setTimeout` de auto-dismiss.
+- **M3**: fila offline (`offlineQueue.js`) estendida pro passageiro — `cancel-ride` (`Home.jsx`) e `pay-ride` (`Riding.jsx`) agora têm a mesma rede de segurança que só existia pro motorista; token por tipo de ação (`captain`/`user`) generalizado em `buildRequestConfig`.
+- **M7**: novo `shared/components/ui/InstallPrompt.jsx` — captura `beforeinstallprompt`, mostra CTA própria "Instalar o MoveCity" (nunca aparece no iOS, que não dispara esse evento — limitação de plataforma, documentada no componente).
+- **B5**: as 17 ocorrências de `<img>` do repo ganharam `width`/`height` (aspect ratio real: 1024×1024 pros veículos, 500×500 pro logo) e `loading="lazy"` (exceto logos de tela de login/cadastro, que são conteúdo acima da dobra).
+- **B6**: `React.lazy` + `Suspense` (`AppRoutes.jsx`) para as telas de uso ocasional (conta, carteira, cupons, termos, ajuda, histórico/ganhos do motorista) — Home/Riding/CaptainHome/CaptainRiding/login/signup continuam estáticos, de propósito. Bundle inicial caiu de ~1,17MB para ~1,01MB (gzip: 340KB → 295KB), com 18 chunks separados carregados sob demanda.
+- **B7**: as 25 ocorrências de `localStorage.getItem('token'/'captain-token')` fora de `session.js` foram trocadas por `getAccessToken('user'/'captain')` — zero leitura direta de token fora do módulo central (confirmado por grep).
+- **B10**: `Backend/tests/setup/setup.js` ganhou `await mongoose.model('captain').syncIndexes()` (mesmo padrão já usado pro índice único de `ride`) — o índice `2dsphere` de `locationGeoJSON` não existia a tempo da primeira query `$nearSphere` em alguns test runs; confirmado resolvido em 2 execuções limpas consecutivas (154/154).
+
+**M4 avaliado como inviável nesta sessão, não implementado.** Gerar PNGs dedicados (192×192, 512×512) e uma variante `purpose: "maskable"` exige uma biblioteca de processamento de imagem (`sharp`/`jimp`) — nenhuma está instalada no projeto nem disponível como dependência transitiva, e este ambiente não tem ImageMagick (`convert`/`magick`) nem acesso a npm para instalar uma nova dependência sem aprovação explícita. Produzir os ícones à mão (fora do código) ou aprovar a instalação de uma dessas bibliotecas são os dois caminhos possíveis — nenhum foi tomado unilateralmente.
+
+**Não implementado (fora do escopo desta sessão):** B2 (screenshots do manifest — exigiria capturas de tela reais do app, não geradas), B8 e B9 (documentados como comportamento esperado, não são falhas).
 
 ---
 
@@ -242,8 +261,12 @@ Tudo em "Baixos", mais M1 (offline-first mais robusto), M3 (fila offline do lado
 
 ---
 
-## Nota de prontidão para produção: 3/10
+## Nota de prontidão para produção
 
-**Por que não é mais baixo:** a arquitetura central (despacho, aceite atômico, push, sessão) já foi auditada e corrigida em profundidade nas sessões anteriores, com testes de integração reais cobrindo os cenários críticos de corrida. O app funciona de ponta a ponta no caminho feliz, e boa parte do que falta aqui é polimento (ícones, code-splitting, CTAs).
+**Original (diagnóstico, antes de qualquer correção): 3/10.**
 
-**Por que não é mais alto:** C1 e C2 não são falhas teóricas — são chamadas de socket sem nenhuma verificação, visíveis no bundle JS público de qualquer navegador (basta abrir o DevTools), que permitem falsificar a localização de qualquer motorista (com efeito direto sobre tarifa) e sequestrar a entrega de eventos em tempo real de outro usuário, sem exigir login. Isso por si só bloqueia um lançamento real, independentemente de qualquer outro item desta lista. Some a isso C3 (uma categoria de bug que a própria correção do sistema de push desta sessão foi feita para eliminar, reaparecendo em outro estado da mesma permissão) e o quadro geral é "as peças certas existem, mas a borda do sistema — o que acontece quando algo não vai como o esperado — ainda tem buracos que um usuário real, ou um atacante casual, vai encontrar rápido".
+**Atualizada em 2026-08-03, após C1-C3, A1-A6, M1-M8 e B1/B3/B4/B5/B6/B7/B10: 8/10.**
+
+**Por que subiu:** os dois problemas que bloqueavam lançamento por si só — falsificação de localização/tarifa (C1) e sequestro de eventos em tempo real (C2) — estão fechados e cobertos por teste de integração que prova especificamente a falha antiga sendo rejeitada (não só que o caminho feliz funciona). C3 (motorista invisível ao despacho sem saber por quê) também está fechado. Os seis altos (deploy silencioso, GPS antes do login, polling forçado, ícone iOS, safe-area, socket cruzado entre contas) e a grande maioria dos médios/baixos (offline gracioso, banner de conexão faltando, notificação duplicada, erros de GPS genéricos, fila offline só de um lado, sem CTA de instalação, imagens sem lazy/CLS, bundle sem code-splitting, leitura de token inconsistente, teste flaky) foram corrigidos e verificados com build + suíte de testes completa, sem introduzir nenhuma regressão nova além do baseline já conhecido.
+
+**Por que não é 10:** M4 (ícones dedicados/maskable) segue pendente por falta de ferramenta de imagem no ambiente — puramente estético, não bloqueia. B2 (screenshots do manifest) e uma cobertura mais ampla de `runtimeCaching` (hoje só `vehicle-categories`) ficaram fora de propósito, por exigirem ativos reais ou uma decisão de produto sobre o que mais pode ficar disponível offline. Nada do que resta ameaça segurança, perde corrida ou perde notificação — é a diferença entre "pronto" e "pulido".

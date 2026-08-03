@@ -6,7 +6,7 @@ import axios from 'axios'
 import { useToast } from '@/contexts/ToastContext'
 import { getVehicleCategories } from '@/services/vehicleCategoriesApi'
 import Button from '@/shared/components/ui/Button'
-import { saveSession } from '@/services/session'
+import { saveSession, getAccessToken } from '@/services/session'
 import { syncTokenWithSW } from '@/services/swCommunication'
 
 const CaptainSignup = () => {
@@ -14,7 +14,7 @@ const CaptainSignup = () => {
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (localStorage.getItem('captain-token')) {
+    if (getAccessToken('captain')) {
       navigate('/captain-home')
     }
   }, [navigate])
@@ -185,7 +185,7 @@ const CaptainSignup = () => {
   return (
     <div className='py-5 px-5 min-h-screen flex flex-col justify-between bg-surface'>
       <div>
-        <img className='h-16 object-contain mb-8' src="/movecity-logo.png" alt="MoveCity Motorista" />
+        <img className='h-16 object-contain mb-8' src="/movecity-logo.png" alt="MoveCity Motorista" width="500" height="500" />
         
         <h2 className='text-2xl font-bold text-ink-900 mb-6'>Cadastro de Motorista</h2>
 

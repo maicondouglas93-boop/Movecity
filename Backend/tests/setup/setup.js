@@ -45,6 +45,17 @@ beforeAll(async () => {
     if (mongoose.modelNames().includes('ride')) {
         await mongoose.model('ride').syncIndexes();
     }
+
+    // Auditoria PWA (2026-08-03, B10): mesmo motivo do bloco acima, agora pro índice
+    // 2dsphere de `locationGeoJSON` (captain.model.js) — sem ele, a primeira query
+    // `$nearSphere` de um arquivo de teste (ex.: captain.availability.test.js) roda
+    // antes do índice existir e falha com "unable to find index for $geoNear query".
+    // `captain.model.js` não tem o problema de índice duplicado que bloqueia isto pra
+    // `user` (só `ride` foi checado antes) — confirmado sem `schema.index()` repetindo
+    // um campo que já é `unique: true`.
+    if (mongoose.modelNames().includes('captain')) {
+        await mongoose.model('captain').syncIndexes();
+    }
 });
 
 afterEach(async () => {

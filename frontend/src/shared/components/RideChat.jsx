@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { SocketContext } from '@/contexts/SocketContext';
+import { getAccessToken } from '@/services/session';
 
 const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
     const { socket } = useContext(SocketContext);
@@ -14,9 +15,7 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
     const chatContainerRef = useRef(null);
     const typingTimeoutRef = useRef(null);
 
-    const token = currentUserType === 'captain' 
-        ? localStorage.getItem('captain-token') 
-        : localStorage.getItem('token');
+    const token = getAccessToken(currentUserType === 'captain' ? 'captain' : 'user');
 
     const quickMessagesCaptain = ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '🚗 Estou a caminho.', '👍 Ok.', '❌ Não encontrei você.'];
     const quickMessagesUser = ['📍 Estou no local.', '⏳ Já estou descendo.', '👍 Ok.', '❌ Não encontrei você.'];

@@ -1,3 +1,4 @@
+import { lazy } from 'react'
 import { Route } from 'react-router-dom'
 
 import UserLogin from '@/modules/passenger/pages/UserLogin'
@@ -6,20 +7,27 @@ import UserLogout from '@/modules/passenger/pages/UserLogout'
 import UserProtectWrapper from '@/modules/passenger/pages/UserProtectWrapper'
 import Home from '@/modules/passenger/pages/Home'
 import Riding from '@/modules/passenger/pages/Riding'
-import Activity from '@/modules/passenger/pages/Activity'
-import Account from '@/modules/passenger/pages/account/Account'
-import Wallet from '@/modules/passenger/pages/account/Wallet'
-import Coupons from '@/modules/passenger/pages/account/Coupons'
-import Profile from '@/modules/passenger/pages/account/Profile'
-import PersonalData from '@/modules/passenger/pages/account/PersonalData'
-import ChangePassword from '@/modules/passenger/pages/account/ChangePassword'
-import DeleteAccount from '@/modules/passenger/pages/account/DeleteAccount'
-import Terms from '@/modules/passenger/pages/account/Terms'
-import Privacy from '@/modules/passenger/pages/account/Privacy'
-import Cards from '@/modules/passenger/pages/account/Cards'
-import Scheduled from '@/modules/passenger/pages/account/Scheduled'
-import Favorites from '@/modules/passenger/pages/account/Favorites'
-import Help from '@/modules/passenger/pages/account/Help'
+
+// Auditoria PWA (2026-08-03, B6): login/cadastro, Home e Riding ficam estáticos —
+// são o caminho mais comum de toda sessão, carregar sob demanda só adicionaria uma
+// viagem de rede extra bem na hora mais sensível. As telas de conta (uso ocasional,
+// nenhuma delas faz parte do fluxo de pedir/fazer uma corrida) entram sob demanda —
+// hoje elas iam todas no mesmo bundle inicial de ~1,17MB mesmo sem ninguém abrir
+// "Ajuda" ou "Termos" naquela sessão.
+const Activity = lazy(() => import('@/modules/passenger/pages/Activity'))
+const Account = lazy(() => import('@/modules/passenger/pages/account/Account'))
+const Wallet = lazy(() => import('@/modules/passenger/pages/account/Wallet'))
+const Coupons = lazy(() => import('@/modules/passenger/pages/account/Coupons'))
+const Profile = lazy(() => import('@/modules/passenger/pages/account/Profile'))
+const PersonalData = lazy(() => import('@/modules/passenger/pages/account/PersonalData'))
+const ChangePassword = lazy(() => import('@/modules/passenger/pages/account/ChangePassword'))
+const DeleteAccount = lazy(() => import('@/modules/passenger/pages/account/DeleteAccount'))
+const Terms = lazy(() => import('@/modules/passenger/pages/account/Terms'))
+const Privacy = lazy(() => import('@/modules/passenger/pages/account/Privacy'))
+const Cards = lazy(() => import('@/modules/passenger/pages/account/Cards'))
+const Scheduled = lazy(() => import('@/modules/passenger/pages/account/Scheduled'))
+const Favorites = lazy(() => import('@/modules/passenger/pages/account/Favorites'))
+const Help = lazy(() => import('@/modules/passenger/pages/account/Help'))
 
 // Rotas do fluxo de passageiro.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.

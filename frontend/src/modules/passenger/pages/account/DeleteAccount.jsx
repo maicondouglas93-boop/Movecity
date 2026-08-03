@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useToast } from '@/contexts/ToastContext';
 import Button from '@/shared/components/ui/Button';
-import { clearSession } from '@/services/session';
+import { clearSession, getAccessToken } from '@/services/session';
 
 const DeleteAccount = () => {
     const navigate = useNavigate();
@@ -19,7 +19,7 @@ const DeleteAccount = () => {
         setLoading(true);
         try {
             await axios.delete(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                headers: { Authorization: `Bearer ${getAccessToken('user')}` },
                 data: { password } // Enviando senha para confirmação no backend
             });
             addToast('Conta excluída com sucesso.', 'success');

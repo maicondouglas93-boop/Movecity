@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getAccessToken } from '@/services/session';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -56,7 +57,7 @@ const ChangePassword = () => {
                 currentPassword: data.currentPassword,
                 newPassword: data.newPassword
             }, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             });
             addToast('Senha alterada com sucesso!', 'success');
             addToast('Logout feito nos outros dispositivos.', 'info');

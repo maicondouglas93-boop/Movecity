@@ -6,7 +6,7 @@ import { CaptainDataContext } from '@/contexts/CaptainContext'
 import Button from '@/shared/components/ui/Button'
 
 import { useToast } from '@/contexts/ToastContext'
-import { saveSession } from '@/services/session'
+import { saveSession, getAccessToken } from '@/services/session'
 import { syncTokenWithSW } from '@/services/swCommunication'
 
 const Captainlogin = () => {
@@ -20,7 +20,7 @@ const Captainlogin = () => {
   const { addToast } = useToast()
 
   useEffect(() => {
-    if (localStorage.getItem('captain-token')) {
+    if (getAccessToken('captain')) {
       navigate('/captain-home')
     }
   }, [navigate])
@@ -57,7 +57,7 @@ const Captainlogin = () => {
   return (
     <div className='h-screen flex flex-col justify-between bg-surface'>
       <div className='p-7 flex-1'>
-        <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity Motorista" />
+        <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity Motorista" width="500" height="500" />
 
         <form onSubmit={(e) => {
           submitHandler(e)

@@ -1,13 +1,14 @@
 
 import React, { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { getAccessToken } from '@/services/session'
 
 const Start = () => {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    const captainToken = localStorage.getItem('captain-token')
+    const token = getAccessToken('user')
+    const captainToken = getAccessToken('captain')
     if (token) {
       navigate('/home')
     } else if (captainToken) {
@@ -22,7 +23,7 @@ const Start = () => {
           §2.10 da auditoria de UX). */}
       <div className='bg-cover bg-center bg-[url(/movecity-cover.jpg)] h-screen flex flex-col w-full pb-8 px-6'>
         <div className='flex-1 flex items-center justify-center'>
-          <img className='w-40 md:w-48 object-contain' src="/movecity-logo.png" alt="MoveCity" />
+          <img className='w-40 md:w-48 object-contain' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
         </div>
 
         <Link

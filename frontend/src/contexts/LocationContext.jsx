@@ -57,11 +57,18 @@ export const LocationProvider = ({ children }) => {
             }
         };
 
+        // Auditoria PWA (2026-08-03, M6): os três códigos de erro da Geolocation API
+        // tinham a mesma mensagem genérica (exceto permissão) — quem lê não sabia se
+        // precisava ligar o GPS, esperar o sinal ou é mesmo permissão negada.
         const handleError = (error) => {
             console.error('Erro de GPS:', error);
             // Evitamos recriar o watcher num loop infinito caso o erro seja de permissão.
             if (error.code === error.PERMISSION_DENIED) {
                 setLocationError('Permissão de localização negada.');
+            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                setLocationError('Não foi possível obter sua localização. Verifique se o GPS está ligado.');
+            } else if (error.code === error.TIMEOUT) {
+                setLocationError('Sinal de GPS demorando para responder. Tentando novamente...');
             } else {
                 setLocationError(`Erro ao obter localização: ${error.message}`);
             }

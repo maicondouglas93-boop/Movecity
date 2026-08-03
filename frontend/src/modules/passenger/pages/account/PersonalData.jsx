@@ -1,4 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
+import { getAccessToken } from '@/services/session';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -45,7 +46,7 @@ const PersonalData = () => {
         const fetchProfile = async () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 
                 const profileData = response.data.user || user;
@@ -78,7 +79,7 @@ const PersonalData = () => {
         setLoading(true);
         try {
             const response = await axios.put(`${import.meta.env.VITE_BASE_URL}/users/profile`, data, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             });
             setUser(response.data.user);
             addToast('Perfil atualizado com sucesso!', 'success');
@@ -118,7 +119,7 @@ const PersonalData = () => {
                     <div className="relative mb-3">
                         <div className="h-28 w-28 bg-surface-alt rounded-full flex items-center justify-center overflow-hidden border-4 border-surface shadow-raised">
                             {photoPreview ? (
-                                <img src={photoPreview} alt="Profile" className="w-full h-full object-cover" />
+                                <img src={photoPreview} alt="Profile" className="w-full h-full object-cover" loading="lazy" />
                             ) : (
                                 <i className="ri-user-fill text-6xl text-ink-400" aria-hidden="true"></i>
                             )}

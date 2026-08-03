@@ -53,7 +53,7 @@ const LookingForDriver = (props) => {
                 <div className='relative h-16 w-16 flex items-center justify-center'>
                     <div className='absolute inset-0 rounded-full border-4 border-brand-300 animate-ping opacity-55'></div>
                     <div className='absolute inset-2 rounded-full border-4 border-brand-400 animate-ping opacity-75 animation-delay-150'></div>
-                    <img className='h-12 w-12 absolute rounded-full object-contain bg-surface p-1 shadow-raised border border-brand-200' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" />
+                    <img className='h-12 w-12 absolute rounded-full object-contain bg-surface p-1 shadow-raised border border-brand-200' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />
                 </div>
                 <p className='text-sm text-brand-700 mt-2'>Buscando motoristas próximos...</p>
                 <p className='text-xs text-ink-400 mt-1 tabular-nums'>{elapsedLabel}</p>

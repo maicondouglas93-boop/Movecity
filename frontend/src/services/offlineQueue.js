@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { db } from '@/services/db'
+import { getAccessToken } from '@/services/session'
 
 // P1.2 da auditoria de concorrência (2026-08-02): antes, a fila offline reexecutava
 // ações via `socket.emit(action.type, ...)` — mas o backend nunca teve handler de
@@ -16,16 +17,25 @@ const ACTION_LABELS = {
     'update-ride-status': 'atualizar o status da corrida',
     'end-ride': 'finalizar a corrida',
     'confirm-payment': 'confirmar o pagamento',
+    // Auditoria PWA (2026-08-03, M3): antes só o app do motorista tinha rede de
+    // segurança offline — cancelar corrida e confirmar pagamento do lado do
+    // passageiro se perdiam de vez numa falha de rede bem na hora do clique.
+    'cancel-ride': 'cancelar a corrida',
+    'pay-ride': 'confirmar o pagamento',
 }
 
 export function actionLabel(type) {
     return ACTION_LABELS[type] || 'sincronizar uma ação pendente'
 }
 
-// Todas as ações hoje enfileiradas são do app do motorista — usam captain-token.
+// Cada tipo de ação pertence a um lado (motorista ou passageiro) — o token tem que
+// bater com quem realmente disparou a ação, não pode ser sempre captain-token.
+const CAPTAIN_ACTION_TYPES = new Set(['accept-ride', 'start-ride', 'update-ride-status', 'end-ride', 'confirm-payment'])
+
 function buildRequestConfig(action) {
     const baseURL = import.meta.env.VITE_BASE_URL
-    const headers = { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+    const ownerKind = CAPTAIN_ACTION_TYPES.has(action.type) ? 'captain' : 'user'
+    const headers = { Authorization: `Bearer ${getAccessToken(ownerKind)}` }
     const { payload } = action
 
     switch (action.type) {
@@ -39,6 +49,10 @@ function buildRequestConfig(action) {
             return { method: 'post', url: `${baseURL}/rides/end-ride`, data: { rideId: payload.rideId }, headers }
         case 'confirm-payment':
             return { method: 'post', url: `${baseURL}/rides/confirm-payment`, data: { rideId: payload.rideId }, headers }
+        case 'cancel-ride':
+            return { method: 'post', url: `${baseURL}/rides/cancel`, data: { rideId: payload.rideId }, headers }
+        case 'pay-ride':
+            return { method: 'post', url: `${baseURL}/rides/pay`, data: { rideId: payload.rideId }, headers }
         default:
             return null
     }

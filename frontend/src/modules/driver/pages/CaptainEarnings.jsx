@@ -7,6 +7,7 @@ import PageHeader from '@/shared/components/ui/PageHeader';
 import Card from '@/shared/components/ui/Card';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
+import { getAccessToken } from '@/services/session';
 
 const RANGES = [
     { value: 'day', label: 'Hoje' },
@@ -24,7 +25,7 @@ const CaptainEarnings = () => {
     const { data, isLoading, isError, refetch, isRefetching } = useQuery({
         queryKey: ['captainEarnings', range],
         queryFn: async () => {
-            const token = localStorage.getItem('captain-token');
+            const token = getAccessToken('captain');
             const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=${range}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });

@@ -1,3 +1,4 @@
+import { lazy } from 'react'
 import { Route } from 'react-router-dom'
 
 import CaptainLogin from '@/modules/driver/pages/CaptainLogin'
@@ -6,10 +7,14 @@ import CaptainLogout from '@/modules/driver/pages/CaptainLogout'
 import CaptainProtectWrapper from '@/modules/driver/pages/CaptainProtectWrapper'
 import CaptainHome from '@/modules/driver/pages/CaptainHome'
 import CaptainRiding from '@/modules/driver/pages/CaptainRiding'
-import CaptainWallet from '@/modules/driver/pages/CaptainWallet'
-import CaptainRidesHistory from '@/modules/driver/pages/CaptainRidesHistory'
-import CaptainEarnings from '@/modules/driver/pages/CaptainEarnings'
-import CaptainProfile from '@/modules/driver/pages/CaptainProfile'
+
+// Auditoria PWA (2026-08-03, B6): ver comentário equivalente em passengerRoutes.jsx —
+// login/cadastro e as duas telas operacionais (Home/Riding) ficam estáticas; carteira,
+// histórico, ganhos e perfil são uso ocasional e entram sob demanda.
+const CaptainWallet = lazy(() => import('@/modules/driver/pages/CaptainWallet'))
+const CaptainRidesHistory = lazy(() => import('@/modules/driver/pages/CaptainRidesHistory'))
+const CaptainEarnings = lazy(() => import('@/modules/driver/pages/CaptainEarnings'))
+const CaptainProfile = lazy(() => import('@/modules/driver/pages/CaptainProfile'))
 
 // Rotas do fluxo de motorista.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.

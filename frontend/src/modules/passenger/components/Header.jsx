@@ -9,7 +9,7 @@ const Header = () => {
         <>
             <div className="fixed top-0 left-0 w-full bg-surface border-b border-line z-[60] px-4 pt-3 pb-2 flex justify-between items-center shadow-raised">
                 <Link to="/home" className="flex items-center">
-                    <img className='h-12 object-contain' src="/movecity-logo.png" alt="MoveCity" />
+                    <img className='h-12 object-contain' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
                 </Link>
                 <button
                     type="button"

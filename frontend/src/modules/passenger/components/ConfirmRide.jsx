@@ -37,7 +37,7 @@ const ConfirmRide = (props) => {
                 {/* Veículo + opcionais */}
                 <div className='flex items-center justify-between'>
                     <div className='flex items-center gap-3'>
-                        <img className='h-12 object-contain' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" />
+                        <img className='h-12 object-contain' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />
                         <p className='text-sm font-medium text-ink-600'>{vehicleLabels[props.vehicleType]}</p>
                     </div>
                     <button

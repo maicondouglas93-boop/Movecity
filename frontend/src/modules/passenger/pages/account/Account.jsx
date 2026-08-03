@@ -15,7 +15,7 @@ const Account = () => {
                     <div className="relative">
                         <div className="h-16 w-16 bg-surface rounded-full flex items-center justify-center overflow-hidden border-2 border-brand-200 shadow-raised">
                             {user?.profilePicture ? (
-                                <img src={user.profilePicture} alt="Profile" className="h-full w-full object-cover" />
+                                <img src={user.profilePicture} alt="Profile" className="h-full w-full object-cover" loading="lazy" />
                             ) : (
                                 <i className="ri-user-fill text-3xl text-brand-500" aria-hidden="true"></i>
                             )}

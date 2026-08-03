@@ -59,7 +59,7 @@ const VehiclePanel = (props) => {
                             key={category._id || category.name}
                             selected={selectedName === category.name}
                             onClick={() => setSelectedName(category.name)}
-                            icon={<img className='h-10 w-14 object-contain' src={vehicleImages[category.iconKey] || vehicleImages[category.name] || vehicleImages.car} alt="" />}
+                            icon={<img className='h-10 w-14 object-contain' src={vehicleImages[category.iconKey] || vehicleImages[category.name] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />}
                             title={
                                 <span className='inline-flex items-center gap-1.5'>
                                     {category.displayName}

@@ -3,6 +3,7 @@ import { SocketContext } from '@/contexts/SocketContext'
 import { LocationContext } from '@/contexts/LocationContext'
 import { createMapProvider } from '@/services/maps'
 import EmptyState from '@/shared/components/ui/EmptyState'
+import { getAccessToken } from '@/services/session'
 
 const sanitizeCoord = (lat, lng) => {
     if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
@@ -160,7 +161,7 @@ const LiveTracking = (props) => {
                 return;
             }
 
-            const token = localStorage.getItem('token') || localStorage.getItem('captain-token');
+            const token = getAccessToken('user') || getAccessToken('captain');
             if (!token) return;
 
             try {

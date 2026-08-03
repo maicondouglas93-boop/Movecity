@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getAccessToken } from '@/services/session';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
@@ -16,7 +17,7 @@ const Coupons = () => {
         const fetchCoupons = async () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/coupons`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 setCoupons(response.data.coupons || []);
             } catch (error) {

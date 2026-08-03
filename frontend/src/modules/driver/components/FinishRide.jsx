@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
+import { getAccessToken } from '@/services/session'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Avatar from '@/shared/components/Avatar'
@@ -44,7 +45,7 @@ const FinishRide = (props) => {
                 rideId: props.ride._id
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
             return response.data;
@@ -80,7 +81,7 @@ const FinishRide = (props) => {
                 rideId: props.ride._id
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
             return response.data;
@@ -127,7 +128,7 @@ const FinishRide = (props) => {
                 rideId: props.ride._id,
                 rating: ratingValue
             }, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
         } catch (err) {
             console.error('Captain review error:', err)

@@ -8,7 +8,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { app } from '@/services/firebase';
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
-import { saveSession } from '@/services/session'
+import { saveSession, getAccessToken } from '@/services/session'
 import { syncTokenWithSW } from '@/services/swCommunication'
 
 const UserSignup = () => {
@@ -25,7 +25,7 @@ const UserSignup = () => {
   const { addToast } = useToast()
 
   useEffect(() => {
-    if (localStorage.getItem('token')) {
+    if (getAccessToken('user')) {
       navigate('/home')
     }
   }, [navigate])
@@ -99,7 +99,7 @@ const UserSignup = () => {
     <div>
       <div className='p-7 h-screen flex flex-col justify-between bg-surface'>
         <div>
-          <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity" />
+          <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
 
           <form onSubmit={(e) => {
             submitHandler(e)

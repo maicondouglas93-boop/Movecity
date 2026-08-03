@@ -13,6 +13,8 @@ import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
 import { getAccessToken } from '@/services/session'
+import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
+import { enqueueOfflineAction } from '@/services/offlineQueue'
 
 const Riding = () => {
     const location = useLocation()
@@ -115,7 +117,7 @@ const Riding = () => {
         const fetchUnread = async () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${ride?._id}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 if (response.data.chat) {
                     setUnreadCount(response.data.chat.unreadUser || 0);
@@ -135,11 +137,24 @@ const Riding = () => {
             await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
                 rideId: ride._id
             }, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             })
             setModalStep('rating')
         } catch (err) {
-            setError(getFriendlyErrorMessage(err, 'Não foi possível confirmar. Tente novamente.'))
+            // Auditoria PWA (2026-08-03, M3): mesma rede de segurança que já existia só
+            // pro app do motorista — sem isto, uma queda de rede bem na hora de confirmar
+            // "Já paguei" simplesmente perdia a ação.
+            if (!navigator.onLine || err.message === 'Network Error') {
+                enqueueOfflineAction({
+                    type: 'pay-ride',
+                    rideId: ride._id,
+                    payload: { rideId: ride._id }
+                }).catch(e => console.error(e));
+                addToast('Sem conexão — a confirmação será enviada assim que a internet voltar.', 'info', 6000);
+                setModalStep('rating')
+            } else {
+                setError(getFriendlyErrorMessage(err, 'Não foi possível confirmar. Tente novamente.'))
+            }
         } finally {
             setLoading(false)
         }
@@ -162,6 +177,10 @@ const Riding = () => {
 
     return (
         <div className='h-screen relative'>
+            {/* Auditoria PWA (2026-08-03, M2): esta é a tela de corrida em andamento do
+                passageiro — se o socket cair aqui, tudo ficava congelado sem nenhum
+                aviso; as outras telas de tempo real já tinham o banner, esta não. */}
+            <ConnectionBanner />
             <div className='fixed right-3 top-3 z-10 flex flex-col gap-2'>
                 <Link
                     to='/home'
@@ -192,7 +211,7 @@ const Riding = () => {
             <div className='h-1/2 p-4 overflow-y-auto'>
                 <div className='flex items-center justify-between'>
                     <div>
-                        <img className='h-14 object-contain' src={vehicleImages[ride?.captain?.vehicle?.vehicleType] || vehicleImages.car} alt={ride?.captain?.vehicle?.vehicleType} />
+                        <img className='h-14 object-contain' src={vehicleImages[ride?.captain?.vehicle?.vehicleType] || vehicleImages.car} alt={ride?.captain?.vehicle?.vehicleType} width="1024" height="1024" loading="lazy" />
                         <p className='text-xs text-center text-ink-400 mt-0.5 font-medium'>{vehicleLabels[ride?.captain?.vehicle?.vehicleType] || 'MoveGo'}</p>
                     </div>
                     <div className='text-right'>

@@ -58,7 +58,7 @@ const WaitingForDriver = (props) => {
 
             <div className='flex items-center justify-between mb-4'>
                 <div>
-                    <img className='h-14 object-contain' src={vehicleImg} alt={captainVehicleType} />
+                    <img className='h-14 object-contain' src={vehicleImg} alt={captainVehicleType} width="1024" height="1024" loading="lazy" />
                     <p className='text-xs text-center text-ink-400 mt-1 font-medium'>{vehicleLabel}</p>
                 </div>
                 <div className='text-right'>

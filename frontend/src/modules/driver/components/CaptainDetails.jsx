@@ -7,6 +7,7 @@ import { useToast } from '@/contexts/ToastContext'
 import axios from 'axios'
 import Avatar from '@/shared/components/Avatar'
 import Card from '@/shared/components/ui/Card'
+import { getAccessToken } from '@/services/session'
 
 const CaptainDetails = () => {
 
@@ -29,7 +30,7 @@ const CaptainDetails = () => {
 
     const fetchSummary = async () => {
         try {
-            const token = localStorage.getItem('captain-token');
+            const token = getAccessToken('captain');
             const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/summary`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -74,7 +75,7 @@ const CaptainDetails = () => {
                 isOnline: !isOnline
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             });
             setIsOnline(response.data.captain.isOnline);

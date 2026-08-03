@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
 
 const ToastContext = createContext(null)
 
@@ -35,6 +35,11 @@ const COLORS = {
 export const ToastProvider = ({ children }) => {
     const [toasts, setToasts] = useState([])
     const idRef = useRef(0)
+    // Auditoria PWA (2026-08-03, B4): o id do setTimeout de auto-dismiss não era
+    // guardado — clicar num toast pra fechar antes da hora (removeToast) não cancelava
+    // o timer, que disparava depois tentando remover um id que já tinha saído da lista
+    // (inofensivo pelo filter, mas um handle solto sem necessidade).
+    const timeoutsRef = useRef(new Map())
 
     const addToast = useCallback((message, type = 'info', duration = 4000, subtitle = null) => {
         const id = ++idRef.current
@@ -42,13 +47,28 @@ export const ToastProvider = ({ children }) => {
             ...prev,
             { id, message, subtitle, type, duration }
         ])
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            timeoutsRef.current.delete(id)
             setToasts(prev => prev.filter(t => t.id !== id))
         }, duration)
+        timeoutsRef.current.set(id, timeoutId)
     }, [])
 
     const removeToast = useCallback((id) => {
+        const timeoutId = timeoutsRef.current.get(id)
+        if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutsRef.current.delete(id)
+        }
         setToasts(prev => prev.filter(t => t.id !== id))
+    }, [])
+
+    useEffect(() => {
+        const timeouts = timeoutsRef.current
+        return () => {
+            timeouts.forEach(clearTimeout)
+            timeouts.clear()
+        }
     }, [])
 
     return (

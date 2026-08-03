@@ -4,6 +4,11 @@ export const useWakeLock = () => {
     const [isSupported, setIsSupported] = useState(false);
     const [isLocked, setIsLocked] = useState(false);
     const wakeLockRef = useRef(null);
+    // Auditoria PWA (2026-08-03, B3): guarda a mesma função pra poder tirá-la do
+    // WakeLockSentinel antes de soltar a referência — sem isso o listener 'release'
+    // ficava preso no objeto antigo (o browser só o libera de fato quando não sobra
+    // mais nenhuma referência a ele, inclusive a do próprio listener).
+    const releaseHandlerRef = useRef(null);
     const [intentToLock, setIntentToLock] = useState(false);
 
     useEffect(() => {
@@ -20,11 +25,13 @@ export const useWakeLock = () => {
             if (wakeLockRef.current) return;
             wakeLockRef.current = await navigator.wakeLock.request('screen');
             setIsLocked(true);
-            
-            wakeLockRef.current.addEventListener('release', () => {
+
+            releaseHandlerRef.current = () => {
                 wakeLockRef.current = null;
+                releaseHandlerRef.current = null;
                 setIsLocked(false);
-            });
+            };
+            wakeLockRef.current.addEventListener('release', releaseHandlerRef.current);
             console.log('Wake Lock is active');
         } catch (err) {
             console.error('Failed to request wake lock:', err);
@@ -33,6 +40,10 @@ export const useWakeLock = () => {
 
     const releaseLock = useCallback(async () => {
         if (wakeLockRef.current) {
+            if (releaseHandlerRef.current) {
+                wakeLockRef.current.removeEventListener('release', releaseHandlerRef.current);
+                releaseHandlerRef.current = null;
+            }
             await wakeLockRef.current.release();
             wakeLockRef.current = null;
             setIsLocked(false);

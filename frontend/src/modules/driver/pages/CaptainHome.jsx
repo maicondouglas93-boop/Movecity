@@ -47,7 +47,7 @@ const CaptainHome = () => {
         setRefreshingApproval(true)
         try {
             const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/profile`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
             setCaptain(response.data.captain)
         } catch (err) {
@@ -91,11 +91,16 @@ const CaptainHome = () => {
 
     // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
     // notificação nativa sozinho — sem escutar aqui, uma notificação que chegasse por
-    // push enquanto o motorista está olhando a tela não aparecia em lugar nenhum (o
-    // aviso de corrida nova em primeiro plano hoje vem só do Socket.IO, em
-    // handleNewRide, mais abaixo).
+    // push enquanto o motorista está olhando a tela não aparecia em lugar nenhum.
     useEffect(() => {
         const unsubscribe = onForegroundMessage((payload) => {
+            // Auditoria PWA (2026-08-03, M5): NEW_RIDE já tem um caminho próprio e mais
+            // rápido — handleNewRide, abaixo, via Socket.IO — com som, vibração,
+            // notificação nativa E toast. Deixar este listener genérico também mostrar
+            // toast pro mesmo evento gerava dois avisos descoordenados pra mesma
+            // corrida sempre que os dois canais entregassem quase juntos.
+            if (payload?.data?.type === 'NEW_RIDE') return;
+
             const title = payload?.notification?.title || payload?.data?.title;
             const body = payload?.notification?.body || payload?.data?.message;
             if (title || body) {
@@ -264,7 +269,7 @@ const CaptainHome = () => {
             // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
             const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/${ride._id}/accept`, {}, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
 

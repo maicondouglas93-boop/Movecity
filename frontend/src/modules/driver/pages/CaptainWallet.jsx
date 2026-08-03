@@ -8,6 +8,7 @@ import CaptainHeader from '@/modules/driver/components/CaptainHeader'
 import StatusBadge from '@/shared/components/ui/StatusBadge'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
+import { getAccessToken } from '@/services/session'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
@@ -22,7 +23,7 @@ const CaptainWallet = () => {
     const { data: walletData, isLoading: walletLoading } = useQuery({
         queryKey: ['captainWallet'],
         queryFn: async () => {
-            const token = localStorage.getItem('captain-token')
+            const token = getAccessToken('captain')
             const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } })
             return res.data.wallet
         }
@@ -31,7 +32,7 @@ const CaptainWallet = () => {
     const { data: transactionsData, isLoading: transLoading } = useQuery({
         queryKey: ['captainTransactions'],
         queryFn: async () => {
-            const token = localStorage.getItem('captain-token')
+            const token = getAccessToken('captain')
             const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
             return res.data.transactions
         }
@@ -46,7 +47,7 @@ const CaptainWallet = () => {
     // Financeiro do admin administrava uma lista de repasses que nada nunca criava.
     const requestPayoutMutation = useMutation({
         mutationFn: async () => {
-            const token = localStorage.getItem('captain-token')
+            const token = getAccessToken('captain')
             const res = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/payouts`, {}, { headers: { Authorization: `Bearer ${token}` } })
             return res.data
         },

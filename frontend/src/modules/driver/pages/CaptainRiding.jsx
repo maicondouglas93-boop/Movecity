@@ -44,7 +44,7 @@ const CaptainRiding = () => {
 
         let cancelled = false
         axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-current`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+            headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
         }).then(response => {
             if (cancelled) return
             setRideData(response.data)
@@ -170,7 +170,7 @@ const CaptainRiding = () => {
         const fetchUnread = async () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('captain-token')}` }
+                    headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
                 });
                 if (response.data.chat) {
                     setUnreadCount(response.data.chat.unreadCaptain || 0);
@@ -205,7 +205,7 @@ const CaptainRiding = () => {
 
             {/* Top bar */}
             <div className='absolute top-0 left-0 right-0 z-panel flex items-center justify-between px-4 pt-4 pointer-events-none'>
-                <img className='w-20 pointer-events-auto drop-shadow-md' src="/movecity-logo.png" alt="MoveCity" />
+                <img className='w-20 pointer-events-auto drop-shadow-md' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
                 <div className='flex flex-col gap-2 pointer-events-auto'>
                     <Link
                         to='/captain-home'
@@ -271,6 +271,9 @@ const CaptainRiding = () => {
                                 src={vehicleImg}
                                 alt={vehicleLabel}
                                 className='h-14 w-20 object-contain flex-shrink-0'
+                                width="1024"
+                                height="1024"
+                                loading="lazy"
                             />
                             <div className='min-w-0'>
                                 <p className='text-xs text-brand-600 font-bold uppercase tracking-widest'>{vehicleLabel}</p>

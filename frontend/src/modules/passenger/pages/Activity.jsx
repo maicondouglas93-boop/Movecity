@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getAccessToken } from '@/services/session';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Header from '@/modules/passenger/components/Header';
@@ -30,7 +31,7 @@ const Activity = () => {
                     search: searchQuery
                 },
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                    Authorization: `Bearer ${getAccessToken('user')}`
                 }
             });
 
@@ -162,7 +163,7 @@ const Activity = () => {
                                 >
                                     <div className="flex items-center gap-4 flex-1 overflow-hidden">
                                         <div className="bg-surface-alt h-12 w-12 rounded-panel flex items-center justify-center flex-shrink-0 border border-line">
-                                            <img src={vehicleImages[ride.vehicleType || 'car']} className="h-8 object-contain" alt="" />
+                                            <img src={vehicleImages[ride.vehicleType || 'car']} className="h-8 object-contain" alt="" width="1024" height="1024" loading="lazy" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-semibold text-base truncate text-ink-900">{ride.destination?.split(',')[0]}</h4>
@@ -214,7 +215,7 @@ const Activity = () => {
                                     <h1 className="text-4xl font-bold text-ink-900">R$ {selectedRide.fare}</h1>
                                     <p className="text-ink-400 text-sm mt-1">{formatDate(selectedRide.createdAt)}</p>
                                 </div>
-                                <img src={vehicleImages[selectedRide.vehicleType || 'car']} className="h-16 object-contain" alt="" />
+                                <img src={vehicleImages[selectedRide.vehicleType || 'car']} className="h-16 object-contain" alt="" width="1024" height="1024" loading="lazy" />
                             </div>
 
                             <div className="bg-surface-alt rounded-panel p-4 mb-6">

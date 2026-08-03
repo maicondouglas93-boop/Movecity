@@ -6,6 +6,7 @@ import PageHeader from '@/shared/components/ui/PageHeader';
 import Card from '@/shared/components/ui/Card';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
+import { getAccessToken } from '@/services/session';
 
 const CaptainRidesHistory = () => {
     // Auditoria de UX do motorista (2026-08-02, §2.13): o `.catch(() => null)` que
@@ -15,7 +16,7 @@ const CaptainRidesHistory = () => {
     const { data: rides = [], isLoading: loading, isError, refetch, isRefetching } = useQuery({
         queryKey: ['captainHistory'],
         queryFn: async () => {
-            const token = localStorage.getItem('captain-token');
+            const token = getAccessToken('captain');
             const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-history`, {
                 headers: { Authorization: `Bearer ${token}` }
             });

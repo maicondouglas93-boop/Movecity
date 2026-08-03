@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
+import { getAccessToken } from '@/services/session'
 import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
@@ -27,7 +28,7 @@ const ConfirmRidePopUp = (props) => {
                 rideId: props.ride._id
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
             addToast('Corrida liberada — buscando outro motorista para o passageiro.', 'info')
@@ -49,7 +50,7 @@ const ConfirmRidePopUp = (props) => {
                 status: status
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
             setRideStatus(status)
@@ -85,7 +86,7 @@ const ConfirmRidePopUp = (props) => {
                     otp: otp
                 },
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('captain-token')}`
+                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
 

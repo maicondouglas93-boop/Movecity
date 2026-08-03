@@ -26,6 +26,7 @@ import { useBackToClose } from '@/shared/hooks/useBackToClose';
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner';
 import Button from '@/shared/components/ui/Button';
 import { getAccessToken } from '@/services/session';
+import { enqueueOfflineAction } from '@/services/offlineQueue';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -223,7 +224,7 @@ const Home = () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/current`, {
                     headers: {
-                        Authorization: `Bearer ${localStorage.getItem('token')}`
+                        Authorization: `Bearer ${getAccessToken('user')}`
                     }
                 });
                 
@@ -337,7 +338,7 @@ const Home = () => {
                     const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
                         headers: {
-                            Authorization: `Bearer ${localStorage.getItem('token')}`
+                            Authorization: `Bearer ${getAccessToken('user')}`
                         }
                     })
                     setPickupSuggestions(response.data)
@@ -373,7 +374,7 @@ const Home = () => {
                     const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
                         headers: {
-                            Authorization: `Bearer ${localStorage.getItem('token')}`
+                            Authorization: `Bearer ${getAccessToken('user')}`
                         }
                     })
                     setDestinationSuggestions(response.data)
@@ -539,7 +540,7 @@ const Home = () => {
             const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
                 params: { pickup: pickupStr, destination: destStr },
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                    Authorization: `Bearer ${getAccessToken('user')}`
                 }
             })
 
@@ -574,7 +575,7 @@ const Home = () => {
                 promoCode: promoCode.trim() || undefined
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                    Authorization: `Bearer ${getAccessToken('user')}`
                 }
             });
 
@@ -612,7 +613,7 @@ const Home = () => {
                 rideId: ride._id
             }, {
                 headers: {
-                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                    Authorization: `Bearer ${getAccessToken('user')}`
                 }
             });
             if (response.data?.cancellationFeeCharged > 0) {
@@ -629,7 +630,23 @@ const Home = () => {
             setPickup('');
             setDestination('');
         } catch (err) {
-            addToast(getFriendlyErrorMessage(err, 'Erro ao cancelar corrida.'), 'error');
+            // Auditoria PWA (2026-08-03, M3): mesma rede de segurança que já existia só
+            // pro app do motorista — sem isto, uma queda de rede bem na hora de cancelar
+            // simplesmente perdia a ação, exigindo repetir manualmente depois.
+            if (!navigator.onLine || err.message === 'Network Error') {
+                enqueueOfflineAction({
+                    type: 'cancel-ride',
+                    rideId: ride._id,
+                    payload: { rideId: ride._id }
+                }).catch(e => console.error(e));
+                addToast('Sem conexão — o cancelamento será confirmado assim que a internet voltar.', 'info', 6000);
+                setVehicleFound(false);
+                setRide(null);
+                setPickup('');
+                setDestination('');
+            } else {
+                addToast(getFriendlyErrorMessage(err, 'Erro ao cancelar corrida.'), 'error');
+            }
         }
     }
 

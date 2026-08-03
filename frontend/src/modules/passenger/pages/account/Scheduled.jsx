@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getAccessToken } from '@/services/session';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
@@ -15,7 +16,7 @@ const Scheduled = () => {
         const fetchScheduled = async () => {
             try {
                 const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/scheduled`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 setScheduledRides(response.data.scheduled || []);
             } catch (error) {

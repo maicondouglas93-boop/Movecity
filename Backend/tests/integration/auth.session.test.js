@@ -98,7 +98,39 @@ describe('Sessão persistente — passageiro', () => {
         expect(res.body.message).toMatch(/bloqueada/i);
     });
 
-    it('8. Detecção de reuse: reapresentar um refresh token já rotacionado derruba TODAS as sessões', async () => {
+    // Auditoria de persistência de login (2026-08-03): este teste codificava como
+    // "correto" exatamente o bug que causava logout depois de algum tempo sem usar o
+    // sistema — duas requisições legítimas do mesmo usuário (duas abas, ou vários
+    // componentes buscando dados ao mesmo tempo quando o app volta do segundo plano)
+    // reapresentando o token quase ao mesmo tempo derrubavam a sessão inteira, mesmo
+    // sem nenhum roubo de verdade. Ver docs/plans/2026-08-03-auditoria-persistencia-
+    // login.md. Duas cobranças agora, no lugar de uma: reuso DENTRO da janela de
+    // tolerância (a corrida legítima) é tolerado; reuso FORA da janela (roubo de
+    // verdade) continua derrubando tudo, exatamente como antes.
+    it('8a. Reuso DENTRO da janela de tolerância (corrida entre abas) não derruba a sessão', async () => {
+        const loginRes = await loginUser();
+        const originalToken = loginRes.body.refreshToken;
+
+        // Aba A renova.
+        const rotatedByA = await request(app).post('/users/refresh').send({ refreshToken: originalToken });
+        expect(rotatedByA.statusCode).toBe(200);
+
+        // Aba B tinha lido o token original antes de A terminar, e só agora manda a
+        // requisição — reapresenta um token que já foi rotacionado, mas a corrida é
+        // legítima, não roubo.
+        const rotatedByB = await request(app).post('/users/refresh').send({ refreshToken: originalToken });
+        expect(rotatedByB.statusCode).toBe(200);
+        expect(rotatedByB.body.refreshToken).not.toBe(rotatedByA.body.refreshToken);
+
+        // As duas abas continuam com sessão válida — nenhuma foi punida pela corrida da outra.
+        const aStillWorks = await request(app).post('/users/refresh').send({ refreshToken: rotatedByA.body.refreshToken });
+        expect(aStillWorks.statusCode).toBe(200);
+
+        const bStillWorks = await request(app).post('/users/refresh').send({ refreshToken: rotatedByB.body.refreshToken });
+        expect(bStillWorks.statusCode).toBe(200);
+    });
+
+    it('8b. Reuso FORA da janela de tolerância continua sendo tratado como roubo e derruba TODAS as sessões', async () => {
         const loginRes = await loginUser();
         const stolenToken = loginRes.body.refreshToken;
 
@@ -106,7 +138,15 @@ describe('Sessão persistente — passageiro', () => {
         const rotated = await request(app).post('/users/refresh').send({ refreshToken: stolenToken });
         expect(rotated.statusCode).toBe(200);
 
-        // Alguém com uma cópia antiga tenta usar: sinal de roubo.
+        // Simula que a rotação aconteceu há muito tempo (fora da janela de 30s) —
+        // exatamente o que aconteceria se um token realmente vazado fosse reusado dias
+        // depois, não duas abas do mesmo usuário competindo em uma corrida.
+        await refreshTokenModel.updateOne(
+            { tokenHash: authService.hashToken(stolenToken) },
+            { $set: { revokedAt: new Date(Date.now() - 5 * 60 * 1000) } }
+        );
+
+        // Alguém com uma cópia antiga tenta usar: sinal de roubo de verdade.
         const reuse = await request(app).post('/users/refresh').send({ refreshToken: stolenToken });
         expect(reuse.statusCode).toBe(401);
 

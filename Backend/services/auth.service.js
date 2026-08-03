@@ -50,12 +50,46 @@ module.exports.issueTokenPair = async ({ userId, userType, extraClaims = {}, ip 
     return { accessToken, refreshToken, refreshTokenExpiresAt: expiresAt };
 };
 
+// Auditoria de persistência de login (2026-08-03): janela de tolerância a reuso — ver
+// docs/plans/2026-08-03-auditoria-persistencia-login.md para a investigação completa.
+//
+// Sem isto, duas requisições legítimas do MESMO usuário renovando quase ao mesmo tempo
+// (duas abas abertas, ou vários componentes buscando dados assim que o app volta do
+// segundo plano depois do access token de 15min expirar) derrubavam a sessão inteira: a
+// segunda a chegar via encontrava o token já rotacionado pela primeira, e a detecção de
+// reuse tratava isso como roubo — revogando inclusive o token que a primeira aba tinha
+// acabado de receber legitimamente. Confirmado empiricamente antes da correção.
+//
+// Trade-off de segurança, deliberado e documentado: um token reapresentado dentro desta
+// janela depois de já ter sido rotacionado deixa de derrubar a sessão inteira — em vez
+// disso, gera mais um elo na mesma cadeia de rotação (o servidor nunca guarda o token em
+// texto claro, só o hash, então não há como devolver de volta o mesmo token que a outra
+// aba já recebeu). Fora da janela, o comportamento de antes continua idêntico: reuso é
+// tratado como roubo e derruba tudo. Mesmo padrão recomendado por implementações de
+// referência de rotação de refresh token (Auth0, OIDC) para tolerar exatamente esta
+// concorrência sem abrir mão de detectar reuso de verdade.
+const REUSE_GRACE_MS = 30 * 1000;
+
+// Segue a cadeia de rotação a partir de um token já substituído até achar o elo
+// atualmente válido. Devolve `null` se a cadeia estiver cortada (um elo intermediário
+// foi revogado por outro motivo, ex: logout explícito no meio da janela) — nesse caso
+// não há elo seguro pra continuar, e quem chamou deve tratar como reuso de verdade.
+async function walkToCurrent(stored) {
+    let current = stored;
+    const seen = new Set([current.tokenHash]);
+    while (current.replacedBy) {
+        if (seen.has(current.replacedBy)) return null; // ciclo — nunca deveria existir
+        seen.add(current.replacedBy);
+        const next = await refreshTokenModel.findOne({ tokenHash: current.replacedBy });
+        if (!next) return null;
+        if (next.revokedAt && !next.replacedBy) return null; // revogado sem suceder ninguém (ex: logout)
+        current = next;
+    }
+    return current;
+}
+
 // Troca um refresh token por um par novo, rotacionando (o antigo é marcado como usado e
 // aponta pro substituto). Lança erro com `code` legível pro controller decidir a resposta.
-//
-// Detecção de reuse: se o token apresentado já foi rotacionado (`replacedBy` preenchido)
-// ou já revogado, significa que alguém está usando uma cópia antiga — o mais provável é
-// roubo. Nesse caso derruba TODAS as sessões daquele usuário, não só esta.
 module.exports.rotateRefreshToken = async ({ refreshToken, ip }) => {
     if (!refreshToken) {
         const err = new Error('Refresh token ausente');
@@ -64,7 +98,7 @@ module.exports.rotateRefreshToken = async ({ refreshToken, ip }) => {
     }
 
     const tokenHash = hashToken(refreshToken);
-    const stored = await refreshTokenModel.findOne({ tokenHash });
+    let stored = await refreshTokenModel.findOne({ tokenHash });
 
     if (!stored) {
         const err = new Error('Sessão inválida');
@@ -73,14 +107,29 @@ module.exports.rotateRefreshToken = async ({ refreshToken, ip }) => {
     }
 
     if (stored.revokedAt || stored.replacedBy) {
-        await module.exports.revokeAllForUser({
-            userId: stored.userId,
-            userType: stored.userType,
-            reason: 'reuse_detected'
-        });
-        const err = new Error('Sessão inválida — por segurança, todas as sessões foram encerradas');
-        err.code = 'REFRESH_TOKEN_REUSE';
-        throw err;
+        // A janela só vale para revogação por ROTAÇÃO (`replacedBy` preenchido — existe
+        // um sucessor de verdade pra seguir). Logout, bloqueio administrativo e reuso já
+        // detectado revogam sem definir `replacedBy` — são intencionais e definitivos,
+        // nunca devem ganhar tolerância, não importa o quão recentes.
+        const withinGrace = stored.replacedBy && stored.revokedAt
+            && (Date.now() - stored.revokedAt.getTime()) < REUSE_GRACE_MS;
+        const current = withinGrace ? await walkToCurrent(stored) : null;
+
+        if (!current) {
+            await module.exports.revokeAllForUser({
+                userId: stored.userId,
+                userType: stored.userType,
+                reason: 'reuse_detected'
+            });
+            const err = new Error('Sessão inválida — por segurança, todas as sessões foram encerradas');
+            err.code = 'REFRESH_TOKEN_REUSE';
+            throw err;
+        }
+
+        // Dentro da janela e a cadeia leva a um elo vivo: rotaciona a partir dele, como
+        // se fosse o token apresentado — a outra aba mantém o que já tinha, esta ganha
+        // seu próprio elo novo.
+        stored = current;
     }
 
     if (stored.expiresAt < new Date()) {

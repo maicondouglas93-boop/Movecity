@@ -7,13 +7,30 @@ let messaging = null;
 // Mesmo cuidado do app do passageiro/motorista (frontend/src/services/fcm.js): chamar
 // getMessaging(app) incondicionalmente dispara, em ambientes sem suporte, uma unhandled
 // promise rejection DENTRO do próprio SDK do Firebase — isSupported() evita isso.
+// Ver o comentário equivalente no fcm.js do app do passageiro: configuração ausente e
+// navegador sem suporte são problemas diferentes e precisam de mensagens diferentes.
+// Aqui, ao contrário do app do passageiro, o Firebase é usado SÓ para push — se faltar
+// configuração, o painel funciona normalmente, só não recebe notificação.
+const hasFirebaseConfig = !!(app?.options?.projectId && app?.options?.messagingSenderId);
+
 const messagingReady = isSupported()
     .then((supported) => {
-        if (!supported) return null;
+        if (!hasFirebaseConfig) {
+            console.warn(
+                '[Push] Configuração do Firebase ausente: as variáveis VITE_FIREBASE_* não chegaram ' +
+                'neste build. O painel funciona normalmente, mas não vai receber notificações ' +
+                '(novo motorista, denúncia, problema de pagamento).'
+            );
+            return null;
+        }
+        if (!supported) {
+            console.warn('[Push] Este navegador não suporta Web Push.');
+            return null;
+        }
         try {
             messaging = getMessaging(app);
         } catch (error) {
-            console.warn('Firebase Messaging not supported in this environment:', error.message);
+            console.warn('[Push] Falha ao inicializar o Firebase Messaging:', error.message);
         }
         return messaging;
     })

@@ -12,13 +12,33 @@ let messaging = null;
 // qualquer try/catch síncrono nosso, porque o SDK dispara uma checagem assíncrona
 // interna independente do que o nosso código faz. `isSupported()` é a checagem oficial
 // da própria lib pra evitar isso, feita antes de qualquer tentativa de uso.
+// Distingue os dois motivos de o push não iniciar, que antes caíam na MESMA mensagem
+// ("not supported in this environment") e mandavam quem estava diagnosticando para o
+// lado errado: configuração ausente é problema de deploy (variáveis não chegaram no
+// build), não de navegador.
+const hasFirebaseConfig = !!(app?.options?.projectId && app?.options?.messagingSenderId);
+
 const messagingReady = isSupported()
     .then((supported) => {
-        if (!supported) return null;
+        if (!hasFirebaseConfig) {
+            console.error(
+                '[Push] Configuração do Firebase ausente: as variáveis VITE_FIREBASE_* não chegaram neste build. ' +
+                'Push desativado. ATENÇÃO: o login com Google usa a MESMA configuração (services/firebase.js) ' +
+                'e também não vai funcionar até isso ser corrigido no painel de deploy.'
+            );
+            return null;
+        }
+        if (!supported) {
+            console.warn(
+                '[Push] Este navegador não suporta Web Push. No iPhone, só funciona com o app ' +
+                'instalado na tela de início (PWA) — no Safari comum, não.'
+            );
+            return null;
+        }
         try {
             messaging = getMessaging(app);
         } catch (error) {
-            console.warn('Firebase Messaging not supported in this environment:', error.message);
+            console.warn('[Push] Falha ao inicializar o Firebase Messaging:', error.message);
         }
         return messaging;
     })

@@ -17,7 +17,8 @@ import CaptainHeader from '@/modules/driver/components/CaptainHeader'
 import { requestFCMToken, onForegroundMessage } from '@/services/fcm'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
-import { enqueueOfflineAction } from '@/services/offlineQueue'
+import { enqueueOfflineAction, flushQueuedLocations } from '@/services/offlineQueue'
+import { getAccessToken } from '@/services/session'
 import * as Sentry from '@sentry/react'
 
 const CaptainHome = () => {
@@ -25,6 +26,10 @@ const CaptainHome = () => {
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
     const [ confirmRidePopupPanel, setConfirmRidePopupPanel ] = useState(false)
     const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
+    // Auditoria PWA (2026-08-03, C3): antes, permissão "negada" não gerava nenhum
+    // aviso — um motorista nesse estado ficava invisível ao despacho por push (com o
+    // app fechado/minimizado) sem nenhuma pista de causa dentro do app.
+    const [ notificationsDenied, setNotificationsDenied ] = useState(false)
 
     const [ ride, setRide ] = useState(null)
 
@@ -77,6 +82,8 @@ const CaptainHome = () => {
                 await requestFCMToken();
             } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
                 setShowNotificationPrompt(true);
+            } else if (Notification.permission === 'denied') {
+                setNotificationsDenied(true);
             }
         };
         setupFCM();
@@ -126,9 +133,19 @@ const CaptainHome = () => {
         if (!captain || !captain._id) return;
 
         const handleConnect = () => {
+            // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
+            // quem está de fato entrando — sem isto, o join é rejeitado. O ack confirma
+            // que a identidade já está setada no socket antes de mandar qualquer
+            // localização enfileirada offline (evita a corrida descrita em
+            // flushQueuedLocations).
             socket.emit('join', {
                 userId: captain._id,
-                userType: 'captain'
+                userType: 'captain',
+                token: getAccessToken('captain')
+            }, (response) => {
+                if (response?.ok) {
+                    flushQueuedLocations(socket).catch(e => console.error(e))
+                }
             })
         }
 
@@ -330,6 +347,22 @@ const CaptainHome = () => {
                                             Agora não
                                         </button>
                                     </div>
+                                </div>
+                            </div>
+                        )}
+                        {notificationsDenied && (
+                            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-panel p-4 flex gap-3">
+                                <i className="ri-notification-off-fill text-amber-600 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-ink-900">Notificações bloqueadas</p>
+                                    <p className="text-xs text-ink-400 mt-0.5">Você não vai receber avisos de corrida com o app fechado ou minimizado. Ative nas configurações de notificação do navegador para este site.</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setNotificationsDenied(false)}
+                                        className="min-h-[36px] px-4 mt-3 rounded-full text-ink-600 text-sm font-medium"
+                                    >
+                                        Entendi
+                                    </button>
                                 </div>
                             </div>
                         )}

@@ -48,30 +48,79 @@ function initializeSocket(server) {
     io.on('connection', (socket) => {
         console.log(`[AUDIT] Client connected: ${socket.id}`);
 
-        socket.on('join', async (data) => {
-            const { userId, userType } = data;
+        socket.on('join', async (data, ack) => {
+            const { userId, userType, token } = data;
             console.log(`[AUDIT] User ${userId} (${userType}) solicitou JOIN no socket ${socket.id}`);
 
-            if (userType === 'user') {
-                await userModel.findByIdAndUpdate(userId, { socketId: socket.id });
-                console.log(`[AUDIT] User ${userId} atualizou socketId para ${socket.id}`);
-            } else if (userType === 'captain') {
-                // Separação disponibilidade x conexão (2026-08-03): `lastSeenAt` é o
-                // heartbeat que mantém o motorista no despacho. Reconectar conta como
-                // contato real.
-                const captainBefore = await captainModel.findByIdAndUpdate(
-                    userId,
-                    { socketId: socket.id, lastSeenAt: new Date() }
-                );
-                console.log(`[AUDIT] Captain ${userId} atualizou socketId para ${socket.id}`);
+            // Auditoria PWA (2026-08-03, C1/C2): antes, `join` de user/captain confiava
+            // cegamente no `userId` mandado pelo cliente, sem verificar token nenhum —
+            // qualquer socket podia se anunciar como qualquer usuário/motorista real e
+            // passar a receber, no lugar da vítima, todo evento endereçado por
+            // `socketId` (localização do motorista, atualização de corrida etc). O join
+            // de admin já exigia token (S1, auditoria anterior); agora o mesmo padrão
+            // vale para user/captain. A identidade verificada fica em `socket.data`
+            // (memória do próprio socket) e é o que `update-location-captain` passa a
+            // confiar, nunca mais o campo solto do payload.
+            //
+            // `ack`: callback opcional (socket.io emit-with-callback). Sem ele, o
+            // cliente não tem como saber QUANDO o join terminou de verificar o token —
+            // e como o handler tem `await`s no meio, um evento seguinte (ex.:
+            // update-location-captain) emitido logo em seguida podia chegar e ser
+            // processado ANTES de `socket.data.identity` estar setado, sendo rejeitado
+            // à toa. O ack dá ao cliente um ponto real de "agora sim pode mandar".
+            const reject = (message) => {
+                socket.emit('unauthorized', { message });
+                if (typeof ack === 'function') ack({ ok: false, message });
+            };
 
-                // O tempo online mede tempo realmente CONECTADO (o disconnect fecha a
-                // sessão). Se o motorista continua disponível e voltou a conectar, uma
-                // nova sessão começa aqui — sem isso, reabrir o app depois de uma queda
-                // deixaria de contar o tempo até o próximo toggle.
-                if (captainBefore && captainBefore.isOnline && !captainBefore.onlineSince) {
-                    const captainService = require('./services/captain.service');
-                    await captainService.startOnlineSession(userId);
+            if (userType === 'user' || userType === 'captain') {
+                if (!token) {
+                    console.log(`[AUDIT] JOIN ${userType} rejeitado (sem token) no socket ${socket.id}`);
+                    return reject('Token ausente');
+                }
+                let decoded;
+                try {
+                    decoded = jwt.verify(token, process.env.JWT_SECRET);
+                } catch (err) {
+                    console.log(`[AUDIT] JOIN ${userType} rejeitado (token inválido) no socket ${socket.id}`);
+                    return reject('Token inválido');
+                }
+                const authenticatedId = decoded._id;
+
+                if (userType === 'user') {
+                    const user = await userModel.findById(authenticatedId);
+                    if (!user || user.isBlocked) {
+                        console.log(`[AUDIT] JOIN user rejeitado (inválido/bloqueado) no socket ${socket.id}`);
+                        return reject('Usuário inválido');
+                    }
+                    socket.data.identity = { type: 'user', id: authenticatedId };
+                    await userModel.findByIdAndUpdate(authenticatedId, { socketId: socket.id });
+                    console.log(`[AUDIT] User ${authenticatedId} atualizou socketId para ${socket.id}`);
+                } else {
+                    const captain = await captainModel.findById(authenticatedId);
+                    if (!captain || captain.isBlocked) {
+                        console.log(`[AUDIT] JOIN captain rejeitado (inválido/bloqueado) no socket ${socket.id}`);
+                        return reject('Motorista inválido');
+                    }
+                    socket.data.identity = { type: 'captain', id: authenticatedId };
+
+                    // Separação disponibilidade x conexão (2026-08-03): `lastSeenAt` é o
+                    // heartbeat que mantém o motorista no despacho. Reconectar conta como
+                    // contato real.
+                    const captainBefore = await captainModel.findByIdAndUpdate(
+                        authenticatedId,
+                        { socketId: socket.id, lastSeenAt: new Date() }
+                    );
+                    console.log(`[AUDIT] Captain ${authenticatedId} atualizou socketId para ${socket.id}`);
+
+                    // O tempo online mede tempo realmente CONECTADO (o disconnect fecha a
+                    // sessão). Se o motorista continua disponível e voltou a conectar, uma
+                    // nova sessão começa aqui — sem isso, reabrir o app depois de uma queda
+                    // deixaria de contar o tempo até o próximo toggle.
+                    if (captainBefore && captainBefore.isOnline && !captainBefore.onlineSince) {
+                        const captainService = require('./services/captain.service');
+                        await captainService.startOnlineSession(authenticatedId);
+                    }
                 }
             } else if (userType === 'admin') {
                 // Auditoria de segurança (2026-08-02, S1): a sala admin_room recebe GPS
@@ -81,27 +130,40 @@ function initializeSocket(server) {
                 const { token } = data;
                 if (!token) {
                     console.log(`[AUDIT] JOIN admin rejeitado (sem token) no socket ${socket.id}`);
-                    return socket.emit('unauthorized', { message: 'Token de admin ausente' });
+                    return reject('Token de admin ausente');
                 }
                 try {
                     const decoded = jwt.verify(token, process.env.JWT_SECRET);
                     const admin = await adminUserModel.findById(decoded._id);
                     if (!admin || !admin.active) {
                         console.log(`[AUDIT] JOIN admin rejeitado (inativo/inexistente) no socket ${socket.id}`);
-                        return socket.emit('unauthorized', { message: 'Admin inválido' });
+                        return reject('Admin inválido');
                     }
                     socket.join('admin_room');
                     console.log(`[AUDIT] Admin ${admin.email} entrou em admin_room via socket ${socket.id}`);
                 } catch (err) {
                     console.log(`[AUDIT] JOIN admin rejeitado (token inválido) no socket ${socket.id}`);
-                    return socket.emit('unauthorized', { message: 'Token de admin inválido' });
+                    return reject('Token de admin inválido');
                 }
             }
+
+            if (typeof ack === 'function') ack({ ok: true });
         });
 
 
         socket.on('update-location-captain', async (data) => {
-            const { userId, location } = data;
+            // Auditoria PWA (2026-08-03, C1): antes, `userId` vinha do payload do
+            // cliente sem nenhuma verificação — qualquer socket conectado (nem
+            // precisava ter feito join) podia falsificar a localização de QUALQUER
+            // motorista, o que também contamina `actualDistance` (usada no cálculo de
+            // tarifa) de uma corrida real em andamento. Agora só aceita a localização
+            // do motorista que passou pelo `join` autenticado nesta mesma conexão.
+            if (!socket.data.identity || socket.data.identity.type !== 'captain') {
+                console.log(`[AUDIT] update-location-captain rejeitado (sem identidade de captain autenticada) no socket ${socket.id}`);
+                return socket.emit('unauthorized', { message: 'Não autenticado' });
+            }
+            const userId = socket.data.identity.id;
+            const { location } = data;
 
             if (!location || location.ltd == null || location.lng == null) {
                 return socket.emit('error', { message: 'Invalid location data' });

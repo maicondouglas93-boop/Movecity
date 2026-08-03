@@ -5,7 +5,6 @@ import { io } from 'socket.io-client';
 export const SocketContext = createContext();
 
 import * as Sentry from '@sentry/react';
-import { db } from '@/services/db';
 import { replayOfflineActions, actionLabel } from '@/services/offlineQueue';
 import { useToast } from '@/contexts/ToastContext';
 
@@ -50,17 +49,6 @@ const SocketProvider = ({ children }) => {
                     // onRetryLater: rede ainda instável, tenta de novo na próxima reconexão
                     // sem incomodar o motorista a cada tentativa silenciosa.
                 });
-
-                const locations = await db.driverLocations.toArray();
-                if (locations.length > 0) {
-                    // Send last location or bulk locations
-                    const lastLoc = locations[locations.length - 1];
-                    socket.emit('update-location-captain', {
-                        userId: lastLoc.userId,
-                        location: { ltd: lastLoc.lat, lng: lastLoc.lng }
-                    });
-                    await db.driverLocations.clear();
-                }
             } catch (err) {
                 console.error('Failed to sync offline queue:', err);
                 Sentry.captureException(err);

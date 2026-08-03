@@ -12,6 +12,7 @@ import { getFriendlyErrorMessage } from '@/services/errorMessages'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
+import { getAccessToken } from '@/services/session'
 
 const Riding = () => {
     const location = useLocation()
@@ -36,7 +37,9 @@ const Riding = () => {
         if (!user || !user._id) return;
 
         const handleConnect = () => {
-            socket.emit("join", { userType: "user", userId: user._id })
+            // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
+            // quem está de fato entrando — sem isto, o join é rejeitado.
+            socket.emit("join", { userType: "user", userId: user._id, token: getAccessToken('user') })
         }
 
         if (socket.connected) {

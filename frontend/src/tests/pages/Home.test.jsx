@@ -124,8 +124,10 @@ describe('Home Component', () => {
     expect(screen.getByText(/John/)).toBeInTheDocument();
     
     // Check if socket join was emitted
+    // Auditoria PWA (2026-08-03, C2): join agora exige o JWT do usuário — sem ele, o
+    // backend rejeita a entrada.
     await waitFor(() => {
-      expect(mockSocket.emit).toHaveBeenCalledWith('join', { userType: 'user', userId: 'mock-user-id' });
+      expect(mockSocket.emit).toHaveBeenCalledWith('join', { userType: 'user', userId: 'mock-user-id', token: null });
     });
   });
 

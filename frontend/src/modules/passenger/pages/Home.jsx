@@ -25,6 +25,7 @@ import { getFriendlyErrorMessage } from '@/services/errorMessages';
 import { useBackToClose } from '@/shared/hooks/useBackToClose';
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner';
 import Button from '@/shared/components/ui/Button';
+import { getAccessToken } from '@/services/session';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -71,6 +72,10 @@ const Home = () => {
     const [ isSearching, setIsSearching ] = useState(false)
     const [ fareLoading, setFareLoading ] = useState(false)
     const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
+    // Auditoria PWA (2026-08-03, C3): antes, permissão "negada" não gerava nenhum
+    // aviso — o usuário simplesmente parava de receber notificação de corrida sem
+    // nenhuma pista de causa dentro do app.
+    const [ notificationsDenied, setNotificationsDenied ] = useState(false)
     const debounceTimer = useRef(null)
     const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
@@ -131,6 +136,8 @@ const Home = () => {
                 await requestFCMToken();
             } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeen')) {
                 setShowNotificationPrompt(true);
+            } else if (Notification.permission === 'denied') {
+                setNotificationsDenied(true);
             }
         };
         setupFCM();
@@ -246,7 +253,9 @@ const Home = () => {
         };
 
         const handleConnect = () => {
-            socket.emit("join", { userType: "user", userId: user._id })
+            // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
+            // quem está de fato entrando — sem isto, o join é rejeitado.
+            socket.emit("join", { userType: "user", userId: user._id, token: getAccessToken('user') })
             fetchCurrentRide()
         }
 
@@ -697,6 +706,23 @@ const Home = () => {
                                                 Agora não
                                             </button>
                                         </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {notificationsDenied && (
+                                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-panel p-4 flex gap-3">
+                                    <i className="ri-notification-off-fill text-amber-600 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-ink-900">Notificações bloqueadas</p>
+                                        <p className="text-xs text-ink-400 mt-0.5">Você não vai receber avisos de motorista aceitando, chegando ou iniciando a corrida. Ative nas configurações de notificação do navegador para este site.</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => setNotificationsDenied(false)}
+                                            className="min-h-[36px] px-4 mt-3 rounded-full text-ink-600 text-sm font-medium"
+                                        >
+                                            Entendi
+                                        </button>
                                     </div>
                                 </div>
                             )}

@@ -60,6 +60,21 @@ export async function enqueueOfflineAction({ type, rideId, payload }) {
     await db.offlineActions.add({ type, rideId, payload, timestamp: Date.now(), attempts: 0 })
 }
 
+// Auditoria PWA (2026-08-03): antes vivia em SocketContext.jsx, disparado direto no
+// 'connect' do socket — mas 'join' agora exige token e faz verificações assíncronas no
+// backend antes de aceitar `update-location-captain` (C1/C2). Emitir a localização
+// enfileirada no mesmo instante do 'connect', sem esperar o join confirmar, corria o
+// risco de chegar ANTES da identidade autenticada existir no socket e ser rejeitada à
+// toa. Por isso só é chamado depois do ack de sucesso do 'join' (ver CaptainHome.jsx /
+// CaptainRiding.jsx).
+export async function flushQueuedLocations(socket) {
+    const locations = await db.driverLocations.toArray()
+    if (locations.length === 0) return
+    const lastLoc = locations[locations.length - 1]
+    socket.emit('update-location-captain', { location: { ltd: lastLoc.lat, lng: lastLoc.lng } })
+    await db.driverLocations.clear()
+}
+
 // Processa a fila em ordem cronológica, sequencialmente (nunca em paralelo — uma ação
 // de "finalizar corrida" reexecutada antes de "iniciar corrida" ter sido confirmada
 // corromperia a máquina de estados do lado do servidor). Para no primeiro erro

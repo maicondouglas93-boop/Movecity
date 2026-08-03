@@ -105,7 +105,8 @@ describe('Fluxo de push de nova corrida (Fase 1: C1, C2, C3, C5)', () => {
             { requireFinal: true }
         );
         expect(notification).toBeTruthy();
-        expect(notification.title).toBe('Nova Corrida Disponível!');
+        // Diagnóstico de push de corrida (2026-08-03): título/formato atualizados.
+        expect(notification.title).toBe('🚗 Nova corrida disponível');
         // O envio real ao Firebase falha neste ambiente (sem credenciais) mesmo depois
         // dos retries do pushTransport — o status final gravado tem que refletir isso
         // (M4 da auditoria: antes gravava 'sent' incondicionalmente, mesmo sem entregar).
@@ -646,7 +647,7 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
             const payload = await waitForPayload();
             expect(payload.webpush.notification.actions).toBeUndefined();
             // A notificação em si continua sendo enviada — só a ação embutida some.
-            expect(payload.title).toBe('Nova Corrida Disponível!');
+            expect(payload.title).toBe('🚗 Nova corrida disponível');
         } finally {
             process.env.NODE_ENV = originalEnv;
             if (originalBaseUrl === undefined) delete process.env.BASE_URL;

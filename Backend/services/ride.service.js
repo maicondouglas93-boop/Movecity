@@ -309,10 +309,18 @@ module.exports.acceptRideAtomic = async ({
     }
 
     if (!updatedRide) {
-        // Find out if it doesn't exist or was already accepted
+        // Find out if it doesn't exist, foi cancelada, ou já foi aceita.
+        //
+        // Diagnóstico de push de corrida (2026-08-03), achado 4: antes, qualquer motivo
+        // de falha aqui virava "RIDE_ALREADY_ACCEPTED" — incluindo quando o passageiro
+        // tinha CANCELADO a corrida, não quando outro motorista aceitou primeiro. O
+        // motorista via "outro motorista aceitou" mesmo quando isso nunca aconteceu.
         const existingRide = await rideModel.findById(rideId);
         if (!existingRide) {
             throw new Error('RIDE_NOT_FOUND');
+        }
+        if (existingRide.status === 'cancelled') {
+            throw new Error('RIDE_CANCELLED');
         }
         throw new Error('RIDE_ALREADY_ACCEPTED');
     }

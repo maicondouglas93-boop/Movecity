@@ -54,8 +54,16 @@ const sendToCaptain = async (captainId, title, message, type, data = {}, options
 };
 
 module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
-    const title = 'Nova Corrida Disponível!';
-    const message = 'Há um passageiro solicitando uma corrida perto de você.';
+    // Diagnóstico de push de corrida (2026-08-03): título/mensagem no formato pedido,
+    // com o valor da corrida — antes `data` só carregava o rideId, então a mensagem
+    // era genérica ("Há um passageiro solicitando...") mesmo o valor já existindo no
+    // documento da corrida (ride.fare). `ride.controller.js: dispatchRideToCaptains`
+    // agora manda `fare` explicitamente.
+    const title = '🚗 Nova corrida disponível';
+    const fareLabel = typeof data.fare === 'number'
+        ? `R$ ${data.fare.toFixed(2).replace('.', ',')}`
+        : null;
+    const message = fareLabel ? `Passageiro próximo • ${fareLabel}` : 'Passageiro próximo';
 
     // C2 da auditoria de push (2026-08-02): o fallback antigo apontava pra
     // localhost:4000 — uma porta que nem o próprio backend usa (PORT default é 3000,
@@ -76,6 +84,15 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
 
     const options = {
         webpush: {
+            // Diagnóstico de push de corrida (2026-08-03): Urgency é o que de fato
+            // controla prioridade de entrega no protocolo Web Push — isto é uma PWA, não
+            // um app Android nativo (que teria message.android.priority='high'; não
+            // existe canal nativo do Android pra configurar aqui, é limitação de
+            // plataforma, não deste código). O navegador/SO usa este cabeçalho pra
+            // decidir o quão agressivamente acordar o dispositivo.
+            headers: {
+                Urgency: 'high'
+            },
             notification: {
                 ...(canAcceptInline ? {
                     actions: [
@@ -84,7 +101,14 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
                         { action: 'open', title: '📱 Abrir App' }
                     ]
                 } : {}),
-                requireInteraction: true
+                requireInteraction: true,
+                // vibrate/badge/tag ficam aqui por completude — quem de fato renderiza
+                // a notificação hoje é o onBackgroundMessage em firebase-messaging-sw.js
+                // (intercepta e monta a notificação na mão), então o que vale de
+                // verdade pra Chrome/Android está lá, não aqui.
+                vibrate: [300, 100, 300, 100, 300],
+                badge: '/movecity-icon.jpg',
+                tag: `ride-${data.rideId}`
             },
             fcmOptions: {
                 link: DEEP_LINK.captainHome

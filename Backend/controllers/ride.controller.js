@@ -67,7 +67,10 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
         // rejection capaz de derrubar o processo — o service já tem try/catch interno
         // desde a mesma auditoria, isto é defesa em profundidade.
-        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID).catch(console.error);
+        // Diagnóstico de push de corrida (2026-08-03): fare vai junto pra sendNewRide
+        // conseguir montar "Passageiro próximo • R$ XX,XX" — antes só o rideId era
+        // passado, mesmo o valor já existindo no documento da corrida.
+        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString(), fare: ride.fare }, TRACE_ID).catch(console.error);
     });
 
     return matchingCaptains.length;
@@ -174,6 +177,12 @@ async function performAcceptRide(rideId, captain, res) {
         return res.status(200).json(rideForCaptain);
     } catch (err) {
         console.error(`[AUDIT][${TRACE_ID}] Falha ao aceitar corrida (Concorrência ou Erro):`, err.message);
+        // Diagnóstico de push de corrida (2026-08-03), achado 4: antes, cancelada pelo
+        // passageiro caía no mesmo 409 de "outro motorista aceitou" — mensagem
+        // factualmente errada pro motorista quando a causa real era cancelamento.
+        if (err.message === 'RIDE_CANCELLED') {
+            return res.status(409).json({ message: 'O passageiro cancelou esta corrida.' });
+        }
         if (err.message === 'RIDE_ALREADY_ACCEPTED') {
             return res.status(409).json({ message: 'Corrida já aceita por outro motorista' });
         }

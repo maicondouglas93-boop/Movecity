@@ -71,16 +71,19 @@ self.addEventListener('message', (event) => {
 messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
     const notificationTitle = payload.notification?.title || payload.data?.title || 'Nova Mensagem';
-    
+
     const notificationOptions = {
         body: payload.notification?.body || payload.data?.message,
         icon: '/movecity-icon.jpg',
+        badge: '/movecity-icon.jpg',
         data: payload.data
     };
 
-    // Firebase normally handles actions if sent via webpush, 
-    // but if we intercept it here, we show it manually.
-    // If we want custom actions in background messages:
+    // Diagnóstico de push de corrida (2026-08-03): webpush.notification.actions/
+    // vibrate/badge/tag setados no backend (notificationDispatcher.service.js)
+    // nunca chegam aqui — o payload que o onBackgroundMessage recebe só tem
+    // {notification, data, fcmOptions}, não o bloco webpush inteiro. Quem de fato
+    // decide o que aparece na tela é este handler, então as opções ficam aqui.
     if (payload.data && payload.data.type === 'NEW_RIDE') {
         notificationOptions.actions = [
             { action: 'accept', title: '✅ Aceitar' },
@@ -88,6 +91,15 @@ messaging.onBackgroundMessage((payload) => {
             { action: 'open', title: '📱 Abrir App' }
         ];
         notificationOptions.requireInteraction = true;
+        // Vibração e badge só na oferta em si — é o momento que precisa chamar
+        // atenção com o app fechado; as notificações de status que vêm depois do
+        // clique (Aceitando/Aceita/indisponível) não precisam repetir isso.
+        notificationOptions.vibrate = [300, 100, 300, 100, 300];
+        // tag: mensagens repetidas da MESMA corrida (retry de envio, por exemplo)
+        // substituem a notificação anterior na bandeja em vez de empilhar.
+        if (payload.data.rideId) {
+            notificationOptions.tag = `ride-${payload.data.rideId}`;
+        }
     }
 
     self.registration.showNotification(notificationTitle, notificationOptions);
@@ -165,6 +177,12 @@ self.addEventListener('notificationclick', function(event) {
         if (acceptingRide) return;
         acceptingRide = true;
 
+        // Diagnóstico de push de corrida (2026-08-03): todas as notificações de status
+        // deste fluxo usam a MESMA tag da oferta original — cada uma substitui a
+        // anterior na bandeja em vez de empilhar (Aceitando/Aceita/indisponível não
+        // ficam acumulando notificações separadas pra mesma corrida).
+        const rideTag = data.rideId ? `ride-${data.rideId}` : undefined;
+
         // Feedback visual: alterando a notificação
         event.waitUntil((async () => {
             try {
@@ -173,6 +191,8 @@ self.addEventListener('notificationclick', function(event) {
                 await self.registration.showNotification('⏳ Aceitando...', {
                     body: 'Aguarde enquanto confirmamos a corrida.',
                     icon: '/movecity-icon.jpg',
+                    badge: '/movecity-icon.jpg',
+                    tag: rideTag,
                     requireInteraction: true
                 });
 
@@ -191,20 +211,43 @@ self.addEventListener('notificationclick', function(event) {
                 });
 
                 if (response.status === 200) {
+                    // Diagnóstico de push de corrida (2026-08-03), item 3: aceitar pela
+                    // notificação deve levar direto pra tela da corrida, não só avisar
+                    // que aceitou e esperar mais um toque. CaptainRiding.jsx já se
+                    // recupera sozinho via GET /rides/captain-current ao montar,
+                    // independente de como foi aberto — seguro abrir direto nela.
                     await self.registration.showNotification('✅ Corrida Aceita!', {
-                        body: 'Toque para abrir a viagem.',
+                        body: 'Abrindo a viagem...',
                         icon: '/movecity-icon.jpg',
+                        badge: '/movecity-icon.jpg',
+                        tag: rideTag,
                         data: data
                     });
+                    await focusOrOpenWindow('/captain-riding');
                 } else if (response.status === 409) {
+                    // Diagnóstico de push de corrida (2026-08-03), achado 4: a mensagem
+                    // agora vem do backend em vez de fixa — "outro motorista aceitou" e
+                    // "passageiro cancelou" são causas diferentes e o backend já sabe
+                    // distingui-las (ver ride.service.js: acceptRideAtomic).
+                    let serverMessage = 'Esta corrida não está mais disponível.';
+                    try {
+                        const body = await response.json();
+                        if (body?.message) serverMessage = body.message;
+                    } catch (parseErr) {
+                        // Resposta sem JSON válido — mantém a mensagem genérica.
+                    }
                     await self.registration.showNotification('❌ Corrida indisponível', {
-                        body: 'Outro motorista aceitou primeiro.',
-                        icon: '/movecity-icon.jpg'
+                        body: serverMessage,
+                        icon: '/movecity-icon.jpg',
+                        badge: '/movecity-icon.jpg',
+                        tag: rideTag
                     });
                 } else if (response.status === 401) {
                     await self.registration.showNotification('❌ Sessão expirada', {
                         body: 'Faça login novamente para aceitar corridas.',
-                        icon: '/movecity-icon.jpg'
+                        icon: '/movecity-icon.jpg',
+                        badge: '/movecity-icon.jpg',
+                        tag: rideTag
                     });
                     // Limpar token se estiver inválido
                     await clearToken();
@@ -214,10 +257,12 @@ self.addEventListener('notificationclick', function(event) {
             } catch (error) {
                 console.error('Erro ao aceitar corrida pelo SW:', error);
                 await self.registration.showNotification('❌ Erro de Conexão', {
-                    body: error.message === 'UNAUTHORIZED' 
-                        ? 'Você precisa estar logado.' 
+                    body: error.message === 'UNAUTHORIZED'
+                        ? 'Você precisa estar logado.'
                         : 'Verifique sua internet e tente abrir o app.',
-                    icon: '/movecity-icon.jpg'
+                    icon: '/movecity-icon.jpg',
+                    badge: '/movecity-icon.jpg',
+                    tag: rideTag
                 });
             } finally {
                 acceptingRide = false;

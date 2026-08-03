@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
+import { hasActiveSession, onSessionChanged } from '@/services/session';
 
 export const LocationContext = createContext();
 
@@ -14,11 +15,24 @@ export const LocationProvider = ({ children }) => {
     });
 
     const [locationError, setLocationError] = useState(null);
-    
+    // Auditoria PWA (2026-08-03, A2): antes o watcher ligava assim que o app abria,
+    // inclusive nas telas de login/cadastro, antes de existir qualquer sessão — GPS de
+    // alta precisão gastando bateria sem necessidade e o prompt de permissão nativo
+    // aparecendo sem contexto, na primeira tela que a pessoa via. Reage a login/logout
+    // via o evento de session.js (contexts de user/captain não dão um sinal confiável
+    // de "está logado" — UserDataContext começa com um objeto vazio, não null).
+    const [hasSession, setHasSession] = useState(() => hasActiveSession());
+
     // Ref para uso imediato em Sockets/Mapas sem causar re-renderizações desnecessárias
     const locationRef = useRef(userLocation);
 
     useEffect(() => {
+        return onSessionChanged(() => setHasSession(hasActiveSession()));
+    }, []);
+
+    useEffect(() => {
+        if (!hasSession) return;
+
         if (!navigator.geolocation) {
             setLocationError('Geolocalização não é suportada neste navegador.');
             return;
@@ -66,7 +80,7 @@ export const LocationProvider = ({ children }) => {
         return () => {
             navigator.geolocation.clearWatch(watchId);
         };
-    }, []);
+    }, [hasSession]);
 
     return (
         <LocationContext.Provider value={{ userLocation, locationRef, locationError }}>

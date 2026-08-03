@@ -16,6 +16,29 @@ const KEYS = {
     captain: { access: 'captain-token', refresh: 'captain-refreshToken' },
 };
 
+// Auditoria PWA (2026-08-03, A2): único jeito síncrono e confiável de saber "existe
+// sessão ativa agora", sem depender de UserDataContext/CaptainDataContext — o primeiro
+// começa como um objeto vazio (não null) mesmo deslogado, e nenhum dos dois é
+// preenchido de forma consistente antes do login. Usado por LocationContext pra não
+// ligar o GPS de alta precisão antes de existir alguém logado.
+const SESSION_CHANGED_EVENT = 'movecity:session-changed';
+
+function notifySessionChanged() {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+    }
+}
+
+export function onSessionChanged(callback) {
+    if (typeof window === 'undefined') return () => {};
+    window.addEventListener(SESSION_CHANGED_EVENT, callback);
+    return () => window.removeEventListener(SESSION_CHANGED_EVENT, callback);
+}
+
+export function hasActiveSession() {
+    return !!(getAccessToken('user') || getAccessToken('captain'));
+}
+
 export function saveSession(kind, { token, refreshToken }) {
     const keys = KEYS[kind];
     if (!keys) throw new Error(`Tipo de sessão desconhecido: ${kind}`);
@@ -23,6 +46,7 @@ export function saveSession(kind, { token, refreshToken }) {
     // O refresh token pode não vir no corpo se o backend decidir entregar só via
     // cookie httpOnly — nesse caso não sobrescreve o que já existe com undefined.
     if (refreshToken) localStorage.setItem(keys.refresh, refreshToken);
+    notifySessionChanged();
 }
 
 export function getAccessToken(kind) {
@@ -37,6 +61,7 @@ export function clearSession(kind) {
     const keys = KEYS[kind];
     localStorage.removeItem(keys.access);
     localStorage.removeItem(keys.refresh);
+    notifySessionChanged();
 }
 
 export function clearAllSessions() {
@@ -44,6 +69,7 @@ export function clearAllSessions() {
         localStorage.removeItem(access);
         localStorage.removeItem(refresh);
     });
+    notifySessionChanged();
 }
 
 // Qual sessão uma requisição usa é decidido pela rota — o mesmo navegador pode ter

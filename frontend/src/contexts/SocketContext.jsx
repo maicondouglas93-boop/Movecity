@@ -8,8 +8,14 @@ import * as Sentry from '@sentry/react';
 import { replayOfflineActions, actionLabel } from '@/services/offlineQueue';
 import { useToast } from '@/contexts/ToastContext';
 
+// Auditoria PWA (2026-08-03, A3): forçar só 'polling' nunca deixava o socket fazer
+// upgrade pra WebSocket (o backend já aceita os dois — Backend/socket.js) — toda
+// atualização em tempo real (localização, eventos de corrida, chat) usava requisições
+// HTTP repetidas em vez de uma conexão persistente leve, gastando mais bateria e dados
+// móveis em 100% das sessões. 'polling' continua listado primeiro como fallback — o
+// socket.io-client tenta o upgrade automaticamente depois de conectar.
 const socket = io(`${import.meta.env.VITE_BASE_URL}`, {
-    transports: [ 'polling' ]
+    transports: [ 'polling', 'websocket' ]
 });
 
 const SocketProvider = ({ children }) => {

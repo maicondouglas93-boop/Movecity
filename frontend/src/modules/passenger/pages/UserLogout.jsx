@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react'
+import React, { useContext, useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import { getAccessToken, getRefreshToken, clearSession } from '@/services/session'
 import { clearTokenInSW } from '@/services/swCommunication'
 import { getCurrentFcmToken } from '@/services/fcm'
+import { SocketContext } from '@/contexts/SocketContext'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
@@ -20,6 +21,7 @@ import SessionSplash from '@/shared/components/ui/SessionSplash'
 // disparar renovação silenciosa — estamos justamente encerrando a sessão.
 export const UserLogout = () => {
     const navigate = useNavigate()
+    const { socket } = useContext(SocketContext)
 
     useEffect(() => {
         const token = getAccessToken('user')
@@ -58,6 +60,14 @@ export const UserLogout = () => {
         ]).finally(() => {
             clearTokenInSW()
             clearSession('user')
+            // Auditoria PWA (2026-08-03, A6): o socket é um singleton por aba, nunca
+            // recriado — sem desconectar aqui, se outra conta logar na MESMA aba logo
+            // em seguida (sem recarregar a página), o join dela reusava esta mesma
+            // conexão física, e o registro desta conta no banco podia ficar apontando
+            // pra um socketId que agora pertence a outra pessoa. connect() força uma
+            // conexão nova (socket.id novo) pra quem usar o app em seguida.
+            socket.disconnect()
+            socket.connect()
             navigate('/login', { replace: true })
         })
     }, [])

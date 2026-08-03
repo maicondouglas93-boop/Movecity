@@ -17,7 +17,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      // Auditoria PWA (2026-08-03, A1): 'auto' injetava um registerSW.js passivo (só
+      // chama navigator.serviceWorker.register, sem avisar nada) — cada deploy trocava
+      // o Service Worker das abas abertas silenciosamente (skipWaiting+clientsClaim já
+      // eram automáticos no modo autoUpdate), sem nenhum prompt pedindo pra recarregar.
+      // Registro manual via virtual:pwa-register (main.jsx) permite mostrar esse aviso.
+      injectRegister: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
         // C1 da auditoria de push (2026-08-02): sem isto, o próprio Service Worker do

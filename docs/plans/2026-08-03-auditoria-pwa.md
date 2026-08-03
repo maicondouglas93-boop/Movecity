@@ -29,7 +29,16 @@ Nenhum desses três é sutil ou depende de condição de corrida rara — os doi
 
 **Verificação:** build do frontend limpo; suíte de testes do backend com 153/154 passando (a 1 falha restante, em `captain.availability.test.js`, é um erro de índice geoespacial do MongoDB — `unable to find index for $geoNear query` — reproduzido de forma consistente em 2 execuções limpas mesmo sem nenhuma relação com este arquivo ou com autenticação; é uma falha pré-existente de infraestrutura de teste, registrada como novo achado B10 abaixo, fora do escopo desta correção); suíte do frontend sem novas falhas além das já documentadas como baseline (`e2e/rideFlow.spec.js` — precisa do runner do Playwright, não do vitest — e `UserLogin.test.jsx`, nenhum dos dois tocado nesta sessão).
 
-**Ainda não implementado:** A1-A6, M1-M8, B1-B9 (ordem sugerida na seção "Plano de correção recomendado").
+**A1-A6 corrigidos e verificados (build + suíte de testes limpos, sem novas falhas além do baseline já documentado).**
+
+- **A5** (`frontend/index.html`): `viewport-fit=cover` adicionado — `env(safe-area-inset-bottom)` passa a ler o recuo real do dispositivo nos painéis inferiores, em vez do fallback fixo de 16px.
+- **A4** (`frontend/index.html`): `apple-touch-icon`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style` e `apple-mobile-web-app-title` adicionados, reaproveitando `movecity-icon.jpg` (1024×1024) — gerar ícones dedicados/maskable continua pendente como M4.
+- **A3** (`frontend/src/contexts/SocketContext.jsx`): `transports` passou de `['polling']` (nunca fazia upgrade) para `['polling', 'websocket']` — o socket.io-client agora negocia WebSocket automaticamente quando possível.
+- **A6** (`UserLogout.jsx`, `CaptainLogout.jsx`): logout agora chama `socket.disconnect()` + `socket.connect()` no fim do fluxo — fecha a conexão associada à conta que saiu e abre uma nova, limpa, para quem usar o app em seguida na mesma aba.
+- **A2** (`LocationContext.jsx`, `session.js`): o watcher de GPS (`enableHighAccuracy: true`) só liga quando existe sessão ativa (`hasActiveSession()`), reagindo em tempo real a login/logout via um evento próprio (`session.js: onSessionChanged`) — antes rodava desde a tela de login, antes de qualquer autenticação. Também desliga no logout (ganho extra de bateria não pedido explicitamente, mas consequência direta e correta da mesma mudança).
+- **A1** (`vite.config.js`, `App.jsx`, novo `shared/components/ui/UpdatePrompt.jsx`): `injectRegister` trocado de `'auto'` (registro passivo, sem aviso) para registro manual via `virtual:pwa-register/react` (`useRegisterSW`) — quando um novo deploy fica pronto, aparece um banner "Nova versão disponível" com botão "Atualizar"; o reload só acontece quando a pessoa toca, nunca automático (evita interromper uma corrida em andamento).
+
+**Ainda não implementado:** M1-M8, B1-B9 (ordem sugerida na seção "Plano de correção recomendado").
 
 ---
 

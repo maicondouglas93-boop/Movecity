@@ -3,9 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/jpeg" href="/movecity-icon.jpg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Auditoria PWA (2026-08-03, A5): sem viewport-fit=cover, env(safe-area-inset-*)
+         nunca é preenchido pelo navegador — os painéis inferiores do app (escolha de
+         veículo, confirmação, pagamento etc.) ficavam sempre no valor de fallback fixo,
+         nunca no recuo real do iPhone com barra de gestos. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="MoveCity - Sua cidade. Seu movimento. Mobilidade urbana simples, rápida e segura." />
     <meta name="theme-color" content="#0a0a0a" />
+    <!-- Auditoria PWA (2026-08-03, A4): iOS Safari não usa o manifest.webmanifest pra
+         decidir o ícone da tela inicial — sem apple-touch-icon dedicado, "Adicionar à
+         Tela de Início" gerava um ícone genérico (captura de tela recortada). -->
+    <link rel="apple-touch-icon" href="/movecity-icon.jpg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MoveCity" />
     <title>MoveCity</title>
   </head>
   <body>

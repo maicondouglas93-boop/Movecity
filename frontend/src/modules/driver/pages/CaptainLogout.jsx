@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react'
+import React, { useContext, useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import { getAccessToken, getRefreshToken, clearSession } from '@/services/session'
 import { clearTokenInSW } from '@/services/swCommunication'
 import { getCurrentFcmToken } from '@/services/fcm'
+import { SocketContext } from '@/contexts/SocketContext'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
@@ -11,6 +12,7 @@ import SessionSplash from '@/shared/components/ui/SessionSplash'
 // aqui (chamada fora de useEffect, sem catch, sem revogar o refresh token).
 export const CaptainLogout = () => {
     const navigate = useNavigate()
+    const { socket } = useContext(SocketContext)
 
     useEffect(() => {
         const token = getAccessToken('captain')
@@ -45,6 +47,12 @@ export const CaptainLogout = () => {
         ]).finally(() => {
             clearTokenInSW()
             clearSession('captain')
+            // Auditoria PWA (2026-08-03, A6): ver comentário equivalente em
+            // UserLogout.jsx — sem isto, um segundo motorista logando na mesma aba
+            // (aparelho de frota compartilhado) podia reusar a conexão de socket do
+            // motorista anterior.
+            socket.disconnect()
+            socket.connect()
             navigate('/captain-login', { replace: true })
         })
     }, [])

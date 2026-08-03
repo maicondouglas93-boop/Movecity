@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import Home from '@/modules/passenger/pages/Home';
 import { UserDataContext } from '@/contexts/UserContext';
 import { SocketContext } from '@/contexts/SocketContext';
+import { LocationContext } from '@/contexts/LocationContext';
 import { ToastProvider } from '@/contexts/ToastContext';
 
 vi.mock('firebase/messaging', () => ({
@@ -94,14 +95,22 @@ describe('Home Component', () => {
     vi.clearAllMocks();
   });
 
+  // LocationContext faltava aqui, e por isso a Home nunca chegava a renderizar nestes
+  // testes ("Cannot destructure property 'userLocation' of undefined") — as duas
+  // asserções abaixo nunca foram exercidas de verdade. Foi essa lacuna que deixou
+  // passar para produção um erro de temporal dead zone na própria Home (um useEffect
+  // declarado antes de `addToast`, com ele no array de dependências). Com o provider
+  // no lugar, um erro de render volta a quebrar o teste, que é o esperado.
   const renderWithProviders = (ui) => {
     return render(
       <BrowserRouter>
         <UserDataContext.Provider value={{ user: mockUser }}>
           <SocketContext.Provider value={{ socket: mockSocket }}>
-            <ToastProvider>
-              {ui}
-            </ToastProvider>
+            <LocationContext.Provider value={{ userLocation: null, locationRef: { current: null }, locationError: null }}>
+              <ToastProvider>
+                {ui}
+              </ToastProvider>
+            </LocationContext.Provider>
           </SocketContext.Provider>
         </UserDataContext.Provider>
       </BrowserRouter>

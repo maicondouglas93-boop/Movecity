@@ -136,22 +136,6 @@ const Home = () => {
         setupFCM();
     }, []); // Run once on mount
 
-    // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
-    // notificação nativa sozinho (isso só acontece via o Service Worker, com o app em
-    // segundo plano/fechado) — sem escutar aqui, uma corrida aceita/iniciada/finalizada
-    // que chegasse por push enquanto o passageiro está olhando a tela não aparecia em
-    // lugar nenhum (o único aviso em primeiro plano hoje vem do Socket.IO).
-    useEffect(() => {
-        const unsubscribe = onForegroundMessage((payload) => {
-            const title = payload?.notification?.title || payload?.data?.title;
-            const body = payload?.notification?.body || payload?.data?.message;
-            if (title || body) {
-                addToast([title, body].filter(Boolean).join(' — '), 'info');
-            }
-        });
-        return () => unsubscribe();
-    }, [addToast]);
-
     const handleEnableNotifications = async () => {
         setShowNotificationPrompt(false)
         localStorage.setItem('notificationPromptSeen', '1')
@@ -203,6 +187,27 @@ const Home = () => {
     const { socket } = useContext(SocketContext)
     const { user } = useContext(UserDataContext)
     const { addToast } = useToast()
+
+    // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
+    // notificação nativa sozinho (isso só acontece via o Service Worker, com o app em
+    // segundo plano/fechado) — sem escutar aqui, uma corrida aceita/iniciada/finalizada
+    // que chegasse por push enquanto o passageiro está olhando a tela não aparecia em
+    // lugar nenhum (o único aviso em primeiro plano hoje vem do Socket.IO).
+    //
+    // Precisa ficar DEPOIS de `addToast` acima: o array de dependências é avaliado
+    // durante o render, e declarar este efeito antes deixava `addToast` na temporal
+    // dead zone — quebrando a Home inteira com "Cannot access 'rt' before
+    // initialization" em produção (o build não pega isso, é erro de execução).
+    useEffect(() => {
+        const unsubscribe = onForegroundMessage((payload) => {
+            const title = payload?.notification?.title || payload?.data?.title;
+            const body = payload?.notification?.body || payload?.data?.message;
+            if (title || body) {
+                addToast([title, body].filter(Boolean).join(' — '), 'info');
+            }
+        });
+        return () => unsubscribe();
+    }, [addToast]);
 
     useEffect(() => {
         if (!user || !user._id) return;

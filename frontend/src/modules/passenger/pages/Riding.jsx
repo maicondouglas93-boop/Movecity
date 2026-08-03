@@ -13,6 +13,7 @@ import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
 import { getAccessToken } from '@/services/session'
+import { joinWithRetry } from '@/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
 
@@ -39,9 +40,10 @@ const Riding = () => {
         if (!user || !user._id) return;
 
         const handleConnect = () => {
-            // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
-            // quem está de fato entrando — sem isto, o join é rejeitado.
-            socket.emit("join", { userType: "user", userId: user._id, token: getAccessToken('user') })
+            // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
+            // (2026-08-03): joinWithRetry renova o token e tenta de novo se o atual já
+            // estiver vencido — ver docs/plans/2026-08-03-auditoria-regressao-push.md.
+            joinWithRetry(socket, { userId: user._id, userType: 'user' })
         }
 
         if (socket.connected) {

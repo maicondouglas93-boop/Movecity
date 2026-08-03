@@ -113,42 +113,56 @@ api.interceptors.response.use((response) => response, async (error) => {
     }
 
     const refreshKind = kind || (getRefreshToken('user') ? 'user' : 'captain');
-    const refreshToken = getRefreshToken(refreshKind);
 
+    try {
+        const newToken = await refreshAccessToken(refreshKind);
+        config._retriedAfterRefresh = true;
+        config.headers.Authorization = `Bearer ${newToken}`;
+        return api(config);
+    } catch (refreshError) {
+        return Promise.reject(error);
+    }
+});
+
+// Auditoria de regressão de push (2026-08-03): extraído do interceptor acima pra ser
+// reutilizável fora de uma resposta HTTP — especificamente pelo `join` do Socket.IO
+// (frontend/src/services/socketAuth.js). O `join` passou a exigir token válido (C1/C2
+// da auditoria PWA), mas nada nas telas de espera de corrida faz chamada REST
+// periódica, então o token pode ficar vencido por tempo indefinido sem nenhum 401
+// pra disparar a renovação de dentro do interceptor — o motorista caía fora do
+// despacho silenciosamente numa reconexão de socket com token vencido. Mantém a MESMA
+// fila (`isRefreshing`/`refreshQueue`) do interceptor, então uma renovação disparada
+// pelo socket e uma disparada por uma chamada REST concorrente nunca duplicam a
+// chamada ao backend.
+export async function refreshAccessToken(kind) {
     if (isRefreshing) {
         return new Promise((resolve, reject) => {
             refreshQueue.push({ resolve, reject });
-        }).then((newToken) => {
-            config._retriedAfterRefresh = true;
-            config.headers.Authorization = `Bearer ${newToken}`;
-            return api(config);
         });
     }
 
     isRefreshing = true;
     try {
-        const endpoint = refreshKind === 'captain' ? '/captains/refresh' : '/users/refresh';
+        const refreshToken = getRefreshToken(kind);
+        const endpoint = kind === 'captain' ? '/captains/refresh' : '/users/refresh';
         // Sem refresh token no localStorage ainda vale tentar: ele pode estar no cookie
         // httpOnly, que o JS não enxerga mas o navegador envia (withCredentials).
         const { data } = await api.post(endpoint, refreshToken ? { refreshToken } : {});
 
-        saveSession(refreshKind, { token: data.token, refreshToken: data.refreshToken });
+        saveSession(kind, { token: data.token, refreshToken: data.refreshToken });
         // C1 da auditoria de push (2026-08-02): o Service Worker do motorista só consegue
         // aceitar corrida em segundo plano se tiver um access token válido no IndexedDB —
         // sem sincronizar aqui, ele ficaria com o token antigo até a próxima abertura do app.
         syncTokenWithSW(data.token);
         isRefreshing = false;
         flushQueue(null, data.token);
-
-        config._retriedAfterRefresh = true;
-        config.headers.Authorization = `Bearer ${data.token}`;
-        return api(config);
+        return data.token;
     } catch (refreshError) {
         isRefreshing = false;
         flushQueue(refreshError);
-        forceLogout(refreshKind);
-        return Promise.reject(error);
+        forceLogout(kind);
+        throw refreshError;
     }
-});
+}
 
 export default api;

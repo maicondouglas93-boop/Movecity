@@ -15,6 +15,7 @@ import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
 import { getAccessToken } from '@/services/session'
 import { flushQueuedLocations } from '@/services/offlineQueue'
+import { joinWithRetry } from '@/services/socketAuth'
 
 const CaptainRiding = () => {
 
@@ -81,13 +82,11 @@ const CaptainRiding = () => {
         if (!captain?._id || !rideData) return;
 
         const handleConnect = () => {
-            // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
-            // quem está de fato entrando — sem isto, o join é rejeitado. O ack confirma
-            // a identidade antes de mandar qualquer localização enfileirada offline.
-            socket.emit('join', { userId: captain._id, userType: 'captain', token: getAccessToken('captain') }, (response) => {
-                if (response?.ok) {
-                    flushQueuedLocations(socket).catch(e => console.error(e))
-                }
+            // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
+            // (2026-08-03): joinWithRetry renova o token e tenta de novo se o atual já
+            // estiver vencido — ver docs/plans/2026-08-03-auditoria-regressao-push.md.
+            joinWithRetry(socket, { userId: captain._id, userType: 'captain' }, () => {
+                flushQueuedLocations(socket).catch(e => console.error(e))
             })
         }
 

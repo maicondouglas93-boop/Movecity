@@ -33,6 +33,17 @@ vi.mock('@/services/vehicleCategoriesApi', () => ({
   getVehicleCategories: vi.fn().mockResolvedValue([]),
 }));
 
+// Auditoria de regressão de push (2026-08-03): Home.jsx passou a puxar
+// @/services/socketAuth (joinWithRetry), que por sua vez importa @/services/axios —
+// esse módulo faz `axios.create(...)` no topo do arquivo; como este teste já mocka o
+// pacote 'axios' cru (auto-mock, sem create() de verdade), o import real de
+// @/services/axios quebrava o carregamento do arquivo inteiro. Mockado aqui pelo
+// mesmo motivo que os outros serviços acima.
+vi.mock('@/services/axios', () => ({
+  default: { get: vi.fn(), post: vi.fn() },
+  refreshAccessToken: vi.fn(),
+}));
+
 // Mocks for GSAP
 vi.mock('@gsap/react', () => ({
   useGSAP: vi.fn(),
@@ -125,9 +136,15 @@ describe('Home Component', () => {
     
     // Check if socket join was emitted
     // Auditoria PWA (2026-08-03, C2): join agora exige o JWT do usuário — sem ele, o
-    // backend rejeita a entrada.
+    // backend rejeita a entrada. Auditoria de regressão de push (2026-08-03):
+    // joinWithRetry emite via um callback (pra poder renovar o token e tentar de novo
+    // se o join falhar), então o emit real leva um terceiro argumento agora.
     await waitFor(() => {
-      expect(mockSocket.emit).toHaveBeenCalledWith('join', { userType: 'user', userId: 'mock-user-id', token: null });
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'join',
+        { userType: 'user', userId: 'mock-user-id', token: null },
+        expect.any(Function)
+      );
     });
   });
 

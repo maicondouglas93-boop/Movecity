@@ -19,6 +19,7 @@ import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/services/offlineQueue'
 import { getAccessToken } from '@/services/session'
+import { joinWithRetry } from '@/services/socketAuth'
 import * as Sentry from '@sentry/react'
 
 const CaptainHome = () => {
@@ -139,18 +140,13 @@ const CaptainHome = () => {
 
         const handleConnect = () => {
             // Auditoria PWA (2026-08-03, C2): o backend agora exige o JWT pra validar
-            // quem está de fato entrando — sem isto, o join é rejeitado. O ack confirma
-            // que a identidade já está setada no socket antes de mandar qualquer
-            // localização enfileirada offline (evita a corrida descrita em
-            // flushQueuedLocations).
-            socket.emit('join', {
-                userId: captain._id,
-                userType: 'captain',
-                token: getAccessToken('captain')
-            }, (response) => {
-                if (response?.ok) {
-                    flushQueuedLocations(socket).catch(e => console.error(e))
-                }
+            // quem está de fato entrando — sem isto, o join é rejeitado. Auditoria de
+            // regressão de push (2026-08-03): joinWithRetry renova o token e tenta de
+            // novo se o token atual já estiver vencido — sem isso, um motorista com o
+            // app aberto podia cair fora do despacho silenciosamente numa reconexão
+            // (ver docs/plans/2026-08-03-auditoria-regressao-push.md).
+            joinWithRetry(socket, { userId: captain._id, userType: 'captain' }, () => {
+                flushQueuedLocations(socket).catch(e => console.error(e))
             })
         }
 

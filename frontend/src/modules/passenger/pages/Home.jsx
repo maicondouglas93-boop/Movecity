@@ -640,11 +640,7 @@ const Home = () => {
             </div>
             
             <div className={`absolute w-full pointer-events-none z-20 transition-all duration-300 ${panelOpen ? 'top-0 bottom-0 flex flex-col' : 'bottom-0'}`}>
-                {/* Tap area to close panel */}
-                {panelOpen && (
-                    <div className="flex-1 pointer-events-auto" onClick={() => setPanelOpen(false)} />
-                )}
-                <div className={`h-auto p-6 bg-white relative pointer-events-auto transition-transform duration-300 shadow-2xl rounded-t-3xl flex-shrink-0 ${panelOpen ? 'pb-2' : 'pb-8'} ${(isSelectingOnMap || vehiclePanel || confirmRidePanel || vehicleFound || waitingForDriver || schedulePanelOpen) ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
+                <div className={`p-6 bg-white relative pointer-events-auto transition-transform duration-300 shadow-2xl ${panelOpen ? 'flex-shrink-0 pb-2' : 'h-auto rounded-t-3xl flex-shrink-0 pb-8'} ${(isSelectingOnMap || vehiclePanel || confirmRidePanel || vehicleFound || waitingForDriver || schedulePanelOpen) ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
                     
                     {!panelOpen ? (
                         <>

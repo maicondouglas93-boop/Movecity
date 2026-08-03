@@ -277,7 +277,7 @@ const LiveTracking = (props) => {
 
         Promise.resolve(provider.init(mapRef.current, {
             center: pos,
-            zoom: 15,
+            zoom: 14,
             onMoveEnd: (center) => {
                 if (onMapCenterChangeRef.current) {
                     onMapCenterChangeRef.current(center);

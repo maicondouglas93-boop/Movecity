@@ -5,8 +5,30 @@ const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
 const adminUserModel = require('./models/adminUser.model');
 const mapService = require('./services/maps.service');
+const notificationDispatcher = require('./notification/notificationDispatcher.service');
 
 let io;
+
+// A7 da auditoria de push (2026-08-02): "quem está de fato olhando este chat agora" —
+// contagem por corrida e por tipo (não por socket, pra suportar a mesma pessoa com duas
+// abas/dispositivos abertos sem que sair de uma derrube a presença da outra). Usado por
+// 'send-message' pra decidir: destinatário presente -> só Socket.IO (como já era);
+// destinatário ausente -> cai pro push (antes não existia nenhum aviso nesse caso).
+const chatPresence = new Map(); // rideId (string) -> { user: number, captain: number }
+
+const addChatPresence = (rideId, type) => {
+    if (!chatPresence.has(rideId)) chatPresence.set(rideId, { user: 0, captain: 0 });
+    chatPresence.get(rideId)[type]++;
+};
+
+const removeChatPresence = (rideId, type) => {
+    const presence = chatPresence.get(rideId);
+    if (!presence) return;
+    presence[type] = Math.max(0, presence[type] - 1);
+    if (presence.user === 0 && presence.captain === 0) chatPresence.delete(rideId);
+};
+
+const isChatPresent = (rideId, type) => (chatPresence.get(rideId)?.[type] || 0) > 0;
 
 function initializeSocket(server) {
     const allowedOrigins = [
@@ -34,8 +56,23 @@ function initializeSocket(server) {
                 await userModel.findByIdAndUpdate(userId, { socketId: socket.id });
                 console.log(`[AUDIT] User ${userId} atualizou socketId para ${socket.id}`);
             } else if (userType === 'captain') {
-                await captainModel.findByIdAndUpdate(userId, { socketId: socket.id });
+                // Separação disponibilidade x conexão (2026-08-03): `lastSeenAt` é o
+                // heartbeat que mantém o motorista no despacho. Reconectar conta como
+                // contato real.
+                const captainBefore = await captainModel.findByIdAndUpdate(
+                    userId,
+                    { socketId: socket.id, lastSeenAt: new Date() }
+                );
                 console.log(`[AUDIT] Captain ${userId} atualizou socketId para ${socket.id}`);
+
+                // O tempo online mede tempo realmente CONECTADO (o disconnect fecha a
+                // sessão). Se o motorista continua disponível e voltou a conectar, uma
+                // nova sessão começa aqui — sem isso, reabrir o app depois de uma queda
+                // deixaria de contar o tempo até o próximo toggle.
+                if (captainBefore && captainBefore.isOnline && !captainBefore.onlineSince) {
+                    const captainService = require('./services/captain.service');
+                    await captainService.startOnlineSession(userId);
+                }
             } else if (userType === 'admin') {
                 // Auditoria de segurança (2026-08-02, S1): a sala admin_room recebe GPS
                 // em tempo real de toda a frota. Sem checar o token aqui, qualquer cliente
@@ -78,7 +115,11 @@ function initializeSocket(server) {
                 locationGeoJSON: {
                     type: 'Point',
                     coordinates: [location.lng, location.ltd]
-                }
+                },
+                // Heartbeat da separação disponibilidade x conexão (2026-08-03): o app
+                // do motorista já emite este evento periodicamente, então ele é o
+                // batimento natural — sem exigir nada novo do cliente.
+                lastSeenAt: new Date()
             });
 
             // Find active ride for this captain and emit update to the rider
@@ -136,70 +177,158 @@ function initializeSocket(server) {
             });
         });
 
-        // Chat events
-        socket.on('join-chat', (data) => {
-            const { rideId } = data;
-            if (rideId) {
-                socket.join(`chat_${rideId}`);
+        // A10 da auditoria de push (2026-08-02): antes, qualquer socket conectado
+        // entrava em `chat_<rideId>` só sabendo o id da corrida — sem provar quem era —
+        // e passava a receber (e podia forjar o envio de) mensagens de uma conversa
+        // alheia entre passageiro e motorista. Agora 'join-chat' exige o JWT de quem
+        // está entrando e confirma que essa identidade é o `user` ou o `captain` da
+        // corrida antes de autorizar. A autorização fica em `socket.data` (memória do
+        // próprio socket, não persiste em nada) pra não repetir a consulta ao banco em
+        // cada mensagem/typing — só uma vez por entrada na sala.
+        const resolveChatIdentity = async (token) => {
+            if (!token) return null;
+            try {
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                const identifiedUser = await userModel.findById(decoded._id).select('_id');
+                if (identifiedUser) return { type: 'user', id: identifiedUser._id.toString() };
+                const identifiedCaptain = await captainModel.findById(decoded._id).select('_id');
+                if (identifiedCaptain) return { type: 'captain', id: identifiedCaptain._id.toString() };
+            } catch (err) {
+                return null;
             }
+            return null;
+        };
+
+        const canAccessChat = async (identity, rideId) => {
+            if (!identity || !rideId) return false;
+            const ride = await rideModel.findById(rideId).select('user captain');
+            if (!ride) return false;
+            if (identity.type === 'user' && ride.user) return ride.user.toString() === identity.id;
+            if (identity.type === 'captain' && ride.captain) return ride.captain.toString() === identity.id;
+            return false;
+        };
+
+        const hasChatAccess = (rideId) => !!(rideId && socket.data.authorizedChats && socket.data.authorizedChats.has(rideId));
+
+        socket.on('join-chat', async (data) => {
+            const { rideId, token } = data || {};
+            if (!rideId) return;
+
+            const identity = await resolveChatIdentity(token);
+            const allowed = await canAccessChat(identity, rideId);
+            if (!allowed) {
+                console.log(`[AUDIT] JOIN em chat_${rideId} rejeitado (sem acesso) no socket ${socket.id}`);
+                return socket.emit('unauthorized', { message: 'Sem acesso a este chat' });
+            }
+
+            if (!socket.data.authorizedChats) socket.data.authorizedChats = new Set();
+            if (!socket.data.chatIdentities) socket.data.chatIdentities = new Map();
+            socket.data.authorizedChats.add(rideId);
+            socket.data.chatIdentities.set(rideId, identity);
+            socket.join(`chat_${rideId}`);
+            addChatPresence(rideId, identity.type);
         });
 
         socket.on('leave-chat', (data) => {
-            const { rideId } = data;
+            const { rideId } = data || {};
             if (rideId) {
                 socket.leave(`chat_${rideId}`);
+                const identity = socket.data.chatIdentities?.get(rideId);
+                if (identity) removeChatPresence(rideId, identity.type);
+                socket.data.authorizedChats?.delete(rideId);
+                socket.data.chatIdentities?.delete(rideId);
             }
         });
 
-        socket.on('send-message', (data) => {
-            const { rideId, message } = data;
-            if (rideId) {
-                socket.to(`chat_${rideId}`).emit('receive-message', message);
+        socket.on('send-message', async (data) => {
+            const { rideId, message } = data || {};
+            if (!hasChatAccess(rideId)) return;
+
+            socket.to(`chat_${rideId}`).emit('receive-message', message);
+
+            // A7 da auditoria de push (2026-08-02): "App aberto -> Socket.IO; App
+            // fechado -> Firebase Push". O relay acima já cobre o primeiro caso; isto
+            // aqui cobre o segundo, que antes simplesmente não existia — quem não
+            // estava com o chat aberto nunca sabia que recebeu uma mensagem.
+            try {
+                const senderIdentity = socket.data.chatIdentities?.get(rideId);
+                if (!senderIdentity) return;
+
+                const recipientType = senderIdentity.type === 'user' ? 'captain' : 'user';
+                if (isChatPresent(rideId, recipientType)) return;
+
+                const ride = await rideModel.findById(rideId).select('user captain');
+                if (!ride) return;
+
+                const preview = typeof message?.message === 'string' ? message.message.slice(0, 100) : 'Nova mensagem';
+                if (recipientType === 'captain' && ride.captain) {
+                    notificationDispatcher.sendChatMessageToCaptain(ride.captain, preview, { rideId }).catch(err => console.error('[Chat Push]', err.message));
+                } else if (recipientType === 'user' && ride.user) {
+                    notificationDispatcher.sendChatMessageToUser(ride.user, preview, { rideId }).catch(err => console.error('[Chat Push]', err.message));
+                }
+            } catch (err) {
+                console.error('[Chat Push] Erro ao processar fallback de push:', err.message);
             }
         });
 
         socket.on('message-delivered', (data) => {
-            const { rideId, messageId } = data;
-            if (rideId) {
+            const { rideId, messageId } = data || {};
+            if (hasChatAccess(rideId)) {
                 socket.to(`chat_${rideId}`).emit('message-delivered', { messageId });
             }
         });
 
         socket.on('message-read', (data) => {
-            const { rideId, messageId } = data;
-            if (rideId) {
+            const { rideId, messageId } = data || {};
+            if (hasChatAccess(rideId)) {
                 socket.to(`chat_${rideId}`).emit('message-read', { messageId });
             }
         });
 
         socket.on('typing-start', (data) => {
-            const { rideId, senderType } = data;
-            if (rideId) {
+            const { rideId, senderType } = data || {};
+            if (hasChatAccess(rideId)) {
                 socket.to(`chat_${rideId}`).emit('typing-start', { senderType });
             }
         });
 
         socket.on('typing-stop', (data) => {
-            const { rideId, senderType } = data;
-            if (rideId) {
+            const { rideId, senderType } = data || {};
+            if (hasChatAccess(rideId)) {
                 socket.to(`chat_${rideId}`).emit('typing-stop', { senderType });
             }
         });
 
         socket.on('disconnect', async () => {
             console.log(`[AUDIT] Client disconnected: ${socket.id}`);
+
+            // A7: sem isto, um socket que caiu sem emitir 'leave-chat' (fechar o app,
+            // perder conexão) deixaria a presença de chat "presa" achando que ele ainda
+            // está olhando a tela — e o outro lado nunca mais receberia push nenhum.
+            if (socket.data.chatIdentities) {
+                for (const [rideId, identity] of socket.data.chatIdentities.entries()) {
+                    removeChatPresence(rideId, identity.type);
+                }
+            }
+
             await userModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
 
             // findOneAndUpdate sem { new: true } retorna o documento ANTES do update,
             // então dá pra saber se esse motorista estava online quando desconectou.
             const captainBeforeUpdate = await captainModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
             if (captainBeforeUpdate && captainBeforeUpdate.isOnline) {
-                // Motorista fechou o app/perdeu conexão sem tocar em "Ficar Offline" —
-                // sem isto, o tempo online contaria para sempre e ele continuaria
-                // aparecendo como candidato a corridas com isOnline:true.
+                // Separação disponibilidade x conexão (2026-08-03): o tempo online mede
+                // tempo realmente CONECTADO, então a sessão é fechada aqui como sempre
+                // foi — sem isso ela contaria para sempre.
+                //
+                // O que MUDOU: `isOnline` não é mais zerado. Ele passou a significar só a
+                // intenção do motorista ("quero receber corridas"), e fechar o app não é
+                // desistir de receber corridas. Zerá-lo aqui era exatamente o que tirava
+                // o motorista do despacho ao fechar o app e tornava a push de corrida
+                // nova inalcançável. Quem cuida de "sumiu de vez" agora é o TTL de
+                // lastSeenAt em captainService.availabilityFilter().
                 const captainService = require('./services/captain.service');
                 await captainService.endOnlineSession(captainBeforeUpdate._id);
-                await captainModel.findByIdAndUpdate(captainBeforeUpdate._id, { isOnline: false, status: 'inactive' });
 
                 const { deleteByPrefix } = require('./cache/cache');
                 deleteByPrefix(`profile:captain:${captainBeforeUpdate._id}`);

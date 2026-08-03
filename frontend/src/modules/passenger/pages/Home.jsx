@@ -19,7 +19,7 @@ import { LocationContext } from '@/contexts/LocationContext';
 import { useToast } from '@/contexts/ToastContext';
 import Header from '@/modules/passenger/components/Header';
 import ScheduleRidePanel from '@/modules/passenger/components/ScheduleRidePanel';
-import { requestFCMToken } from '@/services/fcm';
+import { requestFCMToken, onForegroundMessage } from '@/services/fcm';
 import { reverseGeocode } from '@/services/mapsApi';
 import { getFriendlyErrorMessage } from '@/services/errorMessages';
 import { useBackToClose } from '@/shared/hooks/useBackToClose';
@@ -135,6 +135,22 @@ const Home = () => {
         };
         setupFCM();
     }, []); // Run once on mount
+
+    // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
+    // notificação nativa sozinho (isso só acontece via o Service Worker, com o app em
+    // segundo plano/fechado) — sem escutar aqui, uma corrida aceita/iniciada/finalizada
+    // que chegasse por push enquanto o passageiro está olhando a tela não aparecia em
+    // lugar nenhum (o único aviso em primeiro plano hoje vem do Socket.IO).
+    useEffect(() => {
+        const unsubscribe = onForegroundMessage((payload) => {
+            const title = payload?.notification?.title || payload?.data?.title;
+            const body = payload?.notification?.body || payload?.data?.message;
+            if (title || body) {
+                addToast([title, body].filter(Boolean).join(' — '), 'info');
+            }
+        });
+        return () => unsubscribe();
+    }, [addToast]);
 
     const handleEnableNotifications = async () => {
         setShowNotificationPrompt(false)

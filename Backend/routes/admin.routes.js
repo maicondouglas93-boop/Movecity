@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
+const notificationController = require('../controllers/notification.controller');
 const { authAdmin, authorizeRoles } = require('../middlewares/adminAuth.middleware');
-const { loginLimiter } = require('../middlewares/rateLimiter');
+const { loginLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
+const { body } = require('express-validator');
 
 // Auth Routes
 router.post('/login', loginLimiter, adminController.login);
@@ -13,6 +15,18 @@ router.post('/logout', authAdmin, adminController.logout);
 // Dashboard Route
 router.get('/dashboard', authAdmin, adminController.getDashboard);
 router.get('/health', authAdmin, adminController.getHealthStatus);
+
+// Fase 7 da correção do sistema de push (2026-08-02): canal de push para o próprio
+// painel administrativo (novo motorista pra aprovar, denúncia, problema de pagamento).
+// Mesmo controller/tokenRegistry usados por passageiro e motorista — só o middleware de
+// auth muda.
+router.post('/notifications/token',
+    notificationTokenLimiter,
+    authAdmin,
+    [ body('token').isString().notEmpty().withMessage('Token is required') ],
+    notificationController.registerToken
+);
+router.delete('/notifications/token', authAdmin, notificationController.unregisterToken);
 
 // Marketing / Campaigns
 router.post('/notifications', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.sendNotification); // Legacy (maybe used elsewhere)

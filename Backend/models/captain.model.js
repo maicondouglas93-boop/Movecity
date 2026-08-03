@@ -101,8 +101,20 @@ const captainSchema = new mongoose.Schema({
     },
 
     isOnline: {
+        // Separação disponibilidade x conexão (2026-08-03): este campo representa
+        // apenas a INTENÇÃO do motorista ("quero receber corridas"), definida pelo
+        // botão "Ficar Online". Antes ele também era zerado pelo `disconnect` do
+        // socket, o que fazia fechar o app remover o motorista do despacho — e por
+        // isso a push de corrida nova com o app fechado nunca era alcançável.
+        // Conectividade agora é `socketId` + `lastSeenAt`, campos separados.
         type: Boolean,
         default: false,
+    },
+
+    lastSeenAt: {
+        type: Date,
+        default: null,
+        description: "Último contato real com o motorista (join de socket, atualização de localização ou toggle-online). Usado com isOnline para decidir se ele ainda está disponível — ver captain.service.js: availabilityFilter."
     },
 
     totalRides: {
@@ -199,6 +211,9 @@ const captainSchema = new mongoose.Schema({
 // Índices de Performance e Geolocalização
 captainSchema.index({ status: 1 });
 captainSchema.index({ isOnline: 1 });
+// Composto: toda consulta de disponibilidade filtra pelos dois juntos
+// (captain.service.js: availabilityFilter).
+captainSchema.index({ isOnline: 1, lastSeenAt: -1 });
 captainSchema.index({ canReceiveRides: 1 });
 captainSchema.index({ locationGeoJSON: '2dsphere' });
 

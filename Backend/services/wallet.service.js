@@ -5,6 +5,7 @@ const { deleteByPrefix } = require('../cache/cache');
 const captainModel = require('../models/captain.model');
 const globalSettingModel = require('../models/globalSetting.model');
 const { sendMessageToSocketId } = require('../socket');
+const notificationService = require('./notification.service');
 
 const getWallet = async (captainId) => {
     let wallet = await walletModel.findOne({ captainId });
@@ -111,6 +112,14 @@ const createTransaction = async ({ captainId, rideId, type, paymentMethod, amoun
                 event: 'summary-updated',
                 data: { timestamp: Date.now() }
             });
+        }
+
+        // Fase 5 da auditoria de push (2026-08-02): sendRechargeApproved já existia
+        // desde sempre mas nunca era chamada — recarga só avisava quem estivesse com o
+        // app aberto naquele instante (socket). Só recarga gera push (não toda
+        // movimentação de carteira) pra não notificar demais por débito de comissão etc.
+        if (type === 'recharge') {
+            notificationService.sendRechargeApproved(captainId, { transactionId: transaction._id.toString(), amount }).catch(console.error);
         }
     };
 

@@ -1,7 +1,9 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
+import { useToast } from './contexts/ToastContext';
+import { onAdminForegroundMessage } from './services/fcm';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
@@ -26,6 +28,23 @@ const PageLoading = () => (
 );
 
 function App() {
+  const toast = useToast();
+
+  // A9/Fase 7 da correção do sistema de push (2026-08-02): com o painel aberto, o
+  // Firebase não mostra notificação nativa sozinho — sem isto, um alerta administrativo
+  // (novo motorista, denúncia, problema de pagamento) só apareceria se o admin
+  // recarregasse a tela ou fosse conferir a aba correspondente por conta própria.
+  useEffect(() => {
+    const unsubscribe = onAdminForegroundMessage((payload) => {
+      const title = payload?.notification?.title || payload?.data?.title;
+      const body = payload?.notification?.body || payload?.data?.message;
+      if (title || body) {
+        toast.success([title, body].filter(Boolean).join(' — '));
+      }
+    });
+    return () => unsubscribe();
+  }, [toast]);
+
   return (
     <AuthProvider>
       <SocketProvider>

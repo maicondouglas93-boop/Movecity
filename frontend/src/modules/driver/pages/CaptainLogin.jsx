@@ -7,6 +7,7 @@ import Button from '@/shared/components/ui/Button'
 
 import { useToast } from '@/contexts/ToastContext'
 import { saveSession } from '@/services/session'
+import { syncTokenWithSW } from '@/services/swCommunication'
 
 const Captainlogin = () => {
 
@@ -40,6 +41,7 @@ const Captainlogin = () => {
 
         setCaptain(data.captain)
         saveSession('captain', data)
+        syncTokenWithSW(data.token)
         addToast(`Bem-vindo online, Motorista ${data.captain.fullname.firstname}! 🚗`, 'success')
         navigate('/captain-home')
       }

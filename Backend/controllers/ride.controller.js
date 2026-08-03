@@ -63,7 +63,11 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
             event: 'new-ride',
             data: rideWithUser
         });
-        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID);
+        // C5 da auditoria de push (2026-08-02): disparado sem await de propósito (não
+        // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
+        // rejection capaz de derrubar o processo — o service já tem try/catch interno
+        // desde a mesma auditoria, isto é defesa em profundidade.
+        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString() }, TRACE_ID).catch(console.error);
     });
 
     return matchingCaptains.length;
@@ -151,7 +155,7 @@ async function performAcceptRide(rideId, captain, res) {
             data: ride
         });
 
-        notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() });
+        notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
 
         // Avisa os outros motoristas que estavam com essa corrida na tela que ela já foi
         // aceita por outro colega — fecha o popup deles (listener entra na Etapa P3.1).
@@ -220,7 +224,7 @@ module.exports.startRide = async (req, res) => {
             event: 'ride-started',
             data: ride
         })
-        notificationService.sendRideStarted(ride.user._id, { rideId: ride._id.toString() });
+        notificationService.sendRideStarted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
 
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
@@ -256,6 +260,13 @@ module.exports.updateRideStatus = async (req, res) => {
             data: ride
         })
 
+        // A5 da auditoria de push (2026-08-02): "motorista chegou" é justamente o
+        // momento em que o passageiro mais provavelmente NÃO está com o app aberto —
+        // socket sozinho não alcança quem não está olhando a tela.
+        if (status === 'arrived' && ride.user?._id) {
+            notificationService.sendCaptainArrived(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        }
+
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
 
@@ -286,7 +297,7 @@ module.exports.endRide = async (req, res) => {
             event: 'ride-ended',
             data: ride
         })
-        notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() });
+        notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
 
         // Invalidate dashboard and history cache
         deleteCache('dashboard:today');
@@ -323,6 +334,11 @@ module.exports.payRide = async (req, res) => {
                 event: 'payment-completed',
                 data: ride
             });
+        }
+        // Fase 5 da auditoria de push (2026-08-02): antes só socket — motorista sem o
+        // app aberto no instante do pagamento nunca era avisado.
+        if (ride.captain?._id) {
+            notificationService.sendPaymentCompleted(ride.captain._id, { rideId: ride._id.toString() }).catch(console.error);
         }
 
         // Invalidate dashboard cache
@@ -526,6 +542,16 @@ module.exports.cancelRide = async (req, res) => {
             data: { rideId: ride._id }
         });
 
+        // A6 da auditoria de push (2026-08-02): sendMessageToRoom sozinho não é
+        // confiável — a sala é populada por socketId no momento do despacho, e
+        // socketId muda a cada reconexão; um motorista que perdeu a conexão por um
+        // instante nunca recebia o aviso. Só se aplica quando já havia um motorista
+        // especificamente designado (senão o "cancelamento" é só a corrida sumir do
+        // pool de despacho, sem ninguém comprometido pra avisar).
+        if (ride.captain) {
+            notificationService.sendRideCancelledToCaptain(ride.captain, { rideId: ride._id.toString() }).catch(console.error);
+        }
+
         // Invalidate dashboard and history cache
         deleteCache('dashboard:today');
         deleteByPrefix(`history:${req.user._id}`);
@@ -554,6 +580,16 @@ module.exports.submitReview = async (req, res) => {
         const review = await rideService.submitReview({
             rideId, user: req.user._id, rating, comment, issueCategory
         });
+
+        // Fase 7 da correção do sistema de push (2026-08-02): passageiro marcando uma
+        // categoria de problema na avaliação é uma denúncia — antes, isso só aparecia
+        // pra quem fosse conferir avaliações no painel por conta própria. 'none' é um
+        // valor válido do enum (route.ride.js) que significa "sem problema" — não é
+        // denúncia, então não pode disparar o alerta.
+        if (issueCategory && issueCategory !== 'none') {
+            notificationService.sendComplaintAlert(rideId, issueCategory).catch(console.error);
+        }
+
         return res.status(201).json(review);
     } catch (err) {
         if (err.message === 'Ride already reviewed') {

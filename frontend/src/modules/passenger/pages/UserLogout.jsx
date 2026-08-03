@@ -2,6 +2,8 @@ import React, { useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import { getAccessToken, getRefreshToken, clearSession } from '@/services/session'
+import { clearTokenInSW } from '@/services/swCommunication'
+import { getCurrentFcmToken } from '@/services/fcm'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
@@ -23,20 +25,41 @@ export const UserLogout = () => {
         const token = getAccessToken('user')
         const refreshToken = getRefreshToken('user')
 
-        axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            params: refreshToken ? { refreshToken } : {},
-            withCredentials: true,
-        })
-            .catch(() => {
+        // A3 da auditoria de push (2026-08-02): desvincula o token FCM deste
+        // dispositivo da conta que está saindo, além de limpar o IndexedDB do Service
+        // Worker (clearTokenInSW, abaixo) — sem os dois, o próximo usuário do mesmo
+        // aparelho continuaria recebendo notificações de quem saiu.
+        const unregisterPushToken = async () => {
+            try {
+                const fcmToken = await getCurrentFcmToken()
+                if (fcmToken && token) {
+                    await axios.delete(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        params: { token: fcmToken },
+                        withCredentials: true,
+                    })
+                }
+            } catch {
+                // Sair não pode depender disso funcionar.
+            }
+        }
+
+        Promise.all([
+            unregisterPushToken(),
+            axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                params: refreshToken ? { refreshToken } : {},
+                withCredentials: true,
+            }).catch(() => {
                 // Falha ao avisar o servidor não pode impedir o usuário de sair do
                 // aplicativo. A sessão local é limpa de qualquer forma; o refresh token
                 // continua revogável pelo servidor depois.
             })
-            .finally(() => {
-                clearSession('user')
-                navigate('/login', { replace: true })
-            })
+        ]).finally(() => {
+            clearTokenInSW()
+            clearSession('user')
+            navigate('/login', { replace: true })
+        })
     }, [])
 
     return <SessionSplash label="Saindo..." />

@@ -4,6 +4,7 @@ const blackListTokenModel = require('../models/blacklistToken.model');
 const authService = require('../services/auth.service');
 const { validationResult } = require('express-validator');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
+const notificationService = require('../services/notification.service');
 
 // Auditoria de sessão (2026-08-02): ver o comentário equivalente em user.controller.js.
 // O motorista tinha exatamente o mesmo problema — token de 24h e nenhuma renovação.
@@ -77,6 +78,11 @@ module.exports.registerCaptain = async (req, res, next) => {
         pixKeyType: pix.keyType,
         pixKey: pix.key
     });
+
+    // Fase 7 da correção do sistema de push (2026-08-02): admin precisa saber que tem
+    // um motorista novo esperando revisão de documentos — antes, só apareceria pra
+    // quem abrisse o painel e fosse conferir a aba de motoristas por conta própria.
+    notificationService.sendNewCaptainAlert(`${fullname.firstname} ${fullname.lastname}`).catch(console.error);
 
     return await respondWithCaptainSession(res, { captain, ip: req.ip, statusCode: 201 });
 
@@ -279,7 +285,14 @@ module.exports.toggleOnline = async (req, res, next) => {
             await captainService.endOnlineSession(req.captain._id);
         }
 
-        const captain = await captainModel.findByIdAndUpdate(req.captain._id, { isOnline, status: isOnline ? 'active' : 'inactive' }, { new: true });
+        // `lastSeenAt` junto: ficar online é o contato mais explícito que existe, e é
+        // ele que sustenta a disponibilidade no despacho quando o app fecha depois
+        // (separação disponibilidade x conexão, 2026-08-03).
+        const captain = await captainModel.findByIdAndUpdate(
+            req.captain._id,
+            { isOnline, status: isOnline ? 'active' : 'inactive', lastSeenAt: new Date() },
+            { new: true }
+        );
 
         deleteByPrefix(`profile:captain:${req.captain._id}`);
         deleteByPrefix(`drivers:`); // clear drivers cache since online status changed

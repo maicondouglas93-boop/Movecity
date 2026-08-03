@@ -7,6 +7,7 @@ import { useToast } from '@/contexts/ToastContext'
 import { getVehicleCategories } from '@/services/vehicleCategoriesApi'
 import Button from '@/shared/components/ui/Button'
 import { saveSession } from '@/services/session'
+import { syncTokenWithSW } from '@/services/swCommunication'
 
 const CaptainSignup = () => {
 
@@ -114,6 +115,7 @@ const CaptainSignup = () => {
         const data = response.data
         setCaptain(data.captain)
         saveSession('captain', data)
+        syncTokenWithSW(data.token)
 
         // A conta já foi criada neste ponto — uma falha de upload não deve travar o
         // cadastro nem derrubar o motorista de volta pro formulário. Sequencial (não em

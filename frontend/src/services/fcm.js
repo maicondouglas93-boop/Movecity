@@ -1,16 +1,73 @@
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 import { app } from '@/services/firebase';
 import axios from 'axios';
+import { getAccessToken } from '@/services/session';
 
 let messaging = null;
 
-try {
-    messaging = getMessaging(app);
-} catch (error) {
-    console.warn('Firebase Messaging not supported in this environment:', error.message);
-}
+// Fase 5 da auditoria de push (2026-08-02): chamar getMessaging(app) incondicionalmente
+// (como era antes) dispara, em ambientes sem suporte (jsdom nos testes, navegadores mais
+// antigos, modo privado sem IndexedDB), uma unhandled promise rejection DENTRO do
+// próprio SDK do Firebase ("messaging/unsupported-browser") — fora do alcance de
+// qualquer try/catch síncrono nosso, porque o SDK dispara uma checagem assíncrona
+// interna independente do que o nosso código faz. `isSupported()` é a checagem oficial
+// da própria lib pra evitar isso, feita antes de qualquer tentativa de uso.
+const messagingReady = isSupported()
+    .then((supported) => {
+        if (!supported) return null;
+        try {
+            messaging = getMessaging(app);
+        } catch (error) {
+            console.warn('Firebase Messaging not supported in this environment:', error.message);
+        }
+        return messaging;
+    })
+    .catch(() => null);
+
+const FCM_SW_URL = '/firebase-messaging-sw.js';
+const FCM_SW_SCOPE = '/firebase-cloud-messaging-push-scope';
+
+const waitForActive = (registration) => {
+    if (registration.active) return Promise.resolve(registration);
+    const worker = registration.installing || registration.waiting;
+    if (!worker) return Promise.resolve(registration);
+    return new Promise((resolve) => {
+        worker.addEventListener('statechange', function handler() {
+            if (worker.state === 'activated') {
+                worker.removeEventListener('statechange', handler);
+                resolve(registration);
+            }
+        });
+    });
+};
+
+// Auditoria de notificações push (2026-08-02, C1): antes, nada registrava este worker
+// explicitamente — o SDK do Firebase escolhia sozinho qual Service Worker usar, e na
+// prática colidia com o worker do vite-plugin-pwa (que controla o escopo "/"). Isso
+// fazia swCommunication.js mandar o JWT pro worker errado (o do PWA, não o do Firebase),
+// deixando o IndexedDB do worker de push sempre vazio e o botão "Aceitar" da notificação
+// sempre falhando com "sessão expirada". Registrar aqui, com escopo próprio, e reusar
+// esta mesma registration tanto no getToken() quanto no postMessage (swCommunication.js)
+// resolve os dois lados de uma vez.
+let registrationPromise = null;
+
+export const getFcmRegistration = () => {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+    if (!registrationPromise) {
+        registrationPromise = navigator.serviceWorker
+            .register(FCM_SW_URL, { scope: FCM_SW_SCOPE })
+            .then(waitForActive)
+            .catch((error) => {
+                console.warn('Falha ao registrar o Service Worker de push:', error.message);
+                registrationPromise = null;
+                return null;
+            });
+    }
+    return registrationPromise;
+};
 
 export const requestFCMToken = async () => {
+    await messagingReady;
     if (!messaging) {
         console.warn('Firebase Messaging is not available.');
         return null;
@@ -25,10 +82,14 @@ export const requestFCMToken = async () => {
                 return null;
             }
 
-            const currentToken = await getToken(messaging, { vapidKey });
+            const registration = await getFcmRegistration();
+            const currentToken = await getToken(messaging, {
+                vapidKey,
+                ...(registration ? { serviceWorkerRegistration: registration } : {})
+            });
             if (currentToken) {
                 // Send token to backend
-                const token = localStorage.getItem('token') || localStorage.getItem('captain-token');
+                const token = getAccessToken('user') || getAccessToken('captain');
                 if (token) {
                     await axios.post(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
                         token: currentToken,
@@ -48,11 +109,48 @@ export const requestFCMToken = async () => {
     return null;
 };
 
-export const onMessageListener = () =>
-    new Promise((resolve) => {
-        if (!messaging) return;
-        onMessage(messaging, (payload) => {
-            resolve(payload);
+// A3 da auditoria de push (2026-08-02): usado no logout pra descobrir o token deste
+// dispositivo e pedir ao backend que o desvincule da conta que está saindo. Não chama
+// Notification.requestPermission() de novo — só lê o token se a permissão já foi
+// concedida antes; não faz sentido (nem pediria) permissão só pra sair.
+export const getCurrentFcmToken = async () => {
+    await messagingReady;
+    if (!messaging) return null;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return null;
+
+    try {
+        const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+        if (!vapidKey) return null;
+
+        const registration = await getFcmRegistration();
+        return await getToken(messaging, {
+            vapidKey,
+            ...(registration ? { serviceWorkerRegistration: registration } : {})
         });
+    } catch (error) {
+        console.warn('Falha ao obter token FCM atual:', error.message);
+        return null;
+    }
+};
+
+// A9 da auditoria de push (2026-08-02): `onMessageListener` (removido) nunca funcionava
+// de verdade — era uma Promise que só resolve UMA vez, então só conseguiria mostrar a
+// primeira mensagem recebida durante toda a vida da aba, e além disso nunca era
+// importada em lugar nenhum do app. Com o app aberto (primeiro plano), o Firebase NÃO
+// mostra a notificação nativa sozinho — quem decide o que fazer é este listener. Sem
+// ele, a única coisa que hoje avisa o usuário de algo em primeiro plano é o Socket.IO.
+//
+// Mantém o contrato síncrono (devolve a função de cancelamento na hora, sem `await`) pra
+// não complicar quem chama isto de dentro de um useEffect — só espera messagingReady
+// por dentro antes de de fato assinar.
+export const onForegroundMessage = (callback) => {
+    let unsubscribed = false;
+    let unsubscribeFn = () => { unsubscribed = true; };
+
+    messagingReady.then(() => {
+        if (unsubscribed || !messaging) return;
+        unsubscribeFn = onMessage(messaging, callback);
     });
 
+    return () => unsubscribeFn();
+};

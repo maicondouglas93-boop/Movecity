@@ -2,6 +2,39 @@ const captainModel = require('../models/captain.model');
 const { getCache, setCache } = require('../cache/cache');
 const mongoose = require('mongoose');
 
+// Separação disponibilidade x conexão (2026-08-03) — ver
+// docs/plans/2026-08-03-disponibilidade-vs-conexao-motorista.md.
+//
+// Quanto tempo depois do último contato real o motorista ainda é considerado
+// disponível. Sem esse limite, alguém que ficou online e fechou o app há dias
+// continuaria recebendo ofertas, e o passageiro esperaria por quem não vai responder.
+// Mais alto = mais alcance via push; mais baixo = menos oferta para quem sumiu.
+const AVAILABILITY_TTL_MINUTES = Number(process.env.CAPTAIN_AVAILABILITY_TTL_MINUTES) || 15;
+
+module.exports.AVAILABILITY_TTL_MINUTES = AVAILABILITY_TTL_MINUTES;
+
+// Definição ÚNICA de "disponível para receber corrida", usada tanto pelo despacho
+// (maps.service.js) quanto pelas contagens do painel administrativo — para as duas
+// nunca divergirem, que é como o painel acabaria mostrando uma frota online que o
+// despacho não enxerga.
+//
+// Note que `socketId` NÃO entra aqui: era justamente essa exigência que tirava do
+// despacho o motorista com o app fechado, tornando a push de corrida nova inalcançável.
+module.exports.availabilityFilter = () => ({
+    isOnline: true,
+    lastSeenAt: { $gte: new Date(Date.now() - AVAILABILITY_TTL_MINUTES * 60 * 1000) },
+    canReceiveRides: { $ne: false },
+    isBlocked: { $ne: true },
+    approvalStatus: 'aprovado'
+});
+
+// Heartbeat: registra que o servidor teve contato real com este motorista agora.
+// Chamado do socket (join e atualização de localização) e do toggle-online.
+module.exports.touchLastSeen = async (captainId) => {
+    if (!captainId) return;
+    await captainModel.findByIdAndUpdate(captainId, { lastSeenAt: new Date() });
+};
+
 module.exports.createCaptain = async ({
     firstname, lastname, email, password, cpf, birthDate, phone, 
     color, plate, capacity, vehicleType, marca, modelo, ano,

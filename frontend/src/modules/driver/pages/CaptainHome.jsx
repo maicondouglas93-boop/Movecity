@@ -14,7 +14,7 @@ import axios from 'axios'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/contexts/ToastContext'
 import CaptainHeader from '@/modules/driver/components/CaptainHeader'
-import { requestFCMToken } from '@/services/fcm'
+import { requestFCMToken, onForegroundMessage } from '@/services/fcm'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
@@ -24,6 +24,7 @@ const CaptainHome = () => {
 
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
     const [ confirmRidePopupPanel, setConfirmRidePopupPanel ] = useState(false)
+    const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
 
     const [ ride, setRide ] = useState(null)
 
@@ -63,14 +64,53 @@ const CaptainHome = () => {
         }
     }, [locationError])
 
+    // C3 da auditoria de push (2026-08-02): antes só buscava o token FCM se a permissão
+    // JÁ estivesse concedida — nada no app do motorista jamais chamava
+    // Notification.requestPermission(), então um motorista novo nunca era convidado e
+    // nunca gerava token. Mesmo padrão do passageiro (Home.jsx): cartão de contexto antes
+    // do prompt nativo, pra não estourar o "Bloquear" que os navegadores nunca deixam
+    // perguntar de novo.
     useEffect(() => {
         const setupFCM = async () => {
-            if ('Notification' in window && Notification.permission === 'granted') {
+            if (!('Notification' in window)) return;
+            if (Notification.permission === 'granted') {
                 await requestFCMToken();
+            } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
+                setShowNotificationPrompt(true);
             }
         };
         setupFCM();
     }, [])
+
+    // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
+    // notificação nativa sozinho — sem escutar aqui, uma notificação que chegasse por
+    // push enquanto o motorista está olhando a tela não aparecia em lugar nenhum (o
+    // aviso de corrida nova em primeiro plano hoje vem só do Socket.IO, em
+    // handleNewRide, mais abaixo).
+    useEffect(() => {
+        const unsubscribe = onForegroundMessage((payload) => {
+            const title = payload?.notification?.title || payload?.data?.title;
+            const body = payload?.notification?.body || payload?.data?.message;
+            if (title || body) {
+                addToast([title, body].filter(Boolean).join(' — '), 'info');
+            }
+        });
+        return () => unsubscribe();
+    }, [addToast]);
+
+    const handleEnableNotifications = async () => {
+        setShowNotificationPrompt(false)
+        localStorage.setItem('notificationPromptSeenCaptain', '1')
+        const permission = await Notification.requestPermission()
+        if (permission === 'granted') {
+            await requestFCMToken();
+        }
+    }
+
+    const handleDismissNotifications = () => {
+        setShowNotificationPrompt(false)
+        localStorage.setItem('notificationPromptSeenCaptain', '1')
+    }
 
     const { requestLock } = useWakeLock();
     useEffect(() => {
@@ -268,6 +308,31 @@ const CaptainHome = () => {
                         <LiveTracking ride={ride} showSearchRadius={true} />
                     </div>
                     <div className='h-[60vh] p-4 overflow-y-auto pb-24'>
+                        {showNotificationPrompt && (
+                            <div className="mb-4 bg-surface-alt border border-line rounded-panel p-4 flex gap-3">
+                                <i className="ri-notification-3-fill text-brand-500 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-ink-900">Ativar notificações?</p>
+                                    <p className="text-xs text-ink-400 mt-0.5">Avisamos de novas corridas mesmo com o app em segundo plano.</p>
+                                    <div className="flex gap-2 mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={handleEnableNotifications}
+                                            className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold"
+                                        >
+                                            Ativar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleDismissNotifications}
+                                            className="min-h-[36px] px-4 rounded-full text-ink-600 text-sm font-medium"
+                                        >
+                                            Agora não
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         <CaptainDetails />
                     </div>
                 </>

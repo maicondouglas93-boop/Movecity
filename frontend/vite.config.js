@@ -20,6 +20,10 @@ export default defineConfig({
       injectRegister: 'auto',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
+        // C1 da auditoria de push (2026-08-02): sem isto, o próprio Service Worker do
+        // PWA fazia precache do firebase-messaging-sw.js como se fosse um asset comum,
+        // arriscando servir uma cópia desatualizada dele após um deploy.
+        globIgnores: ['**/firebase-messaging-sw.js'],
         maximumFileSizeToCacheInBytes: 5000000,
       },
       manifest: {

@@ -11,10 +11,17 @@ vi.mock('firebase/messaging', () => ({
   getMessaging: vi.fn(),
   getToken: vi.fn(),
   onMessage: vi.fn(),
+  // Fase 5 da auditoria de push (2026-08-02): fcm.js agora checa isSupported() antes de
+  // chamar getMessaging(), pra evitar uma unhandled rejection interna do SDK em
+  // ambientes sem suporte (o próprio jsdom é um deles).
+  isSupported: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('../../services/fcm', () => ({
   requestFCMToken: vi.fn(),
+  // A9 da auditoria de push (2026-08-02): Home.jsx passou a assinar push em primeiro
+  // plano — o mock precisa devolver uma função de cancelamento, como o real faz.
+  onForegroundMessage: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/services/mapsApi', () => ({

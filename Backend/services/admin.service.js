@@ -172,10 +172,19 @@ module.exports.getDashboardStats = async (period = 'today') => {
     const prevRides = await getRidesStats(prevStart, prevEnd);
 
     // --- CAPTAINS (Snapshot current state) ---
+    // Separação disponibilidade x conexão (2026-08-03): "online" aqui usa a MESMA
+    // definição do despacho (captainService.availabilityFilter) — inclusive o TTL de
+    // lastSeenAt. Sem isso, um motorista que ficou online e fechou o app há dias
+    // apareceria como online no painel para sempre, já que `isOnline` não é mais
+    // zerado no disconnect.
+    const captainService = require('./captain.service');
+    const availability = captainService.availabilityFilter();
+    const { canReceiveRides, ...availabilityBase } = availability;
+
     const totalCaptains = await captainModel.countDocuments();
-    const onlineCaptains = await captainModel.countDocuments({ isOnline: true });
-    const availableCaptains = await captainModel.countDocuments({ isOnline: true, canReceiveRides: true });
-    const inRideCaptains = await captainModel.countDocuments({ isOnline: true, canReceiveRides: false });
+    const onlineCaptains = await captainModel.countDocuments(availabilityBase);
+    const availableCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: true });
+    const inRideCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: false });
     const offlineCaptains = totalCaptains - onlineCaptains;
 
     // --- QUALITY ---
@@ -517,9 +526,14 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
     const total = await captainModel.countDocuments(query);
     
     // Summary aggregation
+    // Mesma definição de disponibilidade usada pelo despacho — ver comentário em
+    // getDashboardStats acima.
+    const captainServiceForCounts = require('./captain.service');
+    const { canReceiveRides: _ignored, ...availabilityForCounts } = captainServiceForCounts.availabilityFilter();
+
     const totalCaptains = await captainModel.countDocuments();
-    const online = await captainModel.countDocuments({ isOnline: true });
-    const inRide = await captainModel.countDocuments({ isOnline: true, canReceiveRides: false });
+    const online = await captainModel.countDocuments(availabilityForCounts);
+    const inRide = await captainModel.countDocuments({ ...availabilityForCounts, canReceiveRides: false });
     const blocked = await captainModel.countDocuments({ isBlocked: true });
     const inAnalysis = await captainModel.countDocuments({ approvalStatus: 'em_analise' });
     const offline = totalCaptains - online;

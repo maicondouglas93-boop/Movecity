@@ -9,6 +9,7 @@ import { app } from '@/services/firebase';
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 import { saveSession } from '@/services/session'
+import { syncTokenWithSW } from '@/services/swCommunication'
 
 const UserSignup = () => {
   const [ email, setEmail ] = useState('')
@@ -45,6 +46,7 @@ const UserSignup = () => {
         const data = response.data
         setUser(data.user)
         saveSession('user', data)
+        syncTokenWithSW(data.token)
         addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
         navigate('/home')
       }
@@ -77,6 +79,7 @@ const UserSignup = () => {
         const data = response.data
         setUser(data.user)
         saveSession('user', data)
+        syncTokenWithSW(data.token)
         addToast(`Conta criada com sucesso! Bem-vindo, ${data.user.fullname.firstname}! 🎉`, 'success')
         navigate('/home')
       }

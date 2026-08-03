@@ -1,6 +1,7 @@
 const rechargeModel = require('../models/recharge.model');
 const rideModel = require('../models/ride.model');
 const walletService = require('../services/wallet.service');
+const notificationService = require('../services/notification.service');
 
 module.exports.handleAsaasWebhook = async (req, res) => {
     try {
@@ -60,6 +61,20 @@ module.exports.handleAsaasWebhook = async (req, res) => {
             }
 
             return res.status(200).send('Payment not linked to any local entity');
+        }
+
+        // Fase 7 da correção do sistema de push (2026-08-02): antes, esses eventos
+        // simplesmente caíam no "Event ignored" abaixo — uma recarga ou pagamento
+        // recusado/vencido nunca chegava ao conhecimento de ninguém do time. Só avisa
+        // (não muda nenhum estado além do que já é registrado no Asaas).
+        if (event.event === 'PAYMENT_OVERDUE' || event.event === 'PAYMENT_DECLINED') {
+            const paymentId = event.payment?.id;
+            const recharge = await rechargeModel.findOne({ asaasInvoiceId: paymentId });
+            const description = recharge
+                ? `Recarga ${paymentId} de um motorista foi ${event.event === 'PAYMENT_OVERDUE' ? 'vencida' : 'recusada'} pelo Asaas.`
+                : `Pagamento ${paymentId} foi ${event.event === 'PAYMENT_OVERDUE' ? 'vencido' : 'recusado'} pelo Asaas.`;
+            notificationService.sendPaymentProblemAlert(description).catch(console.error);
+            return res.status(200).send('Payment problem acknowledged');
         }
 
         res.status(200).send('Event ignored');

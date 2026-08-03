@@ -19,6 +19,14 @@ module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm, traceId = '[A
     // Filtro geográfico real via 2dsphere ($nearSphere), já ordenado por proximidade.
     // Antes esta função ignorava ltd/lng/radius e retornava até 20 motoristas online
     // de qualquer lugar do mundo.
+    //
+    // Separação disponibilidade x conexão (2026-08-03): a exigência de `socketId`
+    // saiu daqui. Ela era o motivo de um motorista com o app fechado nunca ser
+    // candidato ao despacho — e, por consequência, de a push de corrida nova (todo o
+    // objetivo da correção do sistema de notificações) ser inalcançável na prática.
+    // Quem define disponibilidade agora é captainService.availabilityFilter():
+    // intenção explícita (`isOnline`) + contato recente (`lastSeenAt`, com TTL).
+    const captainService = require('./captain.service');
     const captains = await captainModel.find({
         locationGeoJSON: {
             $nearSphere: {
@@ -26,11 +34,7 @@ module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm, traceId = '[A
                 $maxDistance: radiusKm * 1000 // metros
             }
         },
-        socketId: { $exists: true, $ne: null, $ne: "" },
-        isOnline: true,
-        canReceiveRides: { $ne: false }, // Para pegar true ou undefined (documentos antigos)
-        isBlocked: { $ne: true },
-        approvalStatus: 'aprovado'
+        ...captainService.availabilityFilter()
     }).limit(20);
 
     console.log(`${traceId} ${captains.length} motoristas encontrados num raio de ${radiusKm}km`);

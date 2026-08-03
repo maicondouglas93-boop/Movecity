@@ -125,13 +125,25 @@ self.addEventListener('notificationclick', function(event) {
     const action = event.action;
     const data = notification.data || {};
 
+    // M7 da auditoria de push, corrigido na auditoria final (2026-08-02): antes, TODO
+    // clique sem rideId — e todo clique COM rideId que não fosse na ação "accept" —
+    // abria '/captain-home'. Um passageiro tocando em "Corrida Aceita!" ia parar na
+    // tela inicial do MOTORISTA. O backend agora manda a rota certa em data.deepLink
+    // (ver notificationDispatcher.service.js: DEEP_LINK); '/captain-home' só continua
+    // como último recurso pra notificações antigas, enviadas antes desta correção.
+    const targetUrl = data.deepLink || '/captain-home';
+
     if (!data.rideId) {
         notification.close();
-        event.waitUntil(focusOrOpenWindow('/captain-home'));
+        event.waitUntil(focusOrOpenWindow(targetUrl));
         return;
     }
 
-    const apiUrl = data.apiUrl || 'http://localhost:4000'; // Fallback if backend didn't send apiUrl
+    // Sem apiUrl não há como aceitar a corrida daqui. O backend só omite as ações de
+    // aceite quando BASE_URL não está configurado, então este caminho não deveria ser
+    // alcançável — mas se for, abrir o app é o desfecho correto, nunca chamar localhost
+    // (que seria o próprio aparelho do motorista).
+    const apiUrl = data.apiUrl;
 
     if (action === 'reject') {
         notification.close();
@@ -140,11 +152,16 @@ self.addEventListener('notificationclick', function(event) {
 
     if (action === 'open' || !action) {
         notification.close();
-        event.waitUntil(focusOrOpenWindow('/captain-home'));
+        event.waitUntil(focusOrOpenWindow(targetUrl));
         return;
     }
 
     if (action === 'accept') {
+        if (!apiUrl) {
+            notification.close();
+            event.waitUntil(focusOrOpenWindow(targetUrl));
+            return;
+        }
         if (acceptingRide) return;
         acceptingRide = true;
 

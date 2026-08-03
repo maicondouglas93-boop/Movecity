@@ -51,7 +51,10 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
         fetchMessages();
 
         // Join socket room
-        socket.emit('join-chat', { rideId: ride._id });
+        // A10 da auditoria de push (2026-08-02): o backend agora exige o JWT pra
+        // confirmar que quem está entrando na sala é de fato o passageiro ou o
+        // motorista desta corrida — sem isso, entra sem autorização e sem ouvir nada.
+        socket.emit('join-chat', { rideId: ride._id, token });
 
         const handleReceiveMessage = (message) => {
             setMessages(prev => [...prev, message]);

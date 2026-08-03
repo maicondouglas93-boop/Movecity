@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
+import { requestAdminFCMToken, getCurrentAdminFcmToken } from '../services/fcm';
 
 const AuthContext = createContext();
 
@@ -39,6 +40,11 @@ export const AuthProvider = ({ children }) => {
         if (cancelled) return;
         localStorage.setItem('adminUser', JSON.stringify(data.admin));
         setUser(data.admin);
+        // Fase 7 da correção do sistema de push (2026-08-02): reabrir o painel com uma
+        // sessão já válida também deve garantir que o token FCM deste dispositivo está
+        // registrado — sem isto, só quem tivesse acabado de fazer login (ver `login`
+        // abaixo) teria push habilitado.
+        requestAdminFCMToken().catch(() => {});
       } catch (err) {
         if (cancelled) return;
         // Rede/servidor fora: mantém o que estava em cache — não desloga por
@@ -70,6 +76,9 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('adminUser', JSON.stringify(admin));
 
       setUser(admin);
+      // Fase 7: pede permissão de notificação (se ainda não decidida) e registra o
+      // token deste dispositivo assim que o login é confirmado.
+      requestAdminFCMToken().catch(() => {});
       return { success: true };
     } catch (error) {
       return {
@@ -81,6 +90,13 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
+      // Fase 7 / A3 da auditoria de push (2026-08-02): desvincula o token FCM deste
+      // dispositivo antes de sair — senão o próximo admin a usar o mesmo navegador
+      // continuaria recebendo os alertas da conta anterior.
+      const fcmToken = await getCurrentAdminFcmToken();
+      if (fcmToken) {
+        await api.delete('/admin/notifications/token', { data: { token: fcmToken } }).catch(() => {});
+      }
       // Envia o refresh token pro backend revogar só esta sessão (sem ele, o backend
       // encerra todas as sessões deste admin — ver invalidateRefreshToken).
       await api.post('/admin/logout', { refreshToken: localStorage.getItem('adminRefreshToken') });

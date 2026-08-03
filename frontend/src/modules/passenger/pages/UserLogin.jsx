@@ -10,6 +10,7 @@ import { app } from '@/services/firebase';
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 import { saveSession } from '@/services/session'
+import { syncTokenWithSW } from '@/services/swCommunication'
 
 const UserLogin = () => {
   const [ email, setEmail ] = useState('')
@@ -42,6 +43,7 @@ const UserLogin = () => {
         const data = response.data
         setUser(data.user)
         saveSession('user', data)
+        syncTokenWithSW(data.token)
         addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
         navigate('/home')
       }
@@ -70,6 +72,7 @@ const UserLogin = () => {
         const data = response.data
         setUser(data.user)
         saveSession('user', data)
+        syncTokenWithSW(data.token)
         addToast(`Bem-vindo de volta, ${data.user.fullname.firstname}! 👋`, 'success')
         navigate('/home')
       }

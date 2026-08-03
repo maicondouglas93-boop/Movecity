@@ -9,6 +9,7 @@ import {
     sessionKindForUrl,
     LOGIN_ROUTE,
 } from './session';
+import { syncTokenWithSW } from './swCommunication';
 
 const api = axios.create({
     baseURL: import.meta.env.VITE_BASE_URL,
@@ -132,6 +133,10 @@ api.interceptors.response.use((response) => response, async (error) => {
         const { data } = await api.post(endpoint, refreshToken ? { refreshToken } : {});
 
         saveSession(refreshKind, { token: data.token, refreshToken: data.refreshToken });
+        // C1 da auditoria de push (2026-08-02): o Service Worker do motorista só consegue
+        // aceitar corrida em segundo plano se tiver um access token válido no IndexedDB —
+        // sem sincronizar aqui, ele ficaria com o token antigo até a próxima abertura do app.
+        syncTokenWithSW(data.token);
         isRefreshing = false;
         flushQueue(null, data.token);
 

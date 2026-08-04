@@ -224,7 +224,13 @@ export function createLeafletProvider() {
         if (!map || !coords || coords.length === 0) return false;
         try {
             const bounds = L.latLngBounds(coords);
-            map.fitBounds(bounds, { padding: options.padding || [50, 50], animate: options.animate !== false });
+            const fitOpts = {
+                padding: options.padding || [50, 50],
+                animate: options.animate !== false,
+            };
+            // maxZoom evita que 1 ponto (ou valores quase iguais) estoure o zoom de rua.
+            if (Number.isFinite(options.maxZoom)) fitOpts.maxZoom = options.maxZoom;
+            map.fitBounds(bounds, fitOpts);
             return true;
         } catch (err) {
             console.warn('Leaflet fitBounds error:', err);

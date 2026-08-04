@@ -223,6 +223,12 @@ export function createGoogleMapsProvider() {
             coords.forEach(([lat, lng]) => bounds.extend({ lat, lng }))
             const [px = 50, py = 50] = options.padding || [50, 50]
             map.fitBounds(bounds, { top: py, right: px, bottom: py, left: px })
+            // Google não tem maxZoom nativo no fitBounds — limita depois do idle.
+            if (Number.isFinite(options.maxZoom)) {
+                googleMaps.event.addListenerOnce(map, 'idle', () => {
+                    if (map && map.getZoom() > options.maxZoom) map.setZoom(options.maxZoom)
+                })
+            }
             return true
         } catch (err) {
             console.warn('Google Maps fitBounds error:', err)

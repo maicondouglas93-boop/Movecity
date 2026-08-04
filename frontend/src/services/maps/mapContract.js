@@ -37,8 +37,9 @@
 // @property {(position: LatLng, opts?: {radius?: number, color?: string, fillColor?: string, fillOpacity?: number, weight?: number, dashArray?: string}) => void} setCircle
 //   Cria ou atualiza o círculo de raio de busca.
 // @property {() => void} removeCircle
-// @property {(coords: [number, number][], opts?: {padding?: [number, number], animate?: boolean}) => boolean} fitBounds
+// @property {(coords: [number, number][], opts?: {padding?: [number, number], animate?: boolean, maxZoom?: number}) => boolean} fitBounds
 //   Enquadra o mapa nas coordenadas dadas. Retorna true em sucesso, false se falhar (coords inválidas etc).
+//   maxZoom (opcional) limita o zoom final — útil quando os pontos estão próximos ou há só um.
 // @property {(position: LatLng, opts?: {animate?: boolean}) => void} panTo
 // @property {() => void} destroy
 //   Destroi o mapa e limpa todos os recursos (marcadores, rota, círculo, listeners).

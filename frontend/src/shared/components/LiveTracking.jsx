@@ -41,6 +41,38 @@ const REROUTE_DISTANCE_M = 70;
 // Intervalo mínimo entre recálculos de rota — o endpoint tem custo por chamada e um
 // GPS instável não pode disparar uma rota nova por segundo.
 const REROUTE_MIN_INTERVAL_MS = 20000;
+// Zoom da Home (passageiro/motorista) ao obter o GPS: visão de bairro/cidade (~2–4 km),
+// não rua. Antes o fitBounds com 1 ponto ia ao zoom máximo e “grudava” no pino.
+const IDLE_MAP_ZOOM = 12;
+// Teto ao enquadrar rota/pickup/destino — evita zoom de rua em trajetos curtos.
+const FIT_BOUNDS_MAX_ZOOM = 15;
+
+const focusMapOnCoords = (provider, coords, { padding = [50, 50], animate = true } = {}) => {
+    if (!provider || !coords?.length) return false;
+
+    const points = [];
+    const seen = new Set();
+    for (const c of coords) {
+        const lat = Array.isArray(c) ? c[0] : c?.lat;
+        const lng = Array.isArray(c) ? c[1] : c?.lng;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        points.push([lat, lng]);
+    }
+    if (points.length === 0) return false;
+
+    if (points.length === 1) {
+        provider.moveCamera({
+            center: { lat: points[0][0], lng: points[0][1] },
+            zoom: IDLE_MAP_ZOOM,
+        });
+        return true;
+    }
+
+    return provider.fitBounds(points, { padding, animate, maxZoom: FIT_BOUNDS_MAX_ZOOM });
+};
 
 const getRemainingRoute = (route, position) => {
     if (!route || route.length === 0) return [];
@@ -394,7 +426,7 @@ const LiveTracking = (props) => {
 
         Promise.resolve(provider.init(mapRef.current, {
             center: pos,
-            zoom: 14,
+            zoom: IDLE_MAP_ZOOM,
             onMoveEnd: (center) => {
                 if (onMapCenterChangeRef.current) {
                     onMapCenterChangeRef.current(center);
@@ -835,7 +867,7 @@ const LiveTracking = (props) => {
         }
 
         if (allCoords.length > 0) {
-            if (providerRef.current.fitBounds(allCoords, { padding: [50, 50], animate: true })) {
+            if (focusMapOnCoords(providerRef.current, allCoords, { padding: [50, 50], animate: true })) {
                 setIsFollowing(true);
             }
         }
@@ -869,7 +901,7 @@ const LiveTracking = (props) => {
                 const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
                 if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
 
-                if (providerRef.current.fitBounds(allCoords, { padding: [50, 50], animate: true })) {
+                if (focusMapOnCoords(providerRef.current, allCoords, { padding: [50, 50], animate: true })) {
                     hasFitBoundsRef.current = true;
                 }
             }
@@ -894,7 +926,7 @@ const LiveTracking = (props) => {
                 }
 
                 if (boundsCoords.length > 0) {
-                    if (providerRef.current.fitBounds(boundsCoords, { padding: [50, 50], animate: true })) {
+                    if (focusMapOnCoords(providerRef.current, boundsCoords, { padding: [50, 50], animate: true })) {
                         hasFitBoundsRef.current = true;
                     }
                 }

@@ -70,6 +70,10 @@ module.exports.uploadProfileImage = async (fileBuffer) => {
     return processAndUploadImage(fileBuffer, 'users/profiles');
 };
 
+module.exports.uploadCaptainProfileImage = async (fileBuffer) => {
+    return processAndUploadImage(fileBuffer, 'captains/profiles');
+};
+
 module.exports.uploadVehicleImage = async (fileBuffer) => {
     return processAndUploadImage(fileBuffer, 'captains/vehicles');
 };

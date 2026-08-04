@@ -1011,7 +1011,8 @@ const Home = () => {
                     paymentMethod={paymentMethod}
                     cancelRide={cancelRide} />
             </div>
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            {/* Painel compacto: deixa o mapa livre pra acompanhar o motorista (2026-08-04). */}
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[42dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}

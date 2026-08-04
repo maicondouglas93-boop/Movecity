@@ -65,9 +65,9 @@ describe('Push de corrida — cenário 1: motorista com o app fechado recebe a o
 
         const notification = await waitFor(() => Notification.findOne({ captainId: captain._id, type: 'NEW_RIDE' }));
         expect(notification).toBeTruthy();
-        expect(notification.title).toBe('🚗 Nova corrida disponível');
-        // Heads-up (2026-08-04): body começa com o valor real; pode incluir trecho da rota.
-        expect(notification.message).toMatch(/^R\$ \d+,\d{2}/);
+        expect(notification.title).toMatch(/Nova corrida/);
+        // Valor fica no título; body traz rota / distância / detalhes.
+        expect(notification.title + ' ' + notification.message).toMatch(/R\$ \d+,\d{2}/);
     });
 });
 

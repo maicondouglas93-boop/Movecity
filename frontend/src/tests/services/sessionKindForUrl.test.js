@@ -15,6 +15,8 @@ describe('sessionKindForUrl', () => {
         expect(sessionKindForUrl('/rides/abc123/accept')).toBe('captain')
         expect(sessionKindForUrl('https://api.exemplo.com/rides/abc123/accept')).toBe('captain')
         expect(sessionKindForUrl('/captains/profile')).toBe('captain')
+        expect(sessionKindForUrl('/uploads/captain-profile')).toBe('captain')
+        expect(sessionKindForUrl('/uploads/document')).toBe('captain')
     })
 
     it('classifica rotas exclusivas do passageiro', () => {
@@ -23,6 +25,7 @@ describe('sessionKindForUrl', () => {
         expect(sessionKindForUrl('/rides/cancel')).toBe('user')
         expect(sessionKindForUrl('/users/profile')).toBe('user')
         expect(sessionKindForUrl('/support/tickets')).toBe('user')
+        expect(sessionKindForUrl('/uploads/profile')).toBe('user')
     })
 
     it('não confunde captain-cancel com cancel do passageiro', () => {

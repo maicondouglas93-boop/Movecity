@@ -19,6 +19,7 @@ const webhookRoutes = require('./routes/webhook.routes');
 const vehicleCategoryRoutes = require('./routes/vehicleCategory.routes');
 const supportRoutes = require('./routes/support.routes');
 require('./services/tariffScheduler.service'); // registra o cron que aplica tarifas agendadas
+require('./services/captainDeadline.service'); // registra o cron do prazo de documentação do motorista
 
 const adminRoutes = require('./routes/admin.routes');
 

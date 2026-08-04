@@ -24,8 +24,12 @@ const notificationSchema = new mongoose.Schema({
         // RIDE_ARRIVED, RIDE_CANCELLED, CHAT e PAYMENT adicionados na Fase 5 da correção
         // do sistema de push (2026-08-02) — motorista chegou, corrida cancelada, chat com
         // app fechado, e pagamento confirmado passam a gerar push de verdade.
+        // DOCUMENT adicionado na simplificação do cadastro do motorista (2026-08-04):
+        // cobre prazo de documentação (registro/lembrete/expiração) e aprovação/rejeição
+        // de documento — mesma granularidade grossa já usada por PAYMENT/RECHARGE
+        // (o título/mensagem distingue o cenário específico).
         type: String,
-        enum: ['NEW_RIDE', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED', 'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN', 'RECHARGE'],
+        enum: ['NEW_RIDE', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED', 'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN', 'RECHARGE', 'DOCUMENT'],
         default: 'NEW_RIDE'
     },
     targetAudience: {

@@ -15,6 +15,7 @@ const CaptainWallet = lazy(() => import('@/modules/driver/pages/CaptainWallet'))
 const CaptainRidesHistory = lazy(() => import('@/modules/driver/pages/CaptainRidesHistory'))
 const CaptainEarnings = lazy(() => import('@/modules/driver/pages/CaptainEarnings'))
 const CaptainProfile = lazy(() => import('@/modules/driver/pages/CaptainProfile'))
+const CaptainDocuments = lazy(() => import('@/modules/driver/pages/CaptainDocuments'))
 
 // Rotas do fluxo de motorista.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.
@@ -62,6 +63,11 @@ const driverRoutes = [
   <Route key='captain-profile' path='/captain/profile' element={
     <CaptainProtectWrapper>
       <CaptainProfile />
+    </CaptainProtectWrapper>
+  } />,
+  <Route key='captain-documents' path='/captain/documents' element={
+    <CaptainProtectWrapper>
+      <CaptainDocuments />
     </CaptainProtectWrapper>
   } />,
 ]

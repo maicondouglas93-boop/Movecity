@@ -139,7 +139,7 @@ describe('Disponibilidade do motorista x conexão de socket', () => {
         const notification = await waitFor();
         expect(notification).toBeTruthy();
         // Diagnóstico de push de corrida (2026-08-03): título/formato atualizados.
-        expect(notification.title).toBe('🚗 Nova corrida disponível');
+        expect(notification.title).toMatch(/Nova corrida/);
     });
 });
 

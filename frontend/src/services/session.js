@@ -85,6 +85,9 @@ export function sessionKindForUrl(url = '') {
 
     if (path.includes('/captains')) return 'captain';
     if (path.includes('/users')) return 'user';
+    if (path.includes('/uploads/captain-profile')) return 'captain';
+    if (path.includes('/uploads/vehicle') || path.includes('/uploads/document')) return 'captain';
+    if (path.includes('/uploads/profile')) return 'user';
 
     // Motorista — ordem importa: captain-cancel contém "cancel".
     if (path.includes('/rides/captain-cancel')) return 'captain';

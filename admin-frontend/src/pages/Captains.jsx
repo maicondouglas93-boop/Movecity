@@ -48,6 +48,9 @@ const statusColors = {
   reprovado: 'bg-danger/10 text-danger border-danger/20',
   suspenso: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
   bloqueado: 'bg-red-500/10 text-red-500 border-red-500/20',
+  // Simplificação do cadastro do motorista (2026-08-04): motorista que não enviou a
+  // documentação dentro do prazo de 5 dias — ver Backend/services/captainDeadline.service.js.
+  expirado: 'bg-red-500/10 text-red-500 border-red-500/20',
 };
 
 const statusNames = {
@@ -58,7 +61,13 @@ const statusNames = {
   reprovado: 'Reprovado',
   suspenso: 'Suspenso',
   bloqueado: 'Bloqueado',
+  expirado: 'Prazo Expirado',
 };
+
+function formatDate(date) {
+  if (!date) return '—';
+  return new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
 export default function Captains() {
   const queryClient = useQueryClient();
@@ -185,9 +194,12 @@ export default function Captains() {
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.approvalStatus} onChange={e => { setFilters(f => ({ ...f, approvalStatus: e.target.value })); setPage(1); }}>
               <option value="">Status Cadastro (Todos)</option>
+              <option value="iniciado">Iniciado</option>
+              <option value="documentos_enviados">Docs Enviados</option>
               <option value="em_analise">Em Análise</option>
               <option value="aprovado">Aprovado</option>
               <option value="reprovado">Reprovado</option>
+              <option value="expirado">Prazo Expirado</option>
               <option value="bloqueado">Bloqueado</option>
             </select>
 
@@ -524,6 +536,22 @@ function TabProfile({ captain, liveDrivers }) {
          </div>
       </div>
 
+      {/* Documentação — simplificação do cadastro do motorista (2026-08-04): prazo de
+          5 dias calculado no backend (captain.documentDeadline), nunca fixo aqui. */}
+      <div className="bg-surface p-5 rounded-xl border border-border">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4 flex items-center gap-2"><FileText className="w-4 h-4"/> Documentação</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+           <div><p className="text-xs text-text-muted">Cadastrado em</p><p className="font-medium text-sm">{formatDate(captain.createdAt)}</p></div>
+           <div><p className="text-xs text-text-muted">Prazo para envio</p><p className="font-medium text-sm">{formatDate(captain.documentDeadline)}</p></div>
+           <div>
+             <p className="text-xs text-text-muted">Situação</p>
+             <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[captain.approvalStatus] || 'bg-background'}`}>
+               {statusNames[captain.approvalStatus] || captain.approvalStatus}
+             </span>
+           </div>
+        </div>
+      </div>
+
       {/* Mapa (se online) */}
       {isLive && (
         <div className="bg-surface rounded-xl border border-border overflow-hidden flex flex-col h-[300px]">
@@ -634,9 +662,14 @@ function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
           </a>
           <div>
              <p className="text-sm font-medium">{title}</p>
-             <span className={`text-xs inline-flex items-center gap-1 font-medium mt-1 ${docData.verified ? 'text-primary' : 'text-warning'}`}>
-               {docData.verified ? <><Check className="w-3 h-3"/> Aprovado</> : <><Clock className="w-3 h-3"/> Pendente Verificação</>}
+             <span className={`text-xs inline-flex items-center gap-1 font-medium mt-1 ${docData.verified ? 'text-primary' : docData.reason ? 'text-danger' : 'text-warning'}`}>
+               {docData.verified ? <><Check className="w-3 h-3"/> Aprovado</> : docData.reason ? <><X className="w-3 h-3"/> Rejeitado</> : <><Clock className="w-3 h-3"/> Pendente Verificação</>}
              </span>
+             {/* Motivo salvo em captain.documents.<doc>.reason (2026-08-04) — mesmo texto
+                 que o motorista vê no app, evita ter que abrir a aba Auditoria pra conferir. */}
+             {!docData.verified && docData.reason && (
+               <p className="text-xs text-danger/80 mt-1">{docData.reason}</p>
+             )}
           </div>
        </div>
        <div className="flex gap-2 w-full md:w-auto">

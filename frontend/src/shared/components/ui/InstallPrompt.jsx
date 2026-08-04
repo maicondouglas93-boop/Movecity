@@ -1,43 +1,18 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { usePwaInstall } from '@/contexts/PwaInstallContext'
 
 const DISMISSED_KEY = 'installPromptDismissed'
 
-const isStandalone = () =>
-    window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
-
-// Auditoria PWA (2026-08-03, M7): sem CTA própria, o app dependia inteiramente da UI
-// nativa do navegador pra instalar (ícone discreto na barra de endereço) — Uber/99/
-// iFood mostram um convite próprio, contextual, que converte muito mais. Só existe em
-// Chrome/Edge Android/desktop — Safari (iOS) nunca dispara 'beforeinstallprompt', então
-// lá este componente simplesmente nunca aparece (limitação de plataforma, não bug).
+// Banner flutuante de instalação. O deferredPrompt vive em PwaInstallContext —
+// compartilhado com o botão "Instalar" dos headers.
 const InstallPrompt = () => {
-    const [deferredEvent, setDeferredEvent] = useState(null)
+    const pwaInstall = usePwaInstall()
     const [dismissed, setDismissed] = useState(() => !!localStorage.getItem(DISMISSED_KEY))
 
-    useEffect(() => {
-        if (isStandalone()) return
-
-        const handleBeforeInstallPrompt = (event) => {
-            event.preventDefault()
-            setDeferredEvent(event)
-        }
-        const handleAppInstalled = () => {
-            setDeferredEvent(null)
-        }
-
-        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-        window.addEventListener('appinstalled', handleAppInstalled)
-        return () => {
-            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-            window.removeEventListener('appinstalled', handleAppInstalled)
-        }
-    }, [])
+    if (!pwaInstall || pwaInstall.installed || !pwaInstall.canInstall || dismissed) return null
 
     const handleInstall = async () => {
-        if (!deferredEvent) return
-        deferredEvent.prompt()
-        await deferredEvent.userChoice
-        setDeferredEvent(null)
+        await pwaInstall.promptInstall()
     }
 
     const handleDismiss = () => {
@@ -45,13 +20,9 @@ const InstallPrompt = () => {
         setDismissed(true)
     }
 
-    if (!deferredEvent || dismissed) return null
-
     return (
         <div
             role="status"
-            // bottom-24 (não bottom-4): dá espaço pro UpdatePrompt não empilhar por cima
-            // nos raros casos em que os dois aparecem ao mesmo tempo.
             className="fixed bottom-24 left-1/2 -translate-x-1/2 z-overlay w-[calc(100%-2rem)] max-w-sm bg-white text-ink-900 rounded-panel shadow-2xl p-4 flex items-center gap-3 border border-line"
         >
             <i className="ri-install-line text-xl text-brand-500 flex-shrink-0" aria-hidden="true" />

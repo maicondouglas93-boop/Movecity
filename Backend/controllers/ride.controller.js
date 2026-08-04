@@ -67,14 +67,17 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
         // rejection capaz de derrubar o processo — o service já tem try/catch interno
         // desde a mesma auditoria, isto é defesa em profundidade.
-        // Heads-up (2026-08-04): payload rico com dados REAIS da corrida — fare,
-        // trechos de endereço e distância — pro body da notificação e pro deep link.
+        // Payload rico pro body da push (2026-08-04): fare, rota, distância, tempo,
+        // passageiro e categoria — sem botões Aceitar/Recusar na notificação.
         notificationService.sendNewRide(captain._id, {
-            rideId: ride._id.toString(),
-            fare: ride.fare,
-            pickup: ride.pickup,
-            destination: ride.destination,
-            estimatedDistance: ride.estimatedDistance,
+            rideId: rideWithUser._id.toString(),
+            fare: rideWithUser.fare,
+            pickup: rideWithUser.pickup,
+            destination: rideWithUser.destination,
+            estimatedDistance: rideWithUser.estimatedDistance,
+            estimatedTime: rideWithUser.estimatedTime,
+            vehicleType: rideWithUser.vehicleType || vehicleType,
+            passengerName: rideWithUser.user?.fullname?.firstname || '',
         }, TRACE_ID).catch(console.error);
     });
 
@@ -153,6 +156,17 @@ module.exports.getFare = async (req, res) => {
 // exatamente a mesma lógica atômica.
 async function performAcceptRide(rideId, captain, res) {
     const TRACE_ID = `Ride:${rideId}`;
+
+    // Simplificação do cadastro do motorista (2026-08-04): reforço direto no aceite —
+    // o despacho já filtra por approvalStatus:'aprovado' (availabilityFilter em
+    // captain.service.js) e toggleOnline já bloqueia ficar online sem aprovação, mas
+    // nenhum dos dois impede uma chamada direta a este endpoint com um rideId obtido
+    // por outro meio. Checagem redundante de propósito — a regra não pode depender só
+    // de o motorista nunca ter sido convidado a aceitar.
+    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked || captain.canReceiveRides === false) {
+        return res.status(403).json({ message: 'Documentação pendente. Envie e aguarde a aprovação dos seus documentos para começar a receber corridas.' });
+    }
+
     try {
         console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} tentando aceitar a corrida.`);
         const ride = await rideService.acceptRideAtomic({ rideId, captain });

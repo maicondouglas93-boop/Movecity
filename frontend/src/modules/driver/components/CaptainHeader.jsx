@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { usePwaUpdate } from '@/contexts/PwaUpdateContext';
 import { useToast } from '@/contexts/ToastContext';
+import InstallAppButton from '@/shared/components/ui/InstallAppButton';
 
 // Links do motorista consolidados num menu hamburguer (2026-08-04) — a barra de 5
 // ícones fixa no topo brigava com o espaço da tela em telas pequenas e duplicava o
@@ -40,15 +41,18 @@ const CaptainHeader = () => {
 
     return (
         <>
-            <div className="fixed top-0 left-0 w-full bg-surface border-b border-line z-[60] px-4 pt-3 pb-2 flex justify-between items-center shadow-raised">
-                <Link to="/captain-home" className="flex items-center">
-                    <img className='h-12 object-contain' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
-                </Link>
+            <div className="fixed top-0 left-0 w-full bg-surface border-b border-line z-[60] px-4 pt-3 pb-2 flex justify-between items-center shadow-raised gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    <Link to="/captain-home" className="flex items-center min-w-0">
+                        <img className='h-12 object-contain' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
+                    </Link>
+                    <InstallAppButton />
+                </div>
                 <button
                     type="button"
                     onClick={() => setMenuOpen(true)}
                     aria-label="Abrir menu"
-                    className="text-ink-600 active:text-brand-600 p-1 text-2xl transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    className="text-ink-600 active:text-brand-600 p-1 text-2xl transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
                 >
                     <i className="ri-menu-line" aria-hidden="true"></i>
                 </button>

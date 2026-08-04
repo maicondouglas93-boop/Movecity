@@ -58,6 +58,15 @@ vi.mock('@/contexts/PwaUpdateContext', () => ({
   }),
 }));
 
+vi.mock('@/contexts/PwaInstallContext', () => ({
+  usePwaInstall: () => ({
+    canInstall: false,
+    installed: true,
+    promptInstall: vi.fn(),
+    isIos: false,
+  }),
+}));
+
 // Mocks for GSAP
 vi.mock('@gsap/react', () => ({
   useGSAP: vi.fn(),

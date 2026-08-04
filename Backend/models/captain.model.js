@@ -21,6 +21,11 @@ const captainSchema = new mongoose.Schema({
         lowercase: true,
         match: [ /^\S+@\S+\.\S+$/, 'Please enter a valid email' ]
     },
+    // Foto de perfil pública (cadastro / perfil) — distinta da selfie de documento.
+    profilePicture: {
+        type: String,
+        default: '',
+    },
     password: {
         type: String,
         required: true,
@@ -40,8 +45,11 @@ const captainSchema = new mongoose.Schema({
     },
 
     phone: {
+        // Simplificação do cadastro (2026-08-04): deixou de ser pedido no cadastro
+        // inicial — não é usado em nenhum outro fluxo do app hoje (nenhuma tela liga
+        // pro motorista). Continua opcional aqui em vez de removido, para não perder o
+        // dado de quem já tinha informado antes desta mudança.
         type: String,
-        required: true,
         match: [ /^\+\d{10,15}$/, 'Please enter a valid E.164 phone number (e.g. +5511999999999)' ]
     },
 
@@ -51,9 +59,28 @@ const captainSchema = new mongoose.Schema({
     },
 
     approvalStatus: {
+        // 'expirado' adicionado na simplificação do cadastro (2026-08-04): motorista
+        // que não enviou a documentação dentro do prazo de documentDeadline. Diferente
+        // de 'reprovado' (documento avaliado e recusado) — aqui ninguém avaliou nada,
+        // o prazo só terminou. Ver services/captainDeadline.service.js.
         type: String,
-        enum: [ 'iniciado', 'documentos_enviados', 'em_analise', 'aprovado', 'reprovado', 'suspenso', 'bloqueado' ],
+        enum: [ 'iniciado', 'documentos_enviados', 'em_analise', 'aprovado', 'reprovado', 'suspenso', 'bloqueado', 'expirado' ],
         default: 'iniciado',
+    },
+
+    // Simplificação do cadastro (2026-08-04): prazo para enviar a documentação
+    // obrigatória, calculado no backend (createdAt + 5 dias) no momento da criação da
+    // conta — nunca no frontend, que não é fonte confiável de tempo. Null nos
+    // motoristas criados antes desta mudança (ver migração em scripts/).
+    documentDeadline: {
+        type: Date,
+        default: null,
+    },
+    // Evita reenviar o lembrete de "prazo terminando" a cada tick do cron — ver
+    // services/captainDeadline.service.js.
+    documentDeadlineReminderSent: {
+        type: Boolean,
+        default: false,
     },
 
     rating: {
@@ -67,11 +94,15 @@ const captainSchema = new mongoose.Schema({
     },
 
     documents: {
-        cnhFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
-        cnhBack: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
-        crlv: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
-        vehicleFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } },
-        selfie: { url: { type: String, default: '' }, verified: { type: Boolean, default: false } }
+        // `reason` adicionado na simplificação do cadastro (2026-08-04): antes, o motivo
+        // de rejeição de um documento só existia no log de auditoria do admin — o
+        // motorista via "não verificado" sem nenhuma pista de por quê. Setado pelo admin
+        // em admin.service.js: updateCaptainDocument (limpo automaticamente ao aprovar).
+        cnhFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
+        cnhBack: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
+        crlv: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
+        vehicleFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
+        selfie: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } }
     },
     cnh: {
         number: { type: String },
@@ -210,6 +241,9 @@ const captainSchema = new mongoose.Schema({
 
 // Índices de Performance e Geolocalização
 captainSchema.index({ status: 1 });
+// Consulta do cron de expiração de documentação (captainDeadline.service.js): só
+// varre quem ainda pode expirar, nunca a coleção inteira.
+captainSchema.index({ documentDeadline: 1, approvalStatus: 1 });
 captainSchema.index({ isOnline: 1 });
 // Composto: toda consulta de disponibilidade filtra pelos dois juntos
 // (captain.service.js: availabilityFilter).

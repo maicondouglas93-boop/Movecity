@@ -106,7 +106,7 @@ describe('Fluxo de push de nova corrida (Fase 1: C1, C2, C3, C5)', () => {
         );
         expect(notification).toBeTruthy();
         // Diagnóstico de push de corrida (2026-08-03): título/formato atualizados.
-        expect(notification.title).toBe('🚗 Nova corrida disponível');
+        expect(notification.title).toMatch(/Nova corrida/);
         // O envio real ao Firebase falha neste ambiente (sem credenciais) mesmo depois
         // dos retries do pushTransport — o status final gravado tem que refletir isso
         // (M4 da auditoria: antes gravava 'sent' incondicionalmente, mesmo sem entregar).
@@ -619,49 +619,48 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
         expect(payload.data.deepLink).toBe('/captain/wallet');
     });
 
-    it('nova corrida usa data-only com deep link da oferta e flag de aceite inline', async () => {
+    it('nova corrida usa data-only com deep link e body rico (sem aceite inline)', async () => {
         const captain = await createCaptain();
         await NotificationToken.create({ captainId: captain._id, token: 'tok-deeplink-newride', device: 'test' });
 
-        notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-125', fare: 18.5 });
+        notificationDispatcher.sendNewRide(captain._id, {
+            rideId: 'ride-125',
+            fare: 18.5,
+            pickup: 'Av. Paulista, 1000 - Bela Vista',
+            destination: 'Av. Faria Lima, 200 - Itaim',
+            estimatedDistance: 4500,
+            estimatedTime: 720,
+            passengerName: 'Maria Silva',
+            vehicleType: 'car',
+        });
 
         const payload = await waitForPayload();
-        // Heads-up (2026-08-04): data-only — o SW desenha a notificação; o Chrome não
-        // gera uma segunda automática a partir de notification{} .
         expect(payload.dataOnly).toBe(true);
         expect(payload.webpush.notification).toBeUndefined();
         expect(payload.webpush.headers.Urgency).toBe('high');
         expect(payload.data.deepLink).toBe('/captain-home?rideOffer=ride-125');
-        // Com FRONTEND_URL no ambiente, o absolute inclui a origem do PWA.
         expect(String(payload.data.deepLinkAbsolute)).toContain('/captain-home?rideOffer=ride-125');
         expect(payload.webpush.fcmOptions.link).toContain('/captain-home?rideOffer=ride-125');
-        expect(payload.data.apiUrl).toBeTruthy();
-        expect(payload.data.canAcceptInline).toBe('true');
+        expect(payload.data.canAcceptInline).toBeUndefined();
         expect(payload.data.type).toBe('NEW_RIDE');
+        expect(payload.title).toContain('R$ 18,50');
+        expect(payload.message).toContain('Av. Paulista');
+        expect(payload.message).toContain('Av. Faria Lima');
+        expect(payload.message).toContain('4,5 km');
+        expect(payload.message).toContain('12 min');
+        expect(payload.message).toContain('Maria');
     });
 
-    it('em produção sem BASE_URL, a oferta NÃO habilita Aceitar inline (que não teria como funcionar)', async () => {
-        const originalEnv = process.env.NODE_ENV;
-        const originalBaseUrl = process.env.BASE_URL;
-        process.env.NODE_ENV = 'production';
-        delete process.env.BASE_URL;
+    it('nova corrida sem detalhes ainda envia oferta com deep link', async () => {
+        const captain = await createCaptain();
+        await NotificationToken.create({ captainId: captain._id, token: 'tok-deeplink-nobaseurl', device: 'test' });
 
-        try {
-            const captain = await createCaptain();
-            await NotificationToken.create({ captainId: captain._id, token: 'tok-deeplink-nobaseurl', device: 'test' });
+        notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-126' });
 
-            notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-126' });
-
-            const payload = await waitForPayload();
-            expect(payload.dataOnly).toBe(true);
-            expect(payload.data.canAcceptInline).toBe('false');
-            // A notificação em si continua sendo enviada — só a ação embutida some.
-            expect(payload.title).toBe('🚗 Nova corrida disponível');
-        } finally {
-            process.env.NODE_ENV = originalEnv;
-            if (originalBaseUrl === undefined) delete process.env.BASE_URL;
-            else process.env.BASE_URL = originalBaseUrl;
-        }
+        const payload = await waitForPayload();
+        expect(payload.dataOnly).toBe(true);
+        expect(payload.data.deepLink).toBe('/captain-home?rideOffer=ride-126');
+        expect(payload.title).toBe('Nova corrida disponível');
     });
 
     it('campanha traduz o deepLink lógico do painel para uma rota real com barra inicial', async () => {

@@ -39,7 +39,7 @@ module.exports.registerCaptain = async (req, res, next) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { fullname, email, password, cpf, birthDate, phone, cnh, pix, vehicle } = req.body;
+    const { fullname, email, password, vehicle } = req.body;
 
     const isCaptainAlreadyExist = await captainModel.findOne({ email });
 
@@ -55,28 +55,21 @@ module.exports.registerCaptain = async (req, res, next) => {
 
     const hashedPassword = await captainModel.hashPassword(password);
 
+    // Simplificação do cadastro (2026-08-04): capacity não é mais um campo pedido ao
+    // motorista — vem da categoria escolhida (evita duplicar esse dado em dois lugares
+    // que podiam divergir).
     const captain = await captainService.createCaptain({
         firstname: fullname.firstname,
         lastname: fullname.lastname,
         email,
         password: hashedPassword,
-        cpf,
-        birthDate,
-        phone,
         marca: vehicle.marca,
         modelo: vehicle.modelo,
         ano: vehicle.ano,
         color: vehicle.color,
         plate: vehicle.plate,
-        capacity: vehicle.capacity,
+        capacity: category.capacity,
         vehicleType: vehicle.vehicleType,
-        cnhNumber: cnh.number,
-        cnhCategory: cnh.category,
-        cnhExpiration: cnh.expiration,
-        cnhUf: cnh.uf,
-        cnhEar: cnh.ear,
-        pixKeyType: pix.keyType,
-        pixKey: pix.key
     });
 
     // Fase 7 da correção do sistema de push (2026-08-02): admin precisa saber que tem
@@ -84,8 +77,51 @@ module.exports.registerCaptain = async (req, res, next) => {
     // quem abrisse o painel e fosse conferir a aba de motoristas por conta própria.
     notificationService.sendNewCaptainAlert(`${fullname.firstname} ${fullname.lastname}`).catch(console.error);
 
+    // Simplificação do cadastro (2026-08-04): avisa o motorista, na hora, do prazo de
+    // 5 dias que acabou de começar a contar — ele só vai ver isso de novo quando abrir
+    // o perfil, e o push chega mesmo com o app fechado.
+    notificationService.sendCaptainRegistered(captain._id, { documentDeadline: captain.documentDeadline }).catch(console.error);
+
     return await respondWithCaptainSession(res, { captain, ip: req.ip, statusCode: 201 });
 
+}
+
+// Simplificação do cadastro (2026-08-04): CNH e PIX saíram do cadastro inicial e agora
+// são preenchidos junto da etapa de documentação — este endpoint aceita os dois de
+// forma independente (só CNH, só PIX, ou os dois juntos) e grava apenas o que veio,
+// sem apagar o que já estava salvo.
+module.exports.updateDocumentInfo = async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { cnh, pix } = req.body;
+    const update = {};
+
+    if (cnh) {
+        if (cnh.number !== undefined) update['cnh.number'] = cnh.number;
+        if (cnh.category !== undefined) update['cnh.category'] = cnh.category;
+        if (cnh.expiration !== undefined) update['cnh.expiration'] = cnh.expiration;
+        if (cnh.uf !== undefined) update['cnh.uf'] = cnh.uf;
+        if (cnh.ear !== undefined) update['cnh.ear'] = cnh.ear;
+    }
+    if (pix) {
+        if (pix.keyType !== undefined) update['pix.keyType'] = pix.keyType;
+        if (pix.key !== undefined) update['pix.key'] = pix.key;
+    }
+
+    if (Object.keys(update).length === 0) {
+        return res.status(400).json({ message: 'Nenhum dado para atualizar' });
+    }
+
+    const captain = await captainModel.findByIdAndUpdate(
+        req.captain._id,
+        { $set: update },
+        { new: true, runValidators: true }
+    );
+
+    res.status(200).json({ captain });
 }
 
 module.exports.loginCaptain = async (req, res, next) => {
@@ -163,12 +199,14 @@ module.exports.updateDocument = async (req, res, next) => {
     }
 
     // verified:false explícito — um reenvio deve voltar a exigir conferência do admin,
-    // mesmo que o documento anterior já estivesse verificado.
+    // mesmo que o documento anterior já estivesse verificado. reason limpo: um motivo
+    // de rejeição antigo não deve continuar aparecendo depois de um reenvio.
     const captain = await captainModel.findByIdAndUpdate(
         req.captain._id,
         {
             [`documents.${docType}.url`]: url,
-            [`documents.${docType}.verified`]: false
+            [`documents.${docType}.verified`]: false,
+            [`documents.${docType}.reason`]: ''
         },
         { new: true }
     );

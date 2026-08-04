@@ -35,36 +35,36 @@ module.exports.touchLastSeen = async (captainId) => {
     await captainModel.findByIdAndUpdate(captainId, { lastSeenAt: new Date() });
 };
 
+// Simplificação do cadastro (2026-08-04): cadastro inicial só precisa de conta +
+// veículo — cpf/phone/cnh/pix saíram (ver PATCH /captains/document-info) e não são
+// mais exigidos aqui.
+const DOCUMENT_DEADLINE_DAYS = 5;
+
+module.exports.DOCUMENT_DEADLINE_DAYS = DOCUMENT_DEADLINE_DAYS;
+
 module.exports.createCaptain = async ({
-    firstname, lastname, email, password, cpf, birthDate, phone, 
+    firstname, lastname, email, password,
     color, plate, capacity, vehicleType, marca, modelo, ano,
-    cnhNumber, cnhCategory, cnhExpiration, cnhUf, cnhEar,
-    pixKeyType, pixKey
 }) => {
-    if (!firstname || !email || !password || !color || !plate || !capacity || !vehicleType || !cpf || !phone || !cnhNumber || !pixKey) {
+    if (!firstname || !email || !password || !color || !plate || !capacity || !vehicleType) {
         throw new Error('Required fields are missing');
     }
-    const captain = captainModel.create({
+
+    // Prazo de documentação: SEMPRE calculado aqui (backend), nunca no frontend — é a
+    // única fonte de verdade sobre quando o motorista precisa terminar de enviar os
+    // documentos. `now` também alimenta implicitamente createdAt (timestamps:true),
+    // então os dois nascem do mesmo instante.
+    const now = new Date();
+    const documentDeadline = new Date(now.getTime() + DOCUMENT_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
+
+    const captain = await captainModel.create({
         fullname: {
             firstname,
             lastname
         },
         email,
         password,
-        cpf,
-        birthDate,
-        phone,
-        cnh: {
-            number: cnhNumber,
-            category: cnhCategory,
-            expiration: cnhExpiration,
-            uf: cnhUf,
-            ear: cnhEar
-        },
-        pix: {
-            keyType: pixKeyType,
-            key: pixKey
-        },
+        documentDeadline,
         vehicle: {
             marca,
             modelo,

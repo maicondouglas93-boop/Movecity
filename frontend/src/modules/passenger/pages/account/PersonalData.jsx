@@ -26,6 +26,7 @@ const PersonalData = () => {
     const { user, setUser } = useContext(UserDataContext);
     const { addToast } = useToast();
     const [loading, setLoading] = useState(false);
+    const [photoUploading, setPhotoUploading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
     const [photoPreview, setPhotoPreview] = useState(user?.profilePicture || user?.photo || null);
 
@@ -102,15 +103,51 @@ const PersonalData = () => {
         }
     };
 
-    const handlePhotoChange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setPhotoPreview(reader.result);
-                addToast('Foto pronta para upload (Backend em breve)', 'info');
-            };
-            reader.readAsDataURL(file);
+    const handlePhotoChange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            addToast('Selecione uma imagem válida.', 'error');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            addToast('A foto deve ter no máximo 5 MB.', 'error');
+            return;
+        }
+
+        const localPreview = URL.createObjectURL(file);
+        setPhotoPreview(localPreview);
+        setPhotoUploading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('image', file);
+            const response = await axios.post(
+                `${import.meta.env.VITE_BASE_URL}/uploads/profile`,
+                formData,
+                {
+                    headers: {
+                        Authorization: `Bearer ${getAccessToken('user')}`,
+                        'Content-Type': 'multipart/form-data',
+                    },
+                }
+            );
+            const url = response.data?.url;
+            const updatedUser = response.data?.user;
+            if (updatedUser) setUser(updatedUser);
+            if (url) setPhotoPreview(url);
+            addToast('Foto de perfil atualizada!', 'success');
+        } catch (error) {
+            setPhotoPreview(user?.profilePicture || user?.photo || null);
+            addToast(
+                getFriendlyErrorMessage(error, 'Não foi possível enviar a foto. Tente novamente.'),
+                'error'
+            );
+        } finally {
+            setPhotoUploading(false);
+            URL.revokeObjectURL(localPreview);
+            e.target.value = '';
         }
     };
 
@@ -139,9 +176,18 @@ const PersonalData = () => {
                         <label htmlFor="photo-upload" className="absolute bottom-0 right-0 bg-ink-900 text-white rounded-full h-10 w-10 flex items-center justify-center shadow-raised cursor-pointer active:scale-95 transition-transform border-2 border-surface">
                             <i className="ri-camera-fill text-lg" aria-hidden="true"></i>
                         </label>
-                        <input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                        <input
+                            id="photo-upload"
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handlePhotoChange}
+                            disabled={photoUploading}
+                        />
                     </div>
-                    <p className="text-sm text-ink-400 font-medium">Trocar foto de perfil</p>
+                    <p className="text-sm text-ink-400 font-medium">
+                        {photoUploading ? 'Enviando foto...' : 'Trocar foto de perfil'}
+                    </p>
                 </div>
 
                 <form id="profile-form" onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">

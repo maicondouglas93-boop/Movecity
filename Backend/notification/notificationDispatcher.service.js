@@ -62,51 +62,48 @@ const shortAddress = (address) => {
 };
 
 module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
-    // Heads-up (2026-08-04): título curto + body com valor e trecho real da corrida.
-    // Dados vêm do despacho (ride.controller) — nada mockado.
-    const title = '🚗 Nova corrida disponível';
+    // Body rico sem botões Aceitar/Recusar (2026-08-04): valor, origem→destino,
+    // distância e tempo — o toque abre a oferta no app.
     const fareLabel = typeof data.fare === 'number'
         ? `R$ ${data.fare.toFixed(2).replace('.', ',')}`
         : null;
     const pickupShort = shortAddress(data.pickup);
     const destShort = shortAddress(data.destination);
-    const routeLabel = pickupShort && destShort ? `${pickupShort} → ${destShort}` : null;
+    const routeLabel = pickupShort && destShort
+        ? `${pickupShort} → ${destShort}`
+        : (pickupShort || destShort || null);
     const distanceKm = typeof data.estimatedDistance === 'number' && data.estimatedDistance > 0
         ? `${(data.estimatedDistance / 1000).toFixed(1).replace('.', ',')} km`
         : null;
-    const message = [fareLabel, routeLabel || distanceKm].filter(Boolean).join(' • ')
-        || 'Passageiro próximo';
+    const durationMin = typeof data.estimatedTime === 'number' && data.estimatedTime > 0
+        ? `${Math.max(1, Math.round(data.estimatedTime / 60))} min`
+        : null;
+    const passengerLabel = data.passengerName
+        ? String(data.passengerName).trim().split(/\s+/)[0]
+        : null;
+    const vehicleLabel = data.vehicleType
+        ? String(data.vehicleType)
+        : null;
 
-    // C2 da auditoria de push (2026-08-02): sem BASE_URL em produção o SW apontaria
-    // Aceitar para o localhost do próprio celular do motorista.
-    const baseUrl = process.env.BASE_URL || process.env.API_URL || '';
-    if (!baseUrl && process.env.NODE_ENV === 'production') {
-        console.error('[Notification] AVISO CRÍTICO: BASE_URL não configurado em produção — o botão "Aceitar" da notificação push do motorista vai falhar.');
-    }
-    const canAcceptInline = !!baseUrl || process.env.NODE_ENV !== 'production';
+    const title = fareLabel ? `Nova corrida · ${fareLabel}` : 'Nova corrida disponível';
+    const message = [
+        routeLabel,
+        [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
+        passengerLabel ? `Passageiro: ${passengerLabel}` : null,
+        vehicleLabel,
+    ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta';
 
-    // Deep link com rideId: ao tocar, CaptainHome abre exatamente essa oferta
-    // (não a home genérica). O SW também usa isso no focus/openWindow.
     const deepLinkPath = `${DEEP_LINK.captainHome}?rideOffer=${encodeURIComponent(data.rideId)}`;
-    // fcmOptions.link precisa de URL absoluta quando possível — relative quebra o
-    // click-through em alguns clientes FCM. FRONTEND_URL está no .env.example.
     const frontendOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     const deepLink = frontendOrigin ? `${frontendOrigin}${deepLinkPath}` : deepLinkPath;
 
     const payloadData = {
         ...data,
         type: 'NEW_RIDE',
-        apiUrl: baseUrl || `http://localhost:${process.env.PORT || 3000}`,
-        // Path relativo também vai no data — o SW resolve com self.location.origin.
         deepLink: deepLinkPath,
         deepLinkAbsolute: deepLink,
-        // String: FCM data só aceita strings (sanitize no transport reforça).
-        canAcceptInline: canAcceptInline ? 'true' : 'false',
     };
 
-    // Data-only + Urgency high: o Chrome NÃO desenha sozinho; o SW controla
-    // vibrate/requireInteraction/actions/renotify — o que maximiza heads-up.
-    // NÃO colocar webpush.notification aqui: isso reintroduziria o display automático.
     const options = {
         dataOnly: true,
         webpush: {
@@ -119,8 +116,6 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
         },
     };
 
-    // M3 da auditoria de push (2026-08-02): enfileirado em vez de aguardado — o
-    // despacho de uma corrida não deve esperar (nem depender de) o resultado do envio.
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_RIDE', payloadData, options, traceId), traceId);
 };
 
@@ -133,6 +128,7 @@ const DEEP_LINK = {
     captainHome: '/captain-home',
     captainRiding: '/captain-riding',
     captainWallet: '/captain/wallet',
+    captainProfile: '/captain/profile',
     riding: '/riding',
     home: '/home',
 };
@@ -271,6 +267,65 @@ module.exports.sendNewCaptainAlert = async (captainName) => {
         'Novo motorista aguardando aprovação',
         `${captainName} acabou de se cadastrar e está aguardando revisão de documentos.`
     );
+};
+
+// Simplificação do cadastro do motorista (2026-08-04): a documentação deixou de
+// bloquear o cadastro inicial, então o motorista precisa ser avisado — logo na hora e
+// depois, se o prazo estiver terminando ou tiver terminado — de que ainda precisa
+// resolver isso pra poder ficar online. Ver captainDeadline.service.js (cron) e
+// admin.service.js (aprovação/rejeição por documento).
+const formatDeadlineDate = (deadline) => {
+    try {
+        return new Date(deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch {
+        return '';
+    }
+};
+
+module.exports.sendCaptainRegistered = async (captainId, data) => {
+    const title = 'Cadastro realizado!';
+    const message = `Envie seus documentos até ${formatDeadlineDate(data.documentDeadline)} para concluir a ativação da sua conta.`;
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
+};
+
+module.exports.sendDocumentDeadlineReminder = async (captainId, data) => {
+    const title = 'Seu prazo está terminando';
+    const message = `Você tem até ${formatDeadlineDate(data.documentDeadline)} para enviar seus documentos e não perder o acesso.`;
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
+};
+
+module.exports.sendDocumentDeadlineExpired = async (captainId, data) => {
+    const title = 'Prazo de documentação expirado';
+    const message = 'O prazo para enviar seus documentos expirou. Envie agora para reativar sua conta.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
+};
+
+module.exports.sendCaptainApproved = async (captainId, data = {}) => {
+    const title = 'Cadastro aprovado!';
+    const message = 'Sua documentação foi aprovada. Você já pode ficar online e receber corridas.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainHome }));
+};
+
+module.exports.sendCaptainRejected = async (captainId, data = {}) => {
+    const title = 'Cadastro reprovado';
+    const message = data.reason
+        ? `Sua documentação foi reprovada: ${data.reason}. Envie novamente para continuar.`
+        : 'Sua documentação foi reprovada. Verifique o motivo no app e envie novamente.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
+};
+
+module.exports.sendDocumentApproved = async (captainId, data) => {
+    const title = 'Documento aprovado';
+    const message = `Seu documento (${data.docLabel}) foi aprovado.`;
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
+};
+
+module.exports.sendDocumentRejected = async (captainId, data) => {
+    const title = 'Um documento precisa ser reenviado';
+    const message = data.reason
+        ? `${data.docLabel}: ${data.reason}`
+        : `Seu documento (${data.docLabel}) foi rejeitado. Envie novamente.`;
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'DOCUMENT', { ...data, deepLink: DEEP_LINK.captainProfile }));
 };
 
 module.exports.sendComplaintAlert = async (rideId, issueCategory) => {

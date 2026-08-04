@@ -12,6 +12,7 @@ const { deleteByPrefix } = require('../cache/cache');
 const { disconnectSocket } = require('../socket');
 const uploadService = require('./upload.service');
 const walletService = require('./wallet.service');
+const notificationService = require('./notification.service');
 
 module.exports.login = async (email, password) => {
     const admin = await adminUserModel.findOne({ email }).select('+password');
@@ -547,8 +548,21 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
 };
 
 module.exports.updateCaptainApproval = async (captainId, approvalStatus, reason, admin, ip) => {
-    const captain = await captainModel.findByIdAndUpdate(captainId, { approvalStatus }, { new: true });
-    
+    const captain = await captainModel.findByIdAndUpdate(captainId, { approvalStatus }, { new: true, runValidators: true });
+
+    // Simplificação do cadastro do motorista (2026-08-04): sem isto, um motorista
+    // aprovado continuava vendo (e sendo barrado por) o approvalStatus antigo por até
+    // 10 minutos — o mesmo cache de 10 min que já existia, só nunca invalidado aqui
+    // (só no bloqueio, ver toggleCaptainBlock). A aprovação/rejeição precisa valer na
+    // hora, igual ao bloqueio.
+    deleteByPrefix(`profile:captain:${captainId}`);
+
+    if (approvalStatus === 'aprovado') {
+        notificationService.sendCaptainApproved(captainId).catch(console.error);
+    } else if (approvalStatus === 'reprovado') {
+        notificationService.sendCaptainRejected(captainId, { reason }).catch(console.error);
+    }
+
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,
@@ -559,7 +573,7 @@ module.exports.updateCaptainApproval = async (captainId, approvalStatus, reason,
         newValue: { approvalStatus },
         ipAddress: ip || '0.0.0.0'
     });
-    
+
     return captain;
 };
 
@@ -629,6 +643,16 @@ module.exports.getCaptainDocumentSignedUrl = async (captainId, docType) => {
     return uploadService.getSignedDocumentUrl(fileUrl);
 };
 
+// Rótulo amigável do documento nas notificações — mesmo conjunto de chaves de
+// captain.model.js (documents) e da tela de perfil do motorista (CaptainProfile.jsx).
+const DOCUMENT_LABELS = {
+    cnhFront: 'CNH (frente)',
+    cnhBack: 'CNH (verso)',
+    crlv: 'CRLV',
+    vehicleFront: 'Foto do veículo',
+    selfie: 'Selfie com a CNH',
+};
+
 module.exports.updateCaptainDocument = async (captainId, docType, verified, reason, admin, ip) => {
     const captain = await captainModel.findById(captainId);
     if (!captain || !captain.documents || !captain.documents[docType]) {
@@ -636,7 +660,22 @@ module.exports.updateCaptainDocument = async (captainId, docType, verified, reas
     }
 
     captain.documents[docType].verified = verified;
+    // Motivo visível pro próprio motorista (2026-08-04) — antes só existia no log de
+    // auditoria do admin. Limpo ao aprovar: um motivo de rejeição antigo não deve
+    // continuar aparecendo depois que o documento foi aceito.
+    captain.documents[docType].reason = verified ? '' : (reason || '');
     await captain.save();
+
+    // Mesmo motivo da invalidação em updateCaptainApproval: sem isto, o motorista só
+    // veria o documento verificado/rejeitado depois que o cache de 10 min expirasse.
+    deleteByPrefix(`profile:captain:${captainId}`);
+
+    const docLabel = DOCUMENT_LABELS[docType] || docType;
+    if (verified) {
+        notificationService.sendDocumentApproved(captainId, { docLabel }).catch(console.error);
+    } else {
+        notificationService.sendDocumentRejected(captainId, { docLabel, reason }).catch(console.error);
+    }
 
     await module.exports.logAction({
         adminId: admin._id,

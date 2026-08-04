@@ -42,5 +42,22 @@
 // @property {(position: LatLng, opts?: {animate?: boolean}) => void} panTo
 // @property {() => void} destroy
 //   Destroi o mapa e limpa todos os recursos (marcadores, rota, círculo, listeners).
+//
+// ---- Câmera de navegação (Fase D, 2026-08-03) ----
+//
+// @property {() => boolean} supportsCamera
+//   true se o provider consegue girar/inclinar a câmera de verdade (heading + tilt).
+//   Google só devolve true com um Map ID VETORIAL configurado (VITE_GOOGLE_MAPS_MAP_ID):
+//   mapa raster ignora heading/tilt silenciosamente. Leaflet é 2D top-down e sempre
+//   devolve false. Quem chama usa isso pra decidir entre modo navegação e fallback 2D —
+//   nunca pra assumir que moveCamera não pode ser chamado (pode: degrada sozinho).
+// @property {(camera: {center: LatLng, heading?: number, tilt?: number, zoom?: number}) => void} moveCamera
+//   Reposiciona a câmera SEM animação própria do provider — quem chama já interpola
+//   quadro a quadro (rAF), e uma segunda animação por baixo brigaria com a primeira,
+//   produzindo o "solavanco" clássico de mapa de navegação. Providers sem suporte a
+//   câmera aplicam só center/zoom e ignoram heading/tilt (degradação graciosa).
+// @property {(id: string, degrees: number) => void} setMarkerRotation
+//   Gira o marcador para apontar na direção do movimento (0 = norte). No-op silencioso
+//   em marcador que não existe ou cujo ícone não suporta rotação.
 
 export {}; // arquivo só de documentação/tipos, sem exports em runtime

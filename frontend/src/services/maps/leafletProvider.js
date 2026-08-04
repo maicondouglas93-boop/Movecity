@@ -90,10 +90,27 @@ const destinationIcon = L.divIcon({
     iconAnchor: [14, 28],
 });
 
+// Fase D (2026-08-03): marcador do modo navegação. O Leaflet não gira a câmera, mas
+// gira o marcador sem problema (divIcon é DOM puro) — então o motorista pelo menos vê
+// para onde o veículo aponta, mesmo no fallback 2D.
+const navigatorIcon = L.divIcon({
+    html: `
+      <div class="leaflet-navigator-rotator" style="transform: rotate(0deg); transform-origin: 50% 50%;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-12 -12 24 24">
+          <path d="M 0,-9 L 6.5,8 L 0,4 L -6.5,8 Z" fill="#111111" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    `,
+    className: 'navigator-icon',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+});
+
 function resolveIcon(type) {
     if (type === 'user') return userPositionIcon;
     if (type === 'pickup') return pickupIcon;
     if (type === 'destination') return destinationIcon;
+    if (type === 'navigator') return navigatorIcon;
     return vehicleIcons[type] || vehicleIcons.car;
 }
 
@@ -131,6 +148,34 @@ export function createLeafletProvider() {
     function setMarkerIcon(id, type) {
         const marker = markers[id];
         if (marker) marker.setIcon(resolveIcon(type));
+    }
+
+    // Gira o CONTEÚDO do divIcon, nunca o elemento do marcador em si: o Leaflet usa o
+    // `transform` do elemento externo para posicionar o marcador no mapa, e sobrescrevê-lo
+    // faria o marcador saltar para o canto da tela.
+    function setMarkerRotation(id, degrees) {
+        const marker = markers[id];
+        if (!marker || !Number.isFinite(degrees) || typeof marker.getElement !== 'function') return;
+        const rotator = marker.getElement()?.querySelector('.leaflet-navigator-rotator');
+        if (rotator) rotator.style.transform = `rotate(${degrees}deg)`;
+    }
+
+    // Leaflet é 2D top-down: não existe heading nem tilt de câmera. Devolver false aqui
+    // é o que permite ao LiveTracking escolher o fallback (mapa sem rotação, veículo
+    // girando) em vez de fingir uma navegação que não acontece.
+    function supportsCamera() {
+        return false;
+    }
+
+    // Degradação graciosa: aplica o que o Leaflet tem (centro e zoom) e ignora
+    // heading/tilt. `animate: false` porque quem chama já interpola quadro a quadro.
+    function moveCamera({ center, zoom } = {}) {
+        if (!map || !center) return;
+        if (Number.isFinite(zoom)) {
+            map.setView([center.lat, center.lng], zoom, { animate: false });
+        } else {
+            map.panTo([center.lat, center.lng], { animate: false });
+        }
     }
 
     function removeMarker(id) {
@@ -248,6 +293,7 @@ export function createLeafletProvider() {
         placeMarker,
         moveMarker,
         setMarkerIcon,
+        setMarkerRotation,
         removeMarker,
         setRoute,
         removeRoute,
@@ -255,6 +301,8 @@ export function createLeafletProvider() {
         removeCircle,
         fitBounds,
         panTo,
+        moveCamera,
+        supportsCamera,
         destroy
     };
 }

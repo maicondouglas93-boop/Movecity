@@ -173,6 +173,128 @@ module.exports.getDistanceTime = async (origin, destination) => {
     };
 }
 
+// Fase D da experiência de corrida ativa (2026-08-03): rota COM manobras.
+// GraphHopper é o caminho preferido aqui porque devolve as instruções já em pt-BR
+// (`locale=pt-BR`); o OSRM público não devolve texto de instrução nenhum — só o tipo
+// de manobra e o nome da via —, então a frase é montada aqui.
+const GH_SIGN_MAP = {
+    '-98': 'uturn',
+    '-8': 'uturn',
+    '-7': 'straight',   // manter-se à esquerda
+    '-3': 'turn-sharp-left',
+    '-2': 'turn-left',
+    '-1': 'turn-slight-left',
+    '0': 'straight',
+    '1': 'turn-slight-right',
+    '2': 'turn-right',
+    '3': 'turn-sharp-right',
+    '4': 'destination',
+    '5': 'straight',    // via alcançada
+    '6': 'roundabout',
+    '7': 'straight',    // manter-se à direita
+};
+
+const OSRM_MODIFIER_MAP = {
+    'left': 'turn-left',
+    'right': 'turn-right',
+    'slight left': 'turn-slight-left',
+    'slight right': 'turn-slight-right',
+    'sharp left': 'turn-sharp-left',
+    'sharp right': 'turn-sharp-right',
+    'uturn': 'uturn',
+    'straight': 'straight',
+};
+
+const OSRM_MANEUVER_TEXT = {
+    'turn-left': 'Vire à esquerda',
+    'turn-right': 'Vire à direita',
+    'turn-slight-left': 'Mantenha-se à esquerda',
+    'turn-slight-right': 'Mantenha-se à direita',
+    'turn-sharp-left': 'Curva acentuada à esquerda',
+    'turn-sharp-right': 'Curva acentuada à direita',
+    'uturn': 'Faça o retorno',
+    'roundabout': 'Entre na rotatória',
+    'merge': 'Entre na via',
+    'destination': 'Você chegou ao destino',
+    'straight': 'Siga em frente',
+};
+
+module.exports.getRouteWithSteps = async (origin, destination) => {
+    if (!origin || !destination) {
+        throw new Error('Origin and destination are required');
+    }
+
+    const originCoords = await module.exports.getAddressCoordinate(origin);
+    const destCoords = await module.exports.getAddressCoordinate(destination);
+
+    const ghKey = process.env.GRAPHHOPPER_API_KEY;
+    const hasGhKey = ghKey && ghKey !== 'dummy-graphhopper-api-key';
+
+    if (hasGhKey) {
+        try {
+            const url = `https://graphhopper.com/api/1/route?point=${originCoords.ltd},${originCoords.lng}&point=${destCoords.ltd},${destCoords.lng}&profile=car&locale=pt-BR&calc_points=true&points_encoded=false&instructions=true&key=${ghKey}`;
+            const response = await axios.get(url, { timeout: 5000 });
+            const path = response.data?.paths?.[0];
+            if (path) {
+                const points = path.points.coordinates.map(c => [c[1], c[0]]);
+                // `interval` é [primeiro, último] ponto do trecho, e o texto descreve o
+                // que fazer no INÍCIO dele — por isso o ponto da manobra é interval[0].
+                const steps = (path.instructions || []).map(inst => {
+                    const idx = Array.isArray(inst.interval) ? inst.interval[0] : 0;
+                    const point = points[idx];
+                    return {
+                        instruction: inst.text || '',
+                        maneuver: GH_SIGN_MAP[String(inst.sign)] || 'straight',
+                        distanceMeters: Math.round(inst.distance || 0),
+                        location: point ? { lat: point[0], lng: point[1] } : null,
+                    };
+                }).filter(s => s.location);
+
+                return {
+                    distance: { text: `${(path.distance / 1000).toFixed(1)} km`, value: Math.round(path.distance) },
+                    duration: { text: `${Math.round(path.time / 60000)} mins`, value: Math.round(path.time / 1000) },
+                    polyline: points,
+                    steps,
+                };
+            }
+        } catch (err) {
+            console.warn('[osm.provider] GraphHopper com instruções falhou, tentando OSRM.', err.message);
+        }
+    }
+
+    const url = `https://router.project-osrm.org/route/v1/driving/${originCoords.lng},${originCoords.ltd};${destCoords.lng},${destCoords.ltd}?overview=full&geometries=geojson&steps=true`;
+    const response = await axios.get(url, { timeout: 5000 });
+    const route = response.data?.routes?.[0];
+    if (!route) throw new Error('Invalid OSRM response');
+
+    const steps = (route.legs || []).flatMap(leg => leg.steps || []).map(step => {
+        const type = step.maneuver?.type;
+        let maneuver = OSRM_MODIFIER_MAP[step.maneuver?.modifier] || 'straight';
+        if (type === 'arrive') maneuver = 'destination';
+        else if (type === 'roundabout' || type === 'rotary') maneuver = 'roundabout';
+        else if (type === 'merge') maneuver = 'merge';
+
+        const street = step.name ? ` em ${step.name}` : '';
+        const base = OSRM_MANEUVER_TEXT[maneuver] || OSRM_MANEUVER_TEXT.straight;
+        return {
+            instruction: maneuver === 'destination' ? base : `${base}${street}`,
+            maneuver,
+            distanceMeters: Math.round(step.distance || 0),
+            location: {
+                lat: step.maneuver?.location?.[1],
+                lng: step.maneuver?.location?.[0],
+            },
+        };
+    }).filter(s => Number.isFinite(s.location.lat) && Number.isFinite(s.location.lng));
+
+    return {
+        distance: { text: `${(route.distance / 1000).toFixed(1)} km`, value: Math.round(route.distance) },
+        duration: { text: `${Math.round(route.duration / 60)} mins`, value: Math.round(route.duration) },
+        polyline: route.geometry.coordinates.map(c => [c[1], c[0]]),
+        steps,
+    };
+}
+
 module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
     if (!input) {
         throw new Error('query is required');

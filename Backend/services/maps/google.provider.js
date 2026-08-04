@@ -226,4 +226,97 @@ module.exports.getDistanceTime = async (origin, destination) => {
     }
 };
 
+// Fase D da experiência de corrida ativa (2026-08-03): rota COM manobras.
+// getDistanceTime acima devolve só distância/duração/polyline (é o que a precificação
+// precisa). A navegação precisa de mais: a lista de conversões, cada uma com o ponto
+// onde acontece — é o que alimenta o banner "em 200 m, vire à direita na Rua X".
+// Vocabulário do Google normalizado para o conjunto pequeno e estável que o frontend
+// conhece (ver navigationMath.maneuverIcon), pra que trocar de provider não mude a UI.
+const GOOGLE_MANEUVER_MAP = {
+    TURN_LEFT: 'turn-left',
+    TURN_RIGHT: 'turn-right',
+    TURN_SLIGHT_LEFT: 'turn-slight-left',
+    TURN_SLIGHT_RIGHT: 'turn-slight-right',
+    TURN_SHARP_LEFT: 'turn-sharp-left',
+    TURN_SHARP_RIGHT: 'turn-sharp-right',
+    UTURN_LEFT: 'uturn',
+    UTURN_RIGHT: 'uturn',
+    ROUNDABOUT_LEFT: 'roundabout',
+    ROUNDABOUT_RIGHT: 'roundabout',
+    MERGE: 'merge',
+    FORK_LEFT: 'fork-left',
+    FORK_RIGHT: 'fork-right',
+    RAMP_LEFT: 'fork-left',
+    RAMP_RIGHT: 'fork-right',
+    STRAIGHT: 'straight',
+    DEPART: 'straight',
+    NAME_CHANGE: 'straight',
+    DESTINATION: 'destination',
+    DESTINATION_LEFT: 'destination',
+    DESTINATION_RIGHT: 'destination',
+};
+
+module.exports.getRouteWithSteps = async (origin, destination) => {
+    if (!origin || !destination) {
+        throw new Error('Origin and destination are required');
+    }
+
+    const originCoords = await module.exports.getAddressCoordinate(origin);
+    const destCoords = await module.exports.getAddressCoordinate(destination);
+
+    const response = await axios.post(
+        'https://routes.googleapis.com/directions/v2:computeRoutes',
+        {
+            origin: { location: { latLng: { latitude: originCoords.ltd, longitude: originCoords.lng } } },
+            destination: { location: { latLng: { latitude: destCoords.ltd, longitude: destCoords.lng } } },
+            travelMode: 'DRIVE',
+            routingPreference: 'TRAFFIC_AWARE',
+            polylineEncoding: 'GEO_JSON_LINESTRING',
+            languageCode: 'pt-BR',
+            units: 'METRIC',
+        },
+        {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': apiKey(),
+                'X-Goog-FieldMask': [
+                    'routes.duration',
+                    'routes.distanceMeters',
+                    'routes.polyline.geoJsonLinestring',
+                    'routes.legs.steps.navigationInstruction',
+                    'routes.legs.steps.distanceMeters',
+                    'routes.legs.steps.startLocation',
+                ].join(','),
+            },
+            timeout: 8000,
+        }
+    );
+
+    const route = response.data.routes?.[0];
+    if (!route) throw new Error('Invalid Routes API response');
+
+    const durationSeconds = parseInt(route.duration, 10) || 0;
+    const distanceMeters = route.distanceMeters || 0;
+    const polyline = (route.polyline?.geoJsonLinestring?.coordinates || []).map(c => [c[1], c[0]]);
+
+    // A instrução de um step descreve a manobra no INÍCIO dele (startLocation), não no
+    // fim — usar endLocation deslocaria todo o guia uma conversão à frente.
+    const steps = (route.legs || []).flatMap(leg => leg.steps || []).map(step => ({
+        instruction: step.navigationInstruction?.instructions || '',
+        maneuver: GOOGLE_MANEUVER_MAP[step.navigationInstruction?.maneuver] || 'straight',
+        distanceMeters: step.distanceMeters || 0,
+        location: {
+            lat: step.startLocation?.latLng?.latitude,
+            lng: step.startLocation?.latLng?.longitude,
+        },
+    })).filter(s => Number.isFinite(s.location.lat) && Number.isFinite(s.location.lng));
+
+    return {
+        distance: { text: `${(distanceMeters / 1000).toFixed(1)} km`, value: distanceMeters },
+        duration: { text: `${Math.round(durationSeconds / 60)} mins`, value: durationSeconds },
+        polyline,
+        steps,
+    };
+};
+
 module.exports.haversineKm = haversineKm;

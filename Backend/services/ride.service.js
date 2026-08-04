@@ -21,6 +21,10 @@ const VALID_ORIGINS_BY_TARGET = {
     accepted: ['requested'],
     going_to_pickup: ['accepted'],
     arrived: ['going_to_pickup', 'accepted'],
+    // Fase A da experiência de corrida ativa (2026-08-03): 'waiting_passenger' sempre
+    // esteve no enum do model e em UPDATE_STATUS_ALLOWED_TARGETS, mas faltava aqui —
+    // qualquer tentativa de transição lançava "Transição de status desconhecida".
+    waiting_passenger: ['arrived'],
     started: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     finished: ['started'],
     cancelled: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
@@ -649,10 +653,14 @@ module.exports.getCurrentRide = async ({ user }) => {
         throw new Error('User is required');
     }
 
+    // Fase A da experiência de corrida ativa (2026-08-03): '+otp' porque o PIN pertence
+    // ao próprio passageiro — sem isso, a restauração pós-refresh reconstruía a tela de
+    // espera mas o PIN vinha vazio (otp tem select:false no model), e o motorista não
+    // conseguia mais iniciar a corrida.
     let ride = await rideModel.findOne({
         user,
         status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
-    }).populate('user').populate('captain');
+    }).populate('user').populate('captain').select('+otp');
 
     // Auto-expire stale 'requested' rides (older than 10 minutes)
     if (ride && ride.status === 'requested') {
@@ -682,6 +690,60 @@ module.exports.getCurrentRideForCaptain = async ({ captain }) => {
     }).populate('user').populate('captain');
 
     return ride;
+}
+
+// Fase B da experiência de corrida ativa (2026-08-03): pull de corridas pendentes.
+// O despacho por socket/push é efêmero — se o motorista perdeu o 'new-ride' (app
+// fechado, push falhou, navegador reiniciado), a corrida nunca reaparecia pra ele.
+// Este pull usa os MESMOS critérios do despacho (dispatchRideToCaptains): status
+// 'requested' dentro da janela de expiração, mesmo vehicleType e raio de 15 km — só
+// que a partir da última posição conhecida do motorista, já que aqui é ele quem busca.
+const RIDE_EXPIRATION_MINUTES = 10; // mesma janela do auto-expire de getCurrentRide
+const CAPTAIN_SEARCH_RADIUS_KM = 15; // mesmo raio de dispatchRideToCaptains
+
+module.exports.getPendingRidesForCaptain = async ({ captain }) => {
+    if (!captain) {
+        throw new Error('Captain is required');
+    }
+
+    // Leitura fresca de propósito: o req.captain do middleware vem de um cache de perfil
+    // de 10 min, mas 'location' muda a cada ~10s via socket sem invalidar esse cache —
+    // um raio calculado sobre a posição de 10 min atrás mostraria/esconderia corridas
+    // erradas para um motorista em movimento.
+    const captainModel = require('../models/captain.model');
+    const freshCaptain = await captainModel.findById(captain._id)
+        .select('location vehicle isOnline isBlocked canReceiveRides approvalStatus');
+    if (!freshCaptain) return [];
+
+    // Espelho de captainService.availabilityFilter(): quem não seria candidato no
+    // despacho por push também não deve ver corridas no pull. (lastSeenAt fica de fora:
+    // esta chamada É contato do motorista com o servidor.)
+    const isAvailable = freshCaptain.isOnline === true
+        && freshCaptain.isBlocked !== true
+        && freshCaptain.canReceiveRides !== false
+        && freshCaptain.approvalStatus === 'aprovado';
+    if (!isAvailable) return [];
+
+    const vehicleType = freshCaptain.vehicle?.vehicleType;
+    if (!vehicleType) return [];
+
+    const position = freshCaptain.location;
+    if (!position || position.ltd == null || position.lng == null) return [];
+
+    const cutoff = new Date(Date.now() - RIDE_EXPIRATION_MINUTES * 60 * 1000);
+    const candidates = await rideModel.find({
+        status: 'requested',
+        vehicleType,
+        createdAt: { $gte: cutoff },
+        // pickupCoordinates é persistido no despacho; sem ele não dá pra aplicar o raio.
+        'pickupCoordinates.lat': { $exists: true }
+    }).populate('user').sort({ createdAt: -1 }).limit(20);
+
+    return candidates.filter(ride => {
+        const pickup = ride.pickupCoordinates;
+        if (!pickup || pickup.lat == null || pickup.lng == null) return false;
+        return mapService.haversineKm(position.ltd, position.lng, pickup.lat, pickup.lng) <= CAPTAIN_SEARCH_RADIUS_KM;
+    });
 }
 
 // Auditoria de UX do motorista (2026-08-02): o botão "Cancelar" do ConfirmRidePopUp só

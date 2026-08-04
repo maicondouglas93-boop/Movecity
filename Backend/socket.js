@@ -121,6 +121,22 @@ function initializeSocket(server) {
                         const captainService = require('./services/captain.service');
                         await captainService.startOnlineSession(authenticatedId);
                     }
+
+                    // Fase A da experiência de corrida ativa (2026-08-03): a sala
+                    // `ride_<id>` é populada por socketId no momento do despacho/aceite —
+                    // qualquer reconexão gera um socketId novo que NÃO estava na sala, e o
+                    // motorista designado deixava de receber 'ride-cancelled' /
+                    // 'ride-reassigned-by-admin' da corrida em que ele está agora.
+                    // Reentrar aqui garante que todo join autenticado volte à sala da
+                    // corrida ativa dele.
+                    const activeRide = await rideModel.findOne({
+                        captain: authenticatedId,
+                        status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] }
+                    }).select('_id');
+                    if (activeRide) {
+                        socket.join(`ride_${activeRide._id}`);
+                        console.log(`[AUDIT] Captain ${authenticatedId} reentrou na sala ride_${activeRide._id} após (re)conexão`);
+                    }
                 }
             } else if (userType === 'admin') {
                 // Auditoria de segurança (2026-08-02, S1): a sala admin_room recebe GPS
@@ -169,7 +185,10 @@ function initializeSocket(server) {
                 return socket.emit('error', { message: 'Invalid location data' });
             }
 
-            await captainModel.findByIdAndUpdate(userId, {
+            // Fase C (2026-08-03): `{ new: true }` pra ter o doc atualizado em mãos —
+            // o broadcast pro mapa do passageiro (abaixo) precisa de vehicle/isOnline
+            // sem uma segunda query.
+            const captainDoc = await captainModel.findByIdAndUpdate(userId, {
                 location: {
                     ltd: location.ltd,
                     lng: location.lng
@@ -182,7 +201,7 @@ function initializeSocket(server) {
                 // do motorista já emite este evento periodicamente, então ele é o
                 // batimento natural — sem exigir nada novo do cliente.
                 lastSeenAt: new Date()
-            });
+            }, { new: true });
 
             // Find active ride for this captain and emit update to the rider
             const ride = await rideModel.findOne({
@@ -237,6 +256,50 @@ function initializeSocket(server) {
                 ltd: location.ltd,
                 lng: location.lng,
             });
+
+            // Fase C da experiência de corrida ativa (2026-08-03): mapa do passageiro.
+            // Aproveita o pipeline que já existe (posição chega a cada ~10s) e o `ride`
+            // já consultado acima — nenhuma query extra. Motorista em corrida vira
+            // 'driver-busy' (some do mapa); disponível vira 'driver-location'. O filtro
+            // espelha availabilityFilter(): quem não seria despachado não aparece.
+            if (ride) {
+                io.to('map-viewers').emit('driver-busy', { driverId: userId });
+            } else if (
+                captainDoc && captainDoc.isOnline && !captainDoc.isBlocked
+                && captainDoc.canReceiveRides !== false && captainDoc.approvalStatus === 'aprovado'
+            ) {
+                io.to('map-viewers').emit('driver-location', {
+                    driverId: userId,
+                    vehicleType: captainDoc.vehicle?.vehicleType || 'car',
+                    location: { ltd: location.ltd, lng: location.lng }
+                });
+            }
+        });
+
+        // Fase C (2026-08-03): entrada na sala que recebe os motoristas disponíveis em
+        // tempo real. Exige o JWT do passageiro no próprio evento (mesmo padrão do
+        // join-chat) em vez de depender da ordem do 'join' — e porque posição de frota
+        // é dado sensível: sem essa checagem, qualquer socket anônimo poderia assistir
+        // a localização de todos os motoristas online.
+        socket.on('subscribe-drivers-map', async (data) => {
+            const { token } = data || {};
+            if (!token) {
+                return socket.emit('unauthorized', { message: 'Token ausente' });
+            }
+            try {
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                const viewer = await userModel.findById(decoded._id).select('_id isBlocked');
+                if (!viewer || viewer.isBlocked) {
+                    return socket.emit('unauthorized', { message: 'Usuário inválido' });
+                }
+                socket.join('map-viewers');
+            } catch (err) {
+                socket.emit('unauthorized', { message: 'Token inválido' });
+            }
+        });
+
+        socket.on('unsubscribe-drivers-map', () => {
+            socket.leave('map-viewers');
         });
 
         // A10 da auditoria de push (2026-08-02): antes, qualquer socket conectado

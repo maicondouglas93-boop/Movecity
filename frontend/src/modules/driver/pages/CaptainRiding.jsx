@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useCallback } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import FinishRide from '@/modules/driver/components/FinishRide'
 import BottomSheet from '@/shared/components/ui/BottomSheet'
@@ -7,6 +7,7 @@ import LiveTracking from '@/shared/components/LiveTracking'
 import { SocketContext } from '@/contexts/SocketContext'
 import { CaptainDataContext } from '@/contexts/CaptainContext'
 import { LocationContext } from '@/contexts/LocationContext'
+import { RideContext } from '@/contexts/RideContext'
 import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
 import { useToast } from '@/contexts/ToastContext'
@@ -16,6 +17,7 @@ import { db } from '@/services/db'
 import { getAccessToken } from '@/services/session'
 import { flushQueuedLocations } from '@/services/offlineQueue'
 import { joinWithRetry } from '@/services/socketAuth'
+import { formatManeuverDistance, maneuverIcon } from '@/services/maps/navigationMath'
 
 const CaptainRiding = () => {
 
@@ -27,8 +29,12 @@ const CaptainRiding = () => {
     // corrida (com o passageiro no carro) e a tela perdia tudo: passageiro, destino,
     // valor, mapa vazio. Agora começa com o state (otimização — resposta imediata) e,
     // se ele vier vazio, busca a corrida ativa de verdade no servidor.
-    const [ rideData, setRideData ] = useState(location.state?.ride || null)
-    const [ rehydrating, setRehydrating ] = useState(!location.state?.ride)
+    // Fase A da experiência de corrida ativa (2026-08-03): o RideContext pode já ter a
+    // corrida restaurada (ele consulta /rides/captain-current a cada abertura/retorno) —
+    // usa como segunda fonte imediata antes de cair no fetch próprio abaixo.
+    const { captainRide, setCaptainRide } = useContext(RideContext)
+    const [ rideData, setRideData ] = useState(location.state?.ride || captainRide || null)
+    const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || captainRide))
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
@@ -36,6 +42,17 @@ const CaptainRiding = () => {
     const { addToast } = useToast()
     const [ isChatOpen, setIsChatOpen ] = useState(false)
     const [ unreadCount, setUnreadCount ] = useState(0)
+
+    // Fase D da experiência de corrida ativa (2026-08-03): navegação estilo Waze.
+    // Começa ligada — o motorista chegou aqui justamente para dirigir até o destino —
+    // mas dá para desligar e ver a rota inteira de cima quando ele quiser se situar.
+    const [ navigationMode, setNavigationMode ] = useState(true)
+    const [ navInfo, setNavInfo ] = useState(null)
+    // Painel inferior recolhido por padrão: o mapa é o que importa dirigindo. Os dados
+    // do passageiro continuam a um toque de distância.
+    const [ hudExpanded, setHudExpanded ] = useState(false)
+
+    const handleNavigationUpdate = useCallback((info) => setNavInfo(info), [])
 
     useEffect(() => {
         if (rideData) {
@@ -135,6 +152,11 @@ const CaptainRiding = () => {
                 'Pagamento Recebido! 💰',
                 `R$${rideData?.fare} recebido de ${rideData?.user?.fullname?.firstname || 'passageiro'}`
             )
+            // Fase A da experiência de corrida ativa (2026-08-03): limpa o RideContext
+            // antes de voltar pra Home — sem isso, o contexto ficava com a corrida
+            // 'started' obsoleta e a Home mostraria "corrida em andamento" até a
+            // próxima sincronização com o backend.
+            setCaptainRide(null)
             setTimeout(() => navigate('/captain-home'), 3500)
         }
         
@@ -197,15 +219,42 @@ const CaptainRiding = () => {
 
             {/* Full-screen map — full z-index so it's interactive */}
             <div className='absolute inset-0 z-base'>
-                <LiveTracking ride={rideData} />
+                <LiveTracking
+                    ride={rideData}
+                    navigationMode={navigationMode}
+                    onNavigationUpdate={handleNavigationUpdate}
+                />
             </div>
 
             {/* Toast Notifications — rendered by global ToastProvider */}
 
+            {/* Fase D: banner da próxima manobra. Ocupa o topo inteiro em navegação
+                porque é a única informação que o motorista precisa ler em movimento —
+                tudo o mais fica em botões ou no painel recolhido. */}
+            {navigationMode && navInfo?.step && (
+                <div className='absolute top-0 left-0 right-0 z-panel px-3 pt-3 pointer-events-none'>
+                    <div className='bg-ink-900 text-white rounded-panel shadow-floating px-4 py-3 flex items-center gap-4'>
+                        <i className={`${maneuverIcon(navInfo.step.maneuver)} text-4xl flex-shrink-0`} aria-hidden="true"></i>
+                        <div className='min-w-0'>
+                            {navInfo.distanceToStepM != null && (
+                                <p className='text-2xl font-bold leading-tight'>
+                                    {formatManeuverDistance(navInfo.distanceToStepM)}
+                                </p>
+                            )}
+                            <p className='text-sm text-white/80 leading-snug line-clamp-2'>
+                                {navInfo.step.instruction}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Top bar */}
-            <div className='absolute top-0 left-0 right-0 z-panel flex items-center justify-between px-4 pt-4 pointer-events-none'>
-                <img className='w-20 pointer-events-auto drop-shadow-md' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
-                <div className='flex flex-col gap-2 pointer-events-auto'>
+            <div className={`absolute left-0 right-0 z-panel flex items-start justify-between px-4 pointer-events-none ${navigationMode && navInfo?.step ? 'top-24' : 'top-0 pt-4'}`}>
+                {!(navigationMode && navInfo?.step) && (
+                    <img className='w-20 pointer-events-auto drop-shadow-md' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
+                )}
+                <div className='flex flex-col gap-2 pointer-events-auto ml-auto'>
                     <Link
                         to='/captain-home'
                         aria-label="Voltar para a Home"
@@ -213,10 +262,24 @@ const CaptainRiding = () => {
                     >
                         <i className="text-lg ri-home-5-line"></i>
                     </Link>
+                    <button
+                        type="button"
+                        onClick={() => setNavigationMode(v => !v)}
+                        aria-label={navigationMode ? 'Ver rota completa' : 'Voltar à navegação'}
+                        aria-pressed={navigationMode}
+                        className={`h-11 w-11 flex items-center justify-center rounded-full shadow-raised pointer-events-auto ${navigationMode ? 'bg-brand-500 text-white' : 'bg-surface text-ink-900'}`}
+                    >
+                        <i className={`text-lg ${navigationMode ? 'ri-compass-3-fill' : 'ri-road-map-line'}`}></i>
+                    </button>
                     {/* Auditoria de UX do motorista (2026-08-02, Etapa 7, §4): não existia
                         nenhum jeito de navegar até o destino nem de ligar pro passageiro —
-                        só chat, e só depois de já iniciada a corrida. */}
-                    {rideData?.destination && (
+                        só chat, e só depois de já iniciada a corrida.
+                        Fase D (2026-08-03): com a navegação interna ligada e funcionando,
+                        este atalho externo vira ruído — some. Continua disponível com a
+                        navegação desligada e, principalmente, quando o mapa não suporta
+                        câmera de navegação (sem Map ID vetorial), que é justamente o
+                        caso em que o motorista precisa de um app externo. */}
+                    {rideData?.destination && (!navigationMode || navInfo?.supportsCamera === false) && (
                         <a
                             href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(rideData.destination)}&travelmode=driving`}
                             target="_blank"
@@ -252,20 +315,63 @@ const CaptainRiding = () => {
                 </div>
             </div>
 
-            {/* Bottom HUD — tap to open FinishRide panel */}
+            {/* Bottom HUD.
+                Fase D (2026-08-03): antes este card era fixo e alto (foto do veículo,
+                nome, destino, valor), comendo quase um terço da tela justamente onde a
+                câmera de navegação coloca o veículo. Agora é uma barra fina com o que
+                se lê de relance dirigindo — ETA, distância restante e "Concluir" — e o
+                resto abre com um toque, sem sair da tela. */}
             <div className='absolute bottom-0 left-0 right-0 z-overlay'>
-                <div
-                    className='bg-surface border-t border-line rounded-t-3xl shadow-floating cursor-pointer select-none'
-                    onClick={() => setFinishRidePanel(true)}
-                >
-                    {/* Drag handle */}
-                    <div className='flex justify-center pt-3 pb-2'>
+                <div className='bg-surface border-t border-line rounded-t-3xl shadow-floating select-none'>
+                    <button
+                        type="button"
+                        onClick={() => setHudExpanded(v => !v)}
+                        aria-expanded={hudExpanded}
+                        aria-label={hudExpanded ? 'Recolher detalhes da corrida' : 'Ver detalhes da corrida'}
+                        className='w-full flex justify-center pt-3 pb-2'
+                    >
                         <div className='h-1.5 w-12 bg-line rounded-full'></div>
+                    </button>
+
+                    <div className='px-5 pb-5 flex items-center justify-between gap-3'>
+                        <div className='min-w-0'>
+                            {navInfo?.etaMinutes != null ? (
+                                <>
+                                    <p className='text-xl font-bold text-ink-900 leading-tight'>
+                                        {navInfo.etaMinutes} min
+                                    </p>
+                                    <p className='text-xs text-ink-600 font-medium truncate'>
+                                        {navInfo.remainingKm != null ? `${navInfo.remainingKm.toFixed(1)} km · ` : ''}
+                                        {rideData?.destination?.split(',')[0] || 'Destino'}
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className='text-base font-bold text-ink-900 leading-tight truncate flex items-center gap-1'>
+                                        <i className="ri-map-pin-2-fill text-danger-500 text-sm flex-shrink-0"></i>
+                                        {rideData?.destination?.split(',')[0] || 'Destino'}
+                                    </p>
+                                    <p className='text-xs text-ink-600 font-medium'>
+                                        {rideData?.user?.fullname?.firstname || 'Passageiro'}
+                                        {rideData?.fare ? ` · R$${rideData.fare}` : ''}
+                                    </p>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Complete button */}
+                        <button
+                            type="button"
+                            onClick={() => setFinishRidePanel(true)}
+                            className='flex-shrink-0 bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 px-5 rounded-panel text-sm shadow-floating active:scale-95 transition-all whitespace-nowrap'
+                        >
+                            <i className="ri-flag-fill mr-1"></i>
+                            Concluir
+                        </button>
                     </div>
 
-                    <div className='px-5 pb-6 pt-1 flex items-center justify-between gap-3'>
-                        {/* Vehicle + Passenger Info */}
-                        <div className='flex items-center gap-3 min-w-0'>
+                    {hudExpanded && (
+                        <div className='px-5 pb-6 pt-1 border-t border-line flex items-center gap-3'>
                             <img
                                 src={vehicleImg}
                                 alt={vehicleLabel}
@@ -279,28 +385,16 @@ const CaptainRiding = () => {
                                 <h4 className='text-base font-bold text-ink-900 leading-tight truncate'>
                                     {rideData?.user?.fullname?.firstname || 'Passageiro'} {rideData?.user?.fullname?.lastname || ''}
                                 </h4>
-                                {/* Destino sempre visível (§4 do relatório de UX) — antes só
-                                    aparecia abrindo o painel de finalizar corrida. */}
                                 <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
                                     <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0"></i>
-                                    {rideData?.destination?.split(',')[0] || 'Destino'}
+                                    {rideData?.destination || 'Destino'}
                                 </p>
                                 <p className='text-xs text-ink-600 font-medium'>
                                     {rideData?.fare ? `R$${rideData.fare}` : ''}
                                 </p>
                             </div>
                         </div>
-
-                        {/* Complete button */}
-                        <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setFinishRidePanel(true) }}
-                            className='flex-shrink-0 bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 px-5 rounded-panel text-sm shadow-floating active:scale-95 transition-all whitespace-nowrap'
-                        >
-                            <i className="ri-flag-fill mr-1"></i>
-                            Concluir
-                        </button>
-                    </div>
+                    )}
                 </div>
             </div>
 

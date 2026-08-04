@@ -20,10 +20,18 @@ function svgDataUri(svg) {
     return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg)
 }
 
-// Usa google.maps.Marker (legado, ainda funcional) em vez de AdvancedMarkerElement —
-// decisão explícita para não depender de um Map ID do Console. Só aceita ícones de
-// imagem, não HTML, então a aproximação visual é por SVG/emoji, não idêntica ao
-// divIcon do Leaflet. pickup/destination reaproveitam o path SVG original (já eram
+// Fase D (2026-08-03): heading/tilt só existem em mapa VETORIAL, e mapa vetorial exige
+// um Map ID criado no Console. Sem essa variável o mapa continua funcionando igual a
+// antes (raster), apenas sem câmera de navegação — por isso ela é opcional aqui, não
+// um requisito duro que quebraria as outras telas.
+const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || null
+
+// Usa google.maps.Marker (legado, ainda funcional) em vez de AdvancedMarkerElement.
+// A decisão original era não depender de Map ID; a Fase D passou a usar um (para a
+// câmera vetorial), mas o marcador legado continua porque funciona igual nos dois
+// tipos de mapa e evita reescrever todos os marcadores das outras telas. Só aceita
+// ícones de imagem, não HTML, então a aproximação visual é por SVG/emoji, não
+// idêntica ao divIcon do Leaflet. pickup/destination reaproveitam o path SVG original (já eram
 // SVG puro, não dependiam de fonte de ícone — por isso ficam bem próximos do original).
 const VEHICLE_EMOJI = {
     car: '🚗',
@@ -40,6 +48,13 @@ function vehicleIconUrl(type) {
 
 const USER_ICON_URL = svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" fill-opacity="0.35"/><circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/></svg>`)
 
+// Marcador do modo navegação (tipo 'navigator'). Diferente dos demais, é um Symbol
+// (path SVG), não uma imagem: só Symbol aceita `rotation` nativamente no Google Maps —
+// com ícone de imagem seria preciso regerar o data-URI a cada grau girado, caríssimo
+// num loop de animação. Formato de seta, o mesmo vocabulário visual de Waze/Google
+// Maps em navegação (o carro vira uma seta que aponta para onde você vai).
+const NAVIGATOR_PATH = 'M 0,-9 L 6.5,8 L 0,4 L -6.5,8 Z'
+
 // path original: M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z
 const pinIconUrl = (bgColor) => svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="12.5" fill="${bgColor}" stroke="#fff" stroke-width="3"/><g transform="translate(7,7) scale(0.5833)"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="#fff"/></g></svg>`)
 const PICKUP_ICON_URL = pinIconUrl('#16a34a')
@@ -50,10 +65,27 @@ export function createGoogleMapsProvider() {
     let googleMaps = null // namespace { Map, Marker, Polyline, Circle, LatLngBounds, ... }
     let map = null
     const markers = {}
+    // Fase D: o Google não expõe o tipo/rotação de volta a partir do marcador, e
+    // reconstruir o Symbol exige os dois — então guardamos por id.
+    const markerTypes = {}
+    const markerRotations = {}
     let routeLine = null
     let radiusCircle = null
+    let vectorMap = false
 
-    function resolveIcon(type) {
+    function resolveIcon(type, rotation = 0) {
+        if (type === 'navigator') {
+            return {
+                path: NAVIGATOR_PATH,
+                rotation,
+                scale: 1.7,
+                fillColor: '#111111',
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 2,
+                anchor: new googleMaps.Point(0, 0),
+            }
+        }
         let url, size, anchor
         if (type === 'user') {
             url = USER_ICON_URL; size = 20; anchor = 10
@@ -73,7 +105,8 @@ export function createGoogleMapsProvider() {
 
     function placeMarker(id, position, options = {}) {
         if (!map) return
-        const icon = resolveIcon(options.type)
+        markerTypes[id] = options.type
+        const icon = resolveIcon(options.type, markerRotations[id] || 0)
         const existing = markers[id]
         if (existing) {
             existing.setPosition({ lat: position.lat, lng: position.lng })
@@ -99,7 +132,19 @@ export function createGoogleMapsProvider() {
 
     function setMarkerIcon(id, type) {
         const marker = markers[id]
-        if (marker) marker.setIcon(resolveIcon(type))
+        if (!marker) return
+        markerTypes[id] = type
+        marker.setIcon(resolveIcon(type, markerRotations[id] || 0))
+    }
+
+    // Fase D: só o Symbol do tipo 'navigator' gira. Nos ícones de imagem a rotação é
+    // ignorada de propósito (regerar o data-URI a cada grau custaria caro no rAF).
+    function setMarkerRotation(id, degrees) {
+        const marker = markers[id]
+        if (!marker || !Number.isFinite(degrees)) return
+        if (markerTypes[id] !== 'navigator') return
+        markerRotations[id] = degrees
+        marker.setIcon(resolveIcon('navigator', degrees))
     }
 
     function removeMarker(id) {
@@ -107,6 +152,8 @@ export function createGoogleMapsProvider() {
         if (marker) {
             marker.setMap(null)
             delete markers[id]
+            delete markerTypes[id]
+            delete markerRotations[id]
         }
     }
 
@@ -186,9 +233,40 @@ export function createGoogleMapsProvider() {
         if (map) googleMaps.event.trigger(map, 'resize')
     }
 
+    function supportsCamera() {
+        return vectorMap
+    }
+
+    // Sem animação própria: quem chama já interpola quadro a quadro. `moveCamera` do
+    // Google é justamente a API instantânea (ao contrário de panTo/setZoom, que animam)
+    // e aplica center+zoom+heading+tilt numa transação só — evitando o tremor de
+    // aplicar cada eixo em chamadas separadas.
+    function moveCamera({ center, heading, tilt, zoom } = {}) {
+        if (!map) return
+        const camera = {}
+        if (center) camera.center = { lat: center.lat, lng: center.lng }
+        if (Number.isFinite(zoom)) camera.zoom = zoom
+        // Mapa raster ignora heading/tilt; mandar mesmo assim só polui o console.
+        if (vectorMap) {
+            if (Number.isFinite(heading)) camera.heading = heading
+            if (Number.isFinite(tilt)) camera.tilt = tilt
+        }
+        if (typeof map.moveCamera === 'function') {
+            map.moveCamera(camera)
+            return
+        }
+        // Versões antigas da API JS não têm moveCamera — degrada para os setters.
+        if (camera.center) map.setCenter(camera.center)
+        if (camera.zoom != null) map.setZoom(camera.zoom)
+        if (camera.heading != null) map.setHeading(camera.heading)
+        if (camera.tilt != null) map.setTilt(camera.tilt)
+    }
+
     function destroy() {
         Object.values(markers).forEach(m => m.setMap(null))
         Object.keys(markers).forEach(k => delete markers[k])
+        Object.keys(markerTypes).forEach(k => delete markerTypes[k])
+        Object.keys(markerRotations).forEach(k => delete markerRotations[k])
         if (routeLine) { routeLine.setMap(null); routeLine = null }
         if (radiusCircle) { radiusCircle.setMap(null); radiusCircle = null }
         map = null // Google não expõe um "map.remove()"; sem containerRef, o GC cuida do resto
@@ -202,12 +280,45 @@ export function createGoogleMapsProvider() {
         // — é o padrão recomendado pela própria Google para a API modular.
         googleMaps = window.google.maps
 
-        map = new googleMaps.Map(domNode, {
+        // Fase D (2026-08-03): com Map ID vetorial o mapa aceita heading/tilt (câmera de
+        // navegação). Sem ele o Google entrega raster e ignora os dois — o app continua
+        // funcionando, só sem navegação rotacionada (ver supportsCamera).
+        const mapOptions = {
             center: { lat: center.lat, lng: center.lng },
             zoom,
             disableDefaultUI: true,
             zoomControl: false,
             clickableIcons: false,
+        }
+        if (MAP_ID) mapOptions.mapId = MAP_ID
+
+        map = new googleMaps.Map(domNode, mapOptions)
+
+        // `getRenderingType()` é a resposta da própria API sobre o que ela realmente
+        // entregou — mais confiável que assumir vetorial só porque um Map ID foi
+        // passado (um Map ID configurado como raster no Console cairia na armadilha de
+        // girar a câmera sem nada acontecer na tela). Logo após o construtor ele ainda
+        // pode responder 'UNINITIALIZED', então o valor definitivo chega pelo evento.
+        const readRenderingType = () => {
+            if (typeof map.getRenderingType !== 'function') return Boolean(MAP_ID)
+            const type = map.getRenderingType()
+            if (type === 'UNINITIALIZED') return Boolean(MAP_ID)
+            return type === 'VECTOR'
+        }
+        vectorMap = readRenderingType()
+        map.addListener('renderingtype_changed', () => {
+            vectorMap = readRenderingType()
+            // Um Map ID configurado como RASTER no Console é o modo de falha mais
+            // traiçoeiro daqui: tudo carrega, nada dá erro, e a câmera simplesmente
+            // não gira. Sem este aviso, o sintoma seria "a navegação não funciona"
+            // sem nenhuma pista de onde olhar.
+            if (MAP_ID && !vectorMap) {
+                console.warn(
+                    `[maps] O Map ID "${MAP_ID}" está renderizando como RASTER. ` +
+                    'A navegação do motorista (rotação e inclinação da câmera) exige um ' +
+                    'Map ID VETORIAL — verifique o tipo dele no Google Cloud Console.'
+                )
+            }
         })
 
         placeMarker('user', center, { type: 'user' })
@@ -233,6 +344,7 @@ export function createGoogleMapsProvider() {
         placeMarker,
         moveMarker,
         setMarkerIcon,
+        setMarkerRotation,
         removeMarker,
         setRoute,
         removeRoute,
@@ -240,6 +352,8 @@ export function createGoogleMapsProvider() {
         removeCircle,
         fitBounds,
         panTo,
+        moveCamera,
+        supportsCamera,
         destroy,
     }
 }

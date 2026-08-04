@@ -4,6 +4,36 @@ import { LocationContext } from '@/contexts/LocationContext'
 import { createMapProvider } from '@/services/maps'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import { getAccessToken } from '@/services/session'
+import {
+    cameraCenterForFollow,
+    distanceMeters,
+    dynamicZoom,
+    lerp,
+    lerpAngle,
+    pickNextStep,
+    shortestAngleDelta,
+} from '@/services/maps/navigationMath'
+
+// ====== Fase D da experiência de corrida ativa (2026-08-03) ======
+// Inclinação da câmera em navegação. 55° é o patamar em que a via à frente ganha
+// profundidade sem que o horizonte engula metade da tela (acima de ~62° o Google
+// começa a mostrar mais céu que rua).
+const NAV_TILT = 55;
+// Fração do estado que se aproxima do alvo a cada quadro. Com ~60 fps converge em
+// meio segundo: rápido o bastante para acompanhar uma curva, lento o bastante para
+// não transformar cada fix de GPS num tranco.
+const NAV_SMOOTHING = 0.12;
+// Abaixo destes limiares a câmera já chegou no alvo e o loop de animação PARA — é o
+// que impede um requestAnimationFrame rodando a 60 fps o tempo todo com o veículo
+// parado, que é onde um mapa de navegação queima bateria à toa.
+const NAV_EPSILON_DEG = 0.15;
+const NAV_EPSILON_ZOOM = 0.01;
+const NAV_EPSILON_M = 0.5;
+// Distância da rota a partir da qual se considera que o motorista saiu do caminho.
+const REROUTE_DISTANCE_M = 70;
+// Intervalo mínimo entre recálculos de rota — o endpoint tem custo por chamada e um
+// GPS instável não pode disparar uma rota nova por segundo.
+const REROUTE_MIN_INTERVAL_MS = 20000;
 
 const sanitizeCoord = (lat, lng) => {
     if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
@@ -87,6 +117,34 @@ const LiveTracking = (props) => {
     const [ mapError, setMapError ] = useState(false);
     const [ retryKey, setRetryKey ] = useState(0);
 
+    // Fase C (2026-08-03): providerRef é um ref — não re-renderiza quando o init
+    // assíncrono termina. A camada de motoristas disponíveis precisa de um sinal
+    // reativo de "mapa pronto" pra montar depois do provider existir.
+    const [ mapReady, setMapReady ] = useState(false);
+
+    // Fase C: motoristas disponíveis no mapa do passageiro. Map por driverId
+    // (atualização incremental — nunca recria a lista inteira) e um único loop de
+    // rAF interpolando todos os marcadores com animação pendente, pra escalar pra
+    // centenas de motoristas sem um loop por marcador.
+    const driversRef = useRef(new Map()); // driverId -> { current, from, target, startTime, vehicleType }
+    const driversAnimRef = useRef(null);
+
+    // Fase D (2026-08-03): estado do modo navegação.
+    // navStateRef é o que está NA TELA agora; navTargetRef é para onde a câmera está
+    // indo. O loop de animação aproxima um do outro — é essa separação que produz o
+    // movimento suave em vez de um salto por fix de GPS.
+    const [ routeSteps, setRouteSteps ] = useState([]);
+    const [ routeVersion, setRouteVersion ] = useState(0);
+    const routeSummaryRef = useRef(null); // { distanceValue, durationValue }
+    const navStateRef = useRef({ position: null, heading: 0, zoom: 17 });
+    const navTargetRef = useRef({ position: null, heading: 0, zoom: 17 });
+    const navAnimRef = useRef(null);
+    const navStepIndexRef = useRef(0);
+    const lastRouteFetchRef = useRef(0);
+    const offRouteSinceRef = useRef(null);
+    const lastPrunedPositionRef = useRef(null);
+    const onNavigationUpdateRef = useRef(props.onNavigationUpdate);
+
     // Keep routeCoordsRef in sync
     useEffect(() => {
         routeCoordsRef.current = routeCoords;
@@ -96,15 +154,21 @@ const LiveTracking = (props) => {
         onMapCenterChangeRef.current = props.onMapCenterChange;
     }, [props.onMapCenterChange]);
 
+    useEffect(() => {
+        onNavigationUpdateRef.current = props.onNavigationUpdate;
+    }, [props.onNavigationUpdate]);
+
     // GPS tracking sync from Global Context
     useEffect(() => {
         if (!userLocation) return;
         const { lat, lng } = userLocation;
 
-        currentPositionRef.current = { lat, lng };
+        currentPositionRef.current = { lat, lng, heading: userLocation.heading, speed: userLocation.speed };
 
-        // Update marker position directly
-        if (providerRef.current) {
+        // Update marker position directly. Em navegação o veículo é representado pelo
+        // marcador 'navigator' (seta que gira) — manter também o ponto azul de "você
+        // está aqui" mostraria dois marcadores sobrepostos na mesma coordenada.
+        if (providerRef.current && !props.navigationMode) {
             providerRef.current.placeMarker('user', { lat, lng }, { type: 'user' });
         }
 
@@ -212,7 +276,12 @@ const LiveTracking = (props) => {
         return () => clearTimeout(debounceTimer);
     }, [props.ride, props.pickup, props.destination]);
 
-    // Fetch road route polyline from OSRM depending on the ride phase
+    // Busca a rota conforme a fase da corrida.
+    // Fase D (2026-08-03): passou a usar GET /maps/get-route em vez de chamar o
+    // router.project-osrm.org público direto do navegador. Aquilo furava a regra de o
+    // backend ser a única fonte da verdade, ficava fora do cache do servidor, dependia
+    // de um serviço de demonstração sem SLA e — o que impedia a navegação — não trazia
+    // as manobras. O endpoint novo devolve polyline + steps normalizados.
     useEffect(() => {
         const fetchRoute = async () => {
             if (!pickupCoords || !destinationCoords) return;
@@ -236,31 +305,59 @@ const LiveTracking = (props) => {
                 endLng = pickupCoords.lng;
             }
 
+            // Em navegação quem guia é o GPS real do próprio motorista: a rota parte de
+            // onde ele está agora, não do ponto de embarque de minutos atrás. É também
+            // o que permite o recálculo quando ele sai do caminho.
+            if (props.navigationMode) {
+                const own = currentPositionRef.current;
+                if (own) {
+                    startLat = own.lat;
+                    startLng = own.lng;
+                }
+            }
+
+            const fallbackLine = [[startLat, startLng], [endLat, endLng]];
+            const token = getAccessToken('user') || getAccessToken('captain');
+            if (!token) {
+                setRouteCoords(fallbackLine);
+                return;
+            }
+
+            lastRouteFetchRef.current = Date.now();
+
             try {
-                const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
-                const response = await fetch(url);
+                // toFixed(6) garante o ponto decimal que o parser de "lat,lng" do backend
+                // exige (uma coordenada inteira cairia no geocoder e viraria endereço).
+                const origin = `${startLat.toFixed(6)},${startLng.toFixed(6)}`;
+                const destination = `${endLat.toFixed(6)},${endLng.toFixed(6)}`;
+                const response = await fetch(
+                    `${import.meta.env.VITE_BASE_URL}/maps/get-route?origin=${origin}&destination=${destination}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
 
-                if (data.routes && data.routes.length > 0) {
-                    const coordinates = data.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]);
-                    setRouteCoords(coordinates);
-                } else {
-                    setRouteCoords([
-                        [startLat, startLng],
-                        [endLat, endLng]
-                    ]);
-                }
+                setRouteCoords(Array.isArray(data.polyline) && data.polyline.length > 0 ? data.polyline : fallbackLine);
+                setRouteSteps(Array.isArray(data.steps) ? data.steps : []);
+                routeSummaryRef.current = {
+                    distanceValue: data.distance?.value ?? null,
+                    durationValue: data.duration?.value ?? null,
+                };
+                navStepIndexRef.current = 0;
+                offRouteSinceRef.current = null;
+                // Rota nova: a poda precisa rodar já no próximo quadro, sem esperar os
+                // 3 m de deslocamento — senão o traçado antigo fica na tela.
+                lastPrunedPositionRef.current = null;
             } catch (err) {
-                console.error('Error fetching OSRM route:', err);
-                setRouteCoords([
-                    [startLat, startLng],
-                    [endLat, endLng]
-                ]);
+                console.error('Erro ao buscar rota:', err);
+                setRouteCoords(fallbackLine);
+                setRouteSteps([]);
             }
         };
 
         fetchRoute();
-    }, [pickupCoords, destinationCoords, props.ride?.status]);
+        // routeVersion é o gatilho do recálculo por desvio de rota (modo navegação).
+    }, [pickupCoords, destinationCoords, props.ride?.status, routeVersion]);
 
     // ====== MAP INITIALIZATION — RUNS ONLY ONCE ======
     useEffect(() => {
@@ -292,6 +389,7 @@ const LiveTracking = (props) => {
             } else {
                 providerRef.current = provider;
                 setMapError(false);
+                setMapReady(true);
             }
         }).catch((err) => {
             console.error('Falha ao inicializar o provider de mapa:', err);
@@ -305,6 +403,7 @@ const LiveTracking = (props) => {
                 providerRef.current.destroy();
                 providerRef.current = null;
                 hasCaptainMarkerRef.current = false;
+                setMapReady(false);
             }
         };
     }, [hasPosition, retryKey]); // Only when position first becomes available (ou retry manual)
@@ -314,6 +413,343 @@ const LiveTracking = (props) => {
         setRetryKey(k => k + 1);
     }, []);
 
+    // ====== Fase C (2026-08-03): motoristas disponíveis em tempo real ======
+    // Mesma filosofia do RideContext: o snapshot REST (GET /maps/nearby-drivers)
+    // reconstrói o estado completo — na montagem, no reconnect do socket e na volta do
+    // background — e os eventos de socket (driver-location/busy/offline) só aplicam
+    // atualizações incrementais. Ativo apenas quando props.showNearbyDrivers é true
+    // (Home do passageiro sem corrida aceita); telas do motorista não ligam a camada.
+    useEffect(() => {
+        const clearAllDrivers = () => {
+            if (driversAnimRef.current) {
+                cancelAnimationFrame(driversAnimRef.current);
+                driversAnimRef.current = null;
+            }
+            for (const id of driversRef.current.keys()) {
+                providerRef.current?.removeMarker(`driver_${id}`);
+            }
+            driversRef.current.clear();
+        };
+
+        if (!props.showNearbyDrivers || !mapReady || !socket) {
+            clearAllDrivers();
+            return;
+        }
+
+        // Casada com a frequência real de emissão do motorista (~10s): desliza o
+        // marcador por 2s em vez de teleportar a cada update.
+        const ANIMATION_MS = 2000;
+
+        const ensureAnimationLoop = () => {
+            if (driversAnimRef.current) return;
+            const step = (now) => {
+                let pending = false;
+                for (const [id, driver] of driversRef.current) {
+                    if (!driver.target) continue;
+                    const progress = Math.min((now - driver.startTime) / ANIMATION_MS, 1);
+                    driver.current = {
+                        lat: driver.from.lat + (driver.target.lat - driver.from.lat) * progress,
+                        lng: driver.from.lng + (driver.target.lng - driver.from.lng) * progress
+                    };
+                    providerRef.current?.moveMarker(`driver_${id}`, driver.current);
+                    if (progress < 1) pending = true;
+                    else driver.target = null;
+                }
+                driversAnimRef.current = pending ? requestAnimationFrame(step) : null;
+            };
+            driversAnimRef.current = requestAnimationFrame(step);
+        };
+
+        const upsertDriver = ({ driverId, vehicleType, location }) => {
+            const pos = sanitizeCoord(location?.ltd, location?.lng);
+            if (!driverId || !pos || !providerRef.current) return;
+            const id = String(driverId);
+            const existing = driversRef.current.get(id);
+            if (!existing) {
+                driversRef.current.set(id, { current: pos, from: pos, target: null, startTime: 0, vehicleType });
+                providerRef.current.placeMarker(`driver_${id}`, pos, { type: vehicleType || 'car' });
+                return;
+            }
+            if (vehicleType && existing.vehicleType !== vehicleType) {
+                existing.vehicleType = vehicleType;
+                providerRef.current.setMarkerIcon(`driver_${id}`, vehicleType);
+            }
+            existing.from = existing.current;
+            existing.target = pos;
+            existing.startTime = performance.now();
+            ensureAnimationLoop();
+        };
+
+        const removeDriver = (driverId) => {
+            if (driverId == null) return;
+            const id = String(driverId);
+            if (!driversRef.current.has(id)) return;
+            driversRef.current.delete(id);
+            providerRef.current?.removeMarker(`driver_${id}`);
+        };
+
+        const syncDrivers = async () => {
+            const pos = currentPositionRef.current;
+            const token = getAccessToken('user');
+            if (!pos || !token) return;
+            try {
+                const response = await fetch(
+                    `${import.meta.env.VITE_BASE_URL}/maps/nearby-drivers?lat=${pos.lat}&lng=${pos.lng}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (!response.ok) return;
+                const drivers = await response.json();
+                if (!Array.isArray(drivers)) return;
+                // Reconciliação incremental: remove quem saiu, atualiza/insere o resto.
+                const seen = new Set(drivers.map(d => String(d.id)));
+                for (const id of [...driversRef.current.keys()]) {
+                    if (!seen.has(id)) removeDriver(id);
+                }
+                drivers.forEach(d => upsertDriver({ driverId: d.id, vehicleType: d.vehicleType, location: d.location }));
+            } catch (err) {
+                console.error('Erro ao sincronizar motoristas próximos:', err);
+            }
+        };
+
+        const subscribe = () => {
+            const token = getAccessToken('user');
+            if (token) socket.emit('subscribe-drivers-map', { token });
+        };
+
+        const handleDriverLocation = (data) => upsertDriver(data || {});
+        const handleDriverGone = (data) => removeDriver(data?.driverId);
+        const handleConnect = () => {
+            // Reconexão zera as rooms no servidor — reentra e refaz o snapshot
+            // (eventos perdidos durante a queda não são reenviados).
+            subscribe();
+            syncDrivers();
+        };
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                subscribe();
+                syncDrivers();
+            }
+        };
+
+        subscribe();
+        syncDrivers();
+        socket.on('connect', handleConnect);
+        socket.on('driver-location', handleDriverLocation);
+        socket.on('driver-busy', handleDriverGone);
+        socket.on('driver-offline', handleDriverGone);
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            if (socket.connected) socket.emit('unsubscribe-drivers-map');
+            socket.off('connect', handleConnect);
+            socket.off('driver-location', handleDriverLocation);
+            socket.off('driver-busy', handleDriverGone);
+            socket.off('driver-offline', handleDriverGone);
+            document.removeEventListener('visibilitychange', handleVisibility);
+            clearAllDrivers();
+        };
+    }, [props.showNearbyDrivers, mapReady, socket]);
+
+    // ====== Fase D (2026-08-03): câmera de navegação estilo Waze/Google Maps ======
+    // Duas responsabilidades separadas de propósito:
+    //   1) este efeito mantém o LOOP de animação (interpola posição/rumo/zoom do que
+    //      está na tela em direção ao alvo, quadro a quadro);
+    //   2) o efeito seguinte, disparado a cada fix de GPS, apenas move o ALVO.
+    // Misturar os dois é o que produz o mapa que "pula" a cada GPS.
+    const navKickRef = useRef(null);
+
+    useEffect(() => {
+        if (!props.navigationMode || !mapReady) {
+            return;
+        }
+
+        const provider = providerRef.current;
+        if (!provider) return;
+
+        // O ponto azul de posição e o marcador de veículo da fase anterior sairiam
+        // sobrepostos exatamente sob a seta de navegação.
+        provider.removeMarker('user');
+        provider.removeMarker('captain');
+        hasCaptainMarkerRef.current = false;
+
+        const start = currentPositionRef.current;
+        if (start) {
+            navStateRef.current = {
+                position: { lat: start.lat, lng: start.lng },
+                heading: Number.isFinite(start.heading) ? start.heading : 0,
+                zoom: 17,
+            };
+            navTargetRef.current = { ...navStateRef.current };
+            provider.placeMarker('navigator', navStateRef.current.position, { type: 'navigator' });
+            provider.setMarkerRotation('navigator', navStateRef.current.heading);
+        }
+
+        let cancelled = false;
+
+        const frame = () => {
+            navAnimRef.current = null;
+            if (cancelled || !providerRef.current) return;
+
+            const state = navStateRef.current;
+            const target = navTargetRef.current;
+            if (!target.position) return;
+            if (!state.position) state.position = { ...target.position };
+
+            const headingDelta = shortestAngleDelta(state.heading, target.heading);
+            const zoomDelta = target.zoom - state.zoom;
+            const positionDelta = distanceMeters(state.position, target.position) ?? 0;
+
+            state.position = {
+                lat: lerp(state.position.lat, target.position.lat, NAV_SMOOTHING),
+                lng: lerp(state.position.lng, target.position.lng, NAV_SMOOTHING),
+            };
+            state.heading = lerpAngle(state.heading, target.heading, NAV_SMOOTHING);
+            state.zoom = lerp(state.zoom, target.zoom, NAV_SMOOTHING);
+
+            providerRef.current.moveMarker('navigator', state.position);
+            providerRef.current.setMarkerRotation('navigator', state.heading);
+            providerRef.current.moveCamera({
+                // O veículo fica no terço inferior porque a câmera mira um ponto à
+                // FRENTE dele — assim a tela mostra a rua que vem, não a que já passou.
+                center: cameraCenterForFollow({
+                    position: state.position,
+                    heading: state.heading,
+                    zoom: state.zoom,
+                    viewportHeightPx: mapRef.current?.clientHeight || 0,
+                }),
+                heading: state.heading,
+                tilt: NAV_TILT,
+                zoom: state.zoom,
+            });
+
+            // Consome a rota atrás do veículo enquanto ele avança. Só recalcula a
+            // cada 3 m percorridos: a poda varre a polyline inteira (milhares de
+            // pontos numa viagem longa) e refazer isso a 60 fps é trabalho jogado
+            // fora — o traçado nem muda visivelmente em deslocamentos menores.
+            if (routeCoordsRef.current.length > 0) {
+                const lastPruned = lastPrunedPositionRef.current;
+                if (!lastPruned || (distanceMeters(lastPruned, state.position) ?? 0) > 3) {
+                    lastPrunedPositionRef.current = state.position;
+                    providerRef.current.setRoute(getRemainingRoute(routeCoordsRef.current, state.position));
+                }
+            }
+
+            const converged = Math.abs(headingDelta) < NAV_EPSILON_DEG
+                && Math.abs(zoomDelta) < NAV_EPSILON_ZOOM
+                && positionDelta < NAV_EPSILON_M;
+
+            // Parar ao convergir é o que separa esta tela de um rAF eterno a 60 fps:
+            // com o veículo parado no semáforo o loop simplesmente não roda.
+            if (!converged) {
+                navAnimRef.current = requestAnimationFrame(frame);
+            }
+        };
+
+        const kick = () => {
+            // Em segundo plano o navegador congela o rAF de qualquer forma; não agendar
+            // evita acumular um quadro pendente que dispararia em rajada na volta.
+            if (cancelled || document.hidden || navAnimRef.current) return;
+            navAnimRef.current = requestAnimationFrame(frame);
+        };
+        navKickRef.current = kick;
+
+        const handleVisibility = () => {
+            if (document.visibilityState !== 'visible') return;
+            // Voltou do background: a posição do alvo pode estar muito à frente do que
+            // está na tela. Interpolar dali produziria um voo longo — salta direto.
+            const target = navTargetRef.current;
+            if (target.position) {
+                navStateRef.current = { position: { ...target.position }, heading: target.heading, zoom: target.zoom };
+            }
+            kick();
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        kick();
+
+        return () => {
+            cancelled = true;
+            navKickRef.current = null;
+            document.removeEventListener('visibilitychange', handleVisibility);
+            if (navAnimRef.current) {
+                cancelAnimationFrame(navAnimRef.current);
+                navAnimRef.current = null;
+            }
+            providerRef.current?.removeMarker('navigator');
+            // Devolve a câmera ao estado top-down para quem for usar o mapa depois.
+            providerRef.current?.moveCamera({ heading: 0, tilt: 0 });
+        };
+    }, [props.navigationMode, mapReady]);
+
+    // Fase D: a cada fix de GPS real, recalcula o ALVO da câmera e a próxima manobra.
+    // Roda por fix (~1/s), nunca por quadro — bearing, zoom e busca de manobra são
+    // decisões, não animação.
+    useEffect(() => {
+        if (!props.navigationMode || !userLocation) return;
+
+        const position = { lat: userLocation.lat, lng: userLocation.lng };
+        const heading = Number.isFinite(userLocation.heading)
+            ? userLocation.heading
+            : navTargetRef.current.heading;
+
+        const { index, step, distanceMeters: distanceToStep } = pickNextStep(
+            routeSteps,
+            position,
+            navStepIndexRef.current
+        );
+        navStepIndexRef.current = index;
+
+        navTargetRef.current = {
+            position,
+            heading,
+            zoom: dynamicZoom({ speedMps: userLocation.speed, distanceToManeuverM: distanceToStep }),
+        };
+        navKickRef.current?.();
+
+        const remaining = routeCoordsRef.current.length > 1
+            ? getRemainingRoute(routeCoordsRef.current, position)
+            : [];
+        const remainingKm = remaining.length > 1 ? calculateRouteDistance(remaining) : null;
+
+        // ETA proporcional: a duração que o roteador devolveu, escalada pela fração da
+        // rota que ainda falta. Não é trânsito ao vivo, mas acompanha o progresso real
+        // em vez de exibir para sempre a estimativa do início da viagem.
+        const summary = routeSummaryRef.current;
+        let etaMinutes = null;
+        if (remainingKm != null && summary?.durationValue && summary?.distanceValue > 0) {
+            const fraction = Math.min(1, (remainingKm * 1000) / summary.distanceValue);
+            etaMinutes = Math.max(1, Math.round((summary.durationValue * fraction) / 60));
+        }
+
+        onNavigationUpdateRef.current?.({
+            step,
+            distanceToStepM: distanceToStep,
+            remainingKm,
+            etaMinutes,
+            supportsCamera: providerRef.current?.supportsCamera?.() ?? false,
+        });
+
+        // Recálculo por desvio: só quando ele persiste entre fixes consecutivos, para
+        // que um único salto de GPS (comum entre prédios altos) não peça rota nova.
+        if (routeCoordsRef.current.length > 1) {
+            let nearest = Infinity;
+            for (const [lat, lng] of routeCoordsRef.current) {
+                const d = distanceMeters(position, { lat, lng });
+                if (d != null && d < nearest) nearest = d;
+            }
+            if (nearest > REROUTE_DISTANCE_M) {
+                if (offRouteSinceRef.current == null) {
+                    offRouteSinceRef.current = Date.now();
+                } else if (Date.now() - lastRouteFetchRef.current > REROUTE_MIN_INTERVAL_MS) {
+                    offRouteSinceRef.current = null;
+                    setRouteVersion(v => v + 1);
+                }
+            } else {
+                offRouteSinceRef.current = null;
+            }
+        }
+    }, [userLocation, routeSteps, props.navigationMode]);
+
     // Reset fit bounds flag when route or coordinates change
     useEffect(() => {
         hasFitBoundsRef.current = false;
@@ -322,6 +758,20 @@ const LiveTracking = (props) => {
     const handleRecenter = useCallback(() => {
         if (!providerRef.current) return;
         providerRef.current.invalidateSize();
+
+        // Fase D: em navegação "recentralizar" significa voltar a seguir o veículo (o
+        // motorista arrastou o mapa pra espiar algo à frente), não enquadrar a rota
+        // inteira — um fitBounds aqui jogaria a câmera para uma visão de cidade.
+        if (props.navigationMode) {
+            const target = navTargetRef.current;
+            if (target.position) {
+                navStateRef.current = { position: { ...target.position }, heading: target.heading, zoom: target.zoom };
+                navKickRef.current?.();
+            }
+            setIsFollowing(true);
+            return;
+        }
+
         const allCoords = [];
         if (routeCoordsRef.current.length > 0) {
             allCoords.push(...routeCoordsRef.current);
@@ -348,7 +798,7 @@ const LiveTracking = (props) => {
                 setIsFollowing(true);
             }
         }
-    }, [captainPosition, pickupCoords, destinationCoords]);
+    }, [captainPosition, pickupCoords, destinationCoords, props.navigationMode]);
 
     // Update markers and polyline when data changes
     useEffect(() => {
@@ -362,12 +812,18 @@ const LiveTracking = (props) => {
             providerRef.current.placeMarker('destination', destinationCoords, { type: 'destination', title: 'Destination', tooltip: 'Destination' });
         }
 
+        // Fase D: em navegação, quem controla traçado e câmera é o loop de navegação
+        // (que usa o GPS do próprio motorista). Deixar este efeito também dar
+        // fitBounds faria a câmera saltar para uma visão geral no meio da curva.
+        const navigating = props.navigationMode;
+
         if (routeCoords.length > 0) {
-            const remainingRoute = getRemainingRoute(routeCoords, captainPosition);
-            providerRef.current.setRoute(remainingRoute);
+            if (!navigating) {
+                providerRef.current.setRoute(getRemainingRoute(routeCoords, captainPosition));
+            }
 
             // Fit map bounds once
-            if (!hasFitBoundsRef.current) {
+            if (!hasFitBoundsRef.current && !navigating) {
                 const allCoords = [...routeCoords];
                 const capCoord = sanitizeCoord(captainPosition?.lat, captainPosition?.lng);
                 if (capCoord) allCoords.push([capCoord.lat, capCoord.lng]);
@@ -378,7 +834,7 @@ const LiveTracking = (props) => {
             }
         } else {
             // Fit default bounds once
-            if (!hasFitBoundsRef.current) {
+            if (!hasFitBoundsRef.current && !navigating) {
                 const boundsCoords = [];
                 const pickCoord = sanitizeCoord(pickupCoords?.lat, pickupCoords?.lng);
                 if (pickCoord) boundsCoords.push([pickCoord.lat, pickCoord.lng]);
@@ -403,11 +859,15 @@ const LiveTracking = (props) => {
                 }
             }
         }
-    }, [pickupCoords, destinationCoords, routeCoords, captainPosition]);
+    }, [pickupCoords, destinationCoords, routeCoords, captainPosition, props.navigationMode]);
 
     // Update captain position marker smoothly with linear interpolation
     useEffect(() => {
         if (!providerRef.current || !captainPosition) return;
+        // Fase D: na tela do motorista em navegação, 'captainPosition' é a posição DELE
+        // mesmo voltando pelo socket — desenhar esse marcador criaria um segundo
+        // veículo, atrasado, brigando com a seta de navegação pela câmera.
+        if (props.navigationMode) return;
 
         const startLat = prevCaptainPosRef.current ? prevCaptainPosRef.current.lat : captainPosition.lat;
         const startLng = prevCaptainPosRef.current ? prevCaptainPosRef.current.lng : captainPosition.lng;
@@ -471,7 +931,7 @@ const LiveTracking = (props) => {
                 cancelAnimationFrame(animationFrameId);
             }
         };
-    }, [captainPosition, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType]);
+    }, [captainPosition, props.navigationMode, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType]);
 
     // HUD de fase da corrida — antes só cobria 'accepted' e 'ongoing' (este último nunca
     // existiu no enum real do backend), então o card de progresso nunca aparecia durante
@@ -518,8 +978,9 @@ const LiveTracking = (props) => {
         <div className='relative w-full h-full'>
             <div ref={mapRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
 
-            {/* Chip de status/progresso da corrida no topo do mapa */}
-            {ridePhaseLabel && !props.isSelectingOnMap && (
+            {/* Chip de status/progresso da corrida no topo do mapa. Em navegação ele dá
+                lugar ao banner de próxima manobra, que a tela do motorista renderiza. */}
+            {ridePhaseLabel && !props.isSelectingOnMap && !props.navigationMode && (
                 <div className='absolute top-4 left-1/2 -translate-x-1/2 z-panel flex items-center gap-3 bg-surface rounded-full shadow-raised px-5 py-2.5 border border-line'>
                     <div className='h-2.5 w-2.5 rounded-full bg-brand-500 animate-pulse flex-shrink-0'></div>
                     <div>

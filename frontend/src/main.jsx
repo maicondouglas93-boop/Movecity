@@ -8,6 +8,7 @@ import CaptainContext from '@/contexts/CaptainContext';
 import SocketProvider from '@/contexts/SocketContext';
 import { LocationProvider } from '@/contexts/LocationContext';
 import { ToastProvider } from '@/contexts/ToastContext';
+import RideProvider from '@/contexts/RideContext';
 
 import * as Sentry from "@sentry/react";
 
@@ -36,8 +37,13 @@ createRoot(document.getElementById('root')).render(
         <ToastProvider>
           <SocketProvider>
             <LocationProvider>
+              {/* RideProvider precisa do BrowserRouter (usa useNavigate/useLocation
+                  pra restaurar a tela certa de uma corrida ativa) e do SocketProvider
+                  (re-sincroniza a corrida no 'connect'). */}
               <BrowserRouter>
-                <App />
+                <RideProvider>
+                  <App />
+                </RideProvider>
               </BrowserRouter>
             </LocationProvider>
           </SocketProvider>

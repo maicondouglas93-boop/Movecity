@@ -1,14 +1,15 @@
-import React, { useContext, useEffect, useState } from 'react'
+import React, { useContext } from 'react'
 import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
 import { LocationContext } from '@/contexts/LocationContext'
 import { vehicleLabels } from '@/assets/vehicleAssets'
 
-// Auditoria de UX do motorista (2026-08-02, Etapa 6, §2.9): o popup de oferta não tinha
-// contador — ficava aberto indefinidamente, sem nenhuma urgência visual, diferente do
-// padrão de Uber/99/inDrive (anel/barra regressiva). 20s é um valor de partida razoável;
-// ajustar depois com dado real de aceite, se fizer sentido.
-const RIDE_OFFER_TIMEOUT_S = 20
+// Fase B da experiência de corrida ativa (2026-08-03): o countdown de 20s saiu. Ele só
+// escondia o painel no frontend, sem declinar nada no servidor — a corrida continuava
+// 'requested' no banco, mas sumia da tela do motorista para sempre (estado fantasma).
+// Agora a oferta só sai da tela quando: o motorista aceita, outro motorista aceita
+// ('ride-taken'), o passageiro cancela ('ride-cancelled') ou o motorista toca "Ignorar"
+// — e mesmo ignorada ela continua acessível no card "Corrida disponível" da Home.
 
 const haversineKm = (a, b) => {
     if (!a || !b) return null
@@ -22,46 +23,16 @@ const haversineKm = (a, b) => {
 
 const RidePopUp = (props) => {
     const { userLocation } = useContext(LocationContext)
-    const [ secondsLeft, setSecondsLeft ] = useState(RIDE_OFFER_TIMEOUT_S)
-
-    useEffect(() => {
-        if (!props.open) return
-        setSecondsLeft(RIDE_OFFER_TIMEOUT_S)
-        const interval = setInterval(() => {
-            setSecondsLeft(s => {
-                if (s <= 1) {
-                    clearInterval(interval)
-                    props.setRidePopupPanel(false)
-                    return 0
-                }
-                return s - 1
-            })
-        }, 1000)
-        return () => clearInterval(interval)
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [props.open, props.ride?._id])
 
     // §2.10 do relatório: a distância até o passageiro (não a distância DA corrida) é a
     // informação que mais pesa na decisão de aceitar — antes não existia em lugar nenhum.
     const distanceToPickupKm = haversineKm(userLocation, props.ride?.pickupCoordinates)
     const vehicleLabel = vehicleLabels[props.ride?.vehicleType] || props.ride?.vehicleType
 
-    const progressPct = Math.max(0, Math.round((secondsLeft / RIDE_OFFER_TIMEOUT_S) * 100))
-
     return (
         <div>
-            <div className='flex items-center justify-between mb-3'>
+            <div className='flex items-center justify-between mb-4'>
                 <h3 className='text-2xl font-semibold text-ink-900'>Nova Corrida Disponível!</h3>
-                <div className='flex flex-col items-center flex-shrink-0'>
-                    <span className='text-lg font-bold text-brand-600 tabular-nums'>{secondsLeft}s</span>
-                </div>
-            </div>
-            {/* Barra de contagem regressiva */}
-            <div className='w-full h-1.5 bg-surface-alt rounded-full overflow-hidden mb-4'>
-                <div
-                    className={`h-full rounded-full transition-all duration-1000 ease-linear ${secondsLeft <= 5 ? 'bg-danger-500' : 'bg-brand-500'}`}
-                    style={{ width: `${progressPct}%` }}
-                />
             </div>
 
             <div className='flex items-center justify-between p-3 bg-brand-50 border-2 border-brand-100 rounded-panel'>

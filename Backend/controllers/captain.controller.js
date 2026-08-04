@@ -297,6 +297,29 @@ module.exports.toggleOnline = async (req, res, next) => {
         deleteByPrefix(`profile:captain:${req.captain._id}`);
         deleteByPrefix(`drivers:`); // clear drivers cache since online status changed
 
+        // Fase C (2026-08-03): mapa do passageiro reage na hora ao toggle. Offline
+        // remove o marcador imediatamente (sem isto ele ficaria até o próximo snapshot);
+        // online já anuncia a última posição conhecida (sem isto o motorista só
+        // apareceria no próximo update de localização, ~10s). Um motorista que ficar
+        // online no meio de uma corrida é corrigido pelo 'driver-busy' do fluxo de
+        // localização logo em seguida.
+        const { sendMessageToRoom } = require('../socket');
+        if (!isOnline) {
+            sendMessageToRoom('map-viewers', {
+                event: 'driver-offline',
+                data: { driverId: captain._id.toString() }
+            });
+        } else if (captain.location && captain.location.ltd != null && captain.location.lng != null) {
+            sendMessageToRoom('map-viewers', {
+                event: 'driver-location',
+                data: {
+                    driverId: captain._id.toString(),
+                    vehicleType: captain.vehicle?.vehicleType || 'car',
+                    location: { ltd: captain.location.ltd, lng: captain.location.lng }
+                }
+            });
+        }
+
         res.status(200).json({ captain });
     } catch (err) {
         res.status(500).json({ message: err.message });

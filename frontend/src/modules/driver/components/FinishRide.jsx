@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
@@ -7,6 +7,7 @@ import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
+import { RideContext } from '@/contexts/RideContext'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -29,6 +30,7 @@ const FinishRide = (props) => {
     const [ratingValue, setRatingValue] = useState(0)
     const [submittingRating, setSubmittingRating] = useState(false)
     const navigate = useNavigate()
+    const { setCaptainRide } = useContext(RideContext)
 
     // Antes de finalizar, mostra a estimativa (ainda não existe valor final). Depois de
     // finalizar, usa a corrida real devolvida pelo servidor.
@@ -53,6 +55,11 @@ const FinishRide = (props) => {
         onSuccess: (data) => {
             setEnded(true)
             setEndedRide(data)
+            // Fase A da experiência de corrida ativa (2026-08-03): espelha a corrida
+            // finalizada no RideContext — sem isso, ele ficava com status 'started'
+            // obsoleto e a Home mostraria "corrida em andamento" pra uma corrida que
+            // já acabou (até a próxima sincronização com o backend).
+            setCaptainRide(data)
             queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
         },
         onError: (err) => {

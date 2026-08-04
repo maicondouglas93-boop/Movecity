@@ -7,6 +7,7 @@ import { UserDataContext } from '@/contexts/UserContext';
 import { SocketContext } from '@/contexts/SocketContext';
 import { LocationContext } from '@/contexts/LocationContext';
 import { ToastProvider } from '@/contexts/ToastContext';
+import { RideContext } from '@/contexts/RideContext';
 
 vi.mock('firebase/messaging', () => ({
   getMessaging: vi.fn(),
@@ -112,6 +113,17 @@ describe('Home Component', () => {
   // passar para produção um erro de temporal dead zone na própria Home (um useEffect
   // declarado antes de `addToast`, com ele no array de dependências). Com o provider
   // no lugar, um erro de render volta a quebrar o teste, que é o esperado.
+  // Fase A da experiência de corrida ativa (2026-08-03): Home agora lê a corrida do
+  // RideContext (que reconcilia com o backend) — o provider mockado abaixo cobre isso.
+  const mockRideContext = {
+    userRide: null,
+    setUserRide: vi.fn(),
+    captainRide: null,
+    setCaptainRide: vi.fn(),
+    syncUserRide: vi.fn().mockResolvedValue(null),
+    syncCaptainRide: vi.fn().mockResolvedValue(null),
+  };
+
   const renderWithProviders = (ui) => {
     return render(
       <BrowserRouter>
@@ -119,7 +131,9 @@ describe('Home Component', () => {
           <SocketContext.Provider value={{ socket: mockSocket }}>
             <LocationContext.Provider value={{ userLocation: null, locationRef: { current: null }, locationError: null }}>
               <ToastProvider>
-                {ui}
+                <RideContext.Provider value={mockRideContext}>
+                  {ui}
+                </RideContext.Provider>
               </ToastProvider>
             </LocationContext.Provider>
           </SocketContext.Provider>

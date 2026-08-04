@@ -31,11 +31,18 @@ const Help = lazy(() => import('@/modules/passenger/pages/account/Help'))
 
 // Rotas do fluxo de passageiro.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.
-// Observacao: '/riding' segue publica (sem UserProtectWrapper), como no original.
+// Fase A da experiência de corrida ativa (2026-08-03): '/riding' agora é protegida —
+// era pública, então após um refresh o UserDataContext ficava vazio, o join do socket
+// nunca rodava e a tela perdia os eventos de fim de corrida/pagamento. O wrapper
+// garante o perfil carregado (e o redirect pro login quando não há sessão).
 const passengerRoutes = [
   <Route key='login' path='/login' element={<UserLogin />} />,
   <Route key='signup' path='/signup' element={<UserSignup />} />,
-  <Route key='riding' path='/riding' element={<Riding />} />,
+  <Route key='riding' path='/riding' element={
+    <UserProtectWrapper>
+      <Riding />
+    </UserProtectWrapper>
+  } />,
 
   <Route key='home' path='/home' element={
     <UserProtectWrapper>

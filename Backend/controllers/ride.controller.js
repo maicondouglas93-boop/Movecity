@@ -167,6 +167,14 @@ async function performAcceptRide(rideId, captain, res) {
             data: { rideId }
         });
 
+        // Fase C (2026-08-03): o motorista aceitou — sai imediatamente do mapa dos
+        // passageiros que observam motoristas disponíveis. Sem isto, ele só sumiria no
+        // próximo update de localização (~10s), aparecendo como "livre" sem estar.
+        sendMessageToRoom('map-viewers', {
+            event: 'driver-busy',
+            data: { driverId: captain._id.toString() }
+        });
+
         // Delete otp from response sent to captain for security
         const rideForCaptain = ride.toObject();
         delete rideForCaptain.otp;
@@ -487,6 +495,19 @@ module.exports.getCurrentRideForCaptain = async (req, res) => {
             return res.status(404).json({ message: 'No active ride found' });
         }
         return res.status(200).json(ride);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
+// Fase B da experiência de corrida ativa (2026-08-03): pull de corridas pendentes
+// compatíveis — o caminho de recuperação para quando o evento 'new-ride' se perdeu
+// (app fechado, push falhou, reconexão). O frontend chama no mount, no reconnect do
+// socket, no retorno do background e no evento 'online'.
+module.exports.getPendingRides = async (req, res) => {
+    try {
+        const rides = await rideService.getPendingRidesForCaptain({ captain: req.captain });
+        return res.status(200).json(rides);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

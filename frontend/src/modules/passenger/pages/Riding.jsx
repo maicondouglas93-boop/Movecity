@@ -2,6 +2,7 @@ import React, { useState, useContext, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { SocketContext } from '@/contexts/SocketContext'
 import { UserDataContext } from '@/contexts/UserContext'
+import { RideContext } from '@/contexts/RideContext'
 import LiveTracking from '@/shared/components/LiveTracking'
 import axios from 'axios'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
@@ -19,11 +20,64 @@ import { enqueueOfflineAction } from '@/services/offlineQueue'
 
 const Riding = () => {
     const location = useLocation()
-    const { ride } = location.state || {}
     const { socket } = useContext(SocketContext)
     const { user } = useContext(UserDataContext)
+    const { userRide, setUserRide, syncUserRide } = useContext(RideContext)
     const navigate = useNavigate()
     const { addToast } = useToast()
+
+    // Fase A da experiência de corrida ativa (2026-08-03): antes, a corrida vinha SÓ de
+    // location.state — um refresh (ou o PWA derrubado em segundo plano) zerava a tela
+    // inteira: motorista, veículo, valor, chat, mapa. Agora começa com o state (resposta
+    // imediata) ou com o que o RideContext já restaurou, e se ambos vierem vazios busca
+    // a corrida real no backend.
+    const [ ride, setRideLocal ] = useState(location.state?.ride || userRide || null)
+    const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || userRide))
+
+    useEffect(() => {
+        if (ride) {
+            setRehydrating(false)
+            return
+        }
+
+        let cancelled = false
+        syncUserRide().then((restored) => {
+            if (cancelled) return
+            // null = resposta real do backend (não existe corrida ativa) — não há o que
+            // mostrar aqui. undefined = falha de rede: mantém a tela; o RideContext
+            // re-sincroniza sozinho na volta da internet e o efeito abaixo preenche.
+            if (restored === null) {
+                addToast('Nenhuma corrida em andamento encontrada.', 'info')
+                navigate('/home')
+                return
+            }
+            if (restored && restored.status !== 'started') {
+                // Corrida existe mas ainda não começou — a tela certa é a Home (que
+                // reconstrói o painel de espera com PIN e botão de cancelar).
+                navigate('/home')
+                return
+            }
+            if (restored) {
+                setRideLocal(restored)
+                setRehydrating(false)
+            }
+        })
+
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // Mantém a corrida local espelhando o contexto (que re-sincroniza no retorno do
+    // background/reconexão). NÃO limpa quando o contexto zera: depois de 'ride-ended' a
+    // corrida deixa de ser "ativa" no backend, mas esta tela ainda precisa dela para o
+    // fluxo de pagamento/avaliação.
+    useEffect(() => {
+        if (userRide && (!ride || userRide._id === ride._id)) {
+            setRideLocal(userRide)
+            setRehydrating(false)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userRide])
 
     const [ showPayModal, setShowPayModal ] = useState(false)
     // 'payment' -> 'rating' -> 'done'. Corridas pagas pela carteira pulam direto pra 'rating'.
@@ -58,7 +112,13 @@ const Riding = () => {
     }, [user])
 
     useEffect(() => {
-        const handleRideEnded = () => {
+        const handleRideEnded = (endedRide) => {
+            // Atualiza o RideContext com a corrida finalizada — sem isso, o contexto
+            // ficava com status 'started' obsoleto e a Home mostraria "corrida em
+            // andamento" pra uma corrida que já acabou (até a próxima sincronização).
+            if (endedRide?._id) {
+                setUserRide(endedRide)
+            }
             // Corrida paga pela carteira: o valor já foi debitado na solicitação, não
             // há nada a "acertar" — vai direto para a avaliação do motorista.
             if (ride?.paymentMethod === 'carteira') {
@@ -177,6 +237,15 @@ const Riding = () => {
         }
     }
 
+    if (rehydrating) {
+        return (
+            <div className='h-screen flex items-center justify-center bg-surface-alt'>
+                <ConnectionBanner />
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600"></div>
+            </div>
+        )
+    }
+
     return (
         <div className='h-screen relative'>
             {/* Auditoria PWA (2026-08-03, M2): esta é a tela de corrida em andamento do
@@ -210,7 +279,7 @@ const Riding = () => {
                 <LiveTracking ride={ride} />
             </div>
 
-            <div className='h-1/2 p-4 overflow-y-auto'>
+            <div className='h-1/2 p-4 overflow-y-auto overscroll-y-contain'>
                 <div className='flex items-center justify-between'>
                     <div>
                         <img className='h-14 object-contain' src={vehicleImages[ride?.captain?.vehicle?.vehicleType] || vehicleImages.car} alt={ride?.captain?.vehicle?.vehicleType} width="1024" height="1024" loading="lazy" />

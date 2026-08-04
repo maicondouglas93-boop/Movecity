@@ -5,6 +5,8 @@ const mapsProvider = require('./maps/index');
 module.exports.haversineKm = mapsProvider.haversineKm;
 module.exports.getAddressCoordinate = mapsProvider.getAddressCoordinate;
 module.exports.getDistanceTime = mapsProvider.getDistanceTime;
+// Fase D da experiência de corrida ativa (2026-08-03): rota com manobras (navegação).
+module.exports.getRouteWithSteps = mapsProvider.getRouteWithSteps;
 module.exports.getAutoCompleteSuggestions = mapsProvider.getAutoCompleteSuggestions;
 module.exports.getAutoCompleteSuggestionsWithSession = mapsProvider.getAutoCompleteSuggestionsWithSession;
 module.exports.getPlaceDetails = mapsProvider.getPlaceDetails;

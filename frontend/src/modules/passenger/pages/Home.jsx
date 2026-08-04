@@ -13,6 +13,7 @@ import WaitingForDriver from '@/modules/passenger/components/WaitingForDriver';
 import { SocketContext } from '@/contexts/SocketContext';
 import { useContext } from 'react';
 import { UserDataContext } from '@/contexts/UserContext';
+import { RideContext } from '@/contexts/RideContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import LiveTracking from '@/shared/components/LiveTracking'
 import { LocationContext } from '@/contexts/LocationContext';
@@ -50,7 +51,11 @@ const Home = () => {
     const [ activeField, setActiveField ] = useState(null)
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
-    const [ ride, setRide ] = useState(null)
+    // Fase A da experiência de corrida ativa (2026-08-03): a corrida saiu do useState
+    // local e passou a viver no RideContext — que reconsulta o backend a cada
+    // abertura/reconexão/retorno do background. Refresh na Home não perde mais a
+    // corrida; os handlers de socket abaixo continuam atualizando o mesmo estado.
+    const { userRide: ride, setUserRide: setRide } = useContext(RideContext)
     
     const optionalsPanelRef = useRef(null)
     const paymentPanelRef = useRef(null)
@@ -218,55 +223,48 @@ const Home = () => {
         return () => unsubscribe();
     }, [addToast]);
 
+    // Fase A da experiência de corrida ativa (2026-08-03): a consulta ao backend saiu
+    // daqui e virou responsabilidade do RideContext (que sincroniza em mount, connect,
+    // retorno do background e volta da internet). Este efeito só DERIVA os painéis do
+    // status da corrida — de onde quer que ela tenha vindo (socket, restore ou ação
+    // local), a tela reconstrói o estado visual correto.
+    useEffect(() => {
+        if (!ride) {
+            setVehicleFound(false);
+            setWaitingForDriver(false);
+            return;
+        }
+        if (ride.status === 'requested') {
+            setVehiclePanel(false);
+            setConfirmRidePanel(false);
+            setVehicleFound(true); // Restore searching state
+            setWaitingForDriver(false);
+        } else if (['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status)) {
+            setVehiclePanel(false);
+            setConfirmRidePanel(false);
+            setVehicleFound(false);
+            setWaitingForDriver(true); // Restore waiting state
+        } else {
+            // 'started' é tela própria (/riding) — o redirect fica no RideContext, que
+            // faz isso uma única vez por corrida; se o passageiro voltou pra Home de
+            // propósito, o atalho "Corrida em andamento" (abaixo) leva de volta.
+            setVehicleFound(false);
+            setWaitingForDriver(false);
+        }
+    }, [ride?._id, ride?.status])
+
     useEffect(() => {
         if (!user || !user._id) return;
-
-        const fetchCurrentRide = async () => {
-            try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/current`, {
-                    headers: {
-                        Authorization: `Bearer ${getAccessToken('user')}`
-                    }
-                });
-                
-                if (response.status === 200 && response.data) {
-                    const currentRide = response.data;
-                    setRide(currentRide);
-                    
-                    if (currentRide.status === 'requested') {
-                        setVehiclePanel(false);
-                        setConfirmRidePanel(false);
-                        setVehicleFound(true); // Restore searching state
-                        setWaitingForDriver(false);
-                    } else if (['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(currentRide.status)) {
-                        setVehiclePanel(false);
-                        setConfirmRidePanel(false);
-                        setVehicleFound(false);
-                        setWaitingForDriver(true); // Restore waiting state
-                    }
-                }
-            } catch (err) {
-                // If 404 or error, we just stay in idle state (clean)
-                if (err.response?.status === 404) {
-                    setVehicleFound(false);
-                    setWaitingForDriver(false);
-                }
-            }
-        };
 
         const handleConnect = () => {
             // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
             // (2026-08-03): joinWithRetry renova o token e tenta de novo se o atual já
             // estiver vencido — ver docs/plans/2026-08-03-auditoria-regressao-push.md.
             joinWithRetry(socket, { userId: user._id, userType: 'user' })
-            fetchCurrentRide()
         }
 
         if (socket.connected) {
             handleConnect()
-        } else {
-            // Also fetch immediately on mount if not connected yet
-            fetchCurrentRide()
         }
 
         socket.on('connect', handleConnect)
@@ -293,7 +291,10 @@ const Home = () => {
         const handleRideStarted = (ride) => {
             addToast('Corrida iniciada! Boa viagem 🎉', 'ride', 4000, 'Seu trajeto está sendo acompanhado')
             setWaitingForDriver(false)
-            navigate('/riding', { state: { ride } })
+            // A navegação pra /riding é feita pelo RideContext ao ver status 'started'
+            // — o mesmo caminho usado na restauração pós-refresh, marcado uma única vez
+            // por corrida (permite voltar à Home depois sem ser rebatido de volta).
+            setRide(ride)
         }
 
         // P3.1 da auditoria de concorrência (2026-08-02): o backend já emitia este evento
@@ -655,6 +656,22 @@ const Home = () => {
     return (
         <div className='h-[100dvh] relative overflow-hidden'>
             <ConnectionBanner />
+
+            {/* Fase A da experiência de corrida ativa (2026-08-03): "link para voltar à
+                corrida" que sumia. Se existe corrida 'started' e o passageiro está na
+                Home (voltou de propósito ou reabriu o app), este atalho sempre leva de
+                volta à tela de acompanhamento. */}
+            {ride?.status === 'started' && (
+                <button
+                    type="button"
+                    onClick={() => navigate('/riding', { state: { ride } })}
+                    className='absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-brand-500 text-white font-semibold text-sm px-5 py-3 rounded-full shadow-floating active:scale-95 transition-transform'
+                >
+                    <i className="ri-navigation-fill" aria-hidden="true"></i>
+                    Corrida em andamento — voltar
+                </button>
+            )}
+
             <div className='h-[100dvh] w-screen'>
                 {/* image for temporary use  */}
                 <LiveTracking 
@@ -664,6 +681,11 @@ const Home = () => {
                     vehicleType={vehicleType} 
                     isSelectingOnMap={isSelectingOnMap}
                     onMapCenterChange={handleMapCenterChange}
+                    // Fase C (2026-08-03): motoristas disponíveis em tempo real —
+                    // visíveis enquanto não há motorista designado (idle ou ainda
+                    // procurando). Com corrida aceita, o mapa passa a acompanhar só o
+                    // motorista da corrida.
+                    showNearbyDrivers={!ride || ride.status === 'requested'}
                 />
             </div>
             
@@ -819,7 +841,7 @@ const Home = () => {
                         </>
                     )}
                 </div>
-                <div ref={panelRef} className={`bg-white pointer-events-auto transition-all duration-300 ${panelOpen ? 'flex-1 overflow-y-auto p-6' : 'h-0 overflow-hidden'} ${isSelectingOnMap ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
+                <div ref={panelRef} className={`bg-white pointer-events-auto transition-all duration-300 ${panelOpen ? 'flex-1 overflow-y-auto overscroll-y-contain p-6' : 'h-0 overflow-hidden'} ${isSelectingOnMap ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
                     <LocationSearchPanel
                         suggestions={activeField === 'pickup' ? pickupSuggestions : destinationSuggestions}
                         setPanelOpen={setPanelOpen}
@@ -854,12 +876,12 @@ const Home = () => {
                     </button>
                 </div>
             )}
-            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <VehiclePanel
                     selectVehicle={setVehicleType}
                     fare={fare} setConfirmRidePanel={setConfirmRidePanel} setVehiclePanel={setVehiclePanel} />
             </div>
-            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <ConfirmRide
                     createRide={createRide}
                     pickup={pickup}
@@ -875,7 +897,7 @@ const Home = () => {
                     setPromoCode={setPromoCode}
                 />
             </div>
-            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <OptionalsPanel
                     setOptionalsPanel={setOptionalsPanel}
                     setOptionals={setOptionals}
@@ -883,7 +905,7 @@ const Home = () => {
                     setRequestFemaleDriver={setRequestFemaleDriver}
                 />
             </div>
-            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <PaymentOptionsPanel
                     setPaymentPanel={setPaymentPanel}
                     paymentMethod={paymentMethod}
@@ -893,7 +915,7 @@ const Home = () => {
                     walletBalance={user?.walletBalance}
                 />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <LookingForDriver
                     createRide={createRide}
                     pickup={pickup}
@@ -904,7 +926,7 @@ const Home = () => {
                     cancelRide={cancelRide}
                     setVehicleFound={setVehicleFound} />
             </div>
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto'>
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     setVehicleFound={setVehicleFound}

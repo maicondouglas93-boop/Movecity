@@ -17,6 +17,15 @@ router.get('/get-distance-time',
     mapController.getDistanceTime
 )
 
+// authBoth: o motorista usa para navegar; o passageiro, para desenhar o traçado da
+// corrida no mapa. Mesmo endpoint, mesmo contrato.
+router.get('/get-route',
+    authMiddleware.authBoth,
+    query('origin').isString().isLength({ min: 3 }),
+    query('destination').isString().isLength({ min: 3 }),
+    mapController.getRoute
+)
+
 router.get('/get-suggestions',
     authMiddleware.authBoth,
     query('input').isString().isLength({ min: 3 }),
@@ -31,6 +40,13 @@ router.get('/place-details',
     query('placeId').isString().isLength({ min: 1 }),
     query('sessionToken').optional().isString(),
     mapController.getPlaceDetails
+)
+
+router.get('/nearby-drivers',
+    authMiddleware.authUser,
+    query('lat').isNumeric(),
+    query('lng').isNumeric(),
+    mapController.getNearbyDrivers
 )
 
 router.get('/reverse-geocode',

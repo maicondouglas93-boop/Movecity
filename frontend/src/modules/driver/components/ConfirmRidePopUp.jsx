@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
@@ -7,15 +7,35 @@ import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
 import { useToast } from '@/contexts/ToastContext'
+import { RideContext } from '@/contexts/RideContext'
+
+// Fase A da experiência de corrida ativa (2026-08-03): o status dos botões vem da
+// corrida real (backend), não mais de um useState fixo em 'accepted' — depois de um
+// refresh, os botões voltavam pra "A caminho" mesmo com o motorista já no local.
+// 'waiting_passenger' mostra a mesma UI de 'arrived' (campo do PIN).
+const deriveStatusFromRide = (status) => {
+    if (status === 'waiting_passenger') return 'arrived'
+    if ([ 'accepted', 'going_to_pickup', 'arrived' ].includes(status)) return status
+    return 'accepted'
+}
 
 const ConfirmRidePopUp = (props) => {
     const [otp, setOtp] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
-    const [rideStatus, setRideStatus] = useState('accepted')
+    const [rideStatus, setRideStatus] = useState(deriveStatusFromRide(props.ride?.status))
     const [cancelling, setCancelling] = useState(false)
     const navigate = useNavigate()
     const { addToast } = useToast()
+    const { setCaptainRide } = useContext(RideContext)
+
+    // O componente fica sempre montado dentro do BottomSheet — quando a corrida chega
+    // (aceite ou restauração pós-refresh), sincroniza os botões com o status real.
+    useEffect(() => {
+        if (props.ride?._id) {
+            setRideStatus(deriveStatusFromRide(props.ride.status))
+        }
+    }, [props.ride?._id, props.ride?.status])
 
     // Auditoria de UX do motorista (2026-08-02, §2.4): antes este botão só fechava os
     // painéis — a corrida continuava atribuída a este motorista no banco, travando-o
@@ -32,6 +52,9 @@ const ConfirmRidePopUp = (props) => {
                 }
             })
             addToast('Corrida liberada — buscando outro motorista para o passageiro.', 'info')
+            // Limpa a corrida no RideContext na hora — sem isso, o efeito de restauração
+            // do CaptainHome ainda veria a corrida antiga até a próxima sincronização.
+            setCaptainRide(null)
             props.setConfirmRidePopupPanel(false)
             props.setRidePopupPanel(false)
         } catch (err) {

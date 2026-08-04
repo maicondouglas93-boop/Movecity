@@ -62,6 +62,39 @@ module.exports.getPlaceDetails = async (placeId, sessionToken) => {
     return result;
 };
 
+// Fase D da experiência de corrida ativa (2026-08-03): rota com manobras para a
+// navegação do motorista. Cache curto de propósito (5 min): a geometria da rota é
+// estável, mas a duração é sensível a trânsito e uma rota de navegação recalculada
+// muitas vezes durante a corrida não pode carregar um ETA de horas atrás.
+// Se o provider não souber devolver manobras, degrada para a rota sem passos — o mapa
+// continua mostrando o traçado, só sem o banner de próxima conversão.
+const ROUTE_CACHE_TTL_S = 300;
+
+module.exports.getRouteWithSteps = async (origin, destination) => {
+    const { getCache, setCache } = require('../../cache/cache');
+    const cacheKey = `route-steps:${MAPS_PROVIDER}:${origin}:${destination}`;
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
+    let result;
+    if (typeof provider.getRouteWithSteps === 'function') {
+        try {
+            result = await provider.getRouteWithSteps(origin, destination);
+        } catch (err) {
+            console.warn(`[maps] getRouteWithSteps falhou em "${MAPS_PROVIDER}", caindo para rota sem manobras.`, err.message);
+        }
+    }
+
+    if (!result) {
+        const fallback = await provider.getDistanceTime(origin, destination);
+        result = { ...fallback, steps: [] };
+    }
+
+    contract.checkDistanceTime(result, `getRouteWithSteps:${MAPS_PROVIDER}`);
+    setCache(cacheKey, result, ROUTE_CACHE_TTL_S);
+    return result;
+};
+
 module.exports.getReverseGeocode = async (lat, lng) => {
     if (typeof provider.getReverseGeocode !== 'function') {
         throw new Error(`Provider "${MAPS_PROVIDER}" não implementa getReverseGeocode.`);

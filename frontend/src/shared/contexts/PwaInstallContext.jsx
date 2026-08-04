@@ -73,4 +73,12 @@ export const PwaInstallProvider = ({ children }) => {
     )
 }
 
-export const usePwaInstall = () => useContext(PwaInstallContext)
+// No-op quando o shell não monta PwaInstallProvider (build driver / App.driver).
+const NOOP_PWA_INSTALL = {
+    canInstall: false,
+    installed: true,
+    promptInstall: async () => 'unavailable',
+    isIos: false,
+}
+
+export const usePwaInstall = () => useContext(PwaInstallContext) ?? NOOP_PWA_INSTALL

@@ -120,4 +120,11 @@ export const PwaUpdateProvider = ({ children }) => {
     )
 }
 
-export const usePwaUpdate = () => useContext(PwaUpdateContext)
+// No-op quando o shell não monta PwaUpdateProvider (build driver / App.driver).
+const NOOP_PWA_UPDATE = {
+    needRefresh: false,
+    updateServiceWorker: async () => {},
+    checkForUpdate: async () => ({ updated: false, reason: 'disabled' }),
+}
+
+export const usePwaUpdate = () => useContext(PwaUpdateContext) ?? NOOP_PWA_UPDATE

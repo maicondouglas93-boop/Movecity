@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:driver": "vite --mode driver --open /driver.html",
     "build": "vite build",
-    "lint": "eslint .",
+    "build:driver": "vite build --mode driver",
     "preview": "vite preview",
+    "preview:driver": "vite preview --mode driver",
+    "lint": "eslint .",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"

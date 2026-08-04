@@ -17,7 +17,7 @@ const uploader = {
                 const publicId = `${folder}/mock-${counter}`;
                 callback(null, {
                     public_id: publicId,
-                    secure_url: `https://res.cloudinary.com/mock-cloud/image/${type}/v1700000000/${publicId}.jpg`,
+                    secure_url: `https://res.cloudinary.com/mock-cloud/image/${type}/v1700000000/${publicId}.webp`,
                 });
                 cb();
             },
@@ -28,7 +28,7 @@ const uploader = {
 
 const utils = {
     private_download_url: jest.fn((publicId) =>
-        Promise.resolve(`https://res.cloudinary.com/mock-cloud/image/authenticated/s--mocksig--/${publicId}.jpg?_expires=mock`)
+        Promise.resolve(`https://res.cloudinary.com/mock-cloud/image/authenticated/s--mocksig--/${publicId}.webp?_expires=mock`)
     ),
 };
 

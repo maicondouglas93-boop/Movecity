@@ -8,26 +8,26 @@ const uploadService = require('../../services/upload.service');
 // só a chamada de rede ao Cloudinary é mockada (tests/mocks/cloudinary.mock.js), mesmo
 // padrão já usado pro firebase-admin no resto da suíte.
 
-// 1x1 PNG válido — sharp aceita como entrada mesmo saindo como JPEG comprimido.
+// 1x1 PNG válido — sharp aceita como entrada mesmo saindo como WebP comprimido.
 const TINY_PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64'
 );
 
 describe('upload.service (Cloudinary)', () => {
-    it('uploadProfileImage: sobe como público (type=upload) na pasta users/profiles', async () => {
+    it('uploadProfileImage: sobe como público (type=upload) na pasta users/profiles, em WebP', async () => {
         const url = await uploadService.uploadProfileImage(TINY_PNG);
-        expect(url).toMatch(/^https:\/\/res\.cloudinary\.com\/.*\/image\/upload\/.*users\/profiles\/mock-\d+\.jpg$/);
+        expect(url).toMatch(/^https:\/\/res\.cloudinary\.com\/.*\/image\/upload\/.*users\/profiles\/mock-\d+\.webp$/);
     });
 
     it('uploadVehicleImage: sobe como público na pasta captains/vehicles', async () => {
         const url = await uploadService.uploadVehicleImage(TINY_PNG);
-        expect(url).toMatch(/\/image\/upload\/.*captains\/vehicles\/mock-\d+\.jpg$/);
+        expect(url).toMatch(/\/image\/upload\/.*captains\/vehicles\/mock-\d+\.webp$/);
     });
 
     it('uploadDocument: sobe como authenticated (privado) — nunca no formato /image/upload/', async () => {
         const url = await uploadService.uploadDocument(TINY_PNG, 'cnh');
-        expect(url).toMatch(/\/image\/authenticated\/.*captains\/documents\/cnh\/mock-\d+\.jpg$/);
+        expect(url).toMatch(/\/image\/authenticated\/.*captains\/documents\/cnh\/mock-\d+\.webp$/);
         expect(url).not.toContain('/image/upload/');
     });
 

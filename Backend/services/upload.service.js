@@ -45,9 +45,12 @@ const extractPublicId = (url) => {
  */
 const processAndUploadImage = async (fileBuffer, folder, isPublic = true) => {
     try {
+        // WebP em vez de JPEG: mesmo nível de qualidade visual, arquivo ~25-35% menor —
+        // suporte de sobra em qualquer navegador/dispositivo relevante hoje (iOS Safari
+        // 14+, Android, todos os desktops).
         const compressedBuffer = await sharp(fileBuffer)
             .resize({ width: 800, withoutEnlargement: true })
-            .jpeg({ quality: 80 })
+            .webp({ quality: 80 })
             .toBuffer();
 
         const result = await uploadBuffer(compressedBuffer, {
@@ -96,7 +99,7 @@ module.exports.deleteImage = async (fileUrl) => {
 module.exports.getSignedDocumentUrl = async (fileUrl) => {
     if (!fileUrl) return null;
     const publicId = extractPublicId(fileUrl);
-    return cloudinary.utils.private_download_url(publicId, 'jpg', {
+    return cloudinary.utils.private_download_url(publicId, 'webp', {
         resource_type: 'image',
         type: 'authenticated',
         expires_at: Math.floor(Date.now() / 1000) + 5 * 60,

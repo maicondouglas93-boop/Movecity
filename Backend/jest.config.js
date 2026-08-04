@@ -11,7 +11,7 @@ module.exports = {
     '^firebase-admin$': '<rootDir>/tests/mocks/firebase-admin.mock.js',
     '^firebase-admin/auth$': '<rootDir>/tests/mocks/firebase-admin.mock.js',
     '^uuid$': '<rootDir>/tests/mocks/uuid.mock.js',
-    '^cloudinary$': '<rootDir>/tests/mocks/cloudinary.mock.js'
+    '^@imagekit/nodejs$': '<rootDir>/tests/mocks/imagekit.mock.js'
   },
   collectCoverageFrom: [
     'src/**/*.js',

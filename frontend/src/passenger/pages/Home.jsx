@@ -56,7 +56,7 @@ const Home = () => {
     // local e passou a viver no RideContext — que reconsulta o backend a cada
     // abertura/reconexão/retorno do background. Refresh na Home não perde mais a
     // corrida; os handlers de socket abaixo continuam atualizando o mesmo estado.
-    const { userRide: ride, setUserRide: setRide, syncUserRide, clearUserRide } = useContext(RideContext)
+    const { userRide: ride, setUserRide: setRide, syncUserRide, clearUserRide, userParcel } = useContext(RideContext)
     
     const optionalsPanelRef = useRef(null)
     const paymentPanelRef = useRef(null)
@@ -806,6 +806,27 @@ const Home = () => {
                             >
                                 <i className="ri-search-line text-xl text-brand-500" aria-hidden="true"></i>
                                 <span className="text-ink-900 font-semibold text-base">Para onde vamos?</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (ride) {
+                                        addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
+                                        return
+                                    }
+                                    if (userParcel) {
+                                        navigate('/encomenda/ativa', { state: { parcel: userParcel } })
+                                        return
+                                    }
+                                    navigate('/encomenda')
+                                }}
+                                className="w-full mt-3 bg-surface-alt border border-line px-5 py-3.5 rounded-panel flex items-center gap-3 active:scale-[0.98] transition-transform"
+                            >
+                                <i className="ri-box-3-line text-xl text-brand-500" aria-hidden="true"></i>
+                                <span className="text-ink-900 font-semibold text-base">
+                                    {userParcel ? 'Encomenda em andamento' : 'Encomenda'}
+                                </span>
                             </button>
                             {/* Botão de agendamento escondido até existir backend real (A8 na
                                 auditoria) — ScheduleRidePanel continua implementado, só não

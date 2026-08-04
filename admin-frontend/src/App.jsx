@@ -18,6 +18,7 @@ const Captains = lazy(() => import('./pages/Captains'));
 const Rides = lazy(() => import('./pages/Rides'));
 const Finance = lazy(() => import('./pages/Finance'));
 const Tariffs = lazy(() => import('./pages/Tariffs'));
+const Parcels = lazy(() => import('./pages/Parcels'));
 const Logs = lazy(() => import('./pages/Logs'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Promotions = lazy(() => import('./pages/Promotions'));
@@ -60,6 +61,7 @@ function App() {
               <Route path="/users" element={<Users />} />
               <Route path="/captains" element={<Captains />} />
               <Route path="/rides" element={<Rides />} />
+              <Route path="/parcels" element={<Parcels />} />
               <Route path="/tariffs" element={<Tariffs />} />
             </Route>
           </Route>

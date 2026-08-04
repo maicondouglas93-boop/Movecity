@@ -21,7 +21,7 @@ module.exports.uploadProfile = async (req, res) => {
 
         const url = await uploadService.uploadProfileImage(req.file.buffer);
 
-        // Persiste no user — antes só subia pro Cloudinary e o front ficava com stub.
+        // Persiste no user — antes só subia pro storage e o front ficava com stub.
         const user = await userModel.findByIdAndUpdate(
             req.user._id,
             { profilePicture: url },

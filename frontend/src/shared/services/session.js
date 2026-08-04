@@ -100,11 +100,23 @@ export function sessionKindForUrl(url = '') {
     if (path.includes('/rides/confirm-payment')) return 'captain';
     if (/\/rides\/[^/]+\/accept(?:\/|$)/.test(path)) return 'captain';
 
+    // Encomendas — motorista
+    if (path.includes('/parcels/pending')) return 'captain';
+    if (path.includes('/parcels/captain-current')) return 'captain';
+    if (path.includes('/parcels/captain-review')) return 'captain';
+    if (/\/parcels\/[^/]+\/(accept|decline|confirm-delivery)(?:\/|$)/.test(path)) return 'captain';
+    if (/\/parcels\/[^/]+\/status(?:\/|$)/.test(path)) return 'captain';
+
     // Passageiro
     if (path.includes('/rides/create')) return 'user';
     if (path.includes('/rides/current')) return 'user';
     if (path.includes('/rides/cancel')) return 'user';
     if (path.includes('/rides/get-fare') || path.includes('/rides/fare')) return 'user';
+    if (path.includes('/parcels/create')) return 'user';
+    if (path.includes('/parcels/current')) return 'user';
+    if (path.includes('/parcels/fare')) return 'user';
+    if (path.includes('/parcels/review')) return 'user';
+    if (/\/parcels\/[^/]+\/cancel(?:\/|$)/.test(path)) return 'user';
     if (path.includes('/support')) return 'user';
 
     return null;

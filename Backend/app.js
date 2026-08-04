@@ -12,6 +12,7 @@ const userRoutes = require('./routes/user.routes');
 const captainRoutes = require('./routes/captain.routes');
 const mapsRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
+const parcelRoutes = require('./routes/parcel.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const chatRoutes = require('./routes/chat.routes');
@@ -76,6 +77,7 @@ app.get('/', (req, res) => {
 });
 
 const mongoose = require('mongoose');
+const imagekitConfig = require('./config/imagekit');
 
 app.get('/api/health', (req, res) => {
     const memory = process.memoryUsage();
@@ -88,6 +90,12 @@ app.get('/api/health', (req, res) => {
             heapUsed: `${Math.round(memory.heapUsed / 1024 / 1024)} MB`
         },
         databaseState: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        // Migração Cloudinary → ImageKit (2026-08-04): variável de ambiente salva no
+        // painel do Render só entra no processo depois de um redeploy — sem este campo,
+        // a única forma de saber se as credenciais chegaram de fato era abrir o log do
+        // deploy e procurar a linha "ImageKit configurado.". Booleano derivado de
+        // isConfigured(): NUNCA expõe endpoint, chave pública ou privada.
+        storage: imagekitConfig.isConfigured() ? 'configured' : 'missing',
         timestamp: new Date().toISOString()
     });
 });
@@ -137,6 +145,7 @@ app.use('/users', userRoutes);
 app.use('/captains', captainRoutes);
 app.use('/maps', mapsRoutes);
 app.use('/rides', rideRoutes);
+app.use('/parcels', parcelRoutes);
 app.use('/uploads', uploadRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/chat', chatRoutes);

@@ -6,10 +6,20 @@ const messageSchema = new mongoose.Schema({
         ref: 'chat',
         required: true
     },
+    subjectType: {
+        type: String,
+        enum: ['ride', 'parcel'],
+        default: 'ride',
+    },
+    subjectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+    },
+    // Compat com mensagens antigas / clientes que ainda leem rideId
     rideId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'ride',
-        required: true
+        sparse: true,
     },
     senderId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -38,9 +48,7 @@ const messageSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Index for fast retrieval of messages per chat
 messageSchema.index({ chatId: 1, createdAt: 1 });
-// Expiration index to clean up messages after 180 days
 messageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 15552000 });
 
 module.exports = mongoose.model('message', messageSchema);

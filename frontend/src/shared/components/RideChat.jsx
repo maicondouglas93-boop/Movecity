@@ -3,39 +3,78 @@ import axios from 'axios';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { getAccessToken } from '@/shared/services/session';
 
-const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
+const RIDE_ACTIVE = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing'];
+const PARCEL_ACTIVE = [
+    'provider_accepted',
+    'going_to_pickup',
+    'arrived_pickup',
+    'collected',
+    'in_transit',
+    'arrived_destination',
+];
+
+/**
+ * Chat genérico ride|parcel.
+ * Props:
+ * - subject / ride: documento com `_id` e `status` (ride mantido por compat)
+ * - subjectType: 'ride' | 'parcel' (default 'ride')
+ */
+const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, currentUserType }) => {
     const { socket } = useContext(SocketContext);
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [otherIsTyping, setOtherIsTyping] = useState(false);
     const [loading, setLoading] = useState(false);
-    
+
     const messagesEndRef = useRef(null);
     const chatContainerRef = useRef(null);
     const typingTimeoutRef = useRef(null);
 
+    const doc = subject || ride;
+    const type = subjectType === 'parcel' ? 'parcel' : 'ride';
+    const subjectId = doc?._id;
     const token = getAccessToken(currentUserType === 'captain' ? 'captain' : 'user');
 
-    const quickMessagesCaptain = ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '🚗 Estou a caminho.', '👍 Ok.', '❌ Não encontrei você.'];
-    const quickMessagesUser = ['📍 Estou no local.', '⏳ Já estou descendo.', '👍 Ok.', '❌ Não encontrei você.'];
+    const socketPayload = () => (
+        type === 'parcel'
+            ? { subjectType: 'parcel', subjectId, token }
+            : { subjectType: 'ride', subjectId, rideId: subjectId, token }
+    );
+
+    const restSubjectBody = () => (
+        type === 'parcel'
+            ? { subjectType: 'parcel', subjectId }
+            : { subjectType: 'ride', subjectId, rideId: subjectId }
+    );
+
+    const quickMessagesCaptain = type === 'parcel'
+        ? ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '📦 Objeto coletado.', '👍 Ok.']
+        : ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '🚗 Estou a caminho.', '👍 Ok.', '❌ Não encontrei você.'];
+    const quickMessagesUser = type === 'parcel'
+        ? ['📍 Estou no local.', '📦 Pronto para retirar.', '👍 Ok.', '🔑 PIN enviado.']
+        : ['📍 Estou no local.', '⏳ Já estou descendo.', '👍 Ok.', '❌ Não encontrei você.'];
 
     const quickMessages = currentUserType === 'captain' ? quickMessagesCaptain : quickMessagesUser;
+    const peerLabel = currentUserType === 'user'
+        ? (type === 'parcel' ? 'Prestador' : 'Motorista')
+        : (type === 'parcel' ? 'Cliente' : 'Passageiro');
 
     useEffect(() => {
-        if (!isOpen || !ride) return;
+        if (!isOpen || !doc || !subjectId) return;
 
-        // Fetch historical messages
         const fetchMessages = async () => {
             setLoading(true);
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${ride._id}`, {
+                const path = type === 'parcel'
+                    ? `${import.meta.env.VITE_BASE_URL}/chat/parcel/${subjectId}`
+                    : `${import.meta.env.VITE_BASE_URL}/chat/${subjectId}`;
+                const response = await axios.get(path, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (response.data.messages) {
                     setMessages(response.data.messages);
-                    // Mark as read after fetching
-                    await axios.patch(`${import.meta.env.VITE_BASE_URL}/chat/read`, { rideId: ride._id }, {
+                    await axios.patch(`${import.meta.env.VITE_BASE_URL}/chat/read`, restSubjectBody(), {
                         headers: { Authorization: `Bearer ${token}` }
                     });
                 }
@@ -49,18 +88,12 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
 
         fetchMessages();
 
-        // Join socket room
-        // A10 da auditoria de push (2026-08-02): o backend agora exige o JWT pra
-        // confirmar que quem está entrando na sala é de fato o passageiro ou o
-        // motorista desta corrida — sem isso, entra sem autorização e sem ouvir nada.
-        socket.emit('join-chat', { rideId: ride._id, token });
+        socket.emit('join-chat', socketPayload());
 
         const handleReceiveMessage = (message) => {
             setMessages(prev => [...prev, message]);
-            // If chat is open, mark as read immediately
-            socket.emit('message-read', { rideId: ride._id, messageId: message._id });
-            
-            // Smart scroll: only scroll if we're already near bottom
+            socket.emit('message-read', { ...socketPayload(), messageId: message._id });
+
             if (chatContainerRef.current) {
                 const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
                 const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
@@ -87,12 +120,12 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
         socket.on('typing-stop', handleTypingStop);
 
         return () => {
-            socket.emit('leave-chat', { rideId: ride._id });
+            socket.emit('leave-chat', socketPayload());
             socket.off('receive-message', handleReceiveMessage);
             socket.off('typing-start', handleTypingStart);
             socket.off('typing-stop', handleTypingStop);
         };
-    }, [isOpen, ride, socket, token, currentUserType]);
+    }, [isOpen, subjectId, type, socket, token, currentUserType]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -102,20 +135,19 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
         setInputText(e.target.value);
         if (!isTyping) {
             setIsTyping(true);
-            socket.emit('typing-start', { rideId: ride._id, senderType: currentUserType });
+            socket.emit('typing-start', { ...socketPayload(), senderType: currentUserType });
         }
-        
+
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
             setIsTyping(false);
-            socket.emit('typing-stop', { rideId: ride._id, senderType: currentUserType });
+            socket.emit('typing-stop', { ...socketPayload(), senderType: currentUserType });
         }, 1500);
     };
 
     const sendMessage = async (textToSend = inputText) => {
         if (!textToSend.trim()) return;
 
-        // Optimistic UI update
         const tempId = Date.now().toString();
         const newMessage = {
             _id: tempId,
@@ -124,67 +156,62 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
             status: 'sent',
             createdAt: new Date().toISOString()
         };
-        
+
         setMessages(prev => [...prev, newMessage]);
         setInputText('');
         scrollToBottom();
 
         try {
             const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
-                rideId: ride._id,
+                ...restSubjectBody(),
                 message: textToSend,
                 type: 'text'
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
-            // Replace temp message with actual message from server
             setMessages(prev => prev.map(msg => msg._id === tempId ? response.data : msg));
-            socket.emit('send-message', { rideId: ride._id, message: response.data });
-            
+            socket.emit('send-message', { ...socketPayload(), message: response.data });
+
         } catch (err) {
             console.error('Error sending message', err);
-            // Revert optimistic update on failure, maybe show error toast
             setMessages(prev => prev.filter(msg => msg._id !== tempId));
         }
     };
 
-    const isRideActive = ride && ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing'].includes(ride.status);
+    const activeStatuses = type === 'parcel' ? PARCEL_ACTIVE : RIDE_ACTIVE;
+    const isActive = doc && activeStatuses.includes(doc.status);
 
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[100] flex flex-col bg-gray-100 animate-slide-up sm:w-full sm:max-w-md sm:mx-auto sm:border-x">
-            {/* Header */}
             <div className="bg-white px-4 py-3 flex items-center justify-between border-b shadow-sm">
                 <div className="flex items-center gap-3">
                     <button onClick={onClose} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
                         <i className="ri-arrow-left-line text-xl"></i>
                     </button>
                     <div>
-                        <h3 className="font-semibold text-lg">
-                            {currentUserType === 'user' ? 'Motorista' : 'Passageiro'}
-                        </h3>
+                        <h3 className="font-semibold text-lg">{peerLabel}</h3>
                         <span className="text-xs text-green-600 font-medium">
-                            {isRideActive ? 'Online' : 'Corrida Finalizada'}
+                            {isActive ? 'Online' : (type === 'parcel' ? 'Encomenda finalizada' : 'Corrida Finalizada')}
                         </span>
                     </div>
                 </div>
             </div>
 
-            {/* Chat Area */}
-            <div 
+            <div
                 ref={chatContainerRef}
                 className="flex-1 overflow-y-auto overscroll-y-contain p-4 space-y-4 bg-[#e5ddd5]"
             >
-                {!isRideActive && (
+                {!isActive && (
                     <div className="bg-yellow-100 text-yellow-800 text-xs text-center p-2 rounded-lg my-2 mx-auto max-w-[80%]">
-                        Esta conversa foi encerrada porque a corrida não está mais ativa.
+                        Esta conversa foi encerrada.
                     </div>
                 )}
-                
+
                 {loading && <div className="text-center text-sm text-gray-500">Carregando...</div>}
-                
+
                 {messages.map((msg, index) => {
                     const isMine = msg.senderType === currentUserType;
                     return (
@@ -201,7 +228,7 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
                         </div>
                     );
                 })}
-                
+
                 {otherIsTyping && (
                     <div className="flex justify-start">
                         <div className="bg-white rounded-xl rounded-tl-sm px-4 py-2 shadow-sm text-sm text-gray-500 italic flex gap-1">
@@ -212,11 +239,10 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Quick Messages */}
-            {isRideActive && (
+            {isActive && (
                 <div className="bg-white border-t p-2 flex gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
                     {quickMessages.map((msg, idx) => (
-                        <button 
+                        <button
                             key={idx}
                             onClick={() => sendMessage(msg)}
                             className="bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs px-3 py-1.5 rounded-full flex-shrink-0"
@@ -227,20 +253,19 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
                 </div>
             )}
 
-            {/* Input Area */}
             <div className="bg-white p-3 border-t">
-                {isRideActive ? (
+                {isActive ? (
                     <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-2">
-                        <input 
-                            type="text" 
-                            placeholder="Mensagem..." 
+                        <input
+                            type="text"
+                            placeholder="Mensagem..."
                             className="bg-transparent flex-1 outline-none text-sm"
                             value={inputText}
                             onChange={handleInputChange}
                             onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                             maxLength={500}
                         />
-                        <button 
+                        <button
                             onClick={() => sendMessage()}
                             disabled={!inputText.trim()}
                             className={`p-1.5 rounded-full transition-colors flex items-center justify-center ${inputText.trim() ? 'bg-black text-white' : 'bg-gray-300 text-gray-500'}`}

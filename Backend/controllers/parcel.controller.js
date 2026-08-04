@@ -1,0 +1,341 @@
+const { validationResult } = require('express-validator');
+const parcelService = require('../services/parcel.service');
+const dispatchService = require('../services/dispatch.service');
+const parcelModel = require('../models/parcel.model');
+const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMapUpdate } = require('../socket');
+const notificationService = require('../services/notification.service');
+
+async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
+    const { pickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
+        pickup,
+        vehicleType,
+        {
+            TRACE_ID,
+            excludeCaptainId,
+            excludeActiveRide: true,
+            excludeActiveParcel: true,
+        }
+    );
+
+    const parcelWithUser = await parcelModel.findOneAndUpdate(
+        { _id: parcel._id },
+        { pickupCoordinates },
+        { new: true }
+    ).populate('user');
+
+    // Oferta nunca inclui deliveryPin
+    const offerPayload = parcelWithUser.toObject();
+    delete offerPayload.deliveryPin;
+
+    captains.forEach((captain) => {
+        addSocketToRoom(captain.socketId, `parcel_${parcel._id}`);
+        sendMessageToSocketId(captain.socketId, {
+            event: 'new-parcel',
+            data: offerPayload,
+        });
+        if (typeof notificationService.sendNewParcel === 'function') {
+            notificationService.sendNewParcel(captain._id, {
+                parcelId: parcelWithUser._id.toString(),
+                fare: parcelWithUser.fare,
+                pickup: parcelWithUser.pickup,
+                destination: parcelWithUser.destination,
+                vehicleType: parcelWithUser.vehicleType,
+                itemName: parcelWithUser.itemName,
+                size: parcelWithUser.size,
+            }, TRACE_ID).catch(console.error);
+        }
+    });
+
+    return captains.length;
+}
+
+module.exports.getFare = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+        const { pickup, destination, vehicleType } = req.query;
+        const fare = await parcelService.getParcelFare({ pickup, destination, vehicleType });
+        const compatibility = await parcelService.validateVehicleCompatibility({
+            vehicleType,
+            size: req.query.size || 'small',
+            weightKg: Number(req.query.weightKg) || 0,
+        });
+        return res.status(200).json({ ...fare, warnings: compatibility.warnings, blocked: compatibility.blocked });
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.createParcel = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+        const body = req.body || {};
+        const { parcel, warnings } = await parcelService.createParcel({
+            pickup: body.pickup,
+            destination: body.destination,
+            vehicleType: body.vehicleType,
+            sender: body.sender,
+            recipient: body.recipient,
+            itemName: body.itemName,
+            category: body.category,
+            weightKg: body.weightKg,
+            size: body.size,
+            description: body.description,
+            notes: body.notes,
+            paymentMethod: body.paymentMethod,
+            user: req.user._id, // nunca sobrescrito pelo body
+        });
+
+        const TRACE_ID = `Parcel:${parcel._id}`;
+        if (req.user?.socketId) {
+            addSocketToRoom(req.user.socketId, `parcel_${parcel._id}`);
+        }
+        try {
+            await dispatchParcelToCaptains(parcel, {
+                pickup: parcel.pickup,
+                vehicleType: parcel.vehicleType,
+                TRACE_ID,
+            });
+        } catch (dispatchErr) {
+            console.error(`[PARCEL][${TRACE_ID}] dispatch failed:`, dispatchErr.message);
+            await parcelService.cancelParcelSystem(parcel._id, 'dispatch_failed');
+            return res.status(502).json({ message: 'Falha ao despachar encomenda. Tente novamente.' });
+        }
+
+        const withPin = await parcelModel.findById(parcel._id).select('+deliveryPin').populate('captain');
+        return res.status(201).json({ ...withPin.toObject(), warnings });
+    } catch (err) {
+        if (err.code === 'VEHICLE_INCOMPATIBLE') {
+            return res.status(400).json({ message: err.message });
+        }
+        if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
+            return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
+        }
+        if (err.code === 'USER_HAS_ACTIVE_RIDE' || err.message === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({ message: 'Você já possui uma corrida em andamento.' });
+        }
+        console.error('[PARCEL] create error:', err);
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.getCurrent = async (req, res) => {
+    try {
+        const parcel = await parcelService.getCurrentParcelForUser(req.user._id);
+        return res.status(200).json(parcel);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.getCurrentForCaptain = async (req, res) => {
+    try {
+        const parcel = await parcelService.getCurrentParcelForCaptain(req.captain._id);
+        return res.status(200).json(parcel);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.getPending = async (req, res) => {
+    try {
+        const parcels = await parcelService.getPendingParcelsForCaptain({ captain: req.captain });
+        return res.status(200).json(parcels);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.acceptParcel = async (req, res) => {
+    const parcelId = req.params.id;
+    const TRACE_ID = `Parcel:${parcelId}`;
+    try {
+        const parcel = await parcelService.acceptParcelAtomic({
+            parcelId,
+            captain: req.captain,
+        });
+
+        if (parcel.user?.socketId) {
+            addSocketToRoom(parcel.user.socketId, `parcel_${parcelId}`);
+            sendMessageToSocketId(parcel.user.socketId, {
+                event: 'parcel-confirmed',
+                data: parcel,
+            });
+        }
+        if (req.captain.socketId) {
+            addSocketToRoom(req.captain.socketId, `parcel_${parcelId}`);
+        }
+
+        sendMessageToRoom(`parcel_${parcelId}`, {
+            event: 'parcel-taken',
+            data: { parcelId, captainId: req.captain._id.toString() },
+        });
+
+        emitDriverMapUpdate(req.captain._id, { busy: true });
+
+        const forCaptain = parcel.toObject();
+        delete forCaptain.deliveryPin;
+        return res.status(200).json(forCaptain);
+    } catch (err) {
+        console.error(`[AUDIT][${TRACE_ID}] accept fail:`, err.message);
+        if (err.message === 'PARCEL_ALREADY_ACCEPTED') {
+            return res.status(409).json({ message: 'Encomenda já aceita por outro prestador' });
+        }
+        if (err.message === 'PARCEL_CANCELLED') {
+            return res.status(409).json({ message: 'Encomenda cancelada' });
+        }
+        if (err.message === 'PARCEL_NOT_FOUND') {
+            return res.status(404).json({ message: 'Encomenda não encontrada' });
+        }
+        if (err.message === 'CAPTAIN_HAS_ACTIVE_RIDE' || err.message === 'CAPTAIN_HAS_ACTIVE_PARCEL') {
+            return res.status(409).json({ message: 'Você já está em outro serviço ativo.' });
+        }
+        if (err.message === 'CAPTAIN_NOT_ALLOWED' || err.message === 'VEHICLE_MISMATCH') {
+            return res.status(403).json({ message: 'Não autorizado a aceitar esta encomenda.' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.declineParcel = async (req, res) => {
+    // ACK only — zero mutação de estado.
+    await parcelService.declineParcel({
+        parcelId: req.params.id,
+        captain: req.captain,
+    });
+    return res.status(200).json({ ok: true });
+};
+
+module.exports.updateStatus = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+        const parcel = await parcelService.updateParcelStatus({
+            parcelId: req.params.id,
+            captain: req.captain,
+            status: req.body.status,
+        });
+
+        if (parcel.user?.socketId) {
+            sendMessageToSocketId(parcel.user.socketId, {
+                event: 'parcel-status-updated',
+                data: parcel,
+            });
+        }
+
+        return res.status(200).json(parcel);
+    } catch (err) {
+        if (err.message === 'INVALID_STATUS_TRANSITION') {
+            return res.status(400).json({ message: 'Transição de status inválida' });
+        }
+        if (err.message === 'PARCEL_NOT_FOUND') {
+            return res.status(404).json({ message: 'Encomenda não encontrada' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.confirmDelivery = async (req, res) => {
+    try {
+        const parcel = await parcelService.confirmDelivery({
+            parcelId: req.params.id,
+            captain: req.captain,
+            pin: req.body.pin,
+        });
+
+        if (parcel.user?.socketId) {
+            sendMessageToSocketId(parcel.user.socketId, {
+                event: 'parcel-delivered',
+                data: parcel,
+            });
+            sendMessageToSocketId(parcel.user.socketId, {
+                event: 'parcel-ended',
+                data: parcel,
+            });
+        }
+
+        emitDriverMapUpdate(req.captain._id, { busy: false });
+        return res.status(200).json(parcel);
+    } catch (err) {
+        if (err.message === 'INVALID_PIN') {
+            return res.status(400).json({ message: 'PIN inválido' });
+        }
+        if (err.message === 'INVALID_STATUS_FOR_DELIVERY') {
+            return res.status(400).json({ message: 'Encomenda não está aguardando confirmação de entrega' });
+        }
+        if (err.message === 'PARCEL_NOT_FOUND') {
+            return res.status(404).json({ message: 'Encomenda não encontrada' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.cancelParcel = async (req, res) => {
+    try {
+        const parcel = await parcelService.cancelParcel({
+            parcelId: req.params.id || req.body.parcelId,
+            user: req.user._id,
+            reason: req.body.reason,
+        });
+
+        sendMessageToRoom(`parcel_${parcel._id}`, {
+            event: 'parcel-cancelled',
+            data: { parcelId: parcel._id.toString() },
+        });
+
+        if (parcel.captain) {
+            emitDriverMapUpdate(parcel.captain._id || parcel.captain, { busy: false });
+        }
+
+        return res.status(200).json(parcel);
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') {
+            return res.status(404).json({ message: 'Encomenda não encontrada' });
+        }
+        if (err.message === 'PARCEL_NOT_CANCELLABLE') {
+            return res.status(400).json({ message: 'Não é possível cancelar neste status' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.submitReview = async (req, res) => {
+    try {
+        const review = await parcelService.submitReview({
+            parcelId: req.body.parcelId || req.body.subjectId,
+            user: req.user._id,
+            rating: req.body.rating,
+            comment: req.body.comment,
+            issueCategory: req.body.issueCategory,
+        });
+        return res.status(201).json(review);
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
+        if (err.message === 'Parcel already reviewed') return res.status(409).json({ message: err.message });
+        if (err.message === 'Only finished parcels can be reviewed') return res.status(400).json({ message: err.message });
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.submitCaptainReview = async (req, res) => {
+    try {
+        const review = await parcelService.submitCaptainReview({
+            parcelId: req.body.parcelId || req.body.subjectId,
+            captain: req.captain._id,
+            rating: req.body.rating,
+            comment: req.body.comment,
+        });
+        return res.status(201).json(review);
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
+        if (err.message === 'Parcel already reviewed') return res.status(409).json({ message: err.message });
+        if (err.message === 'Only finished parcels can be reviewed') return res.status(400).json({ message: err.message });
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.dispatchParcelToCaptains = dispatchParcelToCaptains;

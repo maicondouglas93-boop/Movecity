@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const userModel = require('./models/user.model');
 const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
+const parcelModel = require('./models/parcel.model');
 const adminUserModel = require('./models/adminUser.model');
 const mapService = require('./services/maps.service');
 const notificationDispatcher = require('./notification/notificationDispatcher.service');
@@ -10,25 +11,35 @@ const notificationDispatcher = require('./notification/notificationDispatcher.se
 let io;
 
 // A7 da auditoria de push (2026-08-02): "quem está de fato olhando este chat agora" —
-// contagem por corrida e por tipo (não por socket, pra suportar a mesma pessoa com duas
+// contagem por corrida/encomenda e por tipo (não por socket, pra suportar a mesma pessoa com duas
 // abas/dispositivos abertos sem que sair de uma derrube a presença da outra). Usado por
 // 'send-message' pra decidir: destinatário presente -> só Socket.IO (como já era);
 // destinatário ausente -> cai pro push (antes não existia nenhum aviso nesse caso).
-const chatPresence = new Map(); // rideId (string) -> { user: number, captain: number }
+// chatKey = rideId (compat corrida) ou `parcel:<id>`
+const chatPresence = new Map();
 
-const addChatPresence = (rideId, type) => {
-    if (!chatPresence.has(rideId)) chatPresence.set(rideId, { user: 0, captain: 0 });
-    chatPresence.get(rideId)[type]++;
+const chatRoomKey = ({ subjectType, subjectId, rideId } = {}) => {
+    const type = subjectType === 'parcel' ? 'parcel' : 'ride';
+    const id = (subjectId || rideId || '').toString();
+    if (!id) return null;
+    return type === 'parcel' ? `parcel:${id}` : id;
 };
 
-const removeChatPresence = (rideId, type) => {
-    const presence = chatPresence.get(rideId);
+const chatRoomName = (key) => `chat_${key}`;
+
+const addChatPresence = (key, type) => {
+    if (!chatPresence.has(key)) chatPresence.set(key, { user: 0, captain: 0 });
+    chatPresence.get(key)[type]++;
+};
+
+const removeChatPresence = (key, type) => {
+    const presence = chatPresence.get(key);
     if (!presence) return;
     presence[type] = Math.max(0, presence[type] - 1);
-    if (presence.user === 0 && presence.captain === 0) chatPresence.delete(rideId);
+    if (presence.user === 0 && presence.captain === 0) chatPresence.delete(key);
 };
 
-const isChatPresent = (rideId, type) => (chatPresence.get(rideId)?.[type] || 0) > 0;
+const isChatPresent = (key, type) => (chatPresence.get(key)?.[type] || 0) > 0;
 
 function initializeSocket(server) {
     const allowedOrigins = [
@@ -96,6 +107,21 @@ function initializeSocket(server) {
                     socket.data.identity = { type: 'user', id: authenticatedId };
                     await userModel.findByIdAndUpdate(authenticatedId, { socketId: socket.id });
                     console.log(`[AUDIT] User ${authenticatedId} atualizou socketId para ${socket.id}`);
+
+                    const dispatchService = require('./services/dispatch.service');
+                    const userParcelStatuses = [
+                        'awaiting_provider',
+                        ...dispatchService.ACTIVE_PARCEL_STATUSES,
+                        'delivered',
+                    ];
+                    const activeUserParcel = await parcelModel.findOne({
+                        user: authenticatedId,
+                        status: { $in: userParcelStatuses },
+                    }).select('_id');
+                    if (activeUserParcel) {
+                        socket.join(`parcel_${activeUserParcel._id}`);
+                        console.log(`[AUDIT] User ${authenticatedId} reentrou na sala parcel_${activeUserParcel._id} após (re)conexão`);
+                    }
                 } else {
                     const captain = await captainModel.findById(authenticatedId);
                     if (!captain || captain.isBlocked) {
@@ -136,6 +162,16 @@ function initializeSocket(server) {
                     if (activeRide) {
                         socket.join(`ride_${activeRide._id}`);
                         console.log(`[AUDIT] Captain ${authenticatedId} reentrou na sala ride_${activeRide._id} após (re)conexão`);
+                    }
+
+                    const dispatchService = require('./services/dispatch.service');
+                    const activeParcel = await parcelModel.findOne({
+                        captain: authenticatedId,
+                        status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
+                    }).select('_id');
+                    if (activeParcel) {
+                        socket.join(`parcel_${activeParcel._id}`);
+                        console.log(`[AUDIT] Captain ${authenticatedId} reentrou na sala parcel_${activeParcel._id} após (re)conexão`);
                     }
                 }
             } else if (userType === 'admin') {
@@ -209,6 +245,14 @@ function initializeSocket(server) {
                 status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
             }).populate('user');
 
+            const dispatchService = require('./services/dispatch.service');
+            const parcel = !ride
+                ? await parcelModel.findOne({
+                    captain: userId,
+                    status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
+                }).populate('user')
+                : null;
+
             if (ride) {
                 let currentDistance = ride.actualDistance || 0;
                 
@@ -240,15 +284,28 @@ function initializeSocket(server) {
                     io.to(ride.user.socketId).emit('captain-location-updated', {
                         ltd: location.ltd,
                         lng: location.lng,
-                        actualDistance: currentDistance
+                        actualDistance: currentDistance,
+                        rideId: ride._id.toString(),
                     });
                 }
                 // Also send back to the captain's socket to update their local map in real time
                 socket.emit('captain-location-updated', {
                     ltd: location.ltd,
                     lng: location.lng,
-                    actualDistance: currentDistance
+                    actualDistance: currentDistance,
+                    rideId: ride._id.toString(),
                 });
+            } else if (parcel) {
+                const locPayload = {
+                    ltd: location.ltd,
+                    lng: location.lng,
+                    parcelId: parcel._id.toString(),
+                    subjectType: 'parcel',
+                };
+                if (parcel.user && parcel.user.socketId) {
+                    io.to(parcel.user.socketId).emit('captain-location-updated', locPayload);
+                }
+                socket.emit('captain-location-updated', locPayload);
             }
 
             io.to('admin_room').emit('admin-captain-location-updated', {
@@ -259,14 +316,14 @@ function initializeSocket(server) {
 
             // Fase C da experiência de corrida ativa (2026-08-03): mapa do passageiro.
             // Aproveita o pipeline que já existe (posição chega a cada ~10s) e o `ride`
-            // já consultado acima — nenhuma query extra. Motorista em corrida vira
-            // 'driver-busy' (some do mapa); disponível vira 'driver-location'. O filtro
-            // espelha availabilityFilter(): quem não seria despachado não aparece.
-            const isAvailableOnMap = !ride
+            // já consultado acima — nenhuma query extra. Motorista em corrida/encomenda
+            // vira 'driver-busy' (some do mapa); disponível vira 'driver-location'.
+            const isBusy = !!(ride || parcel);
+            const isAvailableOnMap = !isBusy
                 && captainDoc && captainDoc.isOnline && !captainDoc.isBlocked
                 && captainDoc.canReceiveRides !== false && captainDoc.approvalStatus === 'aprovado';
 
-            if (ride) {
+            if (isBusy) {
                 // Só na TRANSIÇÃO para ocupado. Em corrida a posição chega a cada 5s, e
                 // reemitir 'driver-busy' a cada uma delas mandaria a mesma informação
                 // repetidas vezes para todos os passageiros com o mapa aberto — eles já
@@ -329,72 +386,110 @@ function initializeSocket(server) {
             return null;
         };
 
-        const canAccessChat = async (identity, rideId) => {
-            if (!identity || !rideId) return false;
-            const ride = await rideModel.findById(rideId).select('user captain');
+        const canAccessChat = async (identity, { subjectType, subjectId, rideId } = {}) => {
+            const key = chatRoomKey({ subjectType, subjectId, rideId });
+            if (!identity || !key) return false;
+
+            if (subjectType === 'parcel') {
+                const parcel = await parcelModel.findById(subjectId || rideId).select('user captain');
+                if (!parcel) return false;
+                if (identity.type === 'user' && parcel.user) return parcel.user.toString() === identity.id;
+                if (identity.type === 'captain' && parcel.captain) return parcel.captain.toString() === identity.id;
+                return false;
+            }
+
+            const ride = await rideModel.findById(subjectId || rideId).select('user captain');
             if (!ride) return false;
             if (identity.type === 'user' && ride.user) return ride.user.toString() === identity.id;
             if (identity.type === 'captain' && ride.captain) return ride.captain.toString() === identity.id;
             return false;
         };
 
-        const hasChatAccess = (rideId) => !!(rideId && socket.data.authorizedChats && socket.data.authorizedChats.has(rideId));
+        const hasChatAccess = (key) => !!(key && socket.data.authorizedChats && socket.data.authorizedChats.has(key));
 
         socket.on('join-chat', async (data) => {
-            const { rideId, token } = data || {};
-            if (!rideId) return;
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const subjectId = data?.subjectId || data?.rideId;
+            const rideId = data?.rideId || (subjectType === 'ride' ? subjectId : undefined);
+            const key = chatRoomKey({ subjectType, subjectId, rideId });
+            const token = data?.token;
+            if (!key) return;
 
             const identity = await resolveChatIdentity(token);
-            const allowed = await canAccessChat(identity, rideId);
+            const allowed = await canAccessChat(identity, { subjectType, subjectId, rideId });
             if (!allowed) {
-                console.log(`[AUDIT] JOIN em chat_${rideId} rejeitado (sem acesso) no socket ${socket.id}`);
+                console.log(`[AUDIT] JOIN em ${chatRoomName(key)} rejeitado (sem acesso) no socket ${socket.id}`);
                 return socket.emit('unauthorized', { message: 'Sem acesso a este chat' });
             }
 
             if (!socket.data.authorizedChats) socket.data.authorizedChats = new Set();
             if (!socket.data.chatIdentities) socket.data.chatIdentities = new Map();
-            socket.data.authorizedChats.add(rideId);
-            socket.data.chatIdentities.set(rideId, identity);
-            socket.join(`chat_${rideId}`);
-            addChatPresence(rideId, identity.type);
+            if (!socket.data.chatSubjects) socket.data.chatSubjects = new Map();
+            socket.data.authorizedChats.add(key);
+            socket.data.chatIdentities.set(key, identity);
+            socket.data.chatSubjects.set(key, { subjectType, subjectId: (subjectId || '').toString(), rideId: rideId?.toString?.() });
+            socket.join(chatRoomName(key));
+            addChatPresence(key, identity.type);
         });
 
         socket.on('leave-chat', (data) => {
-            const { rideId } = data || {};
-            if (rideId) {
-                socket.leave(`chat_${rideId}`);
-                const identity = socket.data.chatIdentities?.get(rideId);
-                if (identity) removeChatPresence(rideId, identity.type);
-                socket.data.authorizedChats?.delete(rideId);
-                socket.data.chatIdentities?.delete(rideId);
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const subjectId = data?.subjectId || data?.rideId;
+            const key = chatRoomKey({ subjectType, subjectId, rideId: data?.rideId });
+            if (key) {
+                socket.leave(chatRoomName(key));
+                const identity = socket.data.chatIdentities?.get(key);
+                if (identity) removeChatPresence(key, identity.type);
+                socket.data.authorizedChats?.delete(key);
+                socket.data.chatIdentities?.delete(key);
+                socket.data.chatSubjects?.delete(key);
             }
         });
 
         socket.on('send-message', async (data) => {
-            const { rideId, message } = data || {};
-            if (!hasChatAccess(rideId)) return;
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const subjectId = data?.subjectId || data?.rideId;
+            const rideId = data?.rideId || (subjectType === 'ride' ? subjectId : undefined);
+            const key = chatRoomKey({ subjectType, subjectId, rideId });
+            const { message } = data || {};
+            if (!hasChatAccess(key)) return;
 
-            socket.to(`chat_${rideId}`).emit('receive-message', message);
+            socket.to(chatRoomName(key)).emit('receive-message', message);
 
             // A7 da auditoria de push (2026-08-02): "App aberto -> Socket.IO; App
             // fechado -> Firebase Push". O relay acima já cobre o primeiro caso; isto
             // aqui cobre o segundo, que antes simplesmente não existia — quem não
             // estava com o chat aberto nunca sabia que recebeu uma mensagem.
             try {
-                const senderIdentity = socket.data.chatIdentities?.get(rideId);
+                const senderIdentity = socket.data.chatIdentities?.get(key);
                 if (!senderIdentity) return;
 
                 const recipientType = senderIdentity.type === 'user' ? 'captain' : 'user';
-                if (isChatPresent(rideId, recipientType)) return;
-
-                const ride = await rideModel.findById(rideId).select('user captain');
-                if (!ride) return;
+                if (isChatPresent(key, recipientType)) return;
 
                 const preview = typeof message?.message === 'string' ? message.message.slice(0, 100) : 'Nova mensagem';
+                const pushMeta = subjectType === 'parcel'
+                    ? { subjectType: 'parcel', subjectId: String(subjectId), parcelId: String(subjectId) }
+                    : { rideId: String(subjectId || rideId) };
+
+                if (subjectType === 'parcel') {
+                    const parcel = await parcelModel.findById(subjectId).select('user captain');
+                    if (!parcel) return;
+                    if (recipientType === 'captain' && parcel.captain) {
+                        notificationDispatcher.sendChatMessageToCaptain(parcel.captain, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
+                    } else if (recipientType === 'user' && parcel.user) {
+                        notificationDispatcher.sendChatMessageToUser(parcel.user, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
+                    }
+                    return;
+                }
+
+                const ride = await rideModel.findById(subjectId || rideId).select('user captain');
+                if (!ride) return;
+
                 if (recipientType === 'captain' && ride.captain) {
-                    notificationDispatcher.sendChatMessageToCaptain(ride.captain, preview, { rideId }).catch(err => console.error('[Chat Push]', err.message));
+                    notificationDispatcher.sendChatMessageToCaptain(ride.captain, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
                 } else if (recipientType === 'user' && ride.user) {
-                    notificationDispatcher.sendChatMessageToUser(ride.user, preview, { rideId }).catch(err => console.error('[Chat Push]', err.message));
+                    notificationDispatcher.sendChatMessageToUser(ride.user, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
                 }
             } catch (err) {
                 console.error('[Chat Push] Erro ao processar fallback de push:', err.message);
@@ -402,30 +497,38 @@ function initializeSocket(server) {
         });
 
         socket.on('message-delivered', (data) => {
-            const { rideId, messageId } = data || {};
-            if (hasChatAccess(rideId)) {
-                socket.to(`chat_${rideId}`).emit('message-delivered', { messageId });
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
+            const { messageId } = data || {};
+            if (hasChatAccess(key)) {
+                socket.to(chatRoomName(key)).emit('message-delivered', { messageId });
             }
         });
 
         socket.on('message-read', (data) => {
-            const { rideId, messageId } = data || {};
-            if (hasChatAccess(rideId)) {
-                socket.to(`chat_${rideId}`).emit('message-read', { messageId });
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
+            const { messageId } = data || {};
+            if (hasChatAccess(key)) {
+                socket.to(chatRoomName(key)).emit('message-read', { messageId });
             }
         });
 
         socket.on('typing-start', (data) => {
-            const { rideId, senderType } = data || {};
-            if (hasChatAccess(rideId)) {
-                socket.to(`chat_${rideId}`).emit('typing-start', { senderType });
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
+            const { senderType } = data || {};
+            if (hasChatAccess(key)) {
+                socket.to(chatRoomName(key)).emit('typing-start', { senderType });
             }
         });
 
         socket.on('typing-stop', (data) => {
-            const { rideId, senderType } = data || {};
-            if (hasChatAccess(rideId)) {
-                socket.to(`chat_${rideId}`).emit('typing-stop', { senderType });
+            const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
+            const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
+            const { senderType } = data || {};
+            if (hasChatAccess(key)) {
+                socket.to(chatRoomName(key)).emit('typing-stop', { senderType });
             }
         });
 
@@ -436,8 +539,8 @@ function initializeSocket(server) {
             // perder conexão) deixaria a presença de chat "presa" achando que ele ainda
             // está olhando a tela — e o outro lado nunca mais receberia push nenhum.
             if (socket.data.chatIdentities) {
-                for (const [rideId, identity] of socket.data.chatIdentities.entries()) {
-                    removeChatPresence(rideId, identity.type);
+                for (const [key, identity] of socket.data.chatIdentities.entries()) {
+                    removeChatPresence(key, identity.type);
                 }
             }
 

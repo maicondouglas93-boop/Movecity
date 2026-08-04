@@ -1,11 +1,23 @@
 const mongoose = require('mongoose');
 
 const chatSchema = new mongoose.Schema({
+    // Compat: chats de corrida antigos só tinham rideId. Novos docs preenchem
+    // subjectType + subjectId (+ rideId quando subjectType === 'ride').
+    subjectType: {
+        type: String,
+        enum: ['ride', 'parcel'],
+        default: 'ride',
+        index: true,
+    },
+    subjectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+        index: true,
+    },
     rideId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'ride',
-        required: true,
-        unique: true // One chat per ride
+        sparse: true,
     },
     passengerId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -32,7 +44,7 @@ const chatSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Expiration index to clean up chat documents after 180 days
+chatSchema.index({ subjectType: 1, subjectId: 1 }, { unique: true });
 chatSchema.index({ createdAt: 1 }, { expireAfterSeconds: 15552000 });
 
 module.exports = mongoose.model('chat', chatSchema);

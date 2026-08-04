@@ -305,10 +305,25 @@ module.exports.acceptRideAtomic = async ({
         throw new Error('Ride id is required');
     }
 
+    // Exclusão mútua ride↔parcel: busyLock atômico + recheck dentro da seção crítica.
+    const dispatchService = require('./dispatch.service');
+    const locked = await dispatchService.acquireCaptainBusyLock(captain._id);
+    if (!locked) {
+        throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
+    }
+
     let updatedRide;
     try {
+        if (await dispatchService.captainHasActiveParcel(captain._id)) {
+            throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
+        }
+        if (await dispatchService.captainHasActiveRide(captain._id)) {
+            throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
+        }
+
         updatedRide = await transitionRide(rideId, 'accepted', {}, { captain: captain._id });
     } catch (err) {
+        await dispatchService.releaseCaptainBusyLock(captain._id);
         // Índice único parcial em ride.model.js (C2 da auditoria de concorrência): este
         // motorista já tem outra corrida ativa. Erro de chave duplicada do Mongo, não uma
         // falha de servidor — traduzido pra uma mensagem que o app sabe mostrar.
@@ -319,6 +334,7 @@ module.exports.acceptRideAtomic = async ({
     }
 
     if (!updatedRide) {
+        await dispatchService.releaseCaptainBusyLock(captain._id);
         // Find out if it doesn't exist, foi cancelada, ou já foi aceita.
         //
         // Diagnóstico de push de corrida (2026-08-03), achado 4: antes, qualquer motivo
@@ -488,6 +504,9 @@ module.exports.endRide = async ({ rideId, captain }) => {
     if (!updated) {
         throw new Error('Ride not started');
     }
+
+    const dispatchService = require('./dispatch.service');
+    await dispatchService.releaseCaptainBusyLock(captain._id);
 
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');
     return updatedRide;
@@ -772,6 +791,10 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         throw new Error('Captain is required');
     }
 
+    // Exclusão mútua: motorista com encomenda ativa não vê ofertas de corrida.
+    const dispatchService = require('./dispatch.service');
+    if (await dispatchService.captainHasActiveParcel(captain._id)) return [];
+
     // Leitura fresca de propósito: o req.captain do middleware vem de um cache de perfil
     // de 10 min, mas 'location' muda a cada ~10s via socket sem invalidar esse cache —
     // um raio calculado sobre a posição de 10 min atrás mostraria/esconderia corridas
@@ -854,6 +877,9 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
         throw new Error('Ride cannot be cancelled at this stage');
     }
 
+    const dispatchService = require('./dispatch.service');
+    await dispatchService.releaseCaptainBusyLock(captain._id);
+
     // Implementação do sistema de cancelamento (2026-08-04): quem chama precisa do
     // socketId do passageiro pra avisar em tempo real (sendMessageToSocketId, não a
     // sala ride_<id> — essa sala só tem os motoristas candidatos do despacho original,
@@ -895,6 +921,11 @@ module.exports.reassignRideByAdmin = async (rideId) => {
     );
     if (!updated) {
         throw new Error('Ride cannot be reassigned at this stage');
+    }
+
+    if (previousCaptain) {
+        const dispatchService = require('./dispatch.service');
+        await dispatchService.releaseCaptainBusyLock(previousCaptain);
     }
 
     return { ride: updated, previousCaptain };
@@ -947,6 +978,8 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
     if (updated.captain) {
         const captainService = require('./captain.service');
         captainService.recalculateCancellationStats(updated.captain).catch(console.error);
+        const dispatchService = require('./dispatch.service');
+        await dispatchService.releaseCaptainBusyLock(updated.captain);
     }
 
     return updated;
@@ -969,12 +1002,21 @@ module.exports.submitReview = async ({ rideId, user, rating, comment, issueCateg
     }
 
     const reviewModel = require('../models/review.model');
-    const existing = await reviewModel.findOne({ ride: rideId, user, type: 'passenger_to_driver' });
+    const existing = await reviewModel.findOne({
+        type: 'passenger_to_driver',
+        user,
+        $or: [
+            { subjectType: 'ride', subjectId: rideId },
+            { ride: rideId },
+        ],
+    });
     if (existing) {
         throw new Error('Ride already reviewed');
     }
 
     const review = await reviewModel.create({
+        subjectType: 'ride',
+        subjectId: rideId,
         ride: rideId,
         user,
         captain: ride.captain,
@@ -1008,12 +1050,21 @@ module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }
     }
 
     const reviewModel = require('../models/review.model');
-    const existing = await reviewModel.findOne({ ride: rideId, captain, type: 'driver_to_passenger' });
+    const existing = await reviewModel.findOne({
+        type: 'driver_to_passenger',
+        captain,
+        $or: [
+            { subjectType: 'ride', subjectId: rideId },
+            { ride: rideId },
+        ],
+    });
     if (existing) {
         throw new Error('Ride already reviewed');
     }
 
     const review = await reviewModel.create({
+        subjectType: 'ride',
+        subjectId: rideId,
         ride: rideId,
         user: ride.user,
         captain,

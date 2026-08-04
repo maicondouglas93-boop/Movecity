@@ -252,8 +252,11 @@ const LiveTracking = (props) => {
 
         const handleCaptainLocationUpdated = (data) => {
             if (!data || data.ltd == null || data.lng == null) return;
-            // Ignora updates de outra corrida / payload sem rideId compatível.
+            // Ignora updates de outra corrida/encomenda quando o payload traz id.
             if (props.ride?._id && data.rideId && String(data.rideId) !== String(props.ride._id)) {
+                return;
+            }
+            if (props.parcelId && data.parcelId && String(data.parcelId) !== String(props.parcelId)) {
                 return;
             }
             setCaptainPosition({
@@ -267,7 +270,7 @@ const LiveTracking = (props) => {
         return () => {
             socket.off('captain-location-updated', handleCaptainLocationUpdated);
         };
-    }, [socket, shouldClearTrip, props.ride?._id]);
+    }, [socket, shouldClearTrip, props.ride?._id, props.parcelId]);
 
     // Initialize pickup and destination coordinates from props/ride
     useEffect(() => {

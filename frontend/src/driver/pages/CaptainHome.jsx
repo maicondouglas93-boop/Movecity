@@ -1,12 +1,13 @@
-import React, { useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import React, { useRef, useState, useEffect, useContext, useCallback } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import CaptainDetails from '@/driver/components/CaptainDetails'
 import RidePopUp from '@/driver/components/RidePopUp'
 import ConfirmRidePopUp from '@/driver/components/ConfirmRidePopUp'
+import ParcelPopUp from '@/driver/components/ParcelPopUp'
+import { acceptParcel, declineParcel, getPendingParcels } from '@/shared/services/parcelApi'
 import ApprovalGate from '@/driver/components/ApprovalGate'
 import BottomSheet from '@/shared/components/ui/BottomSheet'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
-import { useEffect, useContext } from 'react'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
@@ -53,11 +54,14 @@ const CaptainHome = () => {
     // O evento 'new-ride' (socket) só adiciona/atualiza; quem garante que nada se perde
     // é a sincronização no mount, no reconnect, no retorno do background e no 'online'.
     const [ pendingRides, setPendingRides ] = useState([])
+    const [ parcelOffer, setParcelOffer ] = useState(null)
+    const [ parcelPopupOpen, setParcelPopupOpen ] = useState(false)
 
+    const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
     const { captain, setCaptain } = useContext(CaptainDataContext)
     const { locationRef, locationError, userLocation } = useContext(LocationContext)
-    const { captainRide, setCaptainRide } = useContext(RideContext)
+    const { captainRide, setCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const [ refreshingApproval, setRefreshingApproval ] = useState(false)
 
@@ -158,7 +162,7 @@ const CaptainHome = () => {
             // notificação nativa E toast. Deixar este listener genérico também mostrar
             // toast pro mesmo evento gerava dois avisos descoordenados pra mesma
             // corrida sempre que os dois canais entregassem quase juntos.
-            if (payload?.data?.type === 'NEW_RIDE') return;
+            if (payload?.data?.type === 'NEW_RIDE' || payload?.data?.type === 'NEW_PARCEL') return;
 
             const title = payload?.notification?.title || payload?.data?.title;
             const body = payload?.notification?.body || payload?.data?.message;
@@ -198,6 +202,23 @@ const CaptainHome = () => {
     // motorista (aceite confirmado pelo backend) sem re-subscrever os listeners.
     const captainRideRef = useRef(captainRide)
     useEffect(() => { captainRideRef.current = captainRide }, [captainRide])
+    const captainParcelRef = useRef(captainParcel)
+    useEffect(() => { captainParcelRef.current = captainParcel }, [captainParcel])
+    const parcelOfferRef = useRef(parcelOffer)
+    useEffect(() => { parcelOfferRef.current = parcelOffer }, [parcelOffer])
+
+    const syncPendingParcels = useCallback(async () => {
+        if (captainRideRef.current || captainParcelRef.current) return
+        try {
+            const parcels = await getPendingParcels()
+            if (Array.isArray(parcels) && parcels.length) {
+                setParcelOffer(parcels[0])
+                setParcelPopupOpen(true)
+            }
+        } catch {
+            /* ignore */
+        }
+    }, [])
 
     // --- Efeito 1: conexão e listeners do socket (só depende do captain) ---
     useEffect(() => {
@@ -212,8 +233,9 @@ const CaptainHome = () => {
             // (ver docs/plans/2026-08-03-auditoria-regressao-push.md).
             joinWithRetry(socket, { userId: captain._id, userType: 'captain' }, () => {
                 flushQueuedLocations(socket).catch(e => console.error(e))
-                // Fase B: reconexão pode ter perdido eventos 'new-ride' — o pull recupera.
+                // Fase B: reconexão pode ter perdido eventos 'new-ride'/'new-parcel'.
                 syncPendingRides()
+                syncPendingParcels()
             })
         }
 
@@ -225,6 +247,8 @@ const CaptainHome = () => {
         const handleNewRide = (data) => {
             const TRACE_ID = `Ride:${data._id}`;
             console.log(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
+
+            if (captainParcelRef.current || parcelOfferRef.current) return
 
             setRide(data)
             setRidePopupPanel(true)
@@ -312,32 +336,58 @@ const CaptainHome = () => {
             }
         }
 
+        const handleNewParcel = (data) => {
+            if (captainRideRef.current || rideRef.current || captainParcelRef.current) return
+            setParcelOffer(data)
+            setParcelPopupOpen(true)
+            setRidePopupPanel(false)
+        }
+
+        const handleParcelTaken = (data) => {
+            if (data?.captainId && data.captainId === captain._id) return
+            if (parcelOffer && parcelOffer._id === data.parcelId) {
+                setParcelPopupOpen(false)
+                setParcelOffer(null)
+                addToast('Essa encomenda já foi aceita por outro prestador.', 'info')
+            }
+        }
+
         socket.on('new-ride', handleNewRide)
         socket.on('ride-cancelled', handleRideCancelled)
         socket.on('ride-taken', handleRideTaken)
+        socket.on('new-parcel', handleNewParcel)
+        socket.on('parcel-taken', handleParcelTaken)
 
         return () => {
             socket.off('connect', handleConnect)
             socket.off('new-ride', handleNewRide)
             socket.off('ride-cancelled', handleRideCancelled)
             socket.off('ride-taken', handleRideTaken)
+            socket.off('new-parcel', handleNewParcel)
+            socket.off('parcel-taken', handleParcelTaken)
         }
-    }, [captain, socket])
+    }, [captain, socket, parcelOffer, addToast, syncPendingParcels])
 
-    // --- Fase B: sincronização das corridas pendentes ---
-    // Push (socket 'new-ride') é efêmero: se o app estava fechado, minimizado ou sem
-    // rede quando o evento saiu, a oferta se perdia pra sempre. O pull nestes quatro
-    // gatilhos (mount, reconnect — no handleConnect acima —, retorno do background e
-    // volta da rede) garante que uma corrida pendente compatível sempre reapareça.
+    // --- Fase B: sincronização das corridas/encomendas pendentes ---
+    // Push (socket) é efêmero: se o app estava fechado, minimizado ou sem
+    // rede quando o evento saiu, a oferta se perdia pra sempre. O pull nestes
+    // gatilhos garante que uma oferta pendente compatível sempre reapareça.
     useEffect(() => {
         if (!captain || !captain._id) return
 
         syncPendingRides()
+        syncPendingParcels()
 
         const handleVisibility = () => {
-            if (document.visibilityState === 'visible') syncPendingRides()
+            if (document.visibilityState === 'visible') {
+                syncPendingRides()
+                syncPendingParcels()
+            }
         }
-        const handleOnline = () => syncPendingRides()
+        const handleOnline = () => {
+            syncPendingRides()
+            syncPendingParcels()
+        }
 
         document.addEventListener('visibilitychange', handleVisibility)
         window.addEventListener('pageshow', handleVisibility)
@@ -348,7 +398,7 @@ const CaptainHome = () => {
             window.removeEventListener('online', handleOnline)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [captain?._id])
+    }, [captain?._id, syncPendingParcels])
 
     // Heads-up (2026-08-04): deep link da notificação (?rideOffer=<id>). Abre o popup
     // da oferta real consultando o backend — nunca confia só no rideId do push.
@@ -394,6 +444,46 @@ const CaptainHome = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams.get('rideOffer'), captain?._id, captainRide?._id])
 
+    // Deep link ?parcelOffer=<id> — espelha rideOffer.
+    useEffect(() => {
+        const offerId = searchParams.get('parcelOffer')
+        if (!offerId || !captain?._id) return
+        if (captainRide || captainParcel) {
+            const next = new URLSearchParams(searchParams)
+            next.delete('parcelOffer')
+            setSearchParams(next, { replace: true })
+            return
+        }
+
+        let cancelled = false
+        ;(async () => {
+            try {
+                const parcels = await getPendingParcels()
+                if (cancelled) return
+                const list = Array.isArray(parcels) ? parcels : []
+                const target = list.find(p => String(p._id) === String(offerId))
+                if (target) {
+                    setParcelOffer(target)
+                    setParcelPopupOpen(true)
+                    setRidePopupPanel(false)
+                } else {
+                    addToast('Essa encomenda não está mais disponível.', 'info')
+                }
+            } catch (err) {
+                console.error('Falha ao abrir oferta de encomenda da notificação:', err)
+            } finally {
+                if (!cancelled) {
+                    const next = new URLSearchParams(searchParams)
+                    next.delete('parcelOffer')
+                    setSearchParams(next, { replace: true })
+                }
+            }
+        })()
+
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams.get('parcelOffer'), captain?._id, captainRide?._id, captainParcel?._id])
+
     // --- Efeito 2: envio periódico da localização real (GPS) do motorista ---
     const REAL_LOCATION_INTERVAL_MS = 10000
 
@@ -434,6 +524,10 @@ const CaptainHome = () => {
     async function confirmRide(rideToAccept) {
         const targetRide = rideToAccept || rideRef.current
         if (!targetRide?._id) return
+        if (captainParcelRef.current || parcelPopupOpen) {
+            addToast('Finalize a encomenda atual antes de aceitar uma corrida.', 'info')
+            return
+        }
         try {
             // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
             // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
@@ -531,7 +625,7 @@ const CaptainHome = () => {
                             some apenas quando alguém aceita, o passageiro cancela ou
                             ela expira no servidor. Escondido se já há corrida ativa
                             (o índice único impede aceitar duas). */}
-                        {!captainRide && pendingRides.length > 0 && pendingRides.map(pending => {
+                        {!captainRide && !captainParcel && !parcelPopupOpen && pendingRides.length > 0 && pendingRides.map(pending => {
                             const distKm = haversineKm(userLocation, pending.pickupCoordinates)
                             return (
                                 <div key={pending._id} className='mb-4 bg-brand-50 border-2 border-brand-200 rounded-panel p-4'>
@@ -643,6 +737,35 @@ const CaptainHome = () => {
                     ride={ride}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />
             </BottomSheet>
+            {parcelPopupOpen && parcelOffer && (
+                <ParcelPopUp
+                    parcel={parcelOffer}
+                    onDecline={async () => {
+                        try {
+                            await declineParcel(parcelOffer._id)
+                        } catch {
+                            /* ACK only */
+                        }
+                        setParcelPopupOpen(false)
+                        setParcelOffer(null)
+                    }}
+                    onAccept={async () => {
+                        try {
+                            const accepted = await acceptParcel(parcelOffer._id)
+                            setParcelPopupOpen(false)
+                            setParcelOffer(null)
+                            setCaptainParcel(accepted)
+                            navigate('/captain-parcel', { state: { parcel: accepted } })
+                        } catch (err) {
+                            addToast(err.response?.data?.message || 'Não foi possível aceitar', 'error')
+                            if (err.response?.status === 409) {
+                                setParcelPopupOpen(false)
+                                setParcelOffer(null)
+                            }
+                        }
+                    }}
+                />
+            )}
             <CaptainHeader />
         </div>
     )

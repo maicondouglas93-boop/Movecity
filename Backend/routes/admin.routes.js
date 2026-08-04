@@ -95,4 +95,10 @@ router.post('/tariffs/schedule', authAdmin, authorizeRoles('super_admin'), admin
 // Logs
 router.get('/logs', authAdmin, authorizeRoles('super_admin'), adminController.getLogs);
 
+// Encomendas (MVP)
+router.get('/parcels', authAdmin, adminController.getParcels);
+router.put('/parcels/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.cancelParcelAdmin);
+router.get('/parcel-settings', authAdmin, adminController.getParcelSettings);
+router.put('/parcel-settings', authAdmin, authorizeRoles('super_admin'), adminController.updateParcelSettings);
+
 module.exports = router;

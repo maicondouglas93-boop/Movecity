@@ -1,8 +1,6 @@
 const chatService = require('../services/chat.service');
-const rideModel = require('../models/ride.model');
 const { validationResult } = require('express-validator');
 
-// Rate limiting cache (simple object for demo purposes, use Redis in production)
 const rateLimitCache = {};
 
 const checkRateLimit = (userId) => {
@@ -10,51 +8,57 @@ const checkRateLimit = (userId) => {
     if (!rateLimitCache[userId]) {
         rateLimitCache[userId] = [];
     }
-    // Keep only timestamps from the last second
     rateLimitCache[userId] = rateLimitCache[userId].filter(timestamp => now - timestamp < 1000);
-    
-    // Max 5 messages per second
+
     if (rateLimitCache[userId].length >= 5) {
         return false;
     }
-    
+
     rateLimitCache[userId].push(now);
     return true;
 };
 
-module.exports.getChat = async (req, res, next) => {
+function subjectFromReq(req) {
+    const subjectType = req.body?.subjectType || req.query?.subjectType || req.params?.subjectType || 'ride';
+    const subjectId = req.body?.subjectId || req.params?.subjectId || req.params?.rideId || req.body?.rideId;
+    const rideId = req.body?.rideId || (subjectType === 'ride' ? subjectId : undefined);
+    return { subjectType, subjectId, rideId };
+}
+
+module.exports.getChat = async (req, res) => {
     try {
-        const { rideId } = req.params;
+        const subjectInput = {
+            subjectType: req.query.subjectType || (req.params.subjectType) || 'ride',
+            subjectId: req.params.subjectId || req.params.rideId,
+            rideId: req.params.rideId,
+        };
         const userOrCaptain = req.user || req.captain;
 
-        const ride = await rideModel.findById(rideId);
-        if (!ride) {
-            return res.status(404).json({ message: 'Ride not found' });
-        }
+        const subject = await chatService.resolveSubject(subjectInput);
+        chatService.assertParticipant(subject, userOrCaptain._id);
 
-        // Validate authorization
-        if (ride.user.toString() !== userOrCaptain._id.toString() && ride.captain.toString() !== userOrCaptain._id.toString()) {
-            return res.status(403).json({ message: 'Unauthorized access to this chat' });
-        }
-
-        const chat = await chatService.getOrCreateChat(rideId);
+        const chat = await chatService.getOrCreateChat(subjectInput);
         const messages = await chatService.getChatMessages(chat._id);
 
-        res.status(200).json({ chat, messages });
+        res.status(200).json({ chat, messages, subjectType: subject.subjectType, subjectId: subject.subjectId });
     } catch (err) {
+        if (err.message === 'SUBJECT_NOT_FOUND') return res.status(404).json({ message: 'Chat subject not found' });
+        if (err.message === 'CHAT_UNAUTHORIZED') return res.status(403).json({ message: 'Unauthorized access to this chat' });
+        if (err.message === 'CHAT_NO_CAPTAIN') return res.status(400).json({ message: 'Chat unavailable until a provider is assigned' });
         console.error('Error fetching chat:', err);
         res.status(500).json({ message: 'Internal server error' });
     }
 };
 
-module.exports.sendMessage = async (req, res, next) => {
+module.exports.sendMessage = async (req, res) => {
     try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { rideId, message, type } = req.body;
+        const subjectInput = subjectFromReq(req);
+        const { message, type } = req.body;
         const userOrCaptain = req.user || req.captain;
         const senderType = req.user ? 'user' : 'captain';
 
@@ -62,26 +66,27 @@ module.exports.sendMessage = async (req, res, next) => {
             return res.status(429).json({ message: 'Too many messages sent. Please slow down.' });
         }
 
-        const ride = await rideModel.findById(rideId);
-        if (!ride || !['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing'].includes(ride.status)) {
-            return res.status(400).json({ message: 'Cannot send message. Ride is not active.' });
+        const subject = await chatService.resolveSubject(subjectInput);
+        chatService.assertParticipant(subject, userOrCaptain._id);
+
+        if (!subject.isChatActive) {
+            return res.status(400).json({ message: 'Cannot send message. Chat subject is not active.' });
         }
 
-        // Sanitize basic XSS manually for the demo
         const sanitizedMessage = message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-        // Profanity filter logic (mocked)
         const badWords = ['palavrao1', 'palavrao2'];
         const isProfane = badWords.some(word => sanitizedMessage.toLowerCase().includes(word));
         if (isProfane) {
             return res.status(400).json({ message: 'Message contains prohibited content.' });
         }
 
-        const chat = await chatService.getOrCreateChat(rideId);
+        const chat = await chatService.getOrCreateChat(subjectInput);
 
         const newMessage = await chatService.saveMessage({
             chatId: chat._id,
-            rideId,
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+            rideId: subject.subjectType === 'ride' ? subject.subjectId : undefined,
             senderId: userOrCaptain._id,
             senderType,
             message: sanitizedMessage,
@@ -90,22 +95,30 @@ module.exports.sendMessage = async (req, res, next) => {
 
         res.status(201).json(newMessage);
     } catch (err) {
+        if (err.message === 'SUBJECT_NOT_FOUND') return res.status(404).json({ message: 'Chat subject not found' });
+        if (err.message === 'CHAT_UNAUTHORIZED') return res.status(403).json({ message: 'Unauthorized access to this chat' });
+        if (err.message === 'CHAT_NO_CAPTAIN') return res.status(400).json({ message: 'Chat unavailable until a provider is assigned' });
         console.error('Error sending message:', err);
         res.status(500).json({ message: 'Internal server error' });
     }
 };
 
-module.exports.markRead = async (req, res, next) => {
+module.exports.markRead = async (req, res) => {
     try {
-        const { rideId } = req.body;
+        const subjectInput = subjectFromReq(req);
         const userOrCaptain = req.user || req.captain;
         const readerType = req.user ? 'user' : 'captain';
 
-        const chat = await chatService.getOrCreateChat(rideId);
+        const subject = await chatService.resolveSubject(subjectInput);
+        chatService.assertParticipant(subject, userOrCaptain._id);
+
+        const chat = await chatService.getOrCreateChat(subjectInput);
         await chatService.markAsRead(chat._id, readerType);
 
         res.status(200).json({ message: 'Messages marked as read' });
     } catch (err) {
+        if (err.message === 'SUBJECT_NOT_FOUND') return res.status(404).json({ message: 'Chat subject not found' });
+        if (err.message === 'CHAT_UNAUTHORIZED') return res.status(403).json({ message: 'Unauthorized access to this chat' });
         console.error('Error marking messages as read:', err);
         res.status(500).json({ message: 'Internal server error' });
     }

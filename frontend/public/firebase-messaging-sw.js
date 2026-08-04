@@ -82,15 +82,18 @@ messaging.onBackgroundMessage((payload) => {
         timestamp: Date.now(),
     };
 
-    if (data.type === 'NEW_RIDE') {
+    if (data.type === 'NEW_RIDE' || data.type === 'NEW_PARCEL') {
         // Sem Aceitar/Recusar (2026-08-04): o motorista vê valor, origem, destino e
         // distância no body e toca na notificação para abrir a oferta no app.
         notificationOptions.requireInteraction = true;
         notificationOptions.renotify = true;
         notificationOptions.silent = false;
         notificationOptions.vibrate = [300, 100, 300, 100, 300];
-        if (data.rideId) {
+        if (data.type === 'NEW_RIDE' && data.rideId) {
             notificationOptions.tag = `ride-${data.rideId}`;
+        }
+        if (data.type === 'NEW_PARCEL' && data.parcelId) {
+            notificationOptions.tag = `parcel-${data.parcelId}`;
         }
     }
 
@@ -154,6 +157,7 @@ const resolveDeepLink = (data) => {
             }
         } catch (_) { /* ignore */ }
     }
+    if (data?.parcelId) return `/captain-home?parcelOffer=${encodeURIComponent(data.parcelId)}`;
     if (data?.rideId) return `/captain-home?rideOffer=${encodeURIComponent(data.rideId)}`;
     return '/captain-home';
 };

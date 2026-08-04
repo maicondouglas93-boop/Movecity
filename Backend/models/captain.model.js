@@ -236,7 +236,14 @@ const captainSchema = new mongoose.Schema({
     cancelledRides: {
         type: Number,
         default: 0,
-    }
+    },
+    // Lock cruzado ride↔parcel no accept (auditoria P0/P1 Encomendas).
+    // true = captain ocupado em um serviço ativo; liberado no finish/cancel.
+    busyLock: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
 }, { timestamps: true });
 
 // Índices de Performance e Geolocalização

@@ -931,3 +931,80 @@ module.exports.duplicateCategory = async (req, res, next) => {
         next(error);
     }
 };
+
+// --- Encomendas (MVP) ---
+const parcelService = require('../services/parcel.service');
+
+module.exports.getParcels = async (req, res, next) => {
+    try {
+        const { status, limit, skip } = req.query;
+        const result = await parcelService.listParcelsAdmin({
+            status,
+            limit: Number(limit) || 50,
+            skip: Number(skip) || 0,
+        });
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+module.exports.cancelParcelAdmin = async (req, res, next) => {
+    try {
+        const parcel = await parcelService.adminCancelParcel({
+            parcelId: req.params.id,
+            reason: req.body.reason,
+        });
+
+        try {
+            const { sendMessageToRoom, sendMessageToSocketId, emitDriverMapUpdate } = require('../socket');
+            const payload = { parcelId: parcel._id.toString(), reason: req.body.reason || 'Cancelado pelo admin' };
+            sendMessageToRoom(`parcel_${parcel._id}`, {
+                event: 'parcel-cancelled',
+                data: payload,
+            });
+            if (parcel.user?.socketId) {
+                sendMessageToSocketId(parcel.user.socketId, {
+                    event: 'parcel-cancelled',
+                    data: payload,
+                });
+            }
+            if (parcel.captain) {
+                const captainId = parcel.captain._id || parcel.captain;
+                emitDriverMapUpdate(captainId, { busy: false });
+                if (parcel.captain.socketId) {
+                    sendMessageToSocketId(parcel.captain.socketId, {
+                        event: 'parcel-cancelled',
+                        data: payload,
+                    });
+                }
+            }
+        } catch (socketErr) {
+            console.error('[PARCEL] Falha ao emitir cancel admin via socket:', socketErr.message);
+        }
+
+        res.status(200).json(parcel);
+    } catch (error) {
+        if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
+        if (error.message === 'PARCEL_NOT_CANCELLABLE') return res.status(400).json({ message: error.message });
+        next(error);
+    }
+};
+
+module.exports.getParcelSettings = async (req, res, next) => {
+    try {
+        const settings = await parcelService.getSettings();
+        res.status(200).json(settings);
+    } catch (error) {
+        next(error);
+    }
+};
+
+module.exports.updateParcelSettings = async (req, res, next) => {
+    try {
+        const settings = await parcelService.updateSettings(req.body || {});
+        res.status(200).json(settings);
+    } catch (error) {
+        next(error);
+    }
+};

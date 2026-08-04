@@ -7,6 +7,8 @@ import UserLogout from '@/passenger/pages/UserLogout'
 import UserProtectWrapper from '@/passenger/pages/UserProtectWrapper'
 import Home from '@/passenger/pages/Home'
 import Riding from '@/passenger/pages/Riding'
+import ParcelWizard from '@/passenger/pages/parcel/ParcelWizard'
+import ParcelActive from '@/passenger/pages/parcel/ParcelActive'
 
 // Auditoria PWA (2026-08-03, B6): login/cadastro, Home e Riding ficam estáticos —
 // são o caminho mais comum de toda sessão, carregar sob demanda só adicionaria uma
@@ -44,6 +46,16 @@ const passengerRoutes = [
     </UserProtectWrapper>
   } />,
 
+  <Route key='encomenda' path='/encomenda' element={
+    <UserProtectWrapper>
+      <ParcelWizard />
+    </UserProtectWrapper>
+  } />,
+  <Route key='encomenda-ativa' path='/encomenda/ativa' element={
+    <UserProtectWrapper>
+      <ParcelActive />
+    </UserProtectWrapper>
+  } />,
   <Route key='home' path='/home' element={
     <UserProtectWrapper>
       <Home />

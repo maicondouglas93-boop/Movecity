@@ -1,75 +1,94 @@
+process.env.IMAGEKIT_URL_ENDPOINT = 'https://ik.imagekit.io/mock';
+process.env.IMAGEKIT_PUBLIC_KEY = 'public_test';
+process.env.IMAGEKIT_PRIVATE_KEY = 'private_test';
+
 const uploadService = require('../../services/upload.service');
+const imagekitMock = require('@imagekit/nodejs');
 
-// Migração de Firebase Storage para Cloudinary (2026-08-03, docs/plans/): o bucket do
-// Firebase Storage nunca existiu de verdade neste projeto (confirmado com upload real
-// contra produção, credenciais reais — 404 "specified bucket does not exist", plano
-// Spark não provisiona bucket padrão sozinho). Estes testes rodam a lógica REAL de
-// upload.service.js (compressão com sharp, montagem de URL, extração de public_id) —
-// só a chamada de rede ao Cloudinary é mockada (tests/mocks/cloudinary.mock.js), mesmo
-// padrão já usado pro firebase-admin no resto da suíte.
+// Migração Cloudinary → ImageKit (2026-08-04): lógica REAL de upload.service.js
+// (sharp + montagem de URL); só o SDK ImageKit é mockado.
 
-// 1x1 PNG válido — sharp aceita como entrada mesmo saindo como WebP comprimido.
 const TINY_PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64'
 );
 
-describe('upload.service (Cloudinary)', () => {
-    it('uploadProfileImage: sobe como público (type=upload) na pasta users/profiles, em WebP', async () => {
+describe('upload.service (ImageKit)', () => {
+    beforeEach(() => {
+        imagekitMock.__mockState.resetCounter();
+        jest.clearAllMocks();
+    });
+
+    it('uploadProfileImage: sobe como público na pasta users/profiles, em WebP', async () => {
         const url = await uploadService.uploadProfileImage(TINY_PNG);
-        expect(url).toMatch(/^https:\/\/res\.cloudinary\.com\/.*\/image\/upload\/.*users\/profiles\/mock-\d+\.webp$/);
+        expect(url).toMatch(/^https:\/\/ik\.imagekit\.io\/mock\/users\/profiles\/.+\.webp\?/);
+        expect(url).toContain('ik-fileId=');
+        expect(url).not.toContain('ik-private=1');
+        expect(imagekitMock.__mockState.upload).toHaveBeenCalledWith(
+            expect.objectContaining({
+                folder: 'users/profiles',
+                isPrivateFile: false,
+            })
+        );
     });
 
     it('uploadVehicleImage: sobe como público na pasta captains/vehicles', async () => {
         const url = await uploadService.uploadVehicleImage(TINY_PNG);
-        expect(url).toMatch(/\/image\/upload\/.*captains\/vehicles\/mock-\d+\.webp$/);
+        expect(url).toMatch(/\/captains\/vehicles\/.+\.webp/);
+        expect(imagekitMock.__mockState.upload.mock.calls.at(-1)[0]).toMatchObject({
+            folder: 'captains/vehicles',
+            isPrivateFile: false,
+        });
     });
 
-    it('uploadDocument: sobe como authenticated (privado) — nunca no formato /image/upload/', async () => {
+    it('uploadDocument: sobe como privado (isPrivateFile) — nunca sem ik-private', async () => {
         const url = await uploadService.uploadDocument(TINY_PNG, 'cnh');
-        expect(url).toMatch(/\/image\/authenticated\/.*captains\/documents\/cnh\/mock-\d+\.webp$/);
-        expect(url).not.toContain('/image/upload/');
+        expect(url).toMatch(/\/captains\/documents\/cnh\/.+\.webp/);
+        expect(url).toContain('ik-private=1');
+        expect(imagekitMock.__mockState.upload.mock.calls.at(-1)[0]).toMatchObject({
+            folder: 'captains/documents/cnh',
+            isPrivateFile: true,
+        });
     });
 
-    it('getSignedDocumentUrl: gera URL assinada de verdade a partir da URL privada salva', async () => {
+    it('getSignedDocumentUrl: gera URL assinada a partir da URL privada salva', async () => {
         const uploadedUrl = await uploadService.uploadDocument(TINY_PNG, 'selfie');
         const signedUrl = await uploadService.getSignedDocumentUrl(uploadedUrl);
 
         expect(signedUrl).toBeTruthy();
         expect(signedUrl).not.toBe(uploadedUrl);
-        // O public_id extraído da URL original tem que bater com a pasta certa — prova
-        // que o parsing de volta (extractPublicId) está correto. Não fixamos o número
-        // sequencial do mock (mock-N) porque depende da ordem de execução dos testes.
-        const cloudinary = require('cloudinary');
-        const [publicIdUsed] = cloudinary.v2.utils.private_download_url.mock.calls.at(-1);
-        expect(publicIdUsed).toMatch(/^captains\/documents\/selfie\/mock-\d+$/);
+        expect(signedUrl).toContain('ik-s=mocksig');
+
+        const [opts] = imagekitMock.__mockState.buildSrc.mock.calls.at(-1);
+        expect(opts.src).toMatch(/^\/captains\/documents\/selfie\/.+\.webp$/);
+        expect(opts.signed).toBe(true);
+        expect(opts.expiresIn).toBe(300);
     });
 
-    it('getSignedDocumentUrl: sem URL, devolve null sem chamar o Cloudinary', async () => {
+    it('getSignedDocumentUrl: sem URL, devolve null sem chamar o ImageKit', async () => {
         const result = await uploadService.getSignedDocumentUrl(null);
         expect(result).toBeNull();
+        expect(imagekitMock.__mockState.buildSrc).not.toHaveBeenCalled();
     });
 
-    it('deleteImage: apaga documento privado com type=authenticated (não type=upload)', async () => {
+    it('deleteImage: apaga documento privado usando fileId embutido na URL', async () => {
         const url = await uploadService.uploadDocument(TINY_PNG, 'crlv');
         await uploadService.deleteImage(url);
 
-        const cloudinary = require('cloudinary');
-        const [publicIdUsed, options] = cloudinary.v2.uploader.destroy.mock.calls.at(-1);
-        expect(publicIdUsed).toMatch(/^captains\/documents\/crlv\/mock-\d+$/);
-        expect(options).toMatchObject({ type: 'authenticated' });
+        const fileId = new URL(url).searchParams.get('ik-fileId');
+        expect(imagekitMock.__mockState.deleteFile).toHaveBeenCalledWith(fileId);
     });
 
-    it('deleteImage: apaga foto pública com type=upload', async () => {
+    it('deleteImage: apaga foto pública usando fileId embutido na URL', async () => {
         const url = await uploadService.uploadProfileImage(TINY_PNG);
         await uploadService.deleteImage(url);
 
-        const cloudinary = require('cloudinary');
-        const [, options] = cloudinary.v2.uploader.destroy.mock.calls.at(-1);
-        expect(options).toMatchObject({ type: 'upload' });
+        const fileId = new URL(url).searchParams.get('ik-fileId');
+        expect(imagekitMock.__mockState.deleteFile).toHaveBeenCalledWith(fileId);
     });
 
-    it('deleteImage: sem URL, não lança erro nem chama o Cloudinary', async () => {
+    it('deleteImage: sem URL, não lança erro nem chama o ImageKit', async () => {
         await expect(uploadService.deleteImage(null)).resolves.toBeUndefined();
+        expect(imagekitMock.__mockState.deleteFile).not.toHaveBeenCalled();
     });
 });

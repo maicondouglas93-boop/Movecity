@@ -119,6 +119,44 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_RIDE', payloadData, options, traceId), traceId);
 };
 
+module.exports.sendNewParcel = async (captainId, data, traceId = '[AUDIT]') => {
+    const fareLabel = typeof data.fare === 'number'
+        ? `R$ ${data.fare.toFixed(2).replace('.', ',')}`
+        : null;
+    const pickupShort = shortAddress(data.pickup);
+    const destShort = shortAddress(data.destination);
+    const routeLabel = pickupShort && destShort
+        ? `${pickupShort} → ${destShort}`
+        : (pickupShort || destShort || null);
+
+    const title = fareLabel ? `Nova encomenda · ${fareLabel}` : 'Nova encomenda disponível';
+    const message = [
+        routeLabel,
+        data.itemName ? `Item: ${data.itemName}` : null,
+        data.vehicleType,
+        data.size ? `Tamanho: ${data.size}` : null,
+    ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta';
+
+    const deepLinkPath = `${DEEP_LINK.captainHome}?parcelOffer=${encodeURIComponent(data.parcelId)}`;
+    const frontendOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    const deepLink = frontendOrigin ? `${frontendOrigin}${deepLinkPath}` : deepLinkPath;
+    const payloadData = {
+        ...data,
+        type: 'NEW_PARCEL',
+        deepLink: deepLinkPath,
+        deepLinkAbsolute: deepLink,
+        parcelId: data.parcelId,
+    };
+
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_PARCEL', payloadData, {
+        dataOnly: true,
+        webpush: {
+            headers: { Urgency: 'high' },
+            fcmOptions: { link: deepLink },
+        },
+    }, traceId), traceId);
+};
+
 // M7 da auditoria de push (2026-08-02), corrigido na auditoria final (Fase 8): o
 // Service Worker não tem como saber se quem recebeu a notificação é passageiro ou
 // motorista — e antes, na falta dessa informação, mandava TODO clique para

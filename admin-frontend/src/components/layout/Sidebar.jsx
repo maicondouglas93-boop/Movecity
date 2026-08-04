@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Map, CreditCard,
   Bell, LogOut, Receipt, FileText, ClipboardList, Tag,
-  BarChart3
+  BarChart3, Package
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Map, label: 'Corridas & Mapa', path: '/rides' },
+  { icon: Package, label: 'Encomendas', path: '/parcels' },
   { icon: Users, label: 'Passageiros', path: '/users' },
   { icon: Car, label: 'Motoristas', path: '/captains' },
   { icon: CreditCard, label: 'Financeiro', path: '/finance', roles: ['super_admin', 'financeiro'] },

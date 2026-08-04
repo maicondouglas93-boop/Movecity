@@ -16,33 +16,15 @@ const notificationService = require('../services/notification.service');
 // a reatribuição de corrida pelo painel admin precisa do mesmo redespacho — sem isso,
 // a corrida voltava a 'requested' mas nenhum motorista era notificado, ficando travada.
 async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
-    const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
-    // 15km: raio de busca de motoristas a partir do ponto de embarque.
-    const CAPTAIN_SEARCH_RADIUS_KM = 15;
-    const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, CAPTAIN_SEARCH_RADIUS_KM, TRACE_ID);
+    const dispatchService = require('../services/dispatch.service');
+    // Encomenda ativa no motorista bloqueia oferta de corrida (exclusão mútua).
+    const { pickupCoordinates, captains: matchingCaptains } = await dispatchService.findCaptainsNearPickup(
+        pickup,
+        vehicleType,
+        { TRACE_ID, excludeCaptainId, excludeActiveRide: false, excludeActiveParcel: true }
+    );
 
     console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
-    console.log(`[AUDIT][${TRACE_ID}] Captains no raio inicial:`, captainsInRadius.length);
-
-    const matchingCaptains = captainsInRadius.filter(captain => {
-        if (excludeCaptainId && captain._id.toString() === excludeCaptainId.toString()) {
-            return false;
-        }
-        if (!captain.vehicle || !captain.vehicle.vehicleType) {
-            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Sem veículo definido)`);
-            return false;
-        }
-        const capType = captain.vehicle.vehicleType;
-        const isMatch = capType === vehicleType;
-
-        if (!isMatch) {
-            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
-        } else {
-            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} aprovado para receber!`);
-        }
-        return isMatch;
-    });
-
     console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
 
     // Persiste as coordenadas do embarque na própria corrida (Etapa 6 da auditoria de UX,
@@ -50,7 +32,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
     // de oferta, calculada localmente a partir da posição GPS do motorista.
     const rideWithUser = await rideModel.findOneAndUpdate(
         { _id: ride._id },
-        { pickupCoordinates: { lat: pickupCoordinates.ltd, lng: pickupCoordinates.lng } },
+        { pickupCoordinates: { lat: pickupCoordinates.lat, lng: pickupCoordinates.lng } },
         { new: true }
     ).populate('user');
 

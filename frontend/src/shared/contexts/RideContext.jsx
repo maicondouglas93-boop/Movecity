@@ -5,51 +5,58 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { getAccessToken, onSessionChanged } from '@/shared/services/session'
 import { refreshAccessToken } from '@/shared/services/axios'
 
-// Fase A da experiência de corrida ativa (2026-08-03).
+// Fase A da experiência de corrida ativa (2026-08-03) + restore de encomenda.
 //
-// Fonte única de reconciliação da corrida ativa com o backend. Antes, o estado da
-// corrida vivia espalhado em useState local + location.state do React Router — que
-// não sobrevivem a refresh, fechamento do PWA nem retorno do background. O backend
-// continuava com a corrida normalmente, mas a interface "perdia" a corrida (PIN,
-// botões de status, cancelar, mapa).
+// Fonte única de reconciliação da corrida/encomenda ativa com o backend. Antes, o estado
+// vivia espalhado em useState local + location.state do React Router — que
+// não sobrevivem a refresh, fechamento do PWA nem retorno do background.
 //
 // Regras deste contexto:
 // - O BACKEND é a fonte da verdade: toda abertura/reconexão/retorno consulta
-//   /rides/current (passageiro) e /rides/captain-current (motorista) e reconstrói.
-// - O socket apenas ATUALIZA o estado (as telas continuam setando userRide/captainRide
-//   nos handlers de evento) — nunca é a única fonte.
-// - Sessão dupla (passageiro e motorista logados no mesmo navegador, comum em teste)
-//   é suportada: cada papel tem seu próprio estado e seu próprio token.
+//   /rides/current, /rides/captain-current, /parcels/current e /parcels/captain-current.
+// - O socket apenas ATUALIZA o estado — nunca é a única fonte.
+// - Sessão dupla (passageiro e motorista no mesmo navegador) é suportada.
 export const RideContext = createContext()
 
-const ENDPOINT_BY_KIND = {
+const RIDE_ENDPOINT_BY_KIND = {
     user: '/rides/current',
     captain: '/rides/captain-current',
 }
 
-// Sentinela de "não sei" — erro de rede/servidor NUNCA sobrescreve o estado local
-// com null (isso apagaria uma corrida real da tela só porque a consulta falhou).
+const PARCEL_ENDPOINT_BY_KIND = {
+    user: '/parcels/current',
+    captain: '/parcels/captain-current',
+}
+
 const UNKNOWN = undefined
 
-async function fetchActiveRide(kind, allowRetry = true) {
+const PARCEL_RESTORE_STATUSES = [
+    'awaiting_provider',
+    'provider_accepted',
+    'going_to_pickup',
+    'arrived_pickup',
+    'collected',
+    'in_transit',
+    'arrived_destination',
+    'delivered',
+    'finished',
+]
+
+async function fetchActive(kind, endpointMap, allowRetry = true) {
     const token = getAccessToken(kind)
     if (!token) return null
 
     try {
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}${ENDPOINT_BY_KIND[kind]}`, {
+        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}${endpointMap[kind]}`, {
             headers: { Authorization: `Bearer ${token}` }
         })
         return response.data || null
     } catch (err) {
-        // 404 = resposta real do backend: não existe corrida ativa.
         if (err.response?.status === 404) return null
-        // Token vencido: renova uma vez pela mesma fila do interceptor REST e tenta de
-        // novo. O interceptor global não serve aqui porque /rides/* não identifica o
-        // papel pela URL (sessionKindForUrl) e escolheria o token errado em sessão dupla.
         if (err.response?.status === 401 && allowRetry) {
             try {
                 await refreshAccessToken(kind)
-                return fetchActiveRide(kind, false)
+                return fetchActive(kind, endpointMap, false)
             } catch {
                 return UNKNOWN
             }
@@ -61,17 +68,17 @@ async function fetchActiveRide(kind, allowRetry = true) {
 const RideProvider = ({ children }) => {
     const [ userRide, setUserRide ] = useState(null)
     const [ captainRide, setCaptainRide ] = useState(null)
+    const [ userParcel, setUserParcel ] = useState(null)
+    const [ captainParcel, setCaptainParcel ] = useState(null)
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const location = useLocation()
 
-    // Sequência por papel: se dois syncs se cruzarem (ex.: 'connect' e
-    // 'visibilitychange' quase juntos), só o resultado do mais recente é aplicado.
-    const syncSeqRef = useRef({ user: 0, captain: 0 })
+    const syncSeqRef = useRef({ user: 0, captain: 0, userParcel: 0, captainParcel: 0 })
 
     const syncRide = useCallback(async (kind) => {
         const seq = ++syncSeqRef.current[kind]
-        const result = await fetchActiveRide(kind)
+        const result = await fetchActive(kind, RIDE_ENDPOINT_BY_KIND)
         if (seq !== syncSeqRef.current[kind]) return result
         if (result !== UNKNOWN) {
             if (kind === 'user') setUserRide(result)
@@ -80,25 +87,37 @@ const RideProvider = ({ children }) => {
         return result
     }, [])
 
+    const syncParcel = useCallback(async (kind) => {
+        const key = kind === 'user' ? 'userParcel' : 'captainParcel'
+        const seq = ++syncSeqRef.current[key]
+        const result = await fetchActive(kind, PARCEL_ENDPOINT_BY_KIND)
+        if (seq !== syncSeqRef.current[key]) return result
+        if (result !== UNKNOWN) {
+            if (kind === 'user') setUserParcel(result)
+            else setCaptainParcel(result)
+        }
+        return result
+    }, [])
+
     const syncUserRide = useCallback(() => syncRide('user'), [syncRide])
     const syncCaptainRide = useCallback(() => syncRide('captain'), [syncRide])
+    const syncUserParcel = useCallback(() => syncParcel('user'), [syncParcel])
+    const syncCaptainParcel = useCallback(() => syncParcel('captain'), [syncParcel])
 
-    // Pós-corrida (2026-08-04): limpa a corrida ativa do passageiro na fonte de verdade
-    // do app — "Voltar ao Início" e clearTrip da Home dependem disto. finished NÃO é
-    // corrida ativa (/rides/current já a ignora); manter no contexto deixava trajeto
-    // fantasma e o atalho "em andamento" inconsistente.
     const clearUserRide = useCallback(() => {
         setUserRide(null)
     }, [])
 
-    // Reconciliação: sempre que o app "volta à vida" por qualquer caminho, consulta o
-    // backend imediatamente. Cobre: abertura/refresh (mount), reconexão do socket,
-    // retorno do background (visibilitychange), restauração do bfcache (pageshow) e
-    // volta da internet (online).
+    const clearUserParcel = useCallback(() => {
+        setUserParcel(null)
+    }, [])
+
     useEffect(() => {
         const syncAll = () => {
             syncRide('user')
             syncRide('captain')
+            syncParcel('user')
+            syncParcel('captain')
         }
 
         syncAll()
@@ -110,9 +129,14 @@ const RideProvider = ({ children }) => {
             if (event.persisted) syncAll()
         }
         const handleSessionChanged = () => {
-            // Logout limpa na hora (sem esperar rede); login dispara reconciliação.
-            if (!getAccessToken('user')) setUserRide(null)
-            if (!getAccessToken('captain')) setCaptainRide(null)
+            if (!getAccessToken('user')) {
+                setUserRide(null)
+                setUserParcel(null)
+            }
+            if (!getAccessToken('captain')) {
+                setCaptainRide(null)
+                setCaptainParcel(null)
+            }
             syncAll()
         }
 
@@ -129,40 +153,74 @@ const RideProvider = ({ children }) => {
             window.removeEventListener('online', syncAll)
             offSessionChanged()
         }
-    }, [socket, syncRide])
+    }, [socket, syncRide, syncParcel])
 
-    // Redirecionamento de restauração: corrida 'started' não tem como ser exibida na
-    // Home — a tela certa é /riding (passageiro) ou /captain-riding (motorista).
-    // Uma vez por corrida (ref abaixo): depois do redirect inicial, o usuário pode
-    // voltar à Home deliberadamente (as Homes mostram um atalho "voltar à corrida").
-    const redirectedRidesRef = useRef(new Set())
+    const redirectedJobsRef = useRef(new Set())
 
     useEffect(() => {
         const path = location.pathname
 
         if (userRide?.status === 'started') {
-            const key = `user:${userRide._id}`
+            const key = `user-ride:${userRide._id}`
             if (path === '/riding') {
-                // Já está na tela certa (fluxo normal): marca como vista pra uma volta
-                // deliberada à Home não ser rebatida de volta.
-                redirectedRidesRef.current.add(key)
-            } else if ((path === '/home' || path === '/') && !redirectedRidesRef.current.has(key)) {
-                redirectedRidesRef.current.add(key)
+                redirectedJobsRef.current.add(key)
+            } else if ((path === '/home' || path === '/') && !redirectedJobsRef.current.has(key)) {
+                redirectedJobsRef.current.add(key)
                 navigate('/riding', { state: { ride: userRide } })
                 return
             }
         }
 
         if (captainRide?.status === 'started') {
-            const key = `captain:${captainRide._id}`
+            const key = `captain-ride:${captainRide._id}`
             if (path === '/captain-riding') {
-                redirectedRidesRef.current.add(key)
-            } else if ((path === '/captain-home' || path === '/') && !redirectedRidesRef.current.has(key)) {
-                redirectedRidesRef.current.add(key)
+                redirectedJobsRef.current.add(key)
+            } else if ((path === '/captain-home' || path === '/') && !redirectedJobsRef.current.has(key)) {
+                redirectedJobsRef.current.add(key)
                 navigate('/captain-riding', { state: { ride: captainRide } })
+                return
             }
         }
-    }, [userRide, captainRide, location.pathname, navigate])
+
+        // Wizard bloqueado se já há ride/parcel ativo.
+        if (path === '/encomenda') {
+            if (userRide) {
+                navigate(userRide.status === 'started' ? '/riding' : '/home', { state: { ride: userRide }, replace: true })
+                return
+            }
+            if (userParcel && PARCEL_RESTORE_STATUSES.includes(userParcel.status)) {
+                navigate('/encomenda/ativa', { state: { parcel: userParcel }, replace: true })
+                return
+            }
+        }
+
+        // Encomenda ativa: restore para tela dedicada (uma vez por parcel).
+        if (userParcel && PARCEL_RESTORE_STATUSES.includes(userParcel.status) && !userRide) {
+            const key = `user-parcel:${userParcel._id}`
+            if (path === '/encomenda/ativa') {
+                redirectedJobsRef.current.add(key)
+            } else if ((path === '/home' || path === '/') && !redirectedJobsRef.current.has(key)) {
+                redirectedJobsRef.current.add(key)
+                navigate('/encomenda/ativa', { state: { parcel: userParcel } })
+                return
+            }
+        }
+
+        if (
+            captainParcel
+            && PARCEL_RESTORE_STATUSES.includes(captainParcel.status)
+            && captainParcel.status !== 'finished'
+            && !captainRide
+        ) {
+            const key = `captain-parcel:${captainParcel._id}`
+            if (path === '/captain-parcel') {
+                redirectedJobsRef.current.add(key)
+            } else if ((path === '/captain-home' || path === '/') && !redirectedJobsRef.current.has(key)) {
+                redirectedJobsRef.current.add(key)
+                navigate('/captain-parcel', { state: { parcel: captainParcel } })
+            }
+        }
+    }, [userRide, captainRide, userParcel, captainParcel, location.pathname, navigate])
 
     return (
         <RideContext.Provider value={{
@@ -173,6 +231,13 @@ const RideProvider = ({ children }) => {
             syncUserRide,
             syncCaptainRide,
             clearUserRide,
+            userParcel,
+            setUserParcel,
+            captainParcel,
+            setCaptainParcel,
+            syncUserParcel,
+            syncCaptainParcel,
+            clearUserParcel,
         }}>
             {children}
         </RideContext.Provider>

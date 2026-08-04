@@ -29,6 +29,7 @@ import Button from '@/shared/components/ui/Button';
 import { getAccessToken } from '@/services/session';
 import { joinWithRetry } from '@/services/socketAuth';
 import { enqueueOfflineAction } from '@/services/offlineQueue';
+import { showBrowserNotification } from '@/services/browserNotify';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -279,13 +280,7 @@ const Home = () => {
                 7000,
                 `${ride.captain?.fullname?.firstname} está indo até você`
             )
-            // Browser notification
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('Motorista Confirmado! 🚗', {
-                    body: `Seu OTP é ${ride.otp} — compartilhe com o motorista`,
-                    icon: '/movecity-icon.jpg'
-                })
-            }
+            showBrowserNotification('Motorista Confirmado! 🚗', `Seu OTP é ${ride.otp} — compartilhe com o motorista`)
         }
 
         const handleRideStarted = (ride) => {

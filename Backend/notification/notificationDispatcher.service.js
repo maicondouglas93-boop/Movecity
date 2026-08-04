@@ -53,72 +53,69 @@ const sendToCaptain = async (captainId, title, message, type, data = {}, options
     }
 };
 
+// Primeiro pedaço do endereço (antes da vírgula) e sem o sufixo " (lat, lng)" que a
+// Home grava — cabe no body da notificação sem estourar a prévia do Android.
+const shortAddress = (address) => {
+    if (!address) return '';
+    const clean = String(address).replace(/\s*\(-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\)\s*$/, '');
+    return clean.split(',')[0].trim();
+};
+
 module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
-    // Diagnóstico de push de corrida (2026-08-03): título/mensagem no formato pedido,
-    // com o valor da corrida — antes `data` só carregava o rideId, então a mensagem
-    // era genérica ("Há um passageiro solicitando...") mesmo o valor já existindo no
-    // documento da corrida (ride.fare). `ride.controller.js: dispatchRideToCaptains`
-    // agora manda `fare` explicitamente.
+    // Heads-up (2026-08-04): título curto + body com valor e trecho real da corrida.
+    // Dados vêm do despacho (ride.controller) — nada mockado.
     const title = '🚗 Nova corrida disponível';
     const fareLabel = typeof data.fare === 'number'
         ? `R$ ${data.fare.toFixed(2).replace('.', ',')}`
         : null;
-    const message = fareLabel ? `Passageiro próximo • ${fareLabel}` : 'Passageiro próximo';
+    const pickupShort = shortAddress(data.pickup);
+    const destShort = shortAddress(data.destination);
+    const routeLabel = pickupShort && destShort ? `${pickupShort} → ${destShort}` : null;
+    const distanceKm = typeof data.estimatedDistance === 'number' && data.estimatedDistance > 0
+        ? `${(data.estimatedDistance / 1000).toFixed(1).replace('.', ',')} km`
+        : null;
+    const message = [fareLabel, routeLabel || distanceKm].filter(Boolean).join(' • ')
+        || 'Passageiro próximo';
 
-    // C2 da auditoria de push (2026-08-02): o fallback antigo apontava pra
-    // localhost:4000 — uma porta que nem o próprio backend usa (PORT default é 3000,
-    // ver server.js) — e sem BASE_URL configurado em produção o Service Worker do
-    // motorista tentava aceitar a corrida contra o próprio dispositivo dele.
+    // C2 da auditoria de push (2026-08-02): sem BASE_URL em produção o SW apontaria
+    // Aceitar para o localhost do próprio celular do motorista.
     const baseUrl = process.env.BASE_URL;
     if (!baseUrl && process.env.NODE_ENV === 'production') {
         console.error('[Notification] AVISO CRÍTICO: BASE_URL não configurado em produção — o botão "Aceitar" da notificação push do motorista vai falhar.');
     }
-    data.apiUrl = baseUrl || `http://localhost:${process.env.PORT || 3000}`;
-    data.deepLink = DEEP_LINK.captainHome;
-
-    // Auditoria final (Fase 8): sem BASE_URL em produção, o "Aceitar" não tem como
-    // funcionar (apontaria pro localhost do próprio celular do motorista). Melhor não
-    // oferecer o botão do que oferecer um que falha em silêncio — a notificação continua
-    // chegando normalmente, só sem a ação embutida, e o motorista abre o app pra aceitar.
     const canAcceptInline = !!baseUrl || process.env.NODE_ENV !== 'production';
 
+    // Deep link com rideId: ao tocar, CaptainHome abre exatamente essa oferta
+    // (não a home genérica). O SW também usa isso no focus/openWindow.
+    const deepLink = `${DEEP_LINK.captainHome}?rideOffer=${encodeURIComponent(data.rideId)}`;
+
+    const payloadData = {
+        ...data,
+        type: 'NEW_RIDE',
+        apiUrl: baseUrl || `http://localhost:${process.env.PORT || 3000}`,
+        deepLink,
+        // String: FCM data só aceita strings (sanitize no transport reforça).
+        canAcceptInline: canAcceptInline ? 'true' : 'false',
+    };
+
+    // Data-only + Urgency high: o Chrome NÃO desenha sozinho; o SW controla
+    // vibrate/requireInteraction/actions/renotify — o que maximiza heads-up.
+    // NÃO colocar webpush.notification aqui: isso reintroduziria o display automático.
     const options = {
+        dataOnly: true,
         webpush: {
-            // Diagnóstico de push de corrida (2026-08-03): Urgency é o que de fato
-            // controla prioridade de entrega no protocolo Web Push — isto é uma PWA, não
-            // um app Android nativo (que teria message.android.priority='high'; não
-            // existe canal nativo do Android pra configurar aqui, é limitação de
-            // plataforma, não deste código). O navegador/SO usa este cabeçalho pra
-            // decidir o quão agressivamente acordar o dispositivo.
             headers: {
-                Urgency: 'high'
-            },
-            notification: {
-                ...(canAcceptInline ? {
-                    actions: [
-                        { action: 'accept', title: '✅ Aceitar' },
-                        { action: 'reject', title: '❌ Recusar' },
-                        { action: 'open', title: '📱 Abrir App' }
-                    ]
-                } : {}),
-                requireInteraction: true,
-                // vibrate/badge/tag ficam aqui por completude — quem de fato renderiza
-                // a notificação hoje é o onBackgroundMessage em firebase-messaging-sw.js
-                // (intercepta e monta a notificação na mão), então o que vale de
-                // verdade pra Chrome/Android está lá, não aqui.
-                vibrate: [300, 100, 300, 100, 300],
-                badge: '/movecity-icon.jpg',
-                tag: `ride-${data.rideId}`
+                Urgency: 'high',
             },
             fcmOptions: {
-                link: DEEP_LINK.captainHome
-            }
-        }
+                link: deepLink,
+            },
+        },
     };
 
     // M3 da auditoria de push (2026-08-02): enfileirado em vez de aguardado — o
     // despacho de uma corrida não deve esperar (nem depender de) o resultado do envio.
-    queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_RIDE', data, options, traceId), traceId);
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_RIDE', payloadData, options, traceId), traceId);
 };
 
 // M7 da auditoria de push (2026-08-02), corrigido na auditoria final (Fase 8): o

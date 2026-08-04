@@ -71,6 +71,34 @@ const sendChunkWithRetry = async (tokens, message, traceId, attempt = 0) => {
     }
 };
 
+// Heads-up / NEW_RIDE (2026-08-04): com `notification` + `data` o Chrome Android
+// desenha sozinho uma notificação básica (sem vibrate/requireInteraction/actions) E
+// ainda chama onBackgroundMessage — o SW pode gerar uma segunda, ou a automática
+// (sem prioridade visual) é a que o motorista vê. Data-only deixa o Service Worker
+// como ÚNICA camada que chama showNotification, com as opções que maximizam a
+// chance de heads-up. Outros tipos continuam com notification+data.
+const buildFcmMessage = (payload) => {
+    const data = sanitizeDataValues({
+        ...(payload.data || {}),
+        // Garante title/body no data mesmo em data-only — o SW precisa deles pra desenhar.
+        title: payload.title,
+        message: payload.message,
+    });
+
+    return {
+        ...(payload.dataOnly ? {} : {
+            notification: {
+                title: payload.title,
+                body: payload.message,
+                ...(payload.image ? { image: payload.image } : {})
+            }
+        }),
+        data,
+        ...(payload.webpush ? { webpush: payload.webpush } : {})
+    };
+};
+module.exports.buildFcmMessage = buildFcmMessage;
+
 // Devolve { successCount, failureCount, invalidTokens }. Nunca lança — uma falha (mesmo
 // depois de esgotar os retries) vira failureCount, não uma exceção pro chamador tratar.
 module.exports.sendPush = async (tokens, payload, traceId = '[AUDIT]') => {
@@ -88,17 +116,9 @@ module.exports.sendPush = async (tokens, payload, traceId = '[AUDIT]') => {
         return { successCount: 0, failureCount: 0, invalidTokens: [] };
     }
 
-    console.log(`${traceId} Preparando Push para ${validTokens.length} token(s) válido(s). Payload title: ${payload.title}`);
+    console.log(`${traceId} Preparando Push para ${validTokens.length} token(s) válido(s). Payload title: ${payload.title}${payload.dataOnly ? ' [data-only]' : ''}`);
 
-    const message = {
-        notification: {
-            title: payload.title,
-            body: payload.message,
-            ...(payload.image ? { image: payload.image } : {})
-        },
-        data: sanitizeDataValues(payload.data),
-        ...(payload.webpush ? { webpush: payload.webpush } : {})
-    };
+    const message = buildFcmMessage(payload);
 
     const chunks = chunkArray(validTokens, MAX_TOKENS_PER_CHUNK);
     let successCount = 0;

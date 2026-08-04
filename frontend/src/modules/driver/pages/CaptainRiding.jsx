@@ -18,6 +18,7 @@ import { getAccessToken } from '@/services/session'
 import { flushQueuedLocations } from '@/services/offlineQueue'
 import { joinWithRetry } from '@/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/services/maps/navigationMath'
+import { showBrowserNotification } from '@/services/browserNotify'
 
 const CaptainRiding = () => {
 
@@ -77,15 +78,6 @@ const CaptainRiding = () => {
         return () => { cancelled = true }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
-
-    const showBrowserNotification = (title, body) => {
-        if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(title, {
-                body,
-                icon: '/movecity-icon.jpg'
-            })
-        }
-    }
 
     const { requestLock } = useWakeLock();
     useEffect(() => {

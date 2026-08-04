@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import CaptainDetails from '@/modules/driver/components/CaptainDetails'
 import RidePopUp from '@/modules/driver/components/RidePopUp'
 import ConfirmRidePopUp from '@/modules/driver/components/ConfirmRidePopUp'
@@ -21,6 +21,7 @@ import { db } from '@/services/db'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/services/offlineQueue'
 import { getAccessToken } from '@/services/session'
 import { joinWithRetry } from '@/services/socketAuth'
+import { showBrowserNotification } from '@/services/browserNotify'
 import { vehicleLabels } from '@/assets/vehicleAssets'
 import * as Sentry from '@sentry/react'
 
@@ -39,6 +40,7 @@ const CaptainHome = () => {
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
     const [ confirmRidePopupPanel, setConfirmRidePopupPanel ] = useState(false)
     const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
+    const [ searchParams, setSearchParams ] = useSearchParams()
     // Auditoria PWA (2026-08-03, C3): antes, permissão "negada" não gerava nenhum
     // aviso — um motorista nesse estado ficava invisível ao despacho por push (com o
     // app fechado/minimizado) sem nenhuma pista de causa dentro do app.
@@ -246,10 +248,10 @@ const CaptainHome = () => {
             addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
 
             if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('Nova Solicitação de Corrida! 🚗', {
-                    body: `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`,
-                    icon: '/movecity-icon.jpg'
-                })
+                showBrowserNotification(
+                    'Nova Solicitação de Corrida! 🚗',
+                    `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`
+                )
                 console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
             } else {
                 console.log(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
@@ -340,6 +342,50 @@ const CaptainHome = () => {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [captain?._id])
+
+    // Heads-up (2026-08-04): deep link da notificação (?rideOffer=<id>). Abre o popup
+    // da oferta real consultando o backend — nunca confia só no rideId do push.
+    useEffect(() => {
+        const offerId = searchParams.get('rideOffer')
+        if (!offerId || !captain?._id) return
+        // Já em corrida ativa: não sobrescreve com uma oferta.
+        if (captainRide) {
+            const next = new URLSearchParams(searchParams)
+            next.delete('rideOffer')
+            setSearchParams(next, { replace: true })
+            return
+        }
+
+        let cancelled = false
+        ;(async () => {
+            try {
+                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
+                    headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
+                })
+                if (cancelled) return
+                const list = Array.isArray(response.data) ? response.data : []
+                setPendingRides(list)
+                const target = list.find(r => String(r._id) === String(offerId))
+                if (target) {
+                    setRide(target)
+                    setRidePopupPanel(true)
+                } else {
+                    addToast('Essa corrida não está mais disponível.', 'info')
+                }
+            } catch (err) {
+                console.error('Falha ao abrir oferta da notificação:', err)
+            } finally {
+                if (!cancelled) {
+                    const next = new URLSearchParams(searchParams)
+                    next.delete('rideOffer')
+                    setSearchParams(next, { replace: true })
+                }
+            }
+        })()
+
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams.get('rideOffer'), captain?._id, captainRide?._id])
 
     // --- Efeito 2: envio periódico da localização real (GPS) do motorista ---
     const REAL_LOCATION_INTERVAL_MS = 10000

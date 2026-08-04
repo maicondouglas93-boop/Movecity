@@ -24,39 +24,31 @@ describe('pushTransport — contrato do payload com o FCM', () => {
         });
     });
 
-    it('o payload real de NEW_RIDE passa na validação do SDK (não morre em invalid-payload)', async () => {
+    it('o payload data-only de NEW_RIDE passa na validação do SDK (não morre em invalid-payload)', async () => {
         if (getApps().length === 0) {
             initializeApp({ projectId: 'movecity-teste' });
         }
         const { getMessaging } = require('firebase-admin/messaging');
 
-        // Exatamente o que dispatchRideToCaptains manda hoje: fare numérico e o bloco
-        // webpush com os botões Aceitar/Recusar (que devem continuar funcionando).
+        // Heads-up (2026-08-04): NEW_RIDE é data-only — sem notification{} no topo.
+        // Fare numérico ainda precisa virar string via sanitize.
         const data = pushTransport.sanitizeDataValues({
+            type: 'NEW_RIDE',
+            title: '🚗 Nova corrida disponível',
+            message: 'R$ 12,50 • Av. Paulista → Faria Lima',
             rideId: 'abc123',
             fare: 12.5,
             apiUrl: 'https://api.exemplo.com',
-            deepLink: '/captain-home',
+            deepLink: '/captain-home?rideOffer=abc123',
+            canAcceptInline: 'true',
         });
 
         const result = await getMessaging().sendEachForMulticast({
             tokens: ['token-invalido-de-teste'],
-            notification: { title: '🚗 Nova corrida disponível', body: 'Passageiro próximo • R$ 12,50' },
             data,
             webpush: {
                 headers: { Urgency: 'high' },
-                notification: {
-                    actions: [
-                        { action: 'accept', title: '✅ Aceitar' },
-                        { action: 'reject', title: '❌ Recusar' },
-                        { action: 'open', title: '📱 Abrir App' },
-                    ],
-                    requireInteraction: true,
-                    vibrate: [300, 100, 300, 100, 300],
-                    badge: '/movecity-icon.jpg',
-                    tag: 'ride-abc123',
-                },
-                fcmOptions: { link: '/captain-home' },
+                fcmOptions: { link: '/captain-home?rideOffer=abc123' },
             },
         });
 
@@ -68,4 +60,34 @@ describe('pushTransport — contrato do payload com o FCM', () => {
         expect(error).toBeTruthy();
         expect(error.code).not.toBe('messaging/invalid-payload');
     }, 20000);
+
+    it('buildFcmMessage com dataOnly omite o bloco notification do FCM', () => {
+        const msg = pushTransport.buildFcmMessage({
+            title: '🚗 Nova corrida disponível',
+            message: 'R$ 12,50',
+            dataOnly: true,
+            data: { type: 'NEW_RIDE', rideId: 'r1', fare: 12.5 },
+            webpush: { headers: { Urgency: 'high' } },
+        });
+
+        expect(msg.notification).toBeUndefined();
+        expect(msg.data.type).toBe('NEW_RIDE');
+        expect(msg.data.fare).toBe('12.5');
+        expect(msg.data.title).toBe('🚗 Nova corrida disponível');
+        expect(msg.webpush.headers.Urgency).toBe('high');
+    });
+
+    it('buildFcmMessage sem dataOnly mantém notification (outros tipos de push)', () => {
+        const msg = pushTransport.buildFcmMessage({
+            title: 'Corrida Aceita!',
+            message: 'O motorista está a caminho.',
+            data: { type: 'RIDE_ACCEPTED', deepLink: '/riding' },
+        });
+
+        expect(msg.notification).toEqual({
+            title: 'Corrida Aceita!',
+            body: 'O motorista está a caminho.',
+        });
+        expect(msg.data.type).toBe('RIDE_ACCEPTED');
+    });
 });

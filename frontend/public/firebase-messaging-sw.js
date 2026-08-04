@@ -68,41 +68,48 @@ self.addEventListener('message', (event) => {
     }
 });
 
+// Heads-up (2026-08-04): NEW_RIDE chega como data-only. O SW é a ÚNICA camada que
+// chama showNotification — com vibrate + requireInteraction + renotify, maximizando
+// a chance de o Android Chrome mostrar heads-up. Retornar a Promise é obrigatório:
+// sem isso o Chrome pode mostrar "This site has been updated in the background".
 messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
-    const notificationTitle = payload.notification?.title || payload.data?.title || 'Nova Mensagem';
+
+    const data = payload.data || {};
+    const notificationTitle = payload.notification?.title || data.title || 'Nova Mensagem';
+    const body = payload.notification?.body || data.message || '';
 
     const notificationOptions = {
-        body: payload.notification?.body || payload.data?.message,
+        body,
         icon: '/movecity-icon.jpg',
         badge: '/movecity-icon.jpg',
-        data: payload.data
+        data,
+        // Timestamp agora: ajuda o sistema a tratar como alerta recente.
+        timestamp: Date.now(),
     };
 
-    // Diagnóstico de push de corrida (2026-08-03): webpush.notification.actions/
-    // vibrate/badge/tag setados no backend (notificationDispatcher.service.js)
-    // nunca chegam aqui — o payload que o onBackgroundMessage recebe só tem
-    // {notification, data, fcmOptions}, não o bloco webpush inteiro. Quem de fato
-    // decide o que aparece na tela é este handler, então as opções ficam aqui.
-    if (payload.data && payload.data.type === 'NEW_RIDE') {
-        notificationOptions.actions = [
-            { action: 'accept', title: '✅ Aceitar' },
-            { action: 'reject', title: '❌ Recusar' },
-            { action: 'open', title: '📱 Abrir App' }
-        ];
+    if (data.type === 'NEW_RIDE') {
+        const canAccept = data.canAcceptInline === 'true';
+        if (canAccept) {
+            notificationOptions.actions = [
+                { action: 'accept', title: '✅ Aceitar' },
+                { action: 'reject', title: '❌ Recusar' },
+            ];
+        }
+        // requireInteraction: não some sozinha (corrida precisa de resposta).
+        // vibrate: no Android Chrome, vibração + som aumentam a chance de heads-up.
+        // renotify + tag: se a mesma corrida for reenviada, o SO alerta de novo em
+        // vez de silenciar uma notificação já existente com a mesma tag.
         notificationOptions.requireInteraction = true;
-        // Vibração e badge só na oferta em si — é o momento que precisa chamar
-        // atenção com o app fechado; as notificações de status que vêm depois do
-        // clique (Aceitando/Aceita/indisponível) não precisam repetir isso.
+        notificationOptions.renotify = true;
+        notificationOptions.silent = false;
         notificationOptions.vibrate = [300, 100, 300, 100, 300];
-        // tag: mensagens repetidas da MESMA corrida (retry de envio, por exemplo)
-        // substituem a notificação anterior na bandeja em vez de empilhar.
-        if (payload.data.rideId) {
-            notificationOptions.tag = `ride-${payload.data.rideId}`;
+        if (data.rideId) {
+            notificationOptions.tag = `ride-${data.rideId}`;
         }
     }
 
-    self.registration.showNotification(notificationTitle, notificationOptions);
+    return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
 // Lock para evitar múltiplos cliques
@@ -114,21 +121,33 @@ const fetchWithTimeout = async (resource, options = {}) => {
     const id = setTimeout(() => controller.abort(), timeout);
     const response = await fetch(resource, {
         ...options,
-        signal: controller.signal  
+        signal: controller.signal
     });
     clearTimeout(id);
     return response;
 };
 
+// Foca uma janela já aberta do MoveCity (qualquer rota) e pede navegação via
+// postMessage; se não houver, abre uma nova com a URL do deep link (com rideOffer).
 const focusOrOpenWindow = async (url) => {
+    const absoluteUrl = new URL(url, self.location.origin).href;
     const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+
     for (const client of clientsList) {
-        if (client.url.includes(url) && 'focus' in client) {
-            return client.focus();
+        try {
+            if (new URL(client.url).origin !== self.location.origin) continue;
+        } catch {
+            continue;
+        }
+        if ('focus' in client) {
+            await client.focus();
+            client.postMessage({ type: 'NOTIFICATION_NAVIGATE', url: absoluteUrl });
+            return client;
         }
     }
+
     if (self.clients.openWindow) {
-        return self.clients.openWindow(url);
+        return self.clients.openWindow(absoluteUrl);
     }
 };
 
@@ -137,12 +156,8 @@ self.addEventListener('notificationclick', function(event) {
     const action = event.action;
     const data = notification.data || {};
 
-    // M7 da auditoria de push, corrigido na auditoria final (2026-08-02): antes, TODO
-    // clique sem rideId — e todo clique COM rideId que não fosse na ação "accept" —
-    // abria '/captain-home'. Um passageiro tocando em "Corrida Aceita!" ia parar na
-    // tela inicial do MOTORISTA. O backend agora manda a rota certa em data.deepLink
-    // (ver notificationDispatcher.service.js: DEEP_LINK); '/captain-home' só continua
-    // como último recurso pra notificações antigas, enviadas antes desta correção.
+    // Deep link vem do backend (data.deepLink). Para NEW_RIDE inclui ?rideOffer=<id>
+    // para a CaptainHome abrir a oferta certa — não a home genérica.
     const targetUrl = data.deepLink || '/captain-home';
 
     if (!data.rideId) {
@@ -151,13 +166,11 @@ self.addEventListener('notificationclick', function(event) {
         return;
     }
 
-    // Sem apiUrl não há como aceitar a corrida daqui. O backend só omite as ações de
-    // aceite quando BASE_URL não está configurado, então este caminho não deveria ser
-    // alcançável — mas se for, abrir o app é o desfecho correto, nunca chamar localhost
-    // (que seria o próprio aparelho do motorista).
     const apiUrl = data.apiUrl;
 
     if (action === 'reject') {
+        // Recusar só fecha a notificação — não declina no servidor (decisão de produto
+        // já documentada: a oferta continua no card "Corrida disponível" da Home).
         notification.close();
         return;
     }
@@ -169,7 +182,7 @@ self.addEventListener('notificationclick', function(event) {
     }
 
     if (action === 'accept') {
-        if (!apiUrl) {
+        if (!apiUrl || data.canAcceptInline !== 'true') {
             notification.close();
             event.waitUntil(focusOrOpenWindow(targetUrl));
             return;
@@ -177,16 +190,10 @@ self.addEventListener('notificationclick', function(event) {
         if (acceptingRide) return;
         acceptingRide = true;
 
-        // Diagnóstico de push de corrida (2026-08-03): todas as notificações de status
-        // deste fluxo usam a MESMA tag da oferta original — cada uma substitui a
-        // anterior na bandeja em vez de empilhar (Aceitando/Aceita/indisponível não
-        // ficam acumulando notificações separadas pra mesma corrida).
         const rideTag = data.rideId ? `ride-${data.rideId}` : undefined;
 
-        // Feedback visual: alterando a notificação
         event.waitUntil((async () => {
             try {
-                // Fechar notificação atual e abrir "Aceitando..."
                 notification.close();
                 await self.registration.showNotification('⏳ Aceitando...', {
                     body: 'Aguarde enquanto confirmamos a corrida.',
@@ -201,6 +208,7 @@ self.addEventListener('notificationclick', function(event) {
                     throw new Error('UNAUTHORIZED');
                 }
 
+                // Mesmo endpoint atômico da tela do motorista — o backend decide.
                 const response = await fetchWithTimeout(`${apiUrl}/rides/${data.rideId}/accept`, {
                     method: 'POST',
                     headers: {
@@ -211,28 +219,19 @@ self.addEventListener('notificationclick', function(event) {
                 });
 
                 if (response.status === 200) {
-                    // Diagnóstico de push de corrida (2026-08-03), item 3: aceitar pela
-                    // notificação deve levar direto pra tela da corrida, não só avisar
-                    // que aceitou e esperar mais um toque. CaptainRiding.jsx já se
-                    // recupera sozinho via GET /rides/captain-current ao montar,
-                    // independente de como foi aberto — seguro abrir direto nela.
                     await self.registration.showNotification('✅ Corrida Aceita!', {
                         body: 'Abrindo a viagem...',
                         icon: '/movecity-icon.jpg',
                         badge: '/movecity-icon.jpg',
                         tag: rideTag,
-                        data: data
+                        data: { ...data, deepLink: '/captain-riding' }
                     });
                     await focusOrOpenWindow('/captain-riding');
                 } else if (response.status === 409) {
-                    // Diagnóstico de push de corrida (2026-08-03), achado 4: a mensagem
-                    // agora vem do backend em vez de fixa — "outro motorista aceitou" e
-                    // "passageiro cancelou" são causas diferentes e o backend já sabe
-                    // distingui-las (ver ride.service.js: acceptRideAtomic).
                     let serverMessage = 'Esta corrida não está mais disponível.';
                     try {
-                        const body = await response.json();
-                        if (body?.message) serverMessage = body.message;
+                        const bodyJson = await response.json();
+                        if (bodyJson?.message) serverMessage = bodyJson.message;
                     } catch (parseErr) {
                         // Resposta sem JSON válido — mantém a mensagem genérica.
                     }
@@ -249,7 +248,6 @@ self.addEventListener('notificationclick', function(event) {
                         badge: '/movecity-icon.jpg',
                         tag: rideTag
                     });
-                    // Limpar token se estiver inválido
                     await clearToken();
                 } else {
                     throw new Error('UNKNOWN_ERROR');

@@ -67,10 +67,15 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
         // rejection capaz de derrubar o processo — o service já tem try/catch interno
         // desde a mesma auditoria, isto é defesa em profundidade.
-        // Diagnóstico de push de corrida (2026-08-03): fare vai junto pra sendNewRide
-        // conseguir montar "Passageiro próximo • R$ XX,XX" — antes só o rideId era
-        // passado, mesmo o valor já existindo no documento da corrida.
-        notificationService.sendNewRide(captain._id, { rideId: ride._id.toString(), fare: ride.fare }, TRACE_ID).catch(console.error);
+        // Heads-up (2026-08-04): payload rico com dados REAIS da corrida — fare,
+        // trechos de endereço e distância — pro body da notificação e pro deep link.
+        notificationService.sendNewRide(captain._id, {
+            rideId: ride._id.toString(),
+            fare: ride.fare,
+            pickup: ride.pickup,
+            destination: ride.destination,
+            estimatedDistance: ride.estimatedDistance,
+        }, TRACE_ID).catch(console.error);
     });
 
     return matchingCaptains.length;

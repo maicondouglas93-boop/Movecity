@@ -619,20 +619,25 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
         expect(payload.data.deepLink).toBe('/captain/wallet');
     });
 
-    it('nova corrida para o motorista aponta para /captain-home e carrega apiUrl para o aceite', async () => {
+    it('nova corrida usa data-only com deep link da oferta e flag de aceite inline', async () => {
         const captain = await createCaptain();
         await NotificationToken.create({ captainId: captain._id, token: 'tok-deeplink-newride', device: 'test' });
 
-        notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-125' });
+        notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-125', fare: 18.5 });
 
         const payload = await waitForPayload();
-        expect(payload.data.deepLink).toBe('/captain-home');
+        // Heads-up (2026-08-04): data-only — o SW desenha a notificação; o Chrome não
+        // gera uma segunda automática a partir de notification{} .
+        expect(payload.dataOnly).toBe(true);
+        expect(payload.webpush.notification).toBeUndefined();
+        expect(payload.webpush.headers.Urgency).toBe('high');
+        expect(payload.data.deepLink).toBe('/captain-home?rideOffer=ride-125');
         expect(payload.data.apiUrl).toBeTruthy();
-        // Fora de produção o aceite inline continua disponível.
-        expect(payload.webpush.notification.actions).toBeTruthy();
+        expect(payload.data.canAcceptInline).toBe('true');
+        expect(payload.data.type).toBe('NEW_RIDE');
     });
 
-    it('em produção sem BASE_URL, a oferta de corrida NÃO oferece o botão "Aceitar" (que não teria como funcionar)', async () => {
+    it('em produção sem BASE_URL, a oferta NÃO habilita Aceitar inline (que não teria como funcionar)', async () => {
         const originalEnv = process.env.NODE_ENV;
         const originalBaseUrl = process.env.BASE_URL;
         process.env.NODE_ENV = 'production';
@@ -645,7 +650,8 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
             notificationDispatcher.sendNewRide(captain._id, { rideId: 'ride-126' });
 
             const payload = await waitForPayload();
-            expect(payload.webpush.notification.actions).toBeUndefined();
+            expect(payload.dataOnly).toBe(true);
+            expect(payload.data.canAcceptInline).toBe('false');
             // A notificação em si continua sendo enviada — só a ação embutida some.
             expect(payload.title).toBe('🚗 Nova corrida disponível');
         } finally {

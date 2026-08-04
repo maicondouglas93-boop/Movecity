@@ -2,6 +2,7 @@ import 'remixicon/fonts/remixicon.css'
 import AppRoutes from '@/routes/AppRoutes'
 import UpdatePrompt from '@/shared/components/ui/UpdatePrompt'
 import InstallPrompt from '@/shared/components/ui/InstallPrompt'
+import NotificationNavigateListener from '@/shared/components/NotificationNavigateListener'
 
 // ToastProvider subiu pro main.jsx (fora do SocketProvider) — a fila offline (P1.2 da
 // auditoria de concorrência) precisa avisar o motorista quando uma ação sincroniza ou
@@ -10,6 +11,7 @@ const App = () => {
 
   return (
     <div>
+      <NotificationNavigateListener />
       <AppRoutes />
       <UpdatePrompt />
       <InstallPrompt />

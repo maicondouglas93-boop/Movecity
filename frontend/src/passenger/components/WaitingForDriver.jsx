@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import Button from '@/shared/components/ui/Button'
+import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
 
 const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira' ? 'Carteira' : method === 'card' ? 'Cartão' : 'Dinheiro'
 
-// Painel compacto (2026-08-04): depois do motorista aceitar, o passageiro precisa
-// acompanhar o carro no mapa — o layout antigo (imagem grande + PIN enorme + 3
-// DetailRows + botão full) cobria ~80% da tela. Aqui fica só o essencial: quem vem,
-// placa, PIN e cancelar.
+// Painel compacto: após aceite — identidade do motorista + PIN + cancelar.
 const WaitingForDriver = (props) => {
     const [ confirmingCancel, setConfirmingCancel ] = useState(false)
     const [ cancelling, setCancelling ] = useState(false)
@@ -42,54 +39,20 @@ const WaitingForDriver = (props) => {
 
     if (!props.ride) return null
 
-    const captainVehicleType = props.ride?.captain?.vehicle?.vehicleType || props.ride?.vehicleType || 'car'
-    const vehicleImg = vehicleImages[captainVehicleType] || vehicleImages.car
-    const vehicleLabel = vehicleLabels[captainVehicleType] || 'MoveGo'
-    const captainName = [props.ride?.captain?.fullname?.firstname, props.ride?.captain?.fullname?.lastname]
-        .filter(Boolean)
-        .join(' ')
+    const fareLabel = props.ride?.fare != null
+        ? `R$${props.ride.fare} · ${paymentLabel(props.ride?.paymentMethod)}`
+        : null
 
     return (
         <div className="pb-2">
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
 
-            <div className="flex items-center gap-3">
-                {props.ride?.captain?.profilePicture ? (
-                    <img
-                        className="h-11 w-11 rounded-full object-cover flex-shrink-0 border border-line"
-                        src={props.ride.captain.profilePicture}
-                        alt={captainName || 'Motorista'}
-                        width="44"
-                        height="44"
-                        loading="lazy"
-                    />
-                ) : (
-                    <img
-                        className="h-11 w-11 object-contain flex-shrink-0"
-                        src={vehicleImg}
-                        alt={captainVehicleType}
-                        width="64"
-                        height="64"
-                        loading="lazy"
-                    />
-                )}
-                <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-ink-900 truncate capitalize">{captainName || 'Motorista'}</p>
-                    <p className="text-xs text-ink-400 truncate capitalize">
-                        {props.ride?.captain?.vehicle?.color} {vehicleLabel}
-                    </p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                    <p className="text-base font-bold text-brand-700 tracking-wide leading-tight">
-                        {props.ride?.captain?.vehicle?.plate}
-                    </p>
-                    {props.ride?.fare != null && (
-                        <p className="text-xs text-ink-500 mt-0.5">
-                            R${props.ride.fare} · {paymentLabel(props.ride?.paymentMethod)}
-                        </p>
-                    )}
-                </div>
-            </div>
+            <DriverIdentityCard
+                captain={props.ride?.captain}
+                vehicleTypeFallback={props.ride?.vehicleType}
+                fareLabel={fareLabel}
+                compact
+            />
 
             <div className="mt-2.5 flex items-center gap-3 rounded-xl bg-brand-50 border border-brand-200 px-3 py-2">
                 <p className="text-xs text-ink-500 flex-shrink-0">PIN</p>

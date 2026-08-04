@@ -5,7 +5,7 @@ import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import LiveTracking from '@/shared/components/LiveTracking'
 import axios from 'axios'
-import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
+import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { submitReview } from '@/shared/services/reviewApi'
@@ -13,6 +13,8 @@ import { getFriendlyErrorMessage } from '@/shared/services/errorMessages'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
+import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
+import { personName } from '@/shared/utils/identity'
 import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
@@ -293,9 +295,7 @@ const Riding = () => {
 
     const distanceLabel = formatDistance(ride?.actualDistance)
     const durationLabel = formatDuration(ride?.actualTime)
-    const captainName = ride?.captain?.fullname?.firstname
-        ? `${ride.captain.fullname.firstname}${ride.captain.fullname.lastname ? ` ${ride.captain.fullname.lastname}` : ''}`
-        : null
+    const captainName = personName(ride?.captain) || null
 
     return (
         <div className='h-screen relative'>
@@ -331,17 +331,10 @@ const Riding = () => {
             </div>
 
             <div className='h-1/2 p-4 overflow-y-auto overscroll-y-contain'>
-                <div className='flex items-center justify-between'>
-                    <div>
-                        <img className='h-14 object-contain' src={vehicleImages[ride?.captain?.vehicle?.vehicleType] || vehicleImages.car} alt={ride?.captain?.vehicle?.vehicleType} width="1024" height="1024" loading="lazy" />
-                        <p className='text-xs text-center text-ink-400 mt-0.5 font-medium'>{vehicleLabels[ride?.captain?.vehicle?.vehicleType] || 'MoveGo'}</p>
-                    </div>
-                    <div className='text-right'>
-                        <h2 className='text-lg font-medium capitalize text-ink-900'>{ride?.captain?.fullname?.firstname}</h2>
-                        <h4 className='text-xl font-semibold -mt-1 -mb-1 text-ink-900'>{ride?.captain?.vehicle?.plate}</h4>
-                        <p className='text-sm text-ink-400 capitalize'>{ride?.captain?.vehicle?.color} {ride?.captain?.vehicle?.vehicleType}</p>
-                    </div>
-                </div>
+                <DriverIdentityCard
+                    captain={ride?.captain}
+                    vehicleTypeFallback={ride?.vehicleType}
+                />
 
                 <Card padding='p-1' className='divide-y divide-line mt-5'>
                     <DetailRow

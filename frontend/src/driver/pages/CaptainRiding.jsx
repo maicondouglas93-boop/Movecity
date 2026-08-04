@@ -19,6 +19,7 @@ import { flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/shared/services/maps/navigationMath'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
+import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 
 const CaptainRiding = () => {
 
@@ -363,27 +364,26 @@ const CaptainRiding = () => {
                     </div>
 
                     {hudExpanded && (
-                        <div className='px-5 pb-6 pt-1 border-t border-line flex items-center gap-3'>
-                            <img
-                                src={vehicleImg}
-                                alt={vehicleLabel}
-                                className='h-14 w-20 object-contain flex-shrink-0'
-                                width="1024"
-                                height="1024"
-                                loading="lazy"
-                            />
-                            <div className='min-w-0'>
-                                <p className='text-xs text-brand-600 font-bold uppercase tracking-widest'>{vehicleLabel}</p>
-                                <h4 className='text-base font-bold text-ink-900 leading-tight truncate'>
-                                    {rideData?.user?.fullname?.firstname || 'Passageiro'} {rideData?.user?.fullname?.lastname || ''}
-                                </h4>
-                                <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
-                                    <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0"></i>
-                                    {rideData?.destination || 'Destino'}
-                                </p>
-                                <p className='text-xs text-ink-600 font-medium'>
-                                    {rideData?.fare ? `R$${rideData.fare}` : ''}
-                                </p>
+                        <div className='px-5 pb-6 pt-1 border-t border-line space-y-3'>
+                            <PassengerIdentityCard user={rideData?.user} showPhoto />
+                            <div className='flex items-center gap-3 min-w-0'>
+                                <img
+                                    src={vehicleImg}
+                                    alt={vehicleLabel}
+                                    className='h-12 w-16 object-contain flex-shrink-0'
+                                    width="1024"
+                                    height="1024"
+                                    loading="lazy"
+                                />
+                                <div className='min-w-0'>
+                                    <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
+                                        <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0" aria-hidden="true"></i>
+                                        {rideData?.destination || 'Destino'}
+                                    </p>
+                                    <p className='text-xs text-ink-600 font-medium'>
+                                        {rideData?.fare ? `R$${rideData.fare}` : ''}
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     )}

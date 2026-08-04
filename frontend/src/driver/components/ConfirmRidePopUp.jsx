@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import * as Sentry from '@sentry/react'
-import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
+import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 
@@ -158,15 +158,18 @@ const ConfirmRidePopUp = (props) => {
     return (
         <div>
             <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Iniciar a Corrida</h3>
-            <div className='flex items-center justify-between p-3 border-2 border-brand-100 bg-brand-50 rounded-panel mt-4'>
-                <div className='flex items-center gap-3'>
-                    <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} />
-                    <div>
-                        <h2 className='text-lg font-bold capitalize text-ink-900'>{props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}</h2>
-                        <p className='text-xs text-ink-600 font-medium'>Passageiro</p>
-                    </div>
-                </div>
-                <h5 className='text-lg font-bold text-ink-900'>{props.ride?.estimatedDistance ? (props.ride.estimatedDistance / 1000).toFixed(1) + ' KM' : '—'}</h5>
+            <div className='mt-4'>
+                <PassengerIdentityCard
+                    user={props.ride?.user}
+                    showPhoto
+                    trailing={
+                        <h5 className='text-lg font-bold text-ink-900'>
+                            {props.ride?.estimatedDistance
+                                ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} KM`
+                                : '—'}
+                        </h5>
+                    }
+                />
             </div>
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>

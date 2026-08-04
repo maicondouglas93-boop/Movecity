@@ -8,7 +8,7 @@ import { submitReview } from '@/shared/services/reviewApi'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import Button from '@/shared/components/ui/Button'
-import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
+import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
 
 const STATUS_COPY = {
   awaiting_provider: {
@@ -115,12 +115,6 @@ function timelineIndex(status) {
 function shortAddress(address) {
   if (!address) return '—'
   return String(address).split(',')[0] || address
-}
-
-function captainDisplayName(captain) {
-  if (!captain) return 'Motorista'
-  const name = [captain.fullname?.firstname, captain.fullname?.lastname].filter(Boolean).join(' ')
-  return name || captain.fullname?.firstname || 'Motorista'
 }
 
 const ParcelTimeline = ({ status }) => {
@@ -323,9 +317,6 @@ const ParcelActive = () => {
   const showPin = Boolean(parcel.deliveryPin)
     && !['finished', 'cancelled', 'delivered'].includes(parcel.status)
   const pinEmphasized = PIN_EMPHASIS.includes(parcel.status)
-  const vehicleType = captain?.vehicle?.vehicleType || parcel.vehicleType || 'car'
-  const vehicleImg = vehicleImages[vehicleType] || vehicleImages.car
-  const vehicleLabel = vehicleLabels[vehicleType] || vehicleType
   const mapHeight = searching ? 'h-[38dvh]' : 'h-[46dvh]'
 
   return (
@@ -389,43 +380,12 @@ const ParcelActive = () => {
 
           <ParcelTimeline status={parcel.status} />
 
-          {/* Motorista */}
+          {/* Motorista — só após aceite (vínculo real) */}
           {captain && !searching && (
-            <div className="flex items-center gap-3 rounded-panel border border-line bg-surface-alt p-3">
-              {captain.profilePicture ? (
-                <img
-                  className="h-12 w-12 rounded-full object-cover flex-shrink-0 border border-line"
-                  src={captain.profilePicture}
-                  alt={captainDisplayName(captain)}
-                  width="48"
-                  height="48"
-                  loading="lazy"
-                />
-              ) : (
-                <img
-                  className="h-12 w-12 object-contain flex-shrink-0"
-                  src={vehicleImg}
-                  alt={vehicleLabel}
-                  width="64"
-                  height="64"
-                  loading="lazy"
-                />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-ink-900 truncate capitalize">
-                  {captainDisplayName(captain)}
-                </p>
-                <p className="text-xs text-ink-400 truncate capitalize">
-                  {[captain.vehicle?.color, vehicleLabel].filter(Boolean).join(' · ')}
-                  {captain.rating != null ? ` · ★ ${Number(captain.rating).toFixed(1)}` : ''}
-                </p>
-              </div>
-              {captain.vehicle?.plate && (
-                <p className="text-sm font-bold text-brand-700 tracking-wide flex-shrink-0">
-                  {captain.vehicle.plate}
-                </p>
-              )}
-            </div>
+            <DriverIdentityCard
+              captain={captain}
+              vehicleTypeFallback={parcel.vehicleType}
+            />
           )}
 
           {/* Procurando — animação + rota */}

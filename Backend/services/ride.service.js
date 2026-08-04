@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { getCache, setCache } = require('../cache/cache');
 
 const PricingEngine = require('./pricingEngine.service');
+const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -372,7 +373,7 @@ module.exports.acceptRideAtomic = async ({
 
     const ride = await rideModel.findOne({
         _id: rideId
-    }).populate('user').populate('captain').select('+otp');
+    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+otp');
 
     return ride;
 }
@@ -704,7 +705,7 @@ module.exports.getCurrentRide = async ({ user }) => {
     let ride = await rideModel.findOne({
         user,
         status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
-    }).populate('user').populate('captain').select('+otp');
+    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+otp');
 
     // Auto-expire stale 'requested' rides (older than 10 minutes)
     //
@@ -742,7 +743,7 @@ module.exports.getCurrentRideForCaptain = async ({ captain }) => {
     const ride = await rideModel.findOne({
         captain,
         status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] }
-    }).populate('user').populate('captain');
+    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
 
     return ride;
 }
@@ -845,12 +846,16 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         createdAt: { $gte: cutoff },
         // pickupCoordinates é persistido no despacho; sem ele não dá pra aplicar o raio.
         'pickupCoordinates.lat': { $exists: true }
-    }).populate('user').sort({ createdAt: -1 }).limit(20);
+    }).populate('user', 'fullname').sort({ createdAt: -1 }).limit(20);
 
     return candidates.filter(ride => {
         const pickup = ride.pickupCoordinates;
         if (!pickup || pickup.lat == null || pickup.lng == null) return false;
         return mapService.haversineKm(position.ltd, position.lng, pickup.lat, pickup.lng) <= CAPTAIN_SEARCH_RADIUS_KM;
+    }).map((ride) => {
+        const obj = ride.toObject();
+        obj.user = toOfferPassengerPreview(ride.user);
+        return obj;
     });
 }
 

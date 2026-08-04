@@ -4,6 +4,7 @@ const parcelSettingModel = require('../models/parcelSetting.model');
 const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
+const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
 
 const SIZE_RANK = { small: 1, medium: 2, large: 3 };
 
@@ -320,7 +321,7 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
                 },
             },
             { new: true }
-        ).populate('user').populate('captain');
+        ).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
 
         if (!updated) throw new Error('PARCEL_ALREADY_ACCEPTED');
         return updated;
@@ -346,7 +347,9 @@ module.exports.updateParcelStatus = async ({ parcelId, captain, status }) => {
     parcel.status = status;
     pushHistory(parcel, status, 'captain');
     await parcel.save();
-    return parcelModel.findById(parcelId).populate('user').populate('captain');
+    return parcelModel.findById(parcelId)
+        .populate('user', USER_IDENTITY_FIELDS)
+        .populate('captain', CAPTAIN_IDENTITY_FIELDS);
 };
 
 module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
@@ -378,7 +381,7 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
             },
         },
         { new: true }
-    ).populate('user').populate('captain');
+    ).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
 
     if (!updated) throw new Error('INVALID_STATUS_FOR_DELIVERY');
 
@@ -479,7 +482,7 @@ module.exports.getCurrentParcelForUser = async (userId) => {
     const current = await parcelModel.findOne({
         user: userId,
         status: { $in: active },
-    }).populate('captain').select('+deliveryPin').sort({ createdAt: -1 });
+    }).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+deliveryPin').sort({ createdAt: -1 });
     if (current) return current;
 
     // Após finalização, mantém na tela de avaliação até o passageiro avaliar ou pular
@@ -490,7 +493,7 @@ module.exports.getCurrentParcelForUser = async (userId) => {
             { passengerReviewSkippedAt: null },
             { passengerReviewSkippedAt: { $exists: false } },
         ],
-    }).populate('captain').select('+deliveryPin').sort({ createdAt: -1 });
+    }).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+deliveryPin').sort({ createdAt: -1 });
     if (!finished) return null;
 
     const reviewModel = require('../models/review.model');
@@ -507,7 +510,7 @@ module.exports.getCurrentParcelForCaptain = async (captainId) => {
     const active = await parcelModel.findOne({
         captain: captainId,
         status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
-    }).populate('user').sort({ createdAt: -1 });
+    }).populate('user', USER_IDENTITY_FIELDS).sort({ createdAt: -1 });
     if (active) return active;
 
     // Rating pós-entrega: finished sem avaliação do motorista (sobrevive refresh).
@@ -518,7 +521,7 @@ module.exports.getCurrentParcelForCaptain = async (captainId) => {
             { captainReviewSkippedAt: null },
             { captainReviewSkippedAt: { $exists: false } },
         ],
-    }).populate('user').sort({ createdAt: -1 });
+    }).populate('user', USER_IDENTITY_FIELDS).sort({ createdAt: -1 });
     if (!finished) return null;
 
     const reviewModel = require('../models/review.model');

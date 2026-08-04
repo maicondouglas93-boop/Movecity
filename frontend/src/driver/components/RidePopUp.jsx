@@ -1,6 +1,6 @@
 import React, { useContext } from 'react'
-import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
+import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 
@@ -35,23 +35,22 @@ const RidePopUp = (props) => {
                 <h3 className='text-2xl font-semibold text-ink-900'>Nova Corrida Disponível!</h3>
             </div>
 
-            <div className='flex items-center justify-between p-3 bg-brand-50 border-2 border-brand-100 rounded-panel'>
-                <div className='flex items-center gap-3'>
-                    <Avatar firstname={props.ride?.user?.fullname?.firstname} lastname={props.ride?.user?.fullname?.lastname} className='border-2 border-white' />
-                    <div>
-                        <h2 className='text-lg font-bold capitalize text-ink-900'>
-                            {props.ride?.user?.fullname?.firstname} {props.ride?.user?.fullname?.lastname}
-                        </h2>
-                        <p className='text-xs text-brand-600 font-medium'>{vehicleLabel}</p>
+            {/* Oferta: sem foto (privacidade pré-aceite) — só primeiro nome. */}
+            <PassengerIdentityCard
+                user={{
+                    fullname: { firstname: props.ride?.user?.fullname?.firstname || 'Passageiro' },
+                }}
+                showPhoto={false}
+                subtitle={vehicleLabel}
+                trailing={
+                    <div className="text-right">
+                        <h5 className="text-xl font-bold text-ink-900">
+                            {distanceToPickupKm != null ? `${distanceToPickupKm.toFixed(1)} km` : '—'}
+                        </h5>
+                        <p className="text-xs text-ink-600">até você</p>
                     </div>
-                </div>
-                <div className='text-right'>
-                    <h5 className='text-xl font-bold text-ink-900'>
-                        {distanceToPickupKm != null ? `${distanceToPickupKm.toFixed(1)} km` : '—'}
-                    </h5>
-                    <p className='text-xs text-ink-600'>até você</p>
-                </div>
-            </div>
+                }
+            />
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>
                     <div className='flex items-center gap-5 p-3 border-b-2 border-line'>

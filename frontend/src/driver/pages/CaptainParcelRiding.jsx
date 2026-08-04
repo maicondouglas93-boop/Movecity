@@ -12,6 +12,7 @@ import {
 } from '@/shared/services/parcelApi'
 import { submitCaptainReview } from '@/shared/services/reviewApi'
 import { useToast } from '@/shared/contexts/ToastContext'
+import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 
 const NEXT_STATUS = {
   provider_accepted: 'going_to_pickup',
@@ -212,6 +213,9 @@ const CaptainParcelRiding = () => {
           </div>
         ) : (
           <>
+            {parcel.user && (
+              <PassengerIdentityCard user={parcel.user} showPhoto className="mb-1" />
+            )}
             <p className="font-semibold text-ink-900">{parcel.itemName}</p>
             <p className="text-xs text-ink-400">Retirada: {parcel.pickup}</p>
             <p className="text-xs text-ink-400">Entrega: {parcel.destination}</p>

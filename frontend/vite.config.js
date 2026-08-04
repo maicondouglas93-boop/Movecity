@@ -16,12 +16,10 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      // Auditoria PWA (2026-08-03, A1): 'auto' injetava um registerSW.js passivo (só
-      // chama navigator.serviceWorker.register, sem avisar nada) — cada deploy trocava
-      // o Service Worker das abas abertas silenciosamente (skipWaiting+clientsClaim já
-      // eram automáticos no modo autoUpdate), sem nenhum prompt pedindo pra recarregar.
-      // Registro manual via virtual:pwa-register (main.jsx) permite mostrar esse aviso.
+      // prompt (não autoUpdate): o SW novo fica em waiting até o usuário confirmar.
+      // Com autoUpdate, onNeedRefresh nunca disparava — o botão "Atualizar app" e o
+      // banner mentiam "já atualizado" / não recarregavam o JS em memória (2026-08-04).
+      registerType: 'prompt',
       injectRegister: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
@@ -29,6 +27,7 @@ export default defineConfig({
         // PWA fazia precache do firebase-messaging-sw.js como se fosse um asset comum,
         // arriscando servir uma cópia desatualizada dele após um deploy.
         globIgnores: ['**/firebase-messaging-sw.js'],
+        cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 5000000,
         // Auditoria PWA (2026-08-03, M1): sem nenhum runtimeCaching, qualquer perda de
         // conexão fazia até uma leitura pública e não sensível (catálogo de veículos)

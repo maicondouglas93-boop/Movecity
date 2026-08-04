@@ -1,20 +1,20 @@
 import React from 'react'
 import { usePwaUpdate } from '@/contexts/PwaUpdateContext'
 
-// Auditoria PWA (2026-08-03, A1): antes, cada deploy substituía o Service Worker das
-// abas abertas em segundo plano (skipWaiting+clientsClaim do modo autoUpdate),
-// silenciosamente — o JavaScript já carregado na memória do usuário continuava sendo o
-// antigo até ele fechar/reabrir o app manualmente, sem nenhum aviso de que existia uma
-// versão nova. O botão aqui só recarrega quando a pessoa decide — nunca automático,
-// pra não interromper uma corrida em andamento.
-//
-// O registro do Service Worker (useRegisterSW), a checagem periódica e o
-// checkForUpdate() manual (usado pelo botão "Atualizar app" dos menus) vivem em
-// PwaUpdateContext — este componente só renderiza o aviso quando needRefresh vira true.
+// Auditoria PWA (2026-08-03, A1) + correção 2026-08-04: registerType 'prompt' deixa o
+// SW novo em waiting; needRefresh vira true e este banner aparece. O botão aplica
+// skipWaiting + reload — nunca automático, pra não interromper uma corrida.
 const UpdatePrompt = () => {
     const { needRefresh, updateServiceWorker } = usePwaUpdate()
 
     if (!needRefresh) return null
+
+    const handleUpdate = async () => {
+        await updateServiceWorker(true)
+        setTimeout(() => {
+            window.location.reload()
+        }, 2000)
+    }
 
     return (
         <div
@@ -28,7 +28,7 @@ const UpdatePrompt = () => {
             </div>
             <button
                 type="button"
-                onClick={() => updateServiceWorker(true)}
+                onClick={handleUpdate}
                 className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold flex-shrink-0"
             >
                 Atualizar

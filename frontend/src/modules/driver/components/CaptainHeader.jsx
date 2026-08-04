@@ -23,13 +23,16 @@ const CaptainHeader = () => {
     const { addToast } = useToast();
 
     // Botão manual de atualização (2026-08-04) — ver o mesmo em Header.jsx (passageiro).
-    // Sair/entrar da conta é navegação client-side, não recarrega a página nem rechecca
-    // o Service Worker; este botão força a checagem e aplica na hora se achar algo novo.
     const handleUpdateClick = async () => {
         setMenuOpen(false);
+        addToast('Procurando atualização...', 'info');
         const found = await checkForUpdate();
         if (found) {
-            updateServiceWorker(true);
+            addToast('Atualizando o app...', 'info');
+            await updateServiceWorker(true);
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
         } else {
             addToast('Você já está na versão mais recente.', 'success');
         }

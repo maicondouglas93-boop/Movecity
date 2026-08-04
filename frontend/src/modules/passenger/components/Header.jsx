@@ -9,18 +9,20 @@ const Header = () => {
     const { checkForUpdate, updateServiceWorker } = usePwaUpdate();
     const { addToast } = useToast();
 
-    // Botão manual de atualização (2026-08-04): a checagem periódica cobre a maioria
-    // dos casos, mas sair/entrar da conta é navegação client-side (React Router) — não
-    // recarrega a página nem rechecca o Service Worker. Sem este botão, quem ficasse
-    // preso numa versão antiga só se desgrudava fechando o app de verdade ou limpando
-    // o cache manualmente. checkForUpdate() força a checagem agora; se encontrar uma
-    // versão nova, updateServiceWorker(true) aplica e recarrega — senão, avisa que já
-    // está atualizado.
+    // Botão manual de atualização (2026-08-04): força checagem do SW e aplica na hora.
+    // Corrigido no mesmo dia: com autoUpdate o check nunca via update nova e o toast
+    // falso "já atualizado" fazia a pessoa limpar o cache na mão.
     const handleUpdateClick = async () => {
         setMenuOpen(false);
+        addToast('Procurando atualização...', 'info');
         const found = await checkForUpdate();
         if (found) {
-            updateServiceWorker(true);
+            addToast('Atualizando o app...', 'info');
+            await updateServiceWorker(true);
+            // Fallback se o plugin não recarregar (rede lenta / SW travado em waiting).
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
         } else {
             addToast('Você já está na versão mais recente.', 'success');
         }

@@ -36,14 +36,6 @@ const VehiclePanel = (props) => {
 
     return (
         <div className='pb-6'>
-            <button
-                type="button"
-                onClick={() => props.setVehiclePanel(false)}
-                aria-label="Fechar"
-                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
-            >
-                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
-            </button>
             <h3 className='text-xl font-semibold mb-4 text-ink-900'>Escolha um veículo</h3>
 
             {loading ? (

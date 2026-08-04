@@ -88,18 +88,6 @@ const Home = () => {
     const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
 
-    // Botão/gesto de voltar fecha o painel de busca/veículo/confirmação em vez de sair
-    // do fluxo de corrida inteiro — ver item 8 do relatório de UX (decisão registrada
-    // em docs/plans/2026-08-01-redesign-ux-passageiro.md §19).
-    useBackToClose(
-        panelOpen || vehiclePanel || confirmRidePanel,
-        () => {
-            setPanelOpen(false)
-            setVehiclePanel(false)
-            setConfirmRidePanel(false)
-        }
-    )
-
     useEffect(() => {
         // If coming from Repeat Ride, prefill and find trip
         if (location.state && location.state.pickup && location.state.destination) {
@@ -638,7 +626,10 @@ const Home = () => {
             } else {
                 addToast('Corrida cancelada.', 'success');
             }
+            setWaitingForDriver(false);
             setVehicleFound(false);
+            setConfirmRidePanel(false);
+            setVehiclePanel(false);
             setRide(null);
             setPickup('');
             setDestination('');
@@ -653,7 +644,10 @@ const Home = () => {
                     payload: { rideId: ride._id }
                 }).catch(e => console.error(e));
                 addToast('Sem conexão — o cancelamento será confirmado assim que a internet voltar.', 'info', 6000);
+                setWaitingForDriver(false);
                 setVehicleFound(false);
+                setConfirmRidePanel(false);
+                setVehiclePanel(false);
                 setRide(null);
                 setPickup('');
                 setDestination('');
@@ -663,15 +657,63 @@ const Home = () => {
         }
     }
 
+    // Voltar (gesto do sistema ou seta no topo) recua um passo do fluxo, sem colapsar
+    // o painel para "ver o mapa" — o chevron de dismiss foi removido dessas telas.
+    // Em "aguardando motorista" não há seta de voltar: cancelar exige confirmação
+    // no botão do painel (pode haver taxa).
+    const handleRideFlowBack = useCallback(() => {
+        if (vehicleFound) {
+            if (ride?._id) {
+                cancelRide()
+            } else {
+                setVehicleFound(false)
+                setConfirmRidePanel(true)
+            }
+            return
+        }
+        if (confirmRidePanel) {
+            setConfirmRidePanel(false)
+            setVehiclePanel(true)
+            return
+        }
+        if (vehiclePanel) {
+            setVehiclePanel(false)
+            return
+        }
+        if (panelOpen) {
+            setPanelOpen(false)
+        }
+    // cancelRide é recriada a cada render; ride já cobre o caso de cancelamento.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [vehicleFound, confirmRidePanel, vehiclePanel, panelOpen, ride])
+
+    useBackToClose(
+        panelOpen || vehiclePanel || confirmRidePanel || vehicleFound,
+        handleRideFlowBack
+    )
+
+    const showRideFlowBack = vehiclePanel || confirmRidePanel || vehicleFound
+
     return (
         <div className='h-[100dvh] relative overflow-hidden'>
             <ConnectionBanner />
+
+            {showRideFlowBack && (
+                <button
+                    type="button"
+                    onClick={handleRideFlowBack}
+                    aria-label="Voltar"
+                    className='absolute top-3 left-3 z-40 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-white text-ink-900 shadow-raised border border-line active:scale-95 transition-transform'
+                >
+                    <i className="ri-arrow-left-line text-2xl" aria-hidden="true"></i>
+                </button>
+            )}
 
             {/* Fase A da experiência de corrida ativa (2026-08-03): "link para voltar à
                 corrida" que sumia. Se existe corrida 'started' e o passageiro está na
                 Home (voltou de propósito ou reabriu o app), este atalho sempre leva de
                 volta à tela de acompanhamento. */}
-            {ride?.status === 'started' && (
+            {ride?.status === 'started' && !showRideFlowBack && (
                 <button
                     type="button"
                     onClick={() => navigate('/riding', { state: { ride } })}
@@ -886,12 +928,12 @@ const Home = () => {
                     </button>
                 </div>
             )}
-            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <VehiclePanel
                     selectVehicle={setVehicleType}
                     fare={fare} setConfirmRidePanel={setConfirmRidePanel} setVehiclePanel={setVehiclePanel} />
             </div>
-            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <ConfirmRide
                     createRide={createRide}
                     pickup={pickup}
@@ -925,7 +967,7 @@ const Home = () => {
                     walletBalance={user?.walletBalance}
                 />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <LookingForDriver
                     createRide={createRide}
                     pickup={pickup}
@@ -933,10 +975,9 @@ const Home = () => {
                     fare={fare}
                     vehicleType={vehicleType}
                     paymentMethod={paymentMethod}
-                    cancelRide={cancelRide}
-                    setVehicleFound={setVehicleFound} />
+                    cancelRide={cancelRide} />
             </div>
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}

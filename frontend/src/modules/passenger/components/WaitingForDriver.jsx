@@ -72,15 +72,6 @@ const WaitingForDriver = (props) => {
 
     return (
         <div className='pb-6'>
-            <button
-                type="button"
-                onClick={() => props.setWaitingForDriver(false)}
-                aria-label="Fechar"
-                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
-            >
-                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
-            </button>
-
             {status && (
                 <div className='flex justify-center mb-3'>
                     <StatusBadge tone={status.tone}>{status.label}</StatusBadge>

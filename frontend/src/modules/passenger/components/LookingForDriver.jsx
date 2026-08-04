@@ -66,14 +66,6 @@ const LookingForDriver = (props) => {
 
     return (
         <div className='pb-6'>
-            <button
-                type="button"
-                onClick={() => props.setVehicleFound(false)}
-                aria-label="Fechar"
-                className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
-            >
-                <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
-            </button>
             <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Buscando um Motorista</h3>
 
             <div className='flex flex-col items-center mb-4'>

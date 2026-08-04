@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressFromInput, coordFromInput, sanitizeCoord } from '@/services/maps/parseLocation'
+import { addressFromInput, coordFromInput, sanitizeCoord } from '@/shared/services/maps/parseLocation'
 
 describe('parseLocation', () => {
     it('extrai lat/lng embutidos no formato da Home', () => {

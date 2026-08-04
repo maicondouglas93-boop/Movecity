@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
-import { SocketContext } from '@/contexts/SocketContext';
-import { getAccessToken } from '@/services/session';
+import { SocketContext } from '@/shared/contexts/SocketContext';
+import { getAccessToken } from '@/shared/services/session';
 
 const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
     const { socket } = useContext(SocketContext);

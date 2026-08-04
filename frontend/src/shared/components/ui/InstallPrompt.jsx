@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { usePwaInstall } from '@/contexts/PwaInstallContext'
+import { usePwaInstall } from '@/shared/contexts/PwaInstallContext'
 
 const DISMISSED_KEY = 'installPromptDismissed'
 

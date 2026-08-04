@@ -3,9 +3,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import axios from 'axios';
-import UserLogin from '@/modules/passenger/pages/UserLogin';
-import { UserDataContext } from '@/contexts/UserContext';
-import { ToastProvider } from '@/contexts/ToastContext';
+import UserLogin from '@/passenger/pages/UserLogin';
+import { UserDataContext } from '@/passenger/contexts/UserContext';
+import { ToastProvider } from '@/shared/contexts/ToastContext';
 
 // Mock dependências externas
 vi.mock('axios');
@@ -29,6 +29,9 @@ describe('UserLogin Component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Login bem-sucedido grava token via saveSession; sem limpar, o useEffect
+    // de UserLogin redireciona para /home nos testes seguintes.
+    localStorage.clear();
   });
 
   const renderWithProviders = (ui) => {

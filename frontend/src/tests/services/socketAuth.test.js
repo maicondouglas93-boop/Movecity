@@ -10,14 +10,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const getAccessTokenMock = vi.fn()
 const refreshAccessTokenMock = vi.fn()
 
-vi.mock('@/services/session', () => ({
+vi.mock('@/shared/services/session', () => ({
     getAccessToken: (...args) => getAccessTokenMock(...args),
 }))
-vi.mock('@/services/axios', () => ({
+vi.mock('@/shared/services/axios', () => ({
     refreshAccessToken: (...args) => refreshAccessTokenMock(...args),
 }))
 
-const { joinWithRetry } = await import('@/services/socketAuth')
+const { joinWithRetry } = await import('@/shared/services/socketAuth')
 
 const makeSocket = (acks) => {
     let call = 0

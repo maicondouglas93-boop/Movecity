@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react'
-import { SocketContext } from '@/contexts/SocketContext'
+import { SocketContext } from '@/shared/contexts/SocketContext'
 
 // Faixa fixa de status de conexão — item 3/4 do relatório de UX: hoje o app do
 // passageiro não tem NENHUMA indicação visual de "sem internet" ou "o socket caiu",

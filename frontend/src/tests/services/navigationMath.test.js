@@ -12,7 +12,7 @@ import {
     offsetPosition,
     pickNextStep,
     shortestAngleDelta,
-} from '@/services/maps/navigationMath'
+} from '@/shared/services/maps/navigationMath'
 
 // Fase D da experiência de corrida ativa (2026-08-03). Estes testes cobrem o
 // comportamento da navegação que NÃO dá para verificar só olhando o mapa: o rumo

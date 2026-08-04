@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sessionKindForUrl } from '@/services/session'
+import { sessionKindForUrl } from '@/shared/services/session'
 
 // Correção 401 do motorista (2026-08-03): rotas de corrida do motorista precisam
 // resolver para 'captain', senão o interceptor injeta o token do passageiro (sessão

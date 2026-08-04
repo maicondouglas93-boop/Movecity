@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
-import WaitingForDriver from '@/modules/passenger/components/WaitingForDriver';
+import WaitingForDriver from '@/passenger/components/WaitingForDriver';
 
 // Correção crítica do cancelamento (2026-08-03): a regra de negócio sempre permitiu o
 // passageiro cancelar com motorista já designado (accepted..waiting_passenger — ver

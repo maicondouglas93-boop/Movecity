@@ -1,5 +1,5 @@
 import React from 'react'
-import { usePwaUpdate } from '@/contexts/PwaUpdateContext'
+import { usePwaUpdate } from '@/shared/contexts/PwaUpdateContext'
 
 // Auditoria PWA (2026-08-03, A1) + correção 2026-08-04: registerType 'prompt' deixa o
 // SW novo em waiting; needRefresh vira true e este banner aparece. O botão aplica

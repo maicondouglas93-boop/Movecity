@@ -1,6 +1,6 @@
 import React from 'react'
-import { usePwaInstall } from '@/contexts/PwaInstallContext'
-import { useToast } from '@/contexts/ToastContext'
+import { usePwaInstall } from '@/shared/contexts/PwaInstallContext'
+import { useToast } from '@/shared/contexts/ToastContext'
 
 // Botão compacto do header (passageiro/motorista) — ao lado da logo. Usa o mesmo
 // deferredPrompt do PwaInstallContext que o banner InstallPrompt.

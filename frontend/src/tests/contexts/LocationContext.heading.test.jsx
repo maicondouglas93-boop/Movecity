@@ -7,12 +7,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // desktop, parado, ou logo no primeiro fix, vem null. A câmera de navegação precisa de
 // um rumo mesmo assim, e precisa que ele NÃO fique girando sozinho com o carro parado.
 
-vi.mock('@/services/session', () => ({
+vi.mock('@/shared/services/session', () => ({
     hasActiveSession: () => true,
     onSessionChanged: () => () => {},
 }))
 
-const { LocationProvider, LocationContext } = await import('@/contexts/LocationContext')
+const { LocationProvider, LocationContext } = await import('@/shared/contexts/LocationContext')
 
 let emitPosition
 

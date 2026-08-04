@@ -2,12 +2,12 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import Home from '@/modules/passenger/pages/Home';
-import { UserDataContext } from '@/contexts/UserContext';
-import { SocketContext } from '@/contexts/SocketContext';
-import { LocationContext } from '@/contexts/LocationContext';
-import { ToastProvider } from '@/contexts/ToastContext';
-import { RideContext } from '@/contexts/RideContext';
+import Home from '@/passenger/pages/Home';
+import { UserDataContext } from '@/passenger/contexts/UserContext';
+import { SocketContext } from '@/shared/contexts/SocketContext';
+import { LocationContext } from '@/shared/contexts/LocationContext';
+import { ToastProvider } from '@/shared/contexts/ToastContext';
+import { RideContext } from '@/shared/contexts/RideContext';
 
 vi.mock('firebase/messaging', () => ({
   getMessaging: vi.fn(),
@@ -19,28 +19,28 @@ vi.mock('firebase/messaging', () => ({
   isSupported: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock('../../services/fcm', () => ({
+vi.mock('@/shared/services/fcm', () => ({
   requestFCMToken: vi.fn(),
   // A9 da auditoria de push (2026-08-02): Home.jsx passou a assinar push em primeiro
   // plano — o mock precisa devolver uma função de cancelamento, como o real faz.
   onForegroundMessage: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/services/mapsApi', () => ({
+vi.mock('@/shared/services/mapsApi', () => ({
   reverseGeocode: vi.fn().mockResolvedValue({ address: 'Mocked Address' }),
 }));
 
-vi.mock('@/services/vehicleCategoriesApi', () => ({
+vi.mock('@/shared/services/vehicleCategoriesApi', () => ({
   getVehicleCategories: vi.fn().mockResolvedValue([]),
 }));
 
 // Auditoria de regressão de push (2026-08-03): Home.jsx passou a puxar
-// @/services/socketAuth (joinWithRetry), que por sua vez importa @/services/axios —
+// @/shared/services/socketAuth (joinWithRetry), que por sua vez importa @/shared/services/axios —
 // esse módulo faz `axios.create(...)` no topo do arquivo; como este teste já mocka o
 // pacote 'axios' cru (auto-mock, sem create() de verdade), o import real de
-// @/services/axios quebrava o carregamento do arquivo inteiro. Mockado aqui pelo
+// @/shared/services/axios quebrava o carregamento do arquivo inteiro. Mockado aqui pelo
 // mesmo motivo que os outros serviços acima.
-vi.mock('@/services/axios', () => ({
+vi.mock('@/shared/services/axios', () => ({
   default: { get: vi.fn(), post: vi.fn() },
   refreshAccessToken: vi.fn(),
 }));
@@ -50,7 +50,7 @@ vi.mock('@/services/axios', () => ({
 // 'virtual:pwa-register/react', um módulo virtual que só existe dentro do pipeline
 // real do Vite (dev/build), não no ambiente do Vitest. Mocka o contexto direto, no
 // mesmo espírito dos outros mocks de serviço acima.
-vi.mock('@/contexts/PwaUpdateContext', () => ({
+vi.mock('@/shared/contexts/PwaUpdateContext', () => ({
   usePwaUpdate: () => ({
     needRefresh: false,
     updateServiceWorker: vi.fn(),
@@ -58,7 +58,7 @@ vi.mock('@/contexts/PwaUpdateContext', () => ({
   }),
 }));
 
-vi.mock('@/contexts/PwaInstallContext', () => ({
+vi.mock('@/shared/contexts/PwaInstallContext', () => ({
   usePwaInstall: () => ({
     canInstall: false,
     installed: true,

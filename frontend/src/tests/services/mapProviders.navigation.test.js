@@ -58,7 +58,7 @@ const loadGoogleProvider = async () => {
     // Reimportado a cada teste: o Map ID é lido no topo do módulo (constante), então
     // trocar import.meta.env exige limpar o cache de módulos.
     vi.resetModules()
-    const mod = await import('@/services/maps/googleMapsProvider')
+    const mod = await import('@/shared/services/maps/googleMapsProvider')
     return mod.createGoogleMapsProvider()
 }
 
@@ -187,7 +187,7 @@ describe('googleMapsProvider — câmera de navegação (Fase D)', () => {
 describe('leafletProvider — degradação sem câmera (Fase D)', () => {
     it('declara que não suporta câmera, mas ainda aplica centro e zoom', async () => {
         vi.resetModules()
-        const { createLeafletProvider } = await import('@/services/maps/leafletProvider')
+        const { createLeafletProvider } = await import('@/shared/services/maps/leafletProvider')
         const provider = createLeafletProvider()
 
         const node = document.createElement('div')
@@ -206,7 +206,7 @@ describe('leafletProvider — degradação sem câmera (Fase D)', () => {
 
     it('gira o conteúdo do marcador, nunca o elemento posicionado pelo Leaflet', async () => {
         vi.resetModules()
-        const { createLeafletProvider } = await import('@/services/maps/leafletProvider')
+        const { createLeafletProvider } = await import('@/shared/services/maps/leafletProvider')
         const provider = createLeafletProvider()
 
         const node = document.createElement('div')
@@ -230,7 +230,7 @@ describe('leafletProvider — degradação sem câmera (Fase D)', () => {
 
     it('mantém o ponteiro de direção do veículo invisível até haver rumo conhecido', async () => {
         vi.resetModules()
-        const { createLeafletProvider } = await import('@/services/maps/leafletProvider')
+        const { createLeafletProvider } = await import('@/shared/services/maps/leafletProvider')
         const provider = createLeafletProvider()
 
         const node = document.createElement('div')

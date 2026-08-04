@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef, useContext, useCallback, memo } from 'react'
-import { SocketContext } from '@/contexts/SocketContext'
-import { LocationContext } from '@/contexts/LocationContext'
-import { createMapProvider } from '@/services/maps'
+import { SocketContext } from '@/shared/contexts/SocketContext'
+import { LocationContext } from '@/shared/contexts/LocationContext'
+import { createMapProvider } from '@/shared/services/maps'
 import EmptyState from '@/shared/components/ui/EmptyState'
-import api from '@/services/axios'
-import { getAccessToken } from '@/services/session'
+import api from '@/shared/services/axios'
+import { getAccessToken } from '@/shared/services/session'
 import {
     addressFromInput,
     coordFromInput,
     sanitizeCoord,
-} from '@/services/maps/parseLocation'
+} from '@/shared/services/maps/parseLocation'
 import {
     cameraCenterForFollow,
     computeBearing,
@@ -19,7 +19,7 @@ import {
     lerpAngle,
     pickNextStep,
     shortestAngleDelta,
-} from '@/services/maps/navigationMath'
+} from '@/shared/services/maps/navigationMath'
 
 // ====== Fase D da experiência de corrida ativa (2026-08-03) ======
 // Inclinação da câmera em navegação. 55° é o patamar em que a via à frente ganha
@@ -304,7 +304,7 @@ const LiveTracking = (props) => {
                 if (local) return local;
                 const address = addressFromInput(input);
                 if (!address || address.length < 3) return null;
-                // api (@/services/axios) renova token em 401 — fetch cru não.
+                // api (@/shared/services/axios) renova token em 401 — fetch cru não.
                 const { data } = await api.get('/maps/get-coordinates', { params: { address } });
                 return sanitizeCoord(data.ltd, data.lng);
             };

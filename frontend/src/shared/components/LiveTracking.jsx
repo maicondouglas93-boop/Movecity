@@ -43,7 +43,7 @@ const REROUTE_DISTANCE_M = 70;
 const REROUTE_MIN_INTERVAL_MS = 20000;
 // Zoom da Home (passageiro/motorista) ao obter o GPS: visão de bairro/cidade (~2–4 km),
 // não rua. Antes o fitBounds com 1 ponto ia ao zoom máximo e “grudava” no pino.
-const IDLE_MAP_ZOOM = 13;
+const IDLE_MAP_ZOOM = 11;
 // Teto ao enquadrar rota/pickup/destino — evita zoom de rua em trajetos curtos.
 const FIT_BOUNDS_MAX_ZOOM = 15;
 

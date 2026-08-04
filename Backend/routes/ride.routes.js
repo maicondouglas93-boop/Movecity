@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, query } = require('express-validator');
 const rideController = require('../controllers/ride.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
+const { rideStartPinLimiter } = require('../middlewares/rateLimiter');
 
 
 router.post('/create',
@@ -11,6 +12,26 @@ router.post('/create',
     body('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination address'),
     body('vehicleType').isString().isLength({ min: 1 }).withMessage('Invalid vehicle type'),
     rideController.createRide
+)
+
+// Corrida presencial (motorista inicia, sem despacho).
+router.post('/presential',
+    authMiddleware.authCaptain,
+    body('destinationPending').optional().isBoolean().withMessage('destinationPending must be boolean'),
+    body('destination').optional().isString().isLength({ min: 3 }).withMessage('Invalid destination'),
+    body('paymentMethod').optional().isIn([ 'cash' ]),
+    body('passengerPhone').optional().isString().isLength({ max: 20 }),
+    body('lat').optional().isFloat({ min: -90, max: 90 }),
+    body('lng').optional().isFloat({ min: -180, max: 180 }),
+    rideController.createPresentialRide
+)
+
+router.get('/presential/estimate',
+    authMiddleware.authCaptain,
+    query('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination'),
+    query('lat').optional().isFloat({ min: -90, max: 90 }),
+    query('lng').optional().isFloat({ min: -180, max: 180 }),
+    rideController.estimatePresentialFare
 )
 
 router.get('/current',
@@ -67,6 +88,7 @@ router.post('/:id/accept',
 
 router.get('/start-ride',
     authMiddleware.authCaptain,
+    rideStartPinLimiter,
     query('rideId').isMongoId().withMessage('Invalid ride id'),
     query('otp').isString().isLength({ min: 6, max: 6 }).withMessage('Invalid OTP'),
     rideController.startRide

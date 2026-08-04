@@ -8,6 +8,7 @@ import CaptainProtectWrapper from '@/driver/pages/CaptainProtectWrapper'
 import CaptainHome from '@/driver/pages/CaptainHome'
 import CaptainRiding from '@/driver/pages/CaptainRiding'
 import CaptainParcelRiding from '@/driver/pages/CaptainParcelRiding'
+import CaptainPresentialRide from '@/driver/pages/CaptainPresentialRide'
 
 // Auditoria PWA (2026-08-03, B6): ver comentário equivalente em passengerRoutes.jsx —
 // login/cadastro e as duas telas operacionais (Home/Riding) ficam estáticas; carteira,
@@ -39,6 +40,11 @@ const driverRoutes = [
   <Route key='captain-home' path='/captain-home' element={
     <CaptainProtectWrapper>
       <CaptainHome />
+    </CaptainProtectWrapper>
+  } />,
+  <Route key='captain-presential' path='/captain-presential' element={
+    <CaptainProtectWrapper>
+      <CaptainPresentialRide />
     </CaptainProtectWrapper>
   } />,
   <Route key='captain-wallet-legacy' path='/captain-wallet' element={

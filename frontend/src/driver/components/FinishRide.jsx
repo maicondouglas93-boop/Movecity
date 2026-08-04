@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { RideContext } from '@/shared/contexts/RideContext'
+import { useToast } from '@/shared/contexts/ToastContext'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -31,6 +32,7 @@ const FinishRide = (props) => {
     const [submittingRating, setSubmittingRating] = useState(false)
     const navigate = useNavigate()
     const { setCaptainRide } = useContext(RideContext)
+    const { addToast } = useToast()
 
     // Antes de finalizar, mostra a estimativa (ainda não existe valor final). Depois de
     // finalizar, usa a corrida real devolvida pelo servidor.
@@ -64,7 +66,11 @@ const FinishRide = (props) => {
         },
         onError: (err) => {
             console.error('End ride error:', err)
-            if (!navigator.onLine || err.message === 'Network Error') {
+            // Auditoria A5: presencial com destino pendente NÃO pode finalizar offline —
+            // o preço depende do GPS/rota no backend; otimismo com fare=0 seria fraude UX.
+            const presentialPending = props.ride?.source === 'driver_initiated'
+                && (props.ride?.destinationPending || !props.ride?.destination)
+            if ((!navigator.onLine || err.message === 'Network Error') && !presentialPending) {
                 enqueueOfflineAction({
                     type: 'end-ride',
                     rideId: props.ride._id,
@@ -73,7 +79,10 @@ const FinishRide = (props) => {
                 setEnded(true); // Optimistic — sem valor final do servidor ainda, usa a estimativa
                 setEndedRide(props.ride);
             } else {
-                Sentry.captureException(err, { tags: { issue: 'api_error' } });
+                addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
+                if (navigator.onLine) {
+                    Sentry.captureException(err, { tags: { issue: 'api_error' } });
+                }
             }
         }
     })
@@ -101,7 +110,15 @@ const FinishRide = (props) => {
             // Breve confirmação visual, depois pede a avaliação do passageiro em vez de
             // já mandar pra Home — só faz sentido pedir quando o pagamento foi
             // confirmado de verdade (não no caminho offline/pendingSync abaixo).
-            setTimeout(() => setShowRating(true), 1200)
+            // Presencial sem passageiro vinculado: pula avaliação.
+            if (props.ride?.user) {
+                setTimeout(() => setShowRating(true), 1200)
+            } else {
+                setTimeout(() => {
+                    setCaptainRide(null)
+                    navigate('/captain-home')
+                }, 1500)
+            }
         },
         onError: (err) => {
             console.error('Confirm payment error:', err)
@@ -113,6 +130,7 @@ const FinishRide = (props) => {
                 }).catch(e => console.error(e));
                 setPaymentConfirmed(true)
                 setPendingSync(true)
+                setCaptainRide(null)
                 setTimeout(() => navigate('/captain-home'), 2500) // Optimistic
             } else {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
@@ -152,17 +170,24 @@ const FinishRide = (props) => {
                 <>
                     <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Finalizar esta Corrida</h3>
                     <div className='mt-4'>
-                        <PassengerIdentityCard
-                            user={props.ride?.user}
-                            showPhoto
-                            trailing={
-                                <h5 className='text-lg font-bold text-ink-900'>
-                                    {props.ride?.estimatedDistance
-                                        ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} KM`
-                                        : '—'}
-                                </h5>
-                            }
-                        />
+                        {props.ride?.user ? (
+                            <PassengerIdentityCard
+                                user={props.ride.user}
+                                showPhoto
+                                trailing={
+                                    <h5 className='text-lg font-bold text-ink-900'>
+                                        {props.ride?.estimatedDistance
+                                            ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} KM`
+                                            : '—'}
+                                    </h5>
+                                }
+                            />
+                        ) : props.ride?.source === 'driver_initiated' ? (
+                            <div className='rounded-panel border border-line bg-surface-alt p-3'>
+                                <p className='text-sm font-semibold text-brand-700'>Corrida presencial</p>
+                                <p className='text-xs text-ink-600 mt-0.5'>Passageiro sem conta vinculada</p>
+                            </div>
+                        ) : null}
                     </div>
                     <div className='flex gap-2 justify-between flex-col items-center'>
                         <div className='w-full mt-5'>
@@ -176,14 +201,26 @@ const FinishRide = (props) => {
                             <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
                                 <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
                                 <div>
-                                    <h3 className='text-lg font-medium text-ink-900'>{props.ride?.destination?.split(',')[0]}</h3>
-                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.destination}</p>
+                                    <h3 className='text-lg font-medium text-ink-900'>
+                                        {props.ride?.destinationPending
+                                            ? 'Será definido ao finalizar'
+                                            : (props.ride?.destination?.split(',')[0] || 'Destino')}
+                                    </h3>
+                                    <p className='text-sm -mt-1 text-ink-600'>
+                                        {props.ride?.destinationPending
+                                            ? 'GPS do fim da corrida define o destino e o preço'
+                                            : (props.ride?.destination || '')}
+                                    </p>
                                 </div>
                             </div>
                             <div className='flex items-center gap-5 p-3'>
                                 <i className="ri-currency-line text-brand-500"></i>
                                 <div>
-                                    <h3 className='text-lg font-medium text-ink-900'>R$ {props.ride?.fare}</h3>
+                                    <h3 className='text-lg font-medium text-ink-900'>
+                                        {props.ride?.destinationPending
+                                            ? 'Preço ao finalizar'
+                                            : `R$ ${props.ride?.fare ?? '—'}`}
+                                    </h3>
                                     <p className='text-sm -mt-1 text-ink-600'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
                                 </div>
                             </div>

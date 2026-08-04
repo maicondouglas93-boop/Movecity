@@ -95,6 +95,9 @@ const RideRow = ({ ride, footer = null, highlight = false }) => {
             <div className="flex justify-between items-start gap-3 mb-3">
                 <div className="flex flex-col gap-1">
                     <StatusBadge tone={status.tone}>{status.text}</StatusBadge>
+                    {ride.source === 'driver_initiated' && (
+                        <span className="text-xs font-semibold text-brand-600">Corrida presencial</span>
+                    )}
                     <span className="text-xs text-ink-400">{formatDateTime(ride.createdAt)}</span>
                 </div>
                 <span className="text-sm font-semibold text-ink-900 shrink-0">{formatFare(ride)}</span>

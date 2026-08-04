@@ -630,20 +630,29 @@ module.exports.reassignRide = async (req, res, next) => {
             data: { rideId: ride._id }
         });
 
-        const { dispatchRideToCaptains } = require('./ride.controller');
-        await dispatchRideToCaptains(ride, {
-            pickup: ride.pickup,
-            vehicleType: ride.vehicleType,
-            TRACE_ID: `Ride:${ride._id}:AdminReassign`,
-            excludeCaptainId: previousCaptain
-        });
+        // Presencial nunca deve ser redespachada (defesa em profundidade; o service j· bloqueia).
+        if (ride.source !== 'driver_initiated') {
+            const { dispatchRideToCaptains } = require('./ride.controller');
+            await dispatchRideToCaptains(ride, {
+                pickup: ride.pickup,
+                vehicleType: ride.vehicleType,
+                TRACE_ID: `Ride:${ride._id}:AdminReassign`,
+                excludeCaptainId: previousCaptain
+            });
+        }
 
         res.status(200).json(ride);
     } catch (error) {
-        if (error.message === 'Corrida n√£o encontrada') {
+        if (error.message === 'Corrida n√£o encontrada' || error.message === 'Ride not found') {
             return res.status(404).json({ message: error.message });
         }
-        if (error.message.includes('n√£o pode ser reatribu√≠da')) {
+        if (
+            error.message.includes('n√£o pode ser reatribu√≠da')
+            || error.message.includes('n„o pode ser reatribuÌda')
+            || error.message.includes('n„o pode ser reatribuÌda ao despacho')
+            || error.message.includes('Ride cannot be reassigned')
+            || error.message.includes('Corrida presencial')
+        ) {
             return res.status(409).json({ message: error.message });
         }
         next(error);

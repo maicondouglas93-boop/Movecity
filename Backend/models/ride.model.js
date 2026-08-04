@@ -5,11 +5,27 @@ const rideSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
-        required: true
+        // Corrida presencial (driver_initiated) pode existir sem passageiro cadastrado.
+        required: function () {
+            return this.source !== 'driver_initiated';
+        },
     },
     captain: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'captain',
+    },
+    // Origem da solicitação: passageiro via app vs motorista iniciando presencialmente.
+    // driver_initiated NUNCA entra no despacho (findCaptains / new-ride / broadcast).
+    source: {
+        type: String,
+        enum: [ 'passenger_requested', 'driver_initiated' ],
+        default: 'passenger_requested',
+        index: true,
+    },
+    // true quando o motorista inicia sem destino e o GPS do fim define o destino.
+    destinationPending: {
+        type: Boolean,
+        default: false,
     },
     pickup: {
         type: String,
@@ -17,7 +33,9 @@ const rideSchema = new mongoose.Schema({
     },
     destination: {
         type: String,
-        required: true,
+        required: function () {
+            return !this.destinationPending;
+        },
     },
     fare: {
         type: Number,
@@ -53,6 +71,29 @@ const rideSchema = new mongoose.Schema({
     pickupCoordinates: {
         lat: { type: Number },
         lng: { type: Number },
+    },
+    destinationCoordinates: {
+        lat: { type: Number },
+        lng: { type: Number },
+    },
+    // Origem persistida no momento da criação presencial (GPS do motorista no backend).
+    origin: {
+        coordinates: { type: [ Number ] }, // [lng, lat]
+        address: { type: String },
+        timestamp: { type: Date },
+    },
+    // Como o destino definitivo foi obtido (endereço informado vs GPS ao finalizar).
+    destinationMeta: {
+        coordinates: { type: [ Number ] }, // [lng, lat]
+        timestamp: { type: Date },
+        source: {
+            type: String,
+            enum: [ 'user_provided', 'gps_at_finish' ],
+        },
+    },
+    startedAt: {
+        type: Date,
+        description: 'Quando a corrida entrou em started — base preferencial do actualTime',
     },
     estimatedTime: {
         type: Number, // seconds

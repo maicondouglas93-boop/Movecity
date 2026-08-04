@@ -91,12 +91,20 @@ const CaptainHome = () => {
     // Corrida 'started' não passa por aqui: o RideContext redireciona pra /captain-riding.
     useEffect(() => {
         if (!captainRide) return
+        // Presencial: PIN/confirmação tem tela própria (não o popup de corrida despachada).
+        if (captainRide.source === 'driver_initiated') {
+            if (captainRide.status === 'started') return
+            if ([ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(captainRide.status)) {
+                navigate('/captain-presential')
+            }
+            return
+        }
         if ([ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(captainRide.status)) {
             setRide(captainRide)
             setRidePopupPanel(false)
             setConfirmRidePopupPanel(true)
         }
-    }, [captainRide?._id, captainRide?.status])
+    }, [captainRide?._id, captainRide?.status, captainRide?.source, navigate])
 
     // Auditoria de UX do motorista (2026-08-02, §2.7): busca o perfil de novo sob
     // demanda (botão "Verificar novamente" do ApprovalGate) — o contexto só é
@@ -727,6 +735,37 @@ const CaptainHome = () => {
                                 </div>
                             </div>
                         )}
+
+                        {!captainRide && !captainParcel && (
+                            <div className="mb-4">
+                                <p className="text-xs font-semibold tracking-wide text-ink-400 uppercase mb-2">Corridas</p>
+                                <div className="space-y-2">
+                                    <div className="bg-surface border border-line rounded-panel p-4">
+                                        <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+                                            <i className="ri-taxi-fill text-brand-500" aria-hidden="true" />
+                                            Corrida pelo MoveCity
+                                        </p>
+                                        <p className="text-xs text-ink-600 mt-1">
+                                            Aguarde solicitações de passageiros próximos. Fique online para receber ofertas.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate('/captain-presential')}
+                                        className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+                                    >
+                                        <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+                                            <i className="ri-user-shared-fill text-brand-500" aria-hidden="true" />
+                                            Corrida presencial
+                                        </p>
+                                        <p className="text-xs text-ink-600 mt-1">
+                                            Passageiro já está com você — inicia sem despacho para outros motoristas.
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         <CaptainDetails />
                     </div>
                 </>

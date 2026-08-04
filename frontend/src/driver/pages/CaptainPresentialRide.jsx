@@ -1,0 +1,432 @@
+import React, { useContext, useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import axios from 'axios'
+import CaptainHeader from '@/driver/components/CaptainHeader'
+import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
+import Button from '@/shared/components/ui/Button'
+import { LocationContext } from '@/shared/contexts/LocationContext'
+import { RideContext } from '@/shared/contexts/RideContext'
+import { useToast } from '@/shared/contexts/ToastContext'
+import { getAccessToken } from '@/shared/services/session'
+import {
+  createPresentialRide,
+  estimatePresentialFare,
+  startPresentialRide,
+} from '@/shared/services/presentialRideApi'
+
+const STEPS = {
+  CHOICE: 'choice',
+  DESTINATION: 'destination',
+  CONFIRM: 'confirm',
+  PIN: 'pin',
+}
+
+function formatKm(meters) {
+  if (meters == null) return '—'
+  return `${(Number(meters) / 1000).toFixed(1)} km`
+}
+
+function formatMin(seconds) {
+  if (seconds == null) return '—'
+  return `${Math.max(1, Math.round(Number(seconds) / 60))} min`
+}
+
+const CaptainPresentialRide = () => {
+  const navigate = useNavigate()
+  const { userLocation, locationError } = useContext(LocationContext)
+  const { setCaptainRide, captainRide, captainParcel } = useContext(RideContext)
+  const { addToast } = useToast()
+
+  const [step, setStep] = useState(STEPS.CHOICE)
+  const [destinationPending, setDestinationPending] = useState(false)
+  const [destination, setDestination] = useState('')
+  const [suggestions, setSuggestions] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [estimate, setEstimate] = useState(null)
+  const [estimating, setEstimating] = useState(false)
+  const [ride, setRide] = useState(null)
+  const [otpInput, setOtpInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [passengerPhone, setPassengerPhone] = useState('')
+  const [passengerConsent, setPassengerConsent] = useState(false)
+
+  const GPS_MAX_AGE_MS = 60_000
+  const hasFreshGps = () => {
+    if (locationError) return false
+    if (userLocation?.lat == null || userLocation?.lng == null) return false
+    if (userLocation.timestamp && (Date.now() - userLocation.timestamp) > GPS_MAX_AGE_MS) return false
+    return true
+  }
+
+  useEffect(() => {
+    if (captainParcel) {
+      navigate('/captain-parcel', { state: { parcel: captainParcel }, replace: true })
+      return
+    }
+    if (captainRide && captainRide.source !== 'driver_initiated') {
+      if (captainRide.status === 'started') {
+        navigate('/captain-riding', { state: { ride: captainRide }, replace: true })
+      } else {
+        navigate('/captain-home', { replace: true })
+      }
+      return
+    }
+    if (captainRide && [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ].includes(captainRide.status)) {
+      if (captainRide.source === 'driver_initiated' && captainRide.status !== 'started') {
+        setRide(captainRide)
+        setStep(STEPS.PIN)
+      } else if (captainRide.status === 'started') {
+        navigate('/captain-riding', { state: { ride: captainRide }, replace: true })
+      }
+    }
+  }, [captainRide, captainParcel, navigate])
+
+  useEffect(() => {
+    if (step !== STEPS.DESTINATION) return
+    const q = destination.trim()
+    if (q.length < 3) {
+      setSuggestions([])
+      return undefined
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const params = { input: q }
+        if (userLocation?.lat != null) {
+          params.lat = userLocation.lat
+          params.lng = userLocation.lng
+        }
+        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
+          headers: { Authorization: `Bearer ${getAccessToken('captain')}` },
+          params,
+        })
+        setSuggestions(Array.isArray(response.data) ? response.data : [])
+      } catch {
+        setSuggestions([])
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [destination, step, userLocation?.lat, userLocation?.lng])
+
+  const coordsPayload = () => ({
+    ...(userLocation?.lat != null ? { lat: userLocation.lat, lng: userLocation.lng } : {}),
+  })
+
+  const chooseNow = () => {
+    setDestinationPending(false)
+    setStep(STEPS.DESTINATION)
+  }
+
+  const chooseLater = () => {
+    setDestinationPending(true)
+    setDestination('')
+    setEstimate(null)
+    setStep(STEPS.CONFIRM)
+  }
+
+  const selectSuggestion = async (value) => {
+    const address = typeof value === 'string' ? value : (value?.description || value?.place_name || '')
+    setDestination(address)
+    setSuggestions([])
+    setEstimating(true)
+    try {
+      const data = await estimatePresentialFare({
+        destination: address,
+        ...coordsPayload(),
+      })
+      setEstimate(data)
+      setStep(STEPS.CONFIRM)
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Não foi possível estimar a tarifa.', 'error')
+    } finally {
+      setEstimating(false)
+    }
+  }
+
+  const createRide = async () => {
+    if (locationError) {
+      addToast(`GPS necessário: ${locationError}`, 'error')
+      return
+    }
+    if (!hasFreshGps()) {
+      addToast('Aguardando GPS atualizado. Ative a localização e tente de novo.', 'error')
+      return
+    }
+    setLoading(true)
+    try {
+      const payload = {
+        destinationPending,
+        paymentMethod: 'cash',
+        ...coordsPayload(),
+      }
+      if (!destinationPending) {
+        payload.destination = destination.trim()
+      }
+      if (passengerPhone.trim()) {
+        payload.passengerPhone = passengerPhone.trim()
+      }
+      const created = await createPresentialRide(payload)
+      setRide(created)
+      setCaptainRide(created)
+      setStep(STEPS.PIN)
+      addToast('Corrida criada. Informe o PIN ao passageiro.', 'success')
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Não foi possível criar a corrida.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const confirmPin = async (e) => {
+    e.preventDefault()
+    if (!ride?._id) return
+    if (!passengerConsent) {
+      addToast('Confirme que o passageiro autorizou a corrida.', 'error')
+      return
+    }
+    if (!otpInput || otpInput.length !== 6) {
+      addToast('Peça o PIN ao passageiro e digite os 6 dígitos.', 'error')
+      return
+    }
+    setLoading(true)
+    try {
+      const started = await startPresentialRide({ rideId: ride._id, otp: otpInput })
+      setCaptainRide(started)
+      navigate('/captain-riding', { state: { ride: started } })
+    } catch (err) {
+      addToast(err.response?.data?.message || 'PIN inválido.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const cancelCreated = async () => {
+    if (!ride?._id) {
+      navigate('/captain-home')
+      return
+    }
+    setLoading(true)
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
+        { rideId: ride._id, reason: 'Cancelamento de corrida presencial' },
+        { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+      )
+      setCaptainRide(null)
+      navigate('/captain-home')
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Não foi possível cancelar.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-surface-alt">
+      <ConnectionBanner />
+      <div className="flex-1 overflow-y-auto overscroll-y-contain pb-24 pt-16 px-4">
+        <div className="flex items-center gap-3 mb-5 mt-2">
+          <Link
+            to="/captain-home"
+            aria-label="Voltar"
+            className="h-10 w-10 rounded-full bg-surface border border-line flex items-center justify-center"
+          >
+            <i className="ri-arrow-left-line text-lg text-ink-900" aria-hidden="true" />
+          </Link>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-600">Corrida presencial</p>
+            <h1 className="text-xl font-bold text-ink-900 leading-tight">Iniciar sem despacho</h1>
+          </div>
+        </div>
+
+        {step === STEPS.CHOICE && (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-600 mb-4">
+              Use quando o passageiro já estiver com você. A corrida não aparece para outros motoristas.
+            </p>
+            <button
+              type="button"
+              onClick={chooseNow}
+              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+            >
+              <p className="text-base font-semibold text-ink-900 flex items-center gap-2">
+                <i className="ri-map-pin-2-fill text-brand-500" aria-hidden="true" />
+                Informar destino agora
+              </p>
+              <p className="text-xs text-ink-600 mt-1">Calculamos a estimativa antes de iniciar.</p>
+            </button>
+            <button
+              type="button"
+              onClick={chooseLater}
+              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+            >
+              <p className="text-base font-semibold text-ink-900 flex items-center gap-2">
+                <i className="ri-route-fill text-brand-500" aria-hidden="true" />
+                Definir destino ao finalizar
+              </p>
+              <p className="text-xs text-ink-600 mt-1">Ideal para “pode me levar até ali”.</p>
+            </button>
+          </div>
+        )}
+
+        {step === STEPS.DESTINATION && (
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-ink-600" htmlFor="presential-destination">
+              Destino
+            </label>
+            <input
+              id="presential-destination"
+              type="text"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              placeholder="Digite o endereço de destino"
+              className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-ink-900"
+              autoComplete="off"
+            />
+            {searching && <p className="text-xs text-ink-400">Buscando endereços…</p>}
+            <ul className="space-y-2">
+              {suggestions.map((s, idx) => {
+                const label = typeof s === 'string' ? s : (s.description || s.place_name || '')
+                return (
+                  <li key={`${idx}-${label}`}>
+                    <button
+                      type="button"
+                      onClick={() => selectSuggestion(s)}
+                      disabled={estimating}
+                      className="w-full text-left px-3 py-3 rounded-panel bg-surface border border-line text-sm text-ink-900"
+                    >
+                      <i className="ri-map-pin-line text-brand-500 mr-2" aria-hidden="true" />
+                      {label}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {destination.trim().length >= 3 && (
+              <Button
+                type="button"
+                onClick={() => selectSuggestion(destination.trim())}
+                loading={estimating}
+                disabled={estimating}
+              >
+                Usar este endereço
+              </Button>
+            )}
+            <Button type="button" variant="ghost" onClick={() => setStep(STEPS.CHOICE)}>
+              Voltar
+            </Button>
+          </div>
+        )}
+
+        {step === STEPS.CONFIRM && (
+          <div className="space-y-4">
+            <div className="bg-surface border border-line rounded-panel p-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-600">Resumo</p>
+              {destinationPending ? (
+                <p className="text-sm text-ink-900">
+                  Destino: <span className="font-semibold">será definido ao finalizar</span>
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-ink-900 break-words">{destination}</p>
+                  {estimate && (
+                    <div className="flex gap-4 text-sm text-ink-600 pt-1">
+                      <span>{formatKm(estimate.estimatedDistance)}</span>
+                      <span>{formatMin(estimate.estimatedTime)}</span>
+                      <span className="font-semibold text-ink-900">
+                        R$ {Number(estimate.fare).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-600 mb-1" htmlFor="passenger-phone">
+                Telefone do passageiro (opcional)
+              </label>
+              <input
+                id="passenger-phone"
+                type="tel"
+                value={passengerPhone}
+                onChange={(e) => setPassengerPhone(e.target.value)}
+                placeholder="+55…"
+                className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-ink-900"
+              />
+              <p className="text-xs text-ink-400 mt-1">Se cadastrado no MoveCity, vinculamos ao histórico dele.</p>
+            </div>
+
+            <Button type="button" onClick={createRide} loading={loading} disabled={loading || estimating}>
+              Confirmar e gerar PIN
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setStep(destinationPending ? STEPS.CHOICE : STEPS.DESTINATION)}
+              className="w-full"
+            >
+              Voltar
+            </Button>
+          </div>
+        )}
+
+        {step === STEPS.PIN && ride && (
+          <div className="space-y-4">
+            <div className="bg-brand-50 border border-brand-200 rounded-panel p-5 text-center">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700 mb-2">
+                PIN do passageiro
+              </p>
+              <p className="text-4xl font-bold tracking-[0.35em] text-ink-900 tabular-nums">
+                {ride.otp || '······'}
+              </p>
+              <p className="text-xs text-ink-600 mt-3">
+                Mostre este PIN ao passageiro. Ele deve confirmar verbalmente. Em seguida digite o PIN no campo abaixo — não inicie sem a autorização dele.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-3 bg-surface border border-line rounded-panel p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={passengerConsent}
+                onChange={(e) => setPassengerConsent(e.target.checked)}
+                className="mt-1 h-4 w-4 accent-brand-500"
+              />
+              <span className="text-sm text-ink-900">
+                O passageiro autorizou esta corrida presencial e confirmou o PIN comigo.
+              </span>
+            </label>
+
+            <form onSubmit={confirmPin} className="space-y-3">
+              <label className="block text-sm font-medium text-ink-600" htmlFor="confirm-otp">
+                Digite o PIN confirmado
+              </label>
+              <input
+                id="confirm-otp"
+                inputMode="numeric"
+                maxLength={6}
+                value={otpInput}
+                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                autoComplete="one-time-code"
+                className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-center text-2xl tracking-[0.4em] font-bold text-ink-900"
+                placeholder="••••••"
+              />
+              <Button type="submit" loading={loading} disabled={loading || !passengerConsent}>
+                Iniciar corrida
+              </Button>
+            </form>
+
+            <Button type="button" variant="ghost" onClick={cancelCreated} disabled={loading} className="w-full text-danger-600">
+              Cancelar corrida
+            </Button>
+          </div>
+        )}
+      </div>
+      <CaptainHeader />
+    </div>
+  )
+}
+
+export default CaptainPresentialRide

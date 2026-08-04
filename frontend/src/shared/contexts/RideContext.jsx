@@ -182,6 +182,25 @@ const RideProvider = ({ children }) => {
             }
         }
 
+        // Presencial pré-início: reconduz ao wizard do PIN de qualquer tela do motorista.
+        if (
+            captainRide?.source === 'driver_initiated'
+            && [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(captainRide.status)
+        ) {
+            const key = `captain-presential:${captainRide._id}`
+            if (path === '/captain-presential') {
+                redirectedJobsRef.current.add(key)
+            } else if (
+                path.startsWith('/captain')
+                && path !== '/captain-riding'
+                && !redirectedJobsRef.current.has(key)
+            ) {
+                redirectedJobsRef.current.add(key)
+                navigate('/captain-presential', { replace: true })
+                return
+            }
+        }
+
         // Wizard bloqueado se já há ride/parcel ativo.
         if (path === '/encomenda') {
             if (userRide) {

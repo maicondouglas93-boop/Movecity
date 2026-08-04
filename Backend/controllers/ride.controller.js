@@ -229,6 +229,87 @@ module.exports.acceptRide = async (req, res) => {
     return performAcceptRide(rideId, req.captain, res);
 }
 
+module.exports.createPresentialRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const {
+        destination,
+        destinationPending,
+        paymentMethod,
+        passengerPhone,
+        lat,
+        lng,
+    } = req.body;
+
+    try {
+        const ride = await rideService.createPresentialRide({
+            captain: req.captain,
+            destination: destinationPending ? null : destination,
+            destinationPending: !!destinationPending,
+            paymentMethod: paymentMethod || 'cash',
+            passengerPhone: passengerPhone || null,
+            clientLat: lat != null ? Number(lat) : null,
+            clientLng: lng != null ? Number(lng) : null,
+        });
+
+        deleteCache('dashboard:today');
+        if (ride.user) {
+            deleteByPrefix(`history:${ride.user._id || ride.user}`);
+        }
+
+        // NUNCA despacha — source=driver_initiated já vinculada ao motorista.
+        return res.status(201).json(ride);
+    } catch (err) {
+        if (err.code === 'CAPTAIN_NOT_ALLOWED') {
+            return res.status(403).json({ message: 'Motorista não autorizado a iniciar corrida presencial.' });
+        }
+        if (err.code === 'INVALID_CAPTAIN_LOCATION') {
+            return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
+        }
+        if (err.code === 'CAPTAIN_BUSY') {
+            return res.status(409).json({ message: 'Você já possui uma corrida ou encomenda em andamento.' });
+        }
+        if (err.code === 'PRESENTIAL_CASH_ONLY') {
+            return res.status(400).json({ message: 'Corrida presencial aceita apenas pagamento em dinheiro.' });
+        }
+        if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.code === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({ message: 'O passageiro informado já possui um serviço em andamento.' });
+        }
+        if (err.message === 'Destination is required when not pending') {
+            return res.status(400).json({ message: 'Informe o destino ou escolha definir ao finalizar.' });
+        }
+        console.error('[AUDIT] createPresentialRide error:', err);
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.estimatePresentialFare = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { destination, lat, lng } = req.query;
+
+    try {
+        const estimate = await rideService.estimatePresentialFare({
+            captain: req.captain,
+            destination,
+            clientLat: lat != null ? Number(lat) : null,
+            clientLng: lng != null ? Number(lng) : null,
+        });
+        return res.status(200).json(estimate);
+    } catch (err) {
+        if (err.code === 'INVALID_CAPTAIN_LOCATION') {
+            return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports.startRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -240,13 +321,18 @@ module.exports.startRide = async (req, res) => {
     try {
         const ride = await rideService.startRide({ rideId, otp, captain: req.captain });
 
-        console.log(ride);
+        // Não logar o documento da ride — OTP e PII (auditoria presencial).
+        console.log(`[AUDIT] startRide ok ride=${ride._id} captain=${req.captain._id} source=${ride.source || 'passenger_requested'}`);
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-started',
-            data: ride
-        })
-        notificationService.sendRideStarted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        if (ride.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-started',
+                data: ride
+            });
+        }
+        if (ride.user?._id) {
+            notificationService.sendRideStarted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        }
 
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
@@ -334,11 +420,15 @@ module.exports.endRide = async (req, res) => {
     try {
         const ride = await rideService.endRide({ rideId, captain: req.captain });
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-ended',
-            data: ride
-        })
-        notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        if (ride.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-ended',
+                data: ride
+            });
+        }
+        if (ride.user?._id) {
+            notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        }
 
         announceCaptainAvailable(req.captain, ride);
 
@@ -355,6 +445,26 @@ module.exports.endRide = async (req, res) => {
         }
         if (err.message === 'Ride not started') {
             return res.status(409).json({ message: 'Corrida não está mais num estado que permita finalizar.' });
+        }
+        if (err.code === 'INVALID_FINISH_LOCATION' || err.message === 'INVALID_FINISH_LOCATION') {
+            return res.status(400).json({
+                message: 'GPS inválido ao finalizar. Aguarde sinal de localização e tente novamente.',
+            });
+        }
+        if (err.code === 'STALE_FINISH_LOCATION') {
+            return res.status(400).json({
+                message: 'Localização desatualizada. Mantenha o GPS ativo por alguns segundos e tente novamente.',
+            });
+        }
+        if (err.code === 'INSUFFICIENT_TRIP_DISTANCE') {
+            return res.status(400).json({
+                message: 'Distância insuficiente para finalizar. Continue a corrida com GPS ativo ou cancele se foi um engano.',
+            });
+        }
+        if (err.code === 'ROUTE_CALCULATION_FAILED' || err.code === 'PRICING_FAILED') {
+            return res.status(502).json({
+                message: 'Não foi possível calcular rota/tarifa agora. Tente novamente em instantes.',
+            });
         }
         return res.status(500).json({ message: err.message });
     }
@@ -579,22 +689,29 @@ module.exports.captainCancelRide = async (req, res) => {
         // passageiro de verdade. sendMessageToSocketId manda direto pro socket dele,
         // igual a todo outro evento direcionado ao passageiro (ride-confirmed,
         // ride-started, ride-status-updated).
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-cancelled-by-captain',
-            data: { rideId: ride._id }
-        });
-
-        // Push como reforço — o socket acima só funciona com o app aberto/conectado
-        // naquele instante (mesmo motivo do A6 da auditoria de push, agora na direção
-        // oposta: motorista cancela, passageiro precisa saber mesmo em segundo plano).
-        notificationService.sendRideRequeuedToUser(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
-
-        await dispatchRideToCaptains(ride, {
-            pickup: ride.pickup,
-            vehicleType: ride.vehicleType,
-            TRACE_ID,
-            excludeCaptainId: req.captain._id
-        });
+        // Presencial: cancelamento terminal — sem redespacho.
+        if (ride.source !== 'driver_initiated') {
+            if (ride.user?.socketId) {
+                sendMessageToSocketId(ride.user.socketId, {
+                    event: 'ride-cancelled-by-captain',
+                    data: { rideId: ride._id }
+                });
+            }
+            if (ride.user?._id) {
+                notificationService.sendRideRequeuedToUser(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+            }
+            await dispatchRideToCaptains(ride, {
+                pickup: ride.pickup,
+                vehicleType: ride.vehicleType,
+                TRACE_ID,
+                excludeCaptainId: req.captain._id
+            });
+        } else if (ride.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-cancelled-by-captain',
+                data: { rideId: ride._id, presential: true }
+            });
+        }
 
         announceCaptainAvailable(req.captain, ride);
 

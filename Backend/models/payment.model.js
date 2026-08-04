@@ -9,7 +9,8 @@ const paymentSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
-        required: true
+        // Opcional em corrida presencial sem passageiro cadastrado no app.
+        required: false,
     },
     amount: {
         type: Number,

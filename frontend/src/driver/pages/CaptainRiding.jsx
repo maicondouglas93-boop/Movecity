@@ -24,6 +24,8 @@ import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
+    const [ elapsedSec, setElapsedSec ] = useState(0)
+    const [ liveDistance, setLiveDistance ] = useState(0)
     const location = useLocation()
     // Auditoria de UX do motorista (2026-08-02, §2.6): rideData vivia só em
     // location.state, que não sobrevive a um refresh de página nem ao app sendo
@@ -48,13 +50,52 @@ const CaptainRiding = () => {
     // Fase D da experiência de corrida ativa (2026-08-03): navegação estilo Waze.
     // Começa ligada — o motorista chegou aqui justamente para dirigir até o destino —
     // mas dá para desligar e ver a rota inteira de cima quando ele quiser se situar.
-    const [ navigationMode, setNavigationMode ] = useState(true)
+    // Sem destino (presencial pending) navegação turn-by-turn não tem rota — começa desligada.
+    const [ navigationMode, setNavigationMode ] = useState(
+        () => !(location.state?.ride?.destinationPending || captainRide?.destinationPending)
+    )
     const [ navInfo, setNavInfo ] = useState(null)
     // Painel inferior recolhido por padrão: o mapa é o que importa dirigindo. Os dados
     // do passageiro continuam a um toque de distância.
     const [ hudExpanded, setHudExpanded ] = useState(false)
 
     const handleNavigationUpdate = useCallback((info) => setNavInfo(info), [])
+
+    const isPresential = rideData?.source === 'driver_initiated'
+
+    useEffect(() => {
+        if (rideData?.destinationPending) setNavigationMode(false)
+    }, [rideData?._id, rideData?.destinationPending])
+
+    useEffect(() => {
+        if (!rideData || rideData.status !== 'started') return undefined
+        const base = rideData.startedAt || rideData.updatedAt || rideData.createdAt
+        const tick = () => {
+            const startMs = base ? new Date(base).getTime() : Date.now()
+            setElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)))
+        }
+        tick()
+        const id = setInterval(tick, 1000)
+        return () => clearInterval(id)
+    }, [rideData?._id, rideData?.status, rideData?.startedAt, rideData?.updatedAt, rideData?.createdAt])
+
+    useEffect(() => {
+        if (rideData?.actualDistance != null) {
+            setLiveDistance(rideData.actualDistance)
+        }
+    }, [rideData?.actualDistance])
+
+    useEffect(() => {
+        if (!socket) return undefined
+        const onLoc = (payload) => {
+            if (payload?.rideId && rideData?._id && String(payload.rideId) !== String(rideData._id)) return
+            if (typeof payload?.actualDistance === 'number') {
+                setLiveDistance(payload.actualDistance)
+            }
+        }
+        socket.on('captain-location-updated', onLoc)
+        return () => socket.off('captain-location-updated', onLoc)
+    }, [socket, rideData?._id])
 
     useEffect(() => {
         if (rideData) {
@@ -128,8 +169,16 @@ const CaptainRiding = () => {
         const locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
         updateLocation()
 
-        addToast('Corrida iniciada — navegue até o destino!', 'info')
-        showBrowserNotification('Corrida Iniciada', `A caminho de ${rideData?.destination?.split(',')[0]}`)
+        const destLabel = rideData?.destinationPending
+            ? 'destino a definir ao finalizar'
+            : (rideData?.destination?.split(',')[0] || 'destino')
+        addToast(
+            rideData?.destinationPending
+                ? 'Corrida presencial iniciada — GPS ativo. Destino ao finalizar.'
+                : 'Corrida iniciada — navegue até o destino!',
+            'info'
+        )
+        showBrowserNotification('Corrida Iniciada', `A caminho de ${destLabel}`)
 
         return () => {
             clearInterval(locationInterval);
@@ -292,19 +341,21 @@ const CaptainRiding = () => {
                             <i className="text-lg ri-phone-fill"></i>
                         </a>
                     )}
-                    <button
-                        type="button"
-                        onClick={() => setIsChatOpen(true)}
-                        aria-label="Abrir chat com o passageiro"
-                        className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative pointer-events-auto'
-                    >
-                        <i className="text-lg font-medium ri-chat-3-line"></i>
-                        {unreadCount > 0 && (
-                            <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-raised'>
-                                {unreadCount > 9 ? '9+' : unreadCount}
-                            </span>
-                        )}
-                    </button>
+                    {rideData?.user && (
+                        <button
+                            type="button"
+                            onClick={() => setIsChatOpen(true)}
+                            aria-label="Abrir chat com o passageiro"
+                            className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative pointer-events-auto'
+                        >
+                            <i className="text-lg font-medium ri-chat-3-line"></i>
+                            {unreadCount > 0 && (
+                                <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold shadow-raised'>
+                                    {unreadCount > 9 ? '9+' : unreadCount}
+                                </span>
+                            )}
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -328,7 +379,28 @@ const CaptainRiding = () => {
 
                     <div className='px-5 pb-5 flex items-center justify-between gap-3'>
                         <div className='min-w-0'>
-                            {navInfo?.etaMinutes != null ? (
+                            {isPresential ? (
+                                <>
+                                    <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-600'>
+                                        Corrida presencial
+                                    </p>
+                                    <p className='text-sm font-semibold text-brand-700 flex items-center gap-1.5'>
+                                        <span className='inline-block h-2 w-2 rounded-full bg-brand-500' aria-hidden="true" />
+                                        Em andamento
+                                    </p>
+                                    <p className='text-xs text-ink-600 mt-1'>
+                                        Tempo {String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:{String(elapsedSec % 60).padStart(2, '0')}
+                                        {' · '}
+                                        Distância {(liveDistance / 1000).toFixed(1)} km
+                                    </p>
+                                    <p className='text-xs text-ink-400 truncate mt-0.5'>
+                                        Destino{' '}
+                                        {rideData?.destinationPending
+                                            ? 'Será definido ao finalizar'
+                                            : (rideData?.destination?.split(',')[0] || '—')}
+                                    </p>
+                                </>
+                            ) : navInfo?.etaMinutes != null ? (
                                 <>
                                     <p className='text-xl font-bold text-ink-900 leading-tight'>
                                         {navInfo.etaMinutes} min
@@ -359,13 +431,17 @@ const CaptainRiding = () => {
                             className='flex-shrink-0 bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 px-5 rounded-panel text-sm shadow-floating active:scale-95 transition-all whitespace-nowrap'
                         >
                             <i className="ri-flag-fill mr-1"></i>
-                            Concluir
+                            {isPresential ? 'Finalizar corrida' : 'Concluir'}
                         </button>
                     </div>
 
                     {hudExpanded && (
                         <div className='px-5 pb-6 pt-1 border-t border-line space-y-3'>
-                            <PassengerIdentityCard user={rideData?.user} showPhoto />
+                            {rideData?.user ? (
+                                <PassengerIdentityCard user={rideData.user} showPhoto />
+                            ) : isPresential ? (
+                                <p className='text-sm text-ink-600'>Passageiro presencial (sem conta vinculada)</p>
+                            ) : null}
                             <div className='flex items-center gap-3 min-w-0'>
                                 <img
                                     src={vehicleImg}
@@ -378,10 +454,14 @@ const CaptainRiding = () => {
                                 <div className='min-w-0'>
                                     <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
                                         <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0" aria-hidden="true"></i>
-                                        {rideData?.destination || 'Destino'}
+                                        {rideData?.destinationPending
+                                            ? 'Será definido ao finalizar'
+                                            : (rideData?.destination || 'Destino')}
                                     </p>
                                     <p className='text-xs text-ink-600 font-medium'>
-                                        {rideData?.fare ? `R$${rideData.fare}` : ''}
+                                        {rideData?.destinationPending
+                                            ? 'Preço ao finalizar'
+                                            : (rideData?.fare ? `R$${rideData.fare}` : '')}
                                     </p>
                                 </div>
                             </div>

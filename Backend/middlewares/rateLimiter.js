@@ -30,3 +30,18 @@ module.exports.parcelPinLimiter = rateLimit({
     },
     message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
 });
+
+// PIN de início de corrida (6 dígitos) — auditoria presencial A6.
+module.exports.rideStartPinLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 8,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: (req) => {
+        const captainId = req.captain?._id?.toString?.() || req.ip || 'anon';
+        const rideId = req.query?.rideId || 'unknown';
+        return `ride-start-pin:${captainId}:${rideId}`;
+    },
+    message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
+});

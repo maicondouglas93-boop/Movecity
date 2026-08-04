@@ -273,6 +273,8 @@ module.exports.createRide = async ({
         observation,
         requestFemaleDriver,
         vehicleType,
+        source: 'passenger_requested',
+        destinationPending: false,
         status: 'requested',
         estimatedDistance: distance,
         estimatedTime: time,
@@ -309,6 +311,358 @@ module.exports.createRide = async ({
 
     return { ride, promoError };
 }
+
+function isValidGpsCoord(lat, lng) {
+    return Number.isFinite(lat)
+        && Number.isFinite(lng)
+        && lat >= -90 && lat <= 90
+        && lng >= -180 && lng <= 180
+        && !(Math.abs(lat) < 1e-6 && Math.abs(lng) < 1e-6);
+}
+
+function resolveCaptainOrigin(captainDoc, clientLat, clientLng) {
+    const storedLat = captainDoc?.location?.ltd;
+    const storedLng = captainDoc?.location?.lng;
+    const clientOk = isValidGpsCoord(clientLat, clientLng);
+    const storedOk = isValidGpsCoord(storedLat, storedLng);
+
+    if (clientOk && storedOk) {
+        const jumpKm = mapService.haversineKm(storedLat, storedLng, clientLat, clientLng);
+        // Aceita o GPS fresco do app só se estiver coerente com a última posição do backend.
+        if (jumpKm <= 2) {
+            return { lat: clientLat, lng: clientLng, from: 'client_validated' };
+        }
+        return { lat: storedLat, lng: storedLng, from: 'server' };
+    }
+    if (clientOk) return { lat: clientLat, lng: clientLng, from: 'client' };
+    if (storedOk) return { lat: storedLat, lng: storedLng, from: 'server' };
+    return null;
+}
+
+// Corrida presencial iniciada pelo motorista — reutiliza PricingEngine/OTP/busyLock/
+// índice de corrida ativa. Nunca despacha (source=driver_initiated + status=accepted).
+module.exports.createPresentialRide = async ({
+    captain,
+    destination = null,
+    destinationPending = false,
+    paymentMethod = 'cash',
+    passengerPhone = null,
+    clientLat = null,
+    clientLng = null,
+}) => {
+    if (!captain) {
+        throw new Error('Captain is required');
+    }
+    if (!destinationPending && (!destination || String(destination).trim().length < 3)) {
+        throw new Error('Destination is required when not pending');
+    }
+    if (destinationPending && destination) {
+        throw new Error('Do not send destination when destinationPending is true');
+    }
+
+    // Auditoria C3: presencial só liquidação em dinheiro no local até existir cobrança
+    // Asaas/carteira dedicada. Aceitar card/carteira creditava wallet sem gateway.
+    const normalizedPayment = String(paymentMethod || 'cash').toLowerCase();
+    if (normalizedPayment !== 'cash') {
+        const err = new Error('PRESENTIAL_CASH_ONLY');
+        err.code = 'PRESENTIAL_CASH_ONLY';
+        throw err;
+    }
+    paymentMethod = 'cash';
+
+    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked || captain.canReceiveRides === false) {
+        const err = new Error('CAPTAIN_NOT_ALLOWED');
+        err.code = 'CAPTAIN_NOT_ALLOWED';
+        throw err;
+    }
+
+    const captainModel = require('../models/captain.model');
+    const freshCaptain = await captainModel.findById(captain._id);
+    if (!freshCaptain) {
+        throw new Error('Captain not found');
+    }
+    if (freshCaptain.approvalStatus !== 'aprovado' || freshCaptain.isBlocked || freshCaptain.canReceiveRides === false) {
+        const err = new Error('CAPTAIN_NOT_ALLOWED');
+        err.code = 'CAPTAIN_NOT_ALLOWED';
+        throw err;
+    }
+
+    const vehicleType = freshCaptain.vehicle?.vehicleType;
+    if (!vehicleType) {
+        throw new Error('Captain vehicle category is required');
+    }
+
+    const origin = resolveCaptainOrigin(freshCaptain, clientLat, clientLng);
+    if (!origin) {
+        const err = new Error('INVALID_CAPTAIN_LOCATION');
+        err.code = 'INVALID_CAPTAIN_LOCATION';
+        throw err;
+    }
+
+    // Persiste a origem usada na criação (auditoria + tracking).
+    await captainModel.findByIdAndUpdate(freshCaptain._id, {
+        location: { ltd: origin.lat, lng: origin.lng },
+        locationGeoJSON: { type: 'Point', coordinates: [ origin.lng, origin.lat ] },
+        lastSeenAt: new Date(),
+    });
+
+    let pickupAddress;
+    try {
+        const rev = await mapService.getReverseGeocode(origin.lat, origin.lng);
+        pickupAddress = rev?.address || `${origin.lat.toFixed(5)}, ${origin.lng.toFixed(5)}`;
+    } catch {
+        pickupAddress = `${origin.lat.toFixed(5)}, ${origin.lng.toFixed(5)}`;
+    }
+
+    // Auditoria A2: não aceitar passengerUserId arbitrário do client (IDOR de vínculo).
+    // Só associa passageiro se o telefone existir no cadastro (opt-in fraco, sem ObjectId livre).
+    let linkedUserId = null;
+    if (passengerPhone) {
+        const phone = String(passengerPhone).trim();
+        const found = await userModel.findOne({ phone }).select('_id');
+        if (found) linkedUserId = found._id;
+    }
+
+    if (linkedUserId) {
+        const parcelModel = require('../models/parcel.model');
+        const dispatchService = require('./dispatch.service');
+        const activeParcel = await parcelModel.exists({
+            user: linkedUserId,
+            status: {
+                $in: [
+                    'awaiting_provider',
+                    ...dispatchService.ACTIVE_PARCEL_STATUSES,
+                    'delivered',
+                ],
+            },
+        });
+        if (activeParcel) {
+            const err = new Error('USER_HAS_ACTIVE_PARCEL');
+            err.code = 'USER_HAS_ACTIVE_PARCEL';
+            throw err;
+        }
+        const activeUserRide = await rideModel.exists({
+            user: linkedUserId,
+            status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
+        });
+        if (activeUserRide) {
+            const err = new Error('USER_HAS_ACTIVE_RIDE');
+            err.code = 'USER_HAS_ACTIVE_RIDE';
+            throw err;
+        }
+    }
+
+    const dispatchService = require('./dispatch.service');
+    if (await dispatchService.captainHasActiveParcel(freshCaptain._id)) {
+        const err = new Error('CAPTAIN_BUSY');
+        err.code = 'CAPTAIN_BUSY';
+        throw err;
+    }
+
+    const locked = await dispatchService.acquireCaptainBusyLock(freshCaptain._id);
+    if (!locked) {
+        const err = new Error('CAPTAIN_BUSY');
+        err.code = 'CAPTAIN_BUSY';
+        throw err;
+    }
+
+    let presentialCreatedId = null;
+    try {
+        const existingActive = await rideModel.exists({
+            captain: freshCaptain._id,
+            status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
+        });
+        if (existingActive) {
+            const err = new Error('CAPTAIN_BUSY');
+            err.code = 'CAPTAIN_BUSY';
+            throw err;
+        }
+
+        const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+        const otp = getOtp(6);
+        const originTimestamp = new Date();
+
+        let fare = 0;
+        let finalPrice = 0;
+        let estimatedDistance = 0;
+        let estimatedTime = 0;
+        let fareBreakdown = null;
+        let commissionAmount = 0;
+        let commissionPercent = 0;
+        let destinationCoords = null;
+        let destinationMeta = undefined;
+        let destinationValue = undefined;
+
+        if (!destinationPending) {
+            const distanceTime = await mapService.getDistanceTime(
+                `${origin.lat},${origin.lng}`,
+                destination
+            );
+            estimatedDistance = distanceTime.distance.value;
+            estimatedTime = distanceTime.duration.value;
+
+            const pricing = await PricingEngine.calculateFare({
+                distance: estimatedDistance,
+                time: estimatedTime,
+                vehicleType,
+                paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod,
+                configSnapshot: pricingSnapshot,
+            });
+            fare = pricing.finalFare;
+            finalPrice = pricing.finalFare;
+            fareBreakdown = pricing.fareBreakdown;
+            commissionAmount = pricing.commissionAmount;
+            commissionPercent = pricing.fareBreakdown.platformCommission > 0
+                ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100)
+                : 0;
+
+            try {
+                const dest = await mapService.getAddressCoordinate(destination);
+                if (dest && isValidGpsCoord(dest.ltd, dest.lng)) {
+                    destinationCoords = { lat: dest.ltd, lng: dest.lng };
+                    destinationMeta = {
+                        coordinates: [ dest.lng, dest.ltd ],
+                        timestamp: originTimestamp,
+                        source: 'user_provided',
+                    };
+                }
+            } catch {
+                // Destino textual ainda é válido; coords opcionais.
+            }
+            destinationValue = String(destination).trim();
+        } else {
+            // Sem destino: congela snapshot; preço real só no endRide via GPS + PricingEngine.
+            // Não chama calculateFare(0) — isso retornaria minFare e enganaria a UI.
+            fare = 0;
+            finalPrice = 0;
+            fareBreakdown = { pendingDestination: true };
+            commissionAmount = 0;
+            commissionPercent = pricingSnapshot?.globalSetting?.platformCommission ?? 20;
+        }
+
+        const ridePayload = {
+            user: linkedUserId || undefined,
+            captain: freshCaptain._id,
+            pickup: pickupAddress,
+            pickupCoordinates: { lat: origin.lat, lng: origin.lng },
+            origin: {
+                coordinates: [ origin.lng, origin.lat ],
+                address: pickupAddress,
+                timestamp: originTimestamp,
+            },
+            otp,
+            fare,
+            finalPrice,
+            paymentMethod,
+            vehicleType,
+            source: 'driver_initiated',
+            destinationPending: !!destinationPending,
+            status: 'accepted',
+            estimatedDistance,
+            estimatedTime,
+            estimatedPriceMin: fare,
+            estimatedPriceMax: fare,
+            commissionPercent,
+            commissionAmount,
+            fareBreakdown,
+            pricingSnapshot,
+            distance: estimatedDistance,
+            duration: estimatedTime,
+            lastLocation: { lat: origin.lat, lng: origin.lng },
+            actualDistance: 0,
+        };
+
+        if (destinationValue) {
+            ridePayload.destination = destinationValue;
+        }
+        if (destinationCoords) {
+            ridePayload.destinationCoordinates = destinationCoords;
+        }
+        if (destinationMeta) {
+            ridePayload.destinationMeta = destinationMeta;
+        }
+
+        const ride = await rideModel.create(ridePayload);
+        presentialCreatedId = ride._id;
+
+        try {
+            if (linkedUserId && finalPrice > 0) {
+                await paymentModel.create({
+                    rideId: ride._id,
+                    userId: linkedUserId,
+                    amount: finalPrice,
+                    method: paymentMethod,
+                    status: 'pending',
+                });
+            }
+
+            return await rideModel.findById(ride._id)
+                .populate('user', USER_IDENTITY_FIELDS)
+                .populate('captain', CAPTAIN_IDENTITY_FIELDS)
+                .select('+otp');
+        } catch (postCreateErr) {
+            // Corrida já existe e ocupa o captain — mantém busyLock e devolve a ride.
+            console.error('[AUDIT] createPresentialRide pós-create:', postCreateErr);
+            return rideModel.findById(ride._id)
+                .populate('user', USER_IDENTITY_FIELDS)
+                .populate('captain', CAPTAIN_IDENTITY_FIELDS)
+                .select('+otp');
+        }
+    } catch (err) {
+        // Só libera o lock se a corrida NÃO chegou a ser criada.
+        if (!presentialCreatedId) {
+            await dispatchService.releaseCaptainBusyLock(freshCaptain._id);
+        }
+        // Índice único captain_active_ride_unique
+        if (err && err.code === 11000) {
+            const busy = new Error('CAPTAIN_BUSY');
+            busy.code = 'CAPTAIN_BUSY';
+            throw busy;
+        }
+        throw err;
+    }
+};
+
+module.exports.estimatePresentialFare = async ({ captain, destination, clientLat = null, clientLng = null }) => {
+    if (!captain || !destination) {
+        throw new Error('Captain and destination are required');
+    }
+    const captainModel = require('../models/captain.model');
+    const freshCaptain = await captainModel.findById(captain._id);
+    if (!freshCaptain) throw new Error('Captain not found');
+
+    const origin = resolveCaptainOrigin(freshCaptain, clientLat, clientLng);
+    if (!origin) {
+        const err = new Error('INVALID_CAPTAIN_LOCATION');
+        err.code = 'INVALID_CAPTAIN_LOCATION';
+        throw err;
+    }
+
+    const vehicleType = freshCaptain.vehicle?.vehicleType;
+    if (!vehicleType) throw new Error('Captain vehicle category is required');
+
+    const distanceTime = await mapService.getDistanceTime(
+        `${origin.lat},${origin.lng}`,
+        destination
+    );
+    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+    const pricing = await PricingEngine.calculateFare({
+        distance: distanceTime.distance.value,
+        time: distanceTime.duration.value,
+        vehicleType,
+        paymentMethod: 'cash',
+        configSnapshot: pricingSnapshot,
+    });
+
+    return {
+        pickupCoordinates: { lat: origin.lat, lng: origin.lng },
+        estimatedDistance: distanceTime.distance.value,
+        estimatedTime: distanceTime.duration.value,
+        fare: pricing.finalFare,
+        fareBreakdown: pricing.fareBreakdown,
+        vehicleType,
+    };
+};
 
 // Único caminho de aceite de corrida no sistema (P1.3 da auditoria de concorrência,
 // 2026-08-01) — usado tanto por POST /rides/:id/accept quanto por POST /rides/confirm
@@ -382,11 +736,15 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
     if (!rideId || !otp) {
         throw new Error('Ride id and OTP are required');
     }
+    if (!captain?._id) {
+        throw new Error('Captain is required');
+    }
 
     // Pré-checagem só pra mensagens de erro precisas (OTP errado vs. corrida em estado
     // errado) — a garantia real de concorrência é o findOneAndUpdate atômico abaixo.
     const ride = await rideModel.findOne({
-        _id: rideId
+        _id: rideId,
+        captain: captain._id,
     }).populate('user').populate('captain').select('+otp');
 
     if (!ride) {
@@ -417,10 +775,15 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         }
     }
 
-    // Guarda atômica de verdade: status de origem E otp certo no mesmo filtro. Se outro
-    // request (cancelamento, ou outra tentativa de start) mudou o status entre a leitura
-    // acima e aqui, isto retorna null em vez de gravar por cima de um estado inválido.
-    const updatedRide = await transitionRide(rideId, 'started', { otp }, { waitTimeFeeCharged });
+    // Guarda atômica: status de origem + otp + captain dono no mesmo filtro (auditoria A1).
+    const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
+        waitTimeFeeCharged,
+        startedAt: new Date(),
+        // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
+        ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
+            ? { lastLocation: { lat: ride.captain.location.ltd, lng: ride.captain.location.lng } }
+            : {}),
+    });
     if (!updatedRide) {
         throw new Error('Ride not accepted');
     }
@@ -479,19 +842,108 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw new Error('Ride not started');
     }
 
-    const actualDistance = ride.actualDistance || 0;
-    // Calculate elapsed time in seconds
-    let actualTimeSeconds = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 1000);
-    if (actualTimeSeconds < 60) actualTimeSeconds = ride.estimatedTime; // Sanity check
+    const finishExtras = {};
+    const isPresentialPendingDest = !!(ride.destinationPending || (ride.source === 'driver_initiated' && !ride.destination));
+
+    // Corrida presencial sem destino: destino = última GPS válida do motorista.
+    if (isPresentialPendingDest) {
+        const captainModel = require('../models/captain.model');
+        const freshCaptain = await captainModel.findById(captain._id).select('location lastSeenAt');
+        const gpsLat = ride.lastLocation?.lat ?? freshCaptain?.location?.ltd;
+        const gpsLng = ride.lastLocation?.lng ?? freshCaptain?.location?.lng;
+
+        if (!isValidGpsCoord(gpsLat, gpsLng)) {
+            const err = new Error('INVALID_FINISH_LOCATION');
+            err.code = 'INVALID_FINISH_LOCATION';
+            throw err;
+        }
+
+        // Auditoria A4: exige contato GPS recente (lastSeenAt) — sem isso o finish
+        // usava a origem gravada na criação e gerava preço 0.
+        const lastSeenMs = freshCaptain?.lastSeenAt ? new Date(freshCaptain.lastSeenAt).getTime() : 0;
+        if (!lastSeenMs || (Date.now() - lastSeenMs) > 120000) {
+            const err = new Error('STALE_FINISH_LOCATION');
+            err.code = 'STALE_FINISH_LOCATION';
+            throw err;
+        }
+
+        const originLat = ride.pickupCoordinates?.lat ?? ride.origin?.coordinates?.[1];
+        const originLng = ride.pickupCoordinates?.lng ?? ride.origin?.coordinates?.[0];
+        if (isValidGpsCoord(originLat, originLng)) {
+            const movedKm = mapService.haversineKm(originLat, originLng, gpsLat, gpsLng);
+            // Sem tracking e quase parado no ponto de origem → não inventar destino/preço.
+            if (!(ride.actualDistance > 50) && movedKm < 0.05) {
+                const err = new Error('INSUFFICIENT_TRIP_DISTANCE');
+                err.code = 'INSUFFICIENT_TRIP_DISTANCE';
+                throw err;
+            }
+        }
+
+        let destAddress;
+        try {
+            const rev = await mapService.getReverseGeocode(gpsLat, gpsLng);
+            destAddress = rev?.address || `${gpsLat.toFixed(5)}, ${gpsLng.toFixed(5)}`;
+        } catch {
+            destAddress = `${gpsLat.toFixed(5)}, ${gpsLng.toFixed(5)}`;
+        }
+
+        finishExtras.destination = destAddress;
+        finishExtras.destinationPending = false;
+        finishExtras.destinationCoordinates = { lat: gpsLat, lng: gpsLng };
+        finishExtras.destinationMeta = {
+            coordinates: [ gpsLng, gpsLat ],
+            timestamp: new Date(),
+            source: 'gps_at_finish',
+        };
+
+        // Se o tracking GPS não acumulou distância útil, usa rota origem→destino real.
+        if (!(ride.actualDistance > 0) && isValidGpsCoord(originLat, originLng)) {
+            try {
+                const route = await mapService.getDistanceTime(
+                    `${originLat},${originLng}`,
+                    `${gpsLat},${gpsLng}`
+                );
+                if (route?.distance?.value > 0) {
+                    finishExtras.actualDistance = route.distance.value;
+                    ride.actualDistance = route.distance.value;
+                }
+            } catch (e) {
+                console.error('Erro calculando rota no fim da presencial sem destino:', e);
+                const err = new Error('ROUTE_CALCULATION_FAILED');
+                err.code = 'ROUTE_CALCULATION_FAILED';
+                throw err;
+            }
+        }
+    }
+
+    const actualDistance = finishExtras.actualDistance ?? ride.actualDistance ?? 0;
+    // Prefer startedAt (quando a corrida de fato começou); fallback createdAt.
+    const timeBase = ride.startedAt || ride.createdAt;
+    let actualTimeSeconds = Math.round((Date.now() - new Date(timeBase).getTime()) / 1000);
+    if (actualTimeSeconds < 60 && ride.estimatedTime) actualTimeSeconds = ride.estimatedTime;
+
+    // Auditoria C2: presencial sem destino não pode fechar com distância 0 / preço 0.
+    if (isPresentialPendingDest && !(actualDistance > 0)) {
+        const err = new Error('INSUFFICIENT_TRIP_DISTANCE');
+        err.code = 'INSUFFICIENT_TRIP_DISTANCE';
+        throw err;
+    }
 
     let finalPrice = ride.fare;
-    if (actualDistance > 0) {
+    let pricingUpdate = {};
+    const mustRecalculatePrice = actualDistance > 0 || isPresentialPendingDest;
+    if (mustRecalculatePrice) {
+        if (!(actualDistance > 0)) {
+            const err = new Error('INSUFFICIENT_TRIP_DISTANCE');
+            err.code = 'INSUFFICIENT_TRIP_DISTANCE';
+            throw err;
+        }
         try {
             const pricing = await PricingEngine.calculateFare({
                 distance: actualDistance,
                 time: actualTimeSeconds,
                 vehicleType: ride.vehicleType,
-                paymentMethod: ride.paymentMethod,
+                paymentMethod: ride.paymentMethod === 'carteira' ? 'pix' : (ride.paymentMethod || 'cash'),
                 // Recalcula com a tarifa/comissão CONGELADAS no momento em que a corrida foi
                 // pedida (P2.2 da auditoria de concorrência) — só distância/tempo variam pro
                 // valor real. Sem isso, uma mudança de tarifa feita pelo admin enquanto a
@@ -501,15 +953,31 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 configSnapshot: ride.pricingSnapshot || null
             });
             finalPrice = pricing.finalFare;
-
-            // Atualizar o breakdown real se a distância foi maior
-            await rideModel.findByIdAndUpdate(rideId, {
+            pricingUpdate = {
                 fareBreakdown: pricing.fareBreakdown,
-                commissionAmount: pricing.commissionAmount
-            });
+                commissionAmount: pricing.commissionAmount,
+                commissionPercent: pricing.fareBreakdown.platformCommission > 0
+                    ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100)
+                    : ride.commissionPercent,
+            };
         } catch (e) {
-            console.error("Erro recalculando tarifa no final da corrida:", e);
+            // Auditoria A3: não engolir falha de pricing — especialmente presencial.
+            if (e.code === 'INSUFFICIENT_TRIP_DISTANCE' || e.code === 'ROUTE_CALCULATION_FAILED') {
+                throw e;
+            }
+            console.error('Erro recalculando tarifa no final da corrida:', e);
+            if (isPresentialPendingDest || ride.source === 'driver_initiated') {
+                const err = new Error('PRICING_FAILED');
+                err.code = 'PRICING_FAILED';
+                throw err;
+            }
         }
+    }
+
+    if (isPresentialPendingDest && !(finalPrice > 0)) {
+        const err = new Error('PRICING_FAILED');
+        err.code = 'PRICING_FAILED';
+        throw err;
     }
 
     // Taxa de espera calculada no startRide (motorista esperou além do tempo grátis) —
@@ -519,10 +987,43 @@ module.exports.endRide = async ({ rideId, captain }) => {
     const updated = await transitionRide(rideId, 'finished', { captain: captain._id }, {
         actualTime: actualTimeSeconds,
         finalPrice: finalPrice,
-        paymentStatus: 'pending' // Awaiting driver to confirm cash received
+        paymentStatus: 'pending', // Awaiting driver to confirm cash received
+        actualDistance,
+        ...finishExtras,
+        ...pricingUpdate,
     });
     if (!updated) {
         throw new Error('Ride not started');
+    }
+
+    // Garante registro de pagamento (presencial sem user/estimativa inicial).
+    if (ride.user) {
+        const existingPayment = await paymentModel.findOne({ rideId });
+        if (!existingPayment) {
+            await paymentModel.create({
+                rideId,
+                userId: ride.user._id || ride.user,
+                amount: finalPrice,
+                method: ride.paymentMethod || 'cash',
+                status: 'pending',
+            });
+        } else if (existingPayment.amount !== finalPrice) {
+            existingPayment.amount = finalPrice;
+            await existingPayment.save();
+        }
+    } else {
+        const existingPayment = await paymentModel.findOne({ rideId });
+        if (!existingPayment) {
+            await paymentModel.create({
+                rideId,
+                amount: finalPrice,
+                method: ride.paymentMethod || 'cash',
+                status: 'pending',
+            });
+        } else if (existingPayment.amount !== finalPrice) {
+            existingPayment.amount = finalPrice;
+            await existingPayment.save();
+        }
     }
 
     const dispatchService = require('./dispatch.service');
@@ -646,11 +1147,20 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
                 $inc: { totalRides: 1, earnings: finalFare }
             }, { session });
 
-            // Update User CRM fields
-            await userModel.findByIdAndUpdate(existing.user, {
-                $inc: { totalRides: 1, totalSpent: finalFare, totalDistance: claimed.distance || 0 },
-                $set: { lastRideAt: new Date() }
-            }, { session });
+            // Alinha coleção payment com o status da ride (auditoria ledger).
+            await paymentModel.updateMany(
+                { rideId: claimed._id },
+                { $set: { status: 'approved', amount: finalFare } },
+                { session }
+            );
+
+            // Update User CRM fields (presencial pode não ter passageiro cadastrado)
+            if (existing.user) {
+                await userModel.findByIdAndUpdate(existing.user, {
+                    $inc: { totalRides: 1, totalSpent: finalFare, totalDistance: claimed.actualDistance || claimed.distance || 0 },
+                    $set: { lastRideAt: new Date() }
+                }, { session });
+            }
         });
     } finally {
         await session.endSession();
@@ -740,10 +1250,22 @@ module.exports.getCurrentRideForCaptain = async ({ captain }) => {
         throw new Error('Captain is required');
     }
 
+    // OTP só é necessário na restauração de corrida presencial (motorista mostra o PIN).
+    // Em corrida normal o PIN pertence ao passageiro — expor aqui quebrava o consentimento
+    // (auditoria presencial C1, 2026-08-04).
     const ride = await rideModel.findOne({
         captain,
         status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] }
     }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
+
+    if (!ride) return ride;
+
+    if (ride.source === 'driver_initiated') {
+        return rideModel.findById(ride._id)
+            .populate('user', USER_IDENTITY_FIELDS)
+            .populate('captain', CAPTAIN_IDENTITY_FIELDS)
+            .select('+otp');
+    }
 
     return ride;
 }
@@ -842,6 +1364,8 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
     const cutoff = new Date(Date.now() - RIDE_EXPIRATION_MINUTES * 60 * 1000);
     const candidates = await rideModel.find({
         status: 'requested',
+        // Presencial nunca fica em requested, mas o filtro evita vazamento futuro.
+        source: { $ne: 'driver_initiated' },
         vehicleType,
         createdAt: { $gte: cutoff },
         // pickupCoordinates é persistido no despacho; sem ele não dá pra aplicar o raio.
@@ -879,6 +1403,33 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     const ride = await rideModel.findOne({ _id: rideId, captain });
     if (!ride) {
         throw new Error('Ride not found');
+    }
+
+    // Presencial: não há pool de despacho — cancelamento total (não requeue).
+    // Também permite cancelar em 'started' antes da conclusão (engano do motorista).
+    if (ride.source === 'driver_initiated') {
+        const presentialOrigins = [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ];
+        if (!presentialOrigins.includes(ride.status)) {
+            throw new Error('Ride cannot be cancelled at this stage');
+        }
+        const cancelled = await rideModel.findOneAndUpdate(
+            { _id: rideId, captain, status: { $in: presentialOrigins }, source: 'driver_initiated' },
+            {
+                $set: {
+                    status: 'cancelled',
+                    cancelledBy: 'captain',
+                    cancellationReason: reason?.trim() || 'Cancelamento de corrida presencial',
+                    cancelledAt: new Date(),
+                },
+            },
+            { new: true }
+        );
+        if (!cancelled) {
+            throw new Error('Ride cannot be cancelled at this stage');
+        }
+        const dispatchService = require('./dispatch.service');
+        await dispatchService.releaseCaptainBusyLock(captain._id || captain);
+        return rideModel.findById(cancelled._id).populate('user');
     }
 
     if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
@@ -930,6 +1481,11 @@ module.exports.reassignRideByAdmin = async (rideId) => {
     const ride = await rideModel.findById(rideId);
     if (!ride) {
         throw new Error('Ride not found');
+    }
+    // Presencial nunca entra no pool — reatribuir seria despachar uma corrida sem
+    // solicitação de passageiro (auditoria presencial, admin reassign).
+    if (ride.source === 'driver_initiated') {
+        throw new Error('Corrida presencial não pode ser reatribuída ao despacho');
     }
     if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
         throw new Error('Ride cannot be reassigned at this stage');
@@ -1071,6 +1627,9 @@ module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }
     }
     if (ride.status !== 'finished') {
         throw new Error('Only finished rides can be reviewed');
+    }
+    if (!ride.user) {
+        throw new Error('Ride has no linked passenger to review');
     }
 
     const reviewModel = require('../models/review.model');

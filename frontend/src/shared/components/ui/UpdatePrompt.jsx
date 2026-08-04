@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 // Auditoria PWA (2026-08-03, A1): antes, cada deploy substituía o Service Worker das
@@ -7,15 +7,45 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 // antigo até ele fechar/reabrir o app manualmente, sem nenhum aviso de que existia uma
 // versão nova. O botão aqui só recarrega quando a pessoa decide — nunca automático,
 // pra não interromper uma corrida em andamento.
+//
+// Checagem periódica (2026-08-04): o navegador só rechecava o sw.js sozinho em
+// navegação/reload da página — um motorista com o app aberto em segundo plano por
+// horas podia nunca ver este aviso, mesmo com o deploy já no ar. registration.update()
+// é uma checagem barata (respeita cache-control do servidor); repetir a cada 30 min
+// pega um deploy dentro do mesmo turno, e a volta do background é justamente o
+// momento mais provável de ter perdido um.
+const CHECK_INTERVAL_MS = 30 * 60 * 1000
+
 const UpdatePrompt = () => {
+    const registrationRef = useRef(null)
+
     const {
         needRefresh: [needRefresh],
         updateServiceWorker,
     } = useRegisterSW({
+        onRegisteredSW(_swUrl, registration) {
+            registrationRef.current = registration
+        },
         onRegisterError(error) {
             console.error('Falha ao registrar o Service Worker:', error)
         },
     })
+
+    useEffect(() => {
+        const checkForUpdate = () => registrationRef.current?.update()
+
+        const interval = setInterval(checkForUpdate, CHECK_INTERVAL_MS)
+
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') checkForUpdate()
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
+
+        return () => {
+            clearInterval(interval)
+            document.removeEventListener('visibilitychange', handleVisibility)
+        }
+    }, [])
 
     if (!needRefresh) return null
 

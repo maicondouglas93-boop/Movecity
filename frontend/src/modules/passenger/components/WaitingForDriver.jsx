@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { vehicleImages, vehicleLabels } from '@/assets/vehicleAssets'
+import Button from '@/shared/components/ui/Button'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import StatusBadge from '@/shared/components/ui/StatusBadge'
@@ -21,6 +22,36 @@ const statusInfo = (status) => {
 };
 
 const WaitingForDriver = (props) => {
+    // Correção crítica do cancelamento (2026-08-03): a regra de negócio SEMPRE permitiu
+    // o passageiro cancelar em accepted/going_to_pickup/arrived/waiting_passenger (ver
+    // VALID_ORIGINS_BY_TARGET.cancelled em Backend/services/ride.service.js, com taxa
+    // informativa quando o motorista já está comprometido) — mas o botão só existia na
+    // fase de busca (LookingForDriver). Nesta tela, com motorista designado, cancelar
+    // sem querer custa caro para os dois lados: por isso o toque duplo de confirmação.
+    const [ confirmingCancel, setConfirmingCancel ] = useState(false)
+    const [ cancelling, setCancelling ] = useState(false)
+
+    useEffect(() => {
+        if (!confirmingCancel) return
+        const timer = setTimeout(() => setConfirmingCancel(false), 5000)
+        return () => clearTimeout(timer)
+    }, [confirmingCancel])
+
+    const handleCancel = async () => {
+        if (cancelling) return
+        if (!confirmingCancel) {
+            setConfirmingCancel(true)
+            return
+        }
+        setCancelling(true)
+        try {
+            await props.cancelRide()
+        } finally {
+            setCancelling(false)
+            setConfirmingCancel(false)
+        }
+    }
+
     const extractTitle = (addressStr) => {
         if (!addressStr) return '';
         if (typeof addressStr === 'object') return addressStr.address?.split(',')[0] || '';
@@ -97,6 +128,26 @@ const WaitingForDriver = (props) => {
                     className='px-3'
                 />
             </Card>
+
+            {props.cancelRide && (
+                <>
+                    <Button
+                        variant='danger'
+                        onClick={handleCancel}
+                        loading={cancelling}
+                        className='mt-4'
+                    >
+                        {cancelling
+                            ? 'Cancelando...'
+                            : confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar corrida'}
+                    </Button>
+                    {confirmingCancel && !cancelling && (
+                        <p className='text-xs text-center text-ink-400 mt-2'>
+                            O motorista já foi designado — pode haver taxa de cancelamento.
+                        </p>
+                    )}
+                </>
+            )}
         </div>
     )
 }

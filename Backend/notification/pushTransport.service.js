@@ -35,6 +35,25 @@ const withTimeout = (promise, ms, label) => Promise.race([
     new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} excedeu ${ms}ms`)), ms))
 ]);
 
+// Correção crítica do push de corrida (2026-08-03): o FCM exige que TODOS os valores
+// de `data` sejam strings — `sendEachForMulticast` rejeita a mensagem inteira com
+// `messaging/invalid-payload: data must only contain string values` ANTES de qualquer
+// rede. Foi exatamente o que quebrou a push de "Nova corrida": o despacho passou a
+// mandar `fare` como número (commit 5fba884) e toda notificação de corrida morria na
+// validação do SDK, invisível aos testes (que mockam o firebase-admin). Converter aqui,
+// na única fronteira com o SDK, protege todos os remetentes de uma vez.
+const sanitizeDataValues = (data = {}) => {
+    const out = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value === undefined || value === null) continue;
+        out[key] = typeof value === 'string'
+            ? value
+            : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+    }
+    return out;
+};
+module.exports.sanitizeDataValues = sanitizeDataValues;
+
 const sendChunkWithRetry = async (tokens, message, traceId, attempt = 0) => {
     try {
         return await withTimeout(
@@ -77,7 +96,7 @@ module.exports.sendPush = async (tokens, payload, traceId = '[AUDIT]') => {
             body: payload.message,
             ...(payload.image ? { image: payload.image } : {})
         },
-        data: payload.data || {},
+        data: sanitizeDataValues(payload.data),
         ...(payload.webpush ? { webpush: payload.webpush } : {})
     };
 

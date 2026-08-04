@@ -185,6 +185,11 @@ const CaptainHome = () => {
     const rideRef = useRef(ride)
     useEffect(() => { rideRef.current = ride }, [ride])
 
+    // Mesmo motivo: handleRideTaken precisa saber se a corrida do evento já é DESTE
+    // motorista (aceite confirmado pelo backend) sem re-subscrever os listeners.
+    const captainRideRef = useRef(captainRide)
+    useEffect(() => { captainRideRef.current = captainRide }, [captainRide])
+
     // --- Efeito 1: conexão e listeners do socket (só depende do captain) ---
     useEffect(() => {
         if (!captain || !captain._id) return;
@@ -272,10 +277,27 @@ const CaptainHome = () => {
         // mas nenhum frontend escutava — o motorista que perdeu a corrida ficava com o
         // popup aberto até tocar em algo, sem saber que ela já tinha sido pega.
         const handleRideTaken = (data) => {
-            // Fase B: outro motorista aceitou — sai do card persistente.
+            // Fase B: a corrida deixou de estar disponível para todo mundo — sai do
+            // card persistente (para o vencedor ela vira a corrida ativa, não um card).
             removePendingRide(data.rideId)
+
+            // Correção crítica do aceite (2026-08-03): a sala ride_<id> inclui TODOS os
+            // candidatos do despacho — inclusive o vencedor, que recebia o próprio
+            // evento e via "aceita por outro motorista" com a corrida já sendo dele.
+            // Quem venceu vem do BACKEND no payload (captainId); o fallback pelo
+            // RideContext cobre a janela em que o aceite já respondeu 200 mas o evento
+            // chegou por uma reconexão sem captainId.
+            const wonByThisCaptain =
+                (data.captainId && data.captainId === captain._id) ||
+                (captainRideRef.current && captainRideRef.current._id === data.rideId)
+            if (wonByThisCaptain) return
+
             if (rideRef.current && rideRef.current._id === data.rideId) {
+                // Fecha os DOIS painéis: o RidePopUp abre o ConfirmRidePopUp de forma
+                // otimista antes da resposta da API — um perdedor com o confirm aberto
+                // ficava com ele pendurado quando só o popup de oferta era fechado.
                 setRidePopupPanel(false)
+                setConfirmRidePopupPanel(false)
                 setRide(null)
                 addToast('Essa corrida já foi aceita por outro motorista.', 'info')
             }

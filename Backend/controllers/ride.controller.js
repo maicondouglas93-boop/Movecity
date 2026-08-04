@@ -162,9 +162,13 @@ async function performAcceptRide(rideId, captain, res) {
 
         // Avisa os outros motoristas que estavam com essa corrida na tela que ela já foi
         // aceita por outro colega — fecha o popup deles (listener entra na Etapa P3.1).
+        // Correção crítica do aceite (2026-08-03): a sala ride_<id> inclui TODOS os
+        // candidatos do despacho — inclusive quem acabou de vencer o aceite atômico.
+        // `captainId` diz quem venceu, para o frontend do vencedor ignorar o evento em
+        // vez de mostrar "aceita por outro motorista" para o próprio dono da corrida.
         sendMessageToRoom(`ride_${rideId}`, {
             event: 'ride-taken',
-            data: { rideId }
+            data: { rideId, captainId: captain._id.toString() }
         });
 
         // Fase C (2026-08-03): o motorista aceitou — sai imediatamente do mapa dos

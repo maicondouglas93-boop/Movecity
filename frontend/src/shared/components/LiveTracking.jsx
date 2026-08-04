@@ -208,20 +208,21 @@ const LiveTracking = (props) => {
         }
     }, [userLocation]); // Syncs automatically when global location updates
 
-    const rideIsTerminal = ['finished', 'cancelled'].includes(props.ride?.status);
+    const subjectStatus = props.status || props.parcelStatus || props.ride?.status;
+    const rideIsTerminal = ['finished', 'cancelled', 'delivered'].includes(subjectStatus);
     const shouldClearTrip = Boolean(props.clearTrip) || rideIsTerminal;
 
-    // Initialize captain position from ride details if available
+    // Seed da posição do motorista: ride.captain.location OU prop captainLocation (parcel).
     useEffect(() => {
         if (shouldClearTrip) return;
-        if (props.ride?.captain?.location?.ltd && props.ride?.captain?.location?.lng) {
-            const newPos = {
-                lat: props.ride.captain.location.ltd,
-                lng: props.ride.captain.location.lng
-            };
-            setCaptainPosition(newPos);
+        const fromRide = props.ride?.captain?.location;
+        const fromProp = props.captainLocation;
+        const ltd = fromProp?.lat ?? fromProp?.ltd ?? fromRide?.ltd;
+        const lng = fromProp?.lng ?? fromRide?.lng;
+        if (ltd != null && lng != null) {
+            setCaptainPosition({ lat: Number(ltd), lng: Number(lng) });
         }
-    }, [props.ride, shouldClearTrip]);
+    }, [props.ride, props.captainLocation, shouldClearTrip]);
 
     // Pós-corrida (2026-08-04): remove polyline/markers na fonte — esconder a rota no
     // CSS deixava o estado vivo e a Home redesenhava o trajeto fantasma.
@@ -355,10 +356,20 @@ const LiveTracking = (props) => {
             // Antes só cobria status === 'accepted' — indo_para_embarque/chegou/aguardando
             // caíam no default errado (pickup→destino) mesmo com o motorista ainda a
             // caminho. 'ongoing' nunca existiu no enum real (é 'started').
-            const headingToPickup = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(props.ride?.status);
+            const headingToPickup = [
+                'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger',
+                'provider_accepted', 'arrived_pickup',
+            ].includes(subjectStatus);
             if (headingToPickup) {
-                startLat = captainPosition?.lat || props.ride.captain?.location?.ltd || pickupCoords.lat;
-                startLng = captainPosition?.lng || props.ride.captain?.location?.lng || pickupCoords.lng;
+                startLat = captainPosition?.lat
+                    || props.captainLocation?.lat
+                    || props.captainLocation?.ltd
+                    || props.ride?.captain?.location?.ltd
+                    || pickupCoords.lat;
+                startLng = captainPosition?.lng
+                    || props.captainLocation?.lng
+                    || props.ride?.captain?.location?.lng
+                    || pickupCoords.lng;
                 endLat = pickupCoords.lat;
                 endLng = pickupCoords.lng;
             }
@@ -411,7 +422,7 @@ const LiveTracking = (props) => {
 
         fetchRoute();
         // routeVersion é o gatilho do recálculo por desvio de rota (modo navegação).
-    }, [pickupCoords, destinationCoords, props.ride?.status, routeVersion, shouldClearTrip, props.navigationMode]);
+    }, [pickupCoords, destinationCoords, subjectStatus, routeVersion, shouldClearTrip, props.navigationMode, props.captainLocation]);
 
     // ====== MAP INITIALIZATION — RUNS ONLY ONCE ======
     useEffect(() => {
@@ -1013,14 +1024,20 @@ const LiveTracking = (props) => {
     // HUD de fase da corrida — antes só cobria 'accepted' e 'ongoing' (este último nunca
     // existiu no enum real do backend), então o card de progresso nunca aparecia durante
     // a viagem de verdade ('started'). Ver item 9 do relatório de UX.
-    const rideStatus = props.ride?.status;
+    const rideStatus = subjectStatus;
     const ridePhaseLabel =
-        ['accepted', 'going_to_pickup'].includes(rideStatus) ? 'Motorista a caminho'
-        : ['arrived', 'waiting_passenger'].includes(rideStatus) ? 'Motorista chegou'
+        ['accepted', 'going_to_pickup', 'provider_accepted'].includes(rideStatus) ? 'Prestador a caminho'
+        : ['arrived', 'waiting_passenger', 'arrived_pickup'].includes(rideStatus) ? 'Prestador na retirada'
+        : ['collected', 'in_transit'].includes(rideStatus) ? 'Em transporte'
+        : rideStatus === 'arrived_destination' ? 'No destino'
         : rideStatus === 'started' ? 'Corrida em andamento'
         : null;
 
-    const showRemainingKm = ridePhaseLabel && rideStatus !== 'arrived' && rideStatus !== 'waiting_passenger';
+    const showRemainingKm = ridePhaseLabel
+        && rideStatus !== 'arrived'
+        && rideStatus !== 'waiting_passenger'
+        && rideStatus !== 'arrived_pickup'
+        && rideStatus !== 'arrived_destination';
     const remainingKm = showRemainingKm && routeCoords.length > 1 && captainPosition
         ? calculateRouteDistance(getRemainingRoute(routeCoords, captainPosition)).toFixed(1)
         : null;

@@ -110,6 +110,9 @@ module.exports.createRide = async (req, res) => {
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
+        if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
+            return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 

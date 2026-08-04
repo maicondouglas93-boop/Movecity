@@ -7,6 +7,7 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import {
   confirmParcelDelivery,
   getCaptainCurrentParcel,
+  skipCaptainParcelReview,
   updateParcelStatus,
 } from '@/shared/services/parcelApi'
 import { submitCaptainReview } from '@/shared/services/reviewApi'
@@ -60,9 +61,9 @@ const CaptainParcelRiding = () => {
         if (current) {
           setParcel(current)
           setCaptainParcel(current)
+          if (current.status === 'finished') setStep('rating')
           return
         }
-        // Refresh durante rating: API current some, mas location.state pode ter finished.
         if (state?.parcel?.status === 'finished' || state?.step === 'rating') {
           setParcel(state.parcel)
           setStep('rating')
@@ -122,8 +123,7 @@ const CaptainParcelRiding = () => {
     try {
       const updated = await confirmParcelDelivery(parcel._id, pin)
       setParcel(updated)
-      // Mantém parcel finished no state para o rating sobreviver a refresh parcial.
-      setCaptainParcel(null)
+      setCaptainParcel(updated)
       addToast('Entrega confirmada!', 'success')
       setStep('rating')
       navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'rating' } })
@@ -161,6 +161,8 @@ const CaptainParcelRiding = () => {
           pickup={parcel.pickupCoordinates}
           destination={parcel.destinationCoordinates}
           parcelId={parcel._id}
+          status={parcel.status}
+          navigationMode={step === 'active'}
         />
         {canChat && step === 'active' && (
           <button
@@ -195,7 +197,12 @@ const CaptainParcelRiding = () => {
             <button
               type="button"
               className="w-full min-h-[44px] rounded-panel border border-line text-ink-700 font-medium"
-              onClick={() => {
+              onClick={async () => {
+                try {
+                  await skipCaptainParcelReview(parcel._id)
+                } catch {
+                  /* still leave */
+                }
                 setCaptainParcel(null)
                 navigate('/captain-home')
               }}

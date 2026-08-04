@@ -562,6 +562,12 @@ const Home = () => {
 
 
     async function findTrip() {
+        if (userParcel) {
+            addToast('Finalize a encomenda atual antes de pedir uma corrida.', 'info')
+            navigate('/encomenda/ativa', { state: { parcel: userParcel } })
+            return
+        }
+
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
         const destStr = typeof destination === 'object' ? `${destination.address} (${destination.lat}, ${destination.lng})` : destination;
 
@@ -589,6 +595,12 @@ const Home = () => {
     }
 
     async function createRide() {
+        if (userParcel) {
+            addToast('Finalize a encomenda atual antes de pedir uma corrida.', 'info')
+            navigate('/encomenda/ativa', { state: { parcel: userParcel } })
+            return
+        }
+
         addToast('Buscando motoristas próximos...', 'info', 5000, 'Isso pode levar alguns instantes')
 
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
@@ -824,9 +836,10 @@ const Home = () => {
                                 className="w-full mt-3 bg-surface-alt border border-line px-5 py-3.5 rounded-panel flex items-center gap-3 active:scale-[0.98] transition-transform"
                             >
                                 <i className="ri-box-3-line text-xl text-brand-500" aria-hidden="true"></i>
-                                <span className="text-ink-900 font-semibold text-base">
-                                    {userParcel ? 'Encomenda em andamento' : 'Encomenda'}
+                                <span className="flex-1 text-left text-ink-900 font-semibold text-base">
+                                    {userParcel ? 'Encomenda em andamento' : 'Fazer uma encomenda'}
                                 </span>
+                                <i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>
                             </button>
                             {/* Botão de agendamento escondido até existir backend real (A8 na
                                 auditoria) — ScheduleRidePanel continua implementado, só não

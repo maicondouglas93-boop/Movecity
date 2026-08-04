@@ -152,6 +152,25 @@ module.exports.createRide = async ({
         throw new Error('All fields are required');
     }
 
+    // Exclusão mútua user: não criar corrida se há encomenda ativa.
+    const parcelModel = require('../models/parcel.model');
+    const dispatchService = require('./dispatch.service');
+    const activeParcel = await parcelModel.exists({
+        user,
+        status: {
+            $in: [
+                'awaiting_provider',
+                ...dispatchService.ACTIVE_PARCEL_STATUSES,
+                'delivered',
+            ],
+        },
+    });
+    if (activeParcel) {
+        const err = new Error('USER_HAS_ACTIVE_PARCEL');
+        err.code = 'USER_HAS_ACTIVE_PARCEL';
+        throw err;
+    }
+
     // Calcular rota e tempo real
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
     const distance = distanceTime.distance.value;

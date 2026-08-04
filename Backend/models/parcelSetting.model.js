@@ -18,7 +18,7 @@ const parcelSettingSchema = new mongoose.Schema({
         default: 'medium',
     },
     motoMaxWeightKg: { type: Number, default: 10 },
-    blockIncompatibleMoto: { type: Boolean, default: false },
+    blockIncompatibleMoto: { type: Boolean, default: true },
 }, { timestamps: true });
 
 module.exports = mongoose.model('parcelSetting', parcelSettingSchema);

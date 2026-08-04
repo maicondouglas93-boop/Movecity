@@ -17,6 +17,27 @@ const VALID_ORIGINS_BY_TARGET = {
 
 const PARCEL_EXPIRATION_MINUTES = 10;
 
+function parcelExpirationCutoff() {
+    return new Date(Date.now() - PARCEL_EXPIRATION_MINUTES * 60 * 1000);
+}
+
+/** Cancela awaiting_provider expirados (lazy, espelha ride getCurrent). */
+async function expireStaleAwaitingParcels({ userId } = {}) {
+    const filter = {
+        status: 'awaiting_provider',
+        createdAt: { $lt: parcelExpirationCutoff() },
+    };
+    if (userId) filter.user = userId;
+
+    const stale = await parcelModel.find(filter).select('_id').limit(20);
+    const cancelled = [];
+    for (const doc of stale) {
+        const updated = await module.exports.cancelParcelSystem(doc._id, 'expired');
+        if (updated) cancelled.push(updated);
+    }
+    return cancelled;
+}
+
 async function getSettings() {
     let settings = await parcelSettingModel.findOne().sort({ updatedAt: -1 });
     if (!settings) {
@@ -172,32 +193,42 @@ module.exports.createParcel = async (payload) => {
     }
 
     const deliveryPin = generateDeliveryPin();
-    const parcel = await parcelModel.create({
-        user,
-        vehicleType,
-        pickup,
-        destination,
-        destinationCoordinates,
-        sender,
-        recipient,
-        itemName,
-        category,
-        weightKg,
-        size,
-        description,
-        notes,
-        schedule: { mode: 'now', at: null },
-        fare: fareData.fare,
-        estimatedDistance: fareData.estimatedDistance,
-        estimatedTime: fareData.estimatedTime,
-        fareBreakdown: fareData.fareBreakdown,
-        pricingSnapshot: fareData.pricingSnapshot,
-        deliveryPin,
-        status: 'awaiting_provider',
-        statusHistory: [{ status: 'awaiting_provider', at: new Date(), by: 'user' }],
-        photos: { pickupUrl: null, deliveryUrl: null },
-        paymentMethod: safePayment,
-    });
+    let parcel;
+    try {
+        parcel = await parcelModel.create({
+            user,
+            vehicleType,
+            pickup,
+            destination,
+            destinationCoordinates,
+            sender,
+            recipient,
+            itemName,
+            category,
+            weightKg,
+            size,
+            description,
+            notes,
+            schedule: { mode: 'now', at: null },
+            fare: fareData.fare,
+            estimatedDistance: fareData.estimatedDistance,
+            estimatedTime: fareData.estimatedTime,
+            fareBreakdown: fareData.fareBreakdown,
+            pricingSnapshot: fareData.pricingSnapshot,
+            deliveryPin,
+            status: 'awaiting_provider',
+            statusHistory: [{ status: 'awaiting_provider', at: new Date(), by: 'user' }],
+            photos: { pickupUrl: null, deliveryUrl: null },
+            paymentMethod: safePayment,
+        });
+    } catch (err) {
+        if (err.code === 11000) {
+            const dup = new Error('USER_HAS_ACTIVE_PARCEL');
+            dup.code = 'USER_HAS_ACTIVE_PARCEL';
+            throw dup;
+        }
+        throw err;
+    }
 
     return {
         parcel,
@@ -208,35 +239,76 @@ module.exports.createParcel = async (payload) => {
 module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
     if (!parcelId || !captain) throw new Error('PARCEL_ID_AND_CAPTAIN_REQUIRED');
 
-    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked || captain.canReceiveRides === false) {
+    const captainModel = require('../models/captain.model');
+    const mapService = require('./maps.service');
+    const freshCaptain = await captainModel.findById(captain._id)
+        .select('approvalStatus isBlocked canReceiveRides isOnline location vehicle busyLock');
+    if (!freshCaptain) throw new Error('CAPTAIN_NOT_ALLOWED');
+
+    if (
+        freshCaptain.approvalStatus !== 'aprovado'
+        || freshCaptain.isBlocked
+        || freshCaptain.canReceiveRides === false
+        || freshCaptain.isOnline !== true
+    ) {
         throw new Error('CAPTAIN_NOT_ALLOWED');
     }
 
-    const locked = await dispatchService.acquireCaptainBusyLock(captain._id);
+    // Recovery: busyLock órfão sem trabalho ativo.
+    if (freshCaptain.busyLock === true) {
+        const hasWork = (await dispatchService.captainHasActiveRide(freshCaptain._id))
+            || (await dispatchService.captainHasActiveParcel(freshCaptain._id));
+        if (!hasWork) {
+            await dispatchService.releaseCaptainBusyLock(freshCaptain._id);
+        }
+    }
+
+    const locked = await dispatchService.acquireCaptainBusyLock(freshCaptain._id);
     if (!locked) {
         throw new Error('CAPTAIN_HAS_ACTIVE_RIDE');
     }
 
     try {
-        if (await dispatchService.captainHasActiveRide(captain._id)) {
+        if (await dispatchService.captainHasActiveRide(freshCaptain._id)) {
             throw new Error('CAPTAIN_HAS_ACTIVE_RIDE');
         }
-        if (await dispatchService.captainHasActiveParcel(captain._id)) {
+        if (await dispatchService.captainHasActiveParcel(freshCaptain._id)) {
             throw new Error('CAPTAIN_HAS_ACTIVE_PARCEL');
         }
 
-        const vehicleType = captain.vehicle?.vehicleType;
+        const vehicleType = freshCaptain.vehicle?.vehicleType;
         const existing = await parcelModel.findById(parcelId);
         if (!existing) throw new Error('PARCEL_NOT_FOUND');
         if (existing.status === 'cancelled') throw new Error('PARCEL_CANCELLED');
         if (existing.status !== 'awaiting_provider') throw new Error('PARCEL_ALREADY_ACCEPTED');
         if (existing.vehicleType !== vehicleType) throw new Error('VEHICLE_MISMATCH');
 
+        // Revalida raio no accept (pending já filtra, mas a API não pode confiar nisso).
+        let pickup = existing.pickupCoordinates;
+        if (!pickup || pickup.lat == null || pickup.lng == null) {
+            try {
+                const geo = await mapService.getAddressCoordinate(existing.pickup);
+                pickup = { lat: geo.ltd, lng: geo.lng };
+                existing.pickupCoordinates = pickup;
+                await existing.save();
+            } catch {
+                throw new Error('OUT_OF_RANGE');
+            }
+        }
+        const pos = freshCaptain.location;
+        if (!pos || pos.ltd == null || pos.lng == null) {
+            throw new Error('OUT_OF_RANGE');
+        }
+        const km = mapService.haversineKm(pos.ltd, pos.lng, pickup.lat, pickup.lng);
+        if (km > dispatchService.CAPTAIN_SEARCH_RADIUS_KM) {
+            throw new Error('OUT_OF_RANGE');
+        }
+
         const updated = await parcelModel.findOneAndUpdate(
             { _id: parcelId, status: 'awaiting_provider' },
             {
                 $set: {
-                    captain: captain._id,
+                    captain: freshCaptain._id,
                     status: 'provider_accepted',
                 },
                 $push: {
@@ -253,7 +325,7 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
         if (!updated) throw new Error('PARCEL_ALREADY_ACCEPTED');
         return updated;
     } catch (err) {
-        await dispatchService.releaseCaptainBusyLock(captain._id);
+        await dispatchService.releaseCaptainBusyLock(freshCaptain._id);
         if (err.code === 11000) throw new Error('CAPTAIN_HAS_ACTIVE_PARCEL');
         throw err;
     }
@@ -337,13 +409,12 @@ module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' 
     const parcel = await parcelModel.findOne({ _id: parcelId, user });
     if (!parcel) throw new Error('PARCEL_NOT_FOUND');
 
+    // MVP: cancel só até chegada na retirada (antes da coleta).
     const cancellable = [
         'awaiting_provider',
         'provider_accepted',
         'going_to_pickup',
         'arrived_pickup',
-        'collected',
-        'in_transit',
     ];
     if (!cancellable.includes(parcel.status)) {
         throw new Error('PARCEL_NOT_CANCELLABLE');
@@ -394,6 +465,8 @@ module.exports.getCurrentParcelForUser = async (userId) => {
         await module.exports.finalizeStuckDelivered(stuck._id);
     }
 
+    await expireStaleAwaitingParcels({ userId });
+
     const active = [
         'awaiting_provider',
         'provider_accepted',
@@ -409,10 +482,14 @@ module.exports.getCurrentParcelForUser = async (userId) => {
     }).populate('captain').select('+deliveryPin').sort({ createdAt: -1 });
     if (current) return current;
 
-    // Após finalização, mantém na tela de avaliação até o passageiro avaliar
+    // Após finalização, mantém na tela de avaliação até o passageiro avaliar ou pular
     const finished = await parcelModel.findOne({
         user: userId,
         status: 'finished',
+        $or: [
+            { passengerReviewSkippedAt: null },
+            { passengerReviewSkippedAt: { $exists: false } },
+        ],
     }).populate('captain').select('+deliveryPin').sort({ createdAt: -1 });
     if (!finished) return null;
 
@@ -427,10 +504,31 @@ module.exports.getCurrentParcelForUser = async (userId) => {
 };
 
 module.exports.getCurrentParcelForCaptain = async (captainId) => {
-    return parcelModel.findOne({
+    const active = await parcelModel.findOne({
         captain: captainId,
         status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
     }).populate('user').sort({ createdAt: -1 });
+    if (active) return active;
+
+    // Rating pós-entrega: finished sem avaliação do motorista (sobrevive refresh).
+    const finished = await parcelModel.findOne({
+        captain: captainId,
+        status: 'finished',
+        $or: [
+            { captainReviewSkippedAt: null },
+            { captainReviewSkippedAt: { $exists: false } },
+        ],
+    }).populate('user').sort({ createdAt: -1 });
+    if (!finished) return null;
+
+    const reviewModel = require('../models/review.model');
+    const reviewed = await reviewModel.findOne({
+        subjectType: 'parcel',
+        subjectId: finished._id,
+        captain: captainId,
+        type: 'driver_to_passenger',
+    });
+    return reviewed ? null : finished;
 };
 
 module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
@@ -456,13 +554,14 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
     const position = freshCaptain.location;
     if (!position || position.ltd == null || position.lng == null) return [];
 
-    const cutoff = new Date(Date.now() - PARCEL_EXPIRATION_MINUTES * 60 * 1000);
+    await expireStaleAwaitingParcels();
+
     const candidates = await parcelModel.find({
         status: 'awaiting_provider',
         vehicleType,
-        createdAt: { $gte: cutoff },
+        createdAt: { $gte: parcelExpirationCutoff() },
         'pickupCoordinates.lat': { $exists: true },
-    }).populate('user').sort({ createdAt: -1 }).limit(20);
+    }).sort({ createdAt: -1 }).limit(20);
 
     return candidates.filter((parcel) => {
         const pickup = parcel.pickupCoordinates;
@@ -473,22 +572,75 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
             pickup.lat,
             pickup.lng
         ) <= dispatchService.CAPTAIN_SEARCH_RADIUS_KM;
-    });
+    }).map((parcel) => module.exports.toParcelOfferDTO(parcel));
 };
 
 module.exports.getSettings = getSettings;
 
+module.exports.toParcelOfferDTO = (parcel) => {
+    const raw = typeof parcel.toObject === 'function' ? parcel.toObject() : { ...parcel };
+    return {
+        _id: raw._id,
+        vehicleType: raw.vehicleType,
+        pickup: raw.pickup,
+        destination: raw.destination,
+        pickupCoordinates: raw.pickupCoordinates,
+        destinationCoordinates: raw.destinationCoordinates,
+        itemName: raw.itemName,
+        category: raw.category,
+        weightKg: raw.weightKg,
+        size: raw.size,
+        description: raw.description,
+        notes: raw.notes,
+        fare: raw.fare,
+        estimatedDistance: raw.estimatedDistance,
+        estimatedTime: raw.estimatedTime,
+        status: raw.status,
+        createdAt: raw.createdAt,
+        // Sem telefones / nomes completos na oferta pré-aceite.
+    };
+};
+
+module.exports.toParcelCaptainDTO = (parcel) => {
+    const raw = typeof parcel.toObject === 'function' ? parcel.toObject({ virtuals: true }) : { ...parcel };
+    delete raw.deliveryPin;
+    return raw;
+};
+
 module.exports.updateSettings = async (patch) => {
     const settings = await getSettings();
-    Object.assign(settings, patch);
-    if (patch.vehicleSurcharge) {
+    const allowed = [
+        'baseFare', 'perKm', 'perMinute', 'minimumFare',
+        'requireDeliveryPin', 'motoMaxSize', 'motoMaxWeightKg', 'blockIncompatibleMoto',
+    ];
+    for (const key of allowed) {
+        if (patch[key] !== undefined) settings[key] = patch[key];
+    }
+    if (patch.vehicleSurcharge && typeof patch.vehicleSurcharge === 'object') {
+        const current = settings.vehicleSurcharge?.toObject?.() || settings.vehicleSurcharge || {};
         settings.vehicleSurcharge = {
-            ...settings.vehicleSurcharge?.toObject?.() || settings.vehicleSurcharge,
-            ...patch.vehicleSurcharge,
+            moto: patch.vehicleSurcharge.moto !== undefined ? patch.vehicleSurcharge.moto : current.moto,
+            car: patch.vehicleSurcharge.car !== undefined ? patch.vehicleSurcharge.car : current.car,
         };
     }
     await settings.save();
     return settings;
+};
+
+module.exports.skipPassengerReview = async ({ parcelId, user }) => {
+    const parcel = await parcelModel.findOne({ _id: parcelId, user, status: 'finished' });
+    if (!parcel) throw new Error('PARCEL_NOT_FOUND');
+    parcel.passengerReviewSkippedAt = new Date();
+    await parcel.save();
+    return parcel;
+};
+
+module.exports.skipCaptainReview = async ({ parcelId, captain }) => {
+    const parcel = await parcelModel.findOne({ _id: parcelId, captain, status: 'finished' });
+    if (!parcel) throw new Error('PARCEL_NOT_FOUND');
+    parcel.captainReviewSkippedAt = new Date();
+    await parcel.save();
+    return parcel;
 };
 
 module.exports.listParcelsAdmin = async ({ status, limit = 50, skip = 0 } = {}) => {
@@ -601,3 +753,5 @@ module.exports.submitCaptainReview = async ({ parcelId, captain, rating, comment
 };
 
 module.exports.VALID_ORIGINS_BY_TARGET = VALID_ORIGINS_BY_TARGET;
+module.exports.PARCEL_EXPIRATION_MINUTES = PARCEL_EXPIRATION_MINUTES;
+module.exports.expireStaleAwaitingParcels = expireStaleAwaitingParcels;

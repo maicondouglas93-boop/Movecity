@@ -72,6 +72,18 @@ export default function Parcels() {
                 />
               </label>
             ))}
+            <label className="flex flex-col gap-1">
+              <span className="text-text-muted">motoMaxSize</span>
+              <select
+                className="border border-border rounded-lg px-3 py-2"
+                value={settings.motoMaxSize || 'medium'}
+                onChange={(e) => setSettings({ ...settings, motoMaxSize: e.target.value })}
+              >
+                <option value="small">small</option>
+                <option value="medium">medium</option>
+                <option value="large">large</option>
+              </select>
+            </label>
             <label className="flex items-center gap-2 col-span-2">
               <input
                 type="checkbox"
@@ -79,6 +91,14 @@ export default function Parcels() {
                 onChange={(e) => setSettings({ ...settings, requireDeliveryPin: e.target.checked })}
               />
               Exigir PIN na entrega
+            </label>
+            <label className="flex items-center gap-2 col-span-2">
+              <input
+                type="checkbox"
+                checked={!!settings.blockIncompatibleMoto}
+                onChange={(e) => setSettings({ ...settings, blockIncompatibleMoto: e.target.checked })}
+              />
+              Bloquear moto incompatível (tamanho/peso)
             </label>
           </div>
           <button type="button" onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium">

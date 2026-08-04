@@ -86,16 +86,17 @@ describe('parcel.service', () => {
         ).rejects.toThrow('USER_HAS_ACTIVE_PARCEL');
     });
 
+    const onlineMotoCaptain = (email, plate) => createCaptain({
+        email,
+        isOnline: true,
+        location: { ltd: -20.1, lng: -41.6 },
+        vehicle: { color: 'black', plate, capacity: 1, vehicleType: 'moto' },
+    });
+
     it('acceptParcelAtomic é exclusivo — segundo captain falha', async () => {
         const { parcel } = await parcelService.createParcel(basePayload());
-        const cap1 = await createCaptain({
-            email: `c1_${Date.now()}@test.com`,
-            vehicle: { color: 'black', plate: 'AAA1111', capacity: 1, vehicleType: 'moto' },
-        });
-        const cap2 = await createCaptain({
-            email: `c2_${Date.now()}@test.com`,
-            vehicle: { color: 'black', plate: 'BBB2222', capacity: 1, vehicleType: 'moto' },
-        });
+        const cap1 = await onlineMotoCaptain(`c1_${Date.now()}@test.com`, 'AAA1111');
+        const cap2 = await onlineMotoCaptain(`c2_${Date.now()}@test.com`, 'BBB2222');
 
         await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain: cap1 });
         await expect(
@@ -103,12 +104,43 @@ describe('parcel.service', () => {
         ).rejects.toThrow('PARCEL_ALREADY_ACCEPTED');
     });
 
+    it('acceptParcelAtomic rejeita captain offline', async () => {
+        const { parcel } = await parcelService.createParcel(basePayload());
+        const cap = await createCaptain({
+            email: `coff_${Date.now()}@test.com`,
+            isOnline: false,
+            location: { ltd: -20.1, lng: -41.6 },
+            vehicle: { color: 'black', plate: 'OFF1111', capacity: 1, vehicleType: 'moto' },
+        });
+        await expect(
+            parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain: cap })
+        ).rejects.toThrow('CAPTAIN_NOT_ALLOWED');
+    });
+
+    it('toParcelOfferDTO não inclui telefones', async () => {
+        const { parcel } = await parcelService.createParcel(basePayload());
+        const dto = parcelService.toParcelOfferDTO(parcel);
+        expect(dto.sender).toBeUndefined();
+        expect(dto.recipient).toBeUndefined();
+        expect(dto.deliveryPin).toBeUndefined();
+        expect(dto.itemName).toBe('Documento');
+    });
+
+    it('expireStaleAwaitingParcels cancela awaiting antigo', async () => {
+        const { parcel } = await parcelService.createParcel(basePayload());
+        await parcelModel.collection.updateOne(
+            { _id: parcel._id },
+            { $set: { createdAt: new Date(Date.now() - 11 * 60 * 1000) } }
+        );
+        await parcelService.expireStaleAwaitingParcels({ userId: parcel.user });
+        const after = await parcelModel.findById(parcel._id);
+        expect(after.status).toBe('cancelled');
+        expect(after.cancellationReason).toBe('expired');
+    });
+
     it('updateParcelStatus rejeita salto ilegal', async () => {
         const { parcel } = await parcelService.createParcel(basePayload());
-        const captain = await createCaptain({
-            email: `c3_${Date.now()}@test.com`,
-            vehicle: { color: 'black', plate: 'CCC3333', capacity: 1, vehicleType: 'moto' },
-        });
+        const captain = await onlineMotoCaptain(`c3_${Date.now()}@test.com`, 'CCC3333');
         await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
 
         await expect(
@@ -130,10 +162,7 @@ describe('parcel.service', () => {
 
     it('confirmDelivery com PIN errado não muda status; sucesso vai direto a finished', async () => {
         const { parcel } = await parcelService.createParcel(basePayload());
-        const captain = await createCaptain({
-            email: `c4_${Date.now()}@test.com`,
-            vehicle: { color: 'black', plate: 'DDD4444', capacity: 1, vehicleType: 'moto' },
-        });
+        const captain = await onlineMotoCaptain(`c4_${Date.now()}@test.com`, 'DDD4444');
         await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
 
         for (const status of [

@@ -341,11 +341,19 @@ const CaptainHome = () => {
             setParcelOffer(data)
             setParcelPopupOpen(true)
             setRidePopupPanel(false)
+            try {
+                const audio = new Audio('/sounds/new-ride.wav')
+                audio.play().catch(() => {})
+            } catch { /* ignore */ }
+            if (navigator.vibrate) {
+                navigator.vibrate([500, 200, 500])
+            }
         }
 
         const handleParcelTaken = (data) => {
             if (data?.captainId && data.captainId === captain._id) return
-            if (parcelOffer && parcelOffer._id === data.parcelId) {
+            const currentOffer = parcelOfferRef.current
+            if (currentOffer && String(currentOffer._id) === String(data?.parcelId)) {
                 setParcelPopupOpen(false)
                 setParcelOffer(null)
                 addToast('Essa encomenda já foi aceita por outro prestador.', 'info')
@@ -366,7 +374,7 @@ const CaptainHome = () => {
             socket.off('new-parcel', handleNewParcel)
             socket.off('parcel-taken', handleParcelTaken)
         }
-    }, [captain, socket, parcelOffer, addToast, syncPendingParcels])
+    }, [captain, socket, addToast, syncPendingParcels])
 
     // --- Fase B: sincronização das corridas/encomendas pendentes ---
     // Push (socket) é efêmero: se o app estava fechado, minimizado ou sem

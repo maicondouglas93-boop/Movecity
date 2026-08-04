@@ -1,11 +1,21 @@
-import React, { useContext, useEffect, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { createParcel, getParcelFare } from '@/shared/services/parcelApi'
+import PageHeader from '@/shared/components/ui/PageHeader'
+import Button from '@/shared/components/ui/Button'
+import Card from '@/shared/components/ui/Card'
+import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
+import DetailRow from '@/shared/components/ui/DetailRow'
 
-const SIZE_LABEL = { small: 'Pequeno', medium: 'Médio', large: 'Grande' }
+const SIZE_OPTIONS = [
+  { id: 'small', label: 'Pequeno', hint: 'Envelope, documentos' },
+  { id: 'medium', label: 'Médio', hint: 'Caixa pequena' },
+  { id: 'large', label: 'Grande', hint: 'Várias caixas' },
+]
+
 const CATEGORIES = [
   { id: 'documento', label: 'Documento' },
   { id: 'caixa', label: 'Caixa' },
@@ -14,32 +24,27 @@ const CATEGORIES = [
   { id: 'outros', label: 'Outros' },
 ]
 
-// Ordem do plano: Origem → Destino → Veículo → Objeto → Compatibilidade → Tarifa → Confirmar
-const STEPS = ['pickup', 'destination', 'vehicle', 'item', 'people', 'fare']
+const fieldClass =
+  'w-full bg-surface-alt border border-line rounded-panel px-4 py-3.5 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-colors'
+
+const labelClass = 'block text-sm font-medium text-ink-600 mb-1.5'
 
 const ParcelWizard = () => {
   const navigate = useNavigate()
   const { user } = useContext(UserDataContext)
   const { setUserParcel, userRide, userParcel } = useContext(RideContext)
   const { addToast } = useToast()
-  const [step, setStep] = useState(0)
 
-  useEffect(() => {
-    if (userRide) {
-      addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
-      navigate('/home', { replace: true })
-      return
-    }
-    if (userParcel) {
-      navigate('/encomenda/ativa', { state: { parcel: userParcel }, replace: true })
-    }
-  }, [userRide, userParcel, navigate, addToast])
   const [loading, setLoading] = useState(false)
+  const [fareLoading, setFareLoading] = useState(false)
   const [fareInfo, setFareInfo] = useState(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const fareTimer = useRef(null)
+
   const [form, setForm] = useState({
     pickup: '',
     destination: '',
-    vehicleType: '',
+    vehicleType: 'moto',
     itemName: '',
     category: 'documento',
     weightKg: '1',
@@ -53,298 +58,416 @@ const ParcelWizard = () => {
     recipient: { name: '', phone: '' },
   })
 
+  useEffect(() => {
+    if (userRide) {
+      addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
+      navigate('/home', { replace: true })
+      return
+    }
+    if (userParcel) {
+      navigate('/encomenda/ativa', { state: { parcel: userParcel }, replace: true })
+    }
+  }, [userRide, userParcel, navigate, addToast])
+
   const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }))
   const setNested = (key, sub, value) =>
     setForm((f) => ({ ...f, [key]: { ...f[key], [sub]: value } }))
 
-  const next = async () => {
-    const current = STEPS[step]
-    if (current === 'pickup' && form.pickup.trim().length < 3) {
-      return addToast('Informe o endereço de retirada', 'error')
-    }
-    if (current === 'destination' && form.destination.trim().length < 3) {
-      return addToast('Informe o endereço de entrega', 'error')
-    }
-    if (current === 'vehicle' && !form.vehicleType) {
-      return addToast('Escolha moto ou carro', 'error')
-    }
-    if (current === 'item') {
-      if (form.itemName.trim().length < 2) return addToast('Nome do objeto obrigatório', 'error')
-      if (Number(form.weightKg) < 0) return addToast('Peso inválido', 'error')
-    }
-    if (current === 'people') {
-      if (form.sender.name.trim().length < 2 || form.sender.phone.trim().length < 8) {
-        return addToast('Dados do remetente incompletos', 'error')
-      }
-      if (form.recipient.name.trim().length < 2 || form.recipient.phone.trim().length < 8) {
-        return addToast('Dados do destinatário incompletos', 'error')
-      }
-      setLoading(true)
-      try {
-        const data = await getParcelFare({
-          pickup: form.pickup,
-          destination: form.destination,
-          vehicleType: form.vehicleType,
-          size: form.size,
-          weightKg: form.weightKg,
-        })
-        setFareInfo(data)
-        if (data.warnings?.length) {
-          data.warnings.forEach((w) => addToast(w, 'info'))
-        }
-        if (data.blocked) {
-          addToast('Troque para carro para continuar com este item', 'error')
-          setLoading(false)
-          return
-        }
-      } catch (err) {
-        addToast(err.response?.data?.message || 'Falha ao calcular tarifa', 'error')
-        setLoading(false)
-        return
-      }
-      setLoading(false)
-    }
-    setStep((s) => Math.min(s + 1, STEPS.length - 1))
-  }
+  const canQuote =
+    form.pickup.trim().length >= 3
+    && form.destination.trim().length >= 3
+    && form.vehicleType
 
-  const back = () => {
-    if (step === 0) return navigate('/home')
-    setStep((s) => s - 1)
+  const refreshFare = useCallback(async () => {
+    if (!canQuote) {
+      setFareInfo(null)
+      return
+    }
+    setFareLoading(true)
+    try {
+      const data = await getParcelFare({
+        pickup: form.pickup.trim(),
+        destination: form.destination.trim(),
+        vehicleType: form.vehicleType,
+        size: form.size,
+        weightKg: form.weightKg,
+      })
+      setFareInfo(data)
+      if (data.blocked) {
+        addToast('Este item não cabe na moto — escolha carro.', 'error')
+      }
+    } catch (err) {
+      setFareInfo(null)
+      addToast(err.response?.data?.message || 'Não foi possível calcular o preço.', 'error')
+    } finally {
+      setFareLoading(false)
+    }
+  }, [canQuote, form.pickup, form.destination, form.vehicleType, form.size, form.weightKg, addToast])
+
+  useEffect(() => {
+    if (fareTimer.current) clearTimeout(fareTimer.current)
+    if (!canQuote) {
+      setFareInfo(null)
+      return undefined
+    }
+    fareTimer.current = setTimeout(() => {
+      refreshFare()
+    }, 550)
+    return () => {
+      if (fareTimer.current) clearTimeout(fareTimer.current)
+    }
+  }, [canQuote, form.pickup, form.destination, form.vehicleType, form.size, form.weightKg, refreshFare])
+
+  const validate = () => {
+    if (form.pickup.trim().length < 3) return 'Informe o local de coleta'
+    if (form.destination.trim().length < 3) return 'Informe o endereço de entrega'
+    if (!form.vehicleType) return 'Escolha moto ou carro'
+    if (form.itemName.trim().length < 2) return 'Descreva o que será entregue'
+    const weight = Number(form.weightKg)
+    if (Number.isNaN(weight) || weight < 0 || weight > 100) return 'Informe um peso válido (0–100 kg)'
+    if (form.sender.name.trim().length < 2 || form.sender.phone.trim().length < 8) {
+      return 'Complete os dados de quem envia'
+    }
+    if (form.recipient.name.trim().length < 2 || form.recipient.phone.trim().length < 8) {
+      return 'Complete os dados de quem recebe'
+    }
+    if (fareInfo?.blocked) return 'Troque para carro para continuar com este item'
+    if (!fareInfo?.fare) return 'Aguarde o cálculo do preço'
+    return null
   }
 
   const confirm = async () => {
-    if (fareInfo?.blocked) {
-      return addToast('Veículo incompatível com o item', 'error')
-    }
+    const error = validate()
+    if (error) return addToast(error, 'error')
+
     setLoading(true)
     try {
       const parcel = await createParcel({
-        pickup: form.pickup,
-        destination: form.destination,
+        pickup: form.pickup.trim(),
+        destination: form.destination.trim(),
         vehicleType: form.vehicleType,
-        itemName: form.itemName,
+        itemName: form.itemName.trim(),
         category: form.category,
         weightKg: Number(form.weightKg),
         size: form.size,
-        description: form.description,
-        notes: form.notes,
-        sender: form.sender,
-        recipient: form.recipient,
+        description: form.description.trim(),
+        notes: form.notes.trim(),
+        sender: {
+          name: form.sender.name.trim(),
+          phone: form.sender.phone.trim(),
+        },
+        recipient: {
+          name: form.recipient.name.trim(),
+          phone: form.recipient.phone.trim(),
+        },
         paymentMethod: 'cash',
       })
       setUserParcel(parcel)
       addToast('Encomenda solicitada!', 'success')
       navigate('/encomenda/ativa', { state: { parcel } })
     } catch (err) {
-      addToast(err.response?.data?.message || 'Falha ao criar encomenda', 'error')
+      addToast(err.response?.data?.message || 'Não foi possível solicitar a entrega.', 'error')
     } finally {
       setLoading(false)
     }
   }
 
+  const sizeLabel = SIZE_OPTIONS.find((s) => s.id === form.size)?.label || form.size
+  const vehicleLabel = form.vehicleType === 'moto' ? 'Moto' : form.vehicleType === 'car' ? 'Carro' : '—'
+
   return (
-    <div className="min-h-screen bg-surface flex flex-col">
-      <header className="px-4 py-3 border-b border-line flex items-center gap-3">
-        <button type="button" onClick={back} className="min-h-[40px] min-w-[40px]" aria-label="Voltar">
-          <i className="ri-arrow-left-line text-xl text-ink-900" />
-        </button>
-        <h1 className="text-lg font-semibold text-ink-900">Encomenda</h1>
-      </header>
+    <div className="min-h-screen bg-surface-alt flex flex-col">
+      <PageHeader title="Nova encomenda" onBack={() => navigate('/home')} />
 
-      <main className="flex-1 p-4 pb-28 max-w-lg mx-auto w-full">
-        {STEPS[step] === 'pickup' && (
-          <section>
-            <h2 className="text-xl font-semibold text-ink-900 mb-2">Onde retirar?</h2>
-            <input
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-              placeholder="Endereço de retirada"
-              value={form.pickup}
-              onChange={(e) => setField('pickup', e.target.value)}
+      <main className="flex-1 w-full max-w-xl mx-auto px-4 pt-4 pb-36 space-y-4">
+        <p className="text-sm text-ink-400 px-0.5">
+          Informe coleta, entrega e o que precisa enviar. O preço aparece ao preencher a rota.
+        </p>
+
+        {/* Rota */}
+        <Card shadow="raised" className="space-y-4">
+          <h2 className="text-base font-semibold text-ink-900">Rota</h2>
+          <div>
+            <label htmlFor="parcel-pickup" className={labelClass}>Coleta</label>
+            <div className="relative">
+              <i className="ri-map-pin-user-fill absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-500" aria-hidden="true" />
+              <input
+                id="parcel-pickup"
+                className={`${fieldClass} pl-10`}
+                placeholder="Digite o local de coleta"
+                value={form.pickup}
+                onChange={(e) => setField('pickup', e.target.value)}
+                autoComplete="street-address"
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="parcel-destination" className={labelClass}>Entrega</label>
+            <div className="relative">
+              <i className="ri-map-pin-2-fill absolute left-3.5 top-1/2 -translate-y-1/2 text-danger-500" aria-hidden="true" />
+              <input
+                id="parcel-destination"
+                className={`${fieldClass} pl-10`}
+                placeholder="Para onde devemos entregar?"
+                value={form.destination}
+                onChange={(e) => setField('destination', e.target.value)}
+                autoComplete="street-address"
+              />
+            </div>
+          </div>
+        </Card>
+
+        {/* Veículo */}
+        <Card shadow="raised" className="space-y-3">
+          <h2 className="text-base font-semibold text-ink-900">Veículo</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <SelectableOptionCard
+              selected={form.vehicleType === 'moto'}
+              onClick={() => setField('vehicleType', 'moto')}
+              icon={<i className="ri-e-bike-2-line text-2xl text-ink-900" aria-hidden="true" />}
+              title="Moto"
+              subtitle="Rápida · volumes pequenos"
             />
-          </section>
-        )}
-
-        {STEPS[step] === 'destination' && (
-          <section>
-            <h2 className="text-xl font-semibold text-ink-900 mb-2">Onde entregar?</h2>
-            <input
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-              placeholder="Endereço de entrega"
-              value={form.destination}
-              onChange={(e) => setField('destination', e.target.value)}
+            <SelectableOptionCard
+              selected={form.vehicleType === 'car'}
+              onClick={() => setField('vehicleType', 'car')}
+              icon={<i className="ri-car-line text-2xl text-ink-900" aria-hidden="true" />}
+              title="Carro"
+              subtitle="Caixas maiores · frágeis"
             />
-          </section>
-        )}
+          </div>
+        </Card>
 
-        {STEPS[step] === 'vehicle' && (
-          <section className="space-y-3">
-            <h2 className="text-xl font-semibold text-ink-900 mb-2">Tipo de veículo</h2>
-            {[
-              {
-                id: 'moto',
-                title: 'Moto',
-                points: ['Mais rápida', 'Mais econômica', 'Para pequenos volumes'],
-              },
-              {
-                id: 'car',
-                title: 'Carro',
-                points: ['Objetos grandes', 'Muitas caixas', 'Compras maiores', 'Itens frágeis'],
-              },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setField('vehicleType', opt.id)}
-                className={`w-full text-left border rounded-panel p-4 ${
-                  form.vehicleType === opt.id ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
-                }`}
-              >
-                <p className="font-semibold text-ink-900 text-lg">{opt.title}</p>
-                <ul className="mt-2 text-sm text-ink-600 space-y-1">
-                  {opt.points.map((p) => (
-                    <li key={p}>• {p}</li>
-                  ))}
-                </ul>
-              </button>
-            ))}
-          </section>
-        )}
-
-        {STEPS[step] === 'item' && (
-          <section className="space-y-3">
-            <h2 className="text-xl font-semibold text-ink-900 mb-2">Dados do objeto</h2>
+        {/* Pacote */}
+        <Card shadow="raised" className="space-y-4">
+          <h2 className="text-base font-semibold text-ink-900">O que vamos entregar?</h2>
+          <div>
+            <label htmlFor="parcel-item" className={labelClass}>Objeto</label>
             <input
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-              placeholder="Nome do objeto"
+              id="parcel-item"
+              className={fieldClass}
+              placeholder="Ex.: documentos, roupas, pequena encomenda"
               value={form.itemName}
               onChange={(e) => setField('itemName', e.target.value)}
             />
-            <select
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-              value={form.category}
-              onChange={(e) => setField('category', e.target.value)}
-            >
+          </div>
+
+          <div>
+            <p className={labelClass} id="parcel-category-label">Categoria</p>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="parcel-category-label">
               {CATEGORIES.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-              placeholder="Peso aproximado (kg)"
-              value={form.weightKg}
-              onChange={(e) => setField('weightKg', e.target.value)}
-            />
-            <div className="grid grid-cols-3 gap-2">
-              {Object.entries(SIZE_LABEL).map(([id, label]) => (
                 <button
-                  key={id}
+                  key={c.id}
                   type="button"
-                  onClick={() => setField('size', id)}
-                  className={`py-3 rounded-panel border font-medium ${
-                    form.size === id ? 'border-brand-500 bg-brand-50' : 'border-line'
+                  onClick={() => setField('category', c.id)}
+                  aria-pressed={form.category === c.id}
+                  className={`min-h-[40px] px-3.5 rounded-full text-sm font-medium border transition-colors ${
+                    form.category === c.id
+                      ? 'bg-brand-50 border-brand-500 text-brand-700'
+                      : 'bg-surface border-line text-ink-600'
                   }`}
                 >
-                  {label}
+                  {c.label}
                 </button>
               ))}
             </div>
-            <textarea
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3 min-h-[90px]"
-              placeholder="Descreva sua encomenda"
-              value={form.description}
-              onChange={(e) => setField('description', e.target.value)}
-            />
-            <textarea
-              className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3 min-h-[90px]"
-              placeholder="Observações (interfone, apto, portão…)"
-              value={form.notes}
-              onChange={(e) => setField('notes', e.target.value)}
-            />
-          </section>
-        )}
+          </div>
 
-        {STEPS[step] === 'people' && (
-          <section className="space-y-4">
-            <h2 className="text-xl font-semibold text-ink-900">Remetente e destinatário</h2>
+          <div>
+            <p className={labelClass} id="parcel-size-label">Tamanho</p>
+            <div className="grid grid-cols-3 gap-2" role="group" aria-labelledby="parcel-size-label">
+              {SIZE_OPTIONS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setField('size', s.id)}
+                  aria-pressed={form.size === s.id}
+                  className={`rounded-panel border-2 px-2 py-3 text-center transition-colors active:scale-[0.98] ${
+                    form.size === s.id
+                      ? 'border-brand-500 bg-brand-50'
+                      : 'border-line bg-surface-alt'
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-ink-900">{s.label}</p>
+                  <p className="text-[11px] text-ink-400 mt-0.5 leading-tight">{s.hint}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="parcel-weight" className={labelClass}>Peso aproximado (kg)</label>
+            <input
+              id="parcel-weight"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              inputMode="decimal"
+              className={fieldClass}
+              placeholder="Ex.: 2,5"
+              value={form.weightKg}
+              onChange={(e) => setField('weightKg', e.target.value)}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((v) => !v)}
+            className="w-full flex items-center justify-between min-h-[44px] text-sm font-medium text-ink-600"
+            aria-expanded={detailsOpen}
+          >
+            <span>Observações e descrição</span>
+            <i className={`ri-arrow-${detailsOpen ? 'up' : 'down'}-s-line text-lg`} aria-hidden="true" />
+          </button>
+
+          {detailsOpen && (
+            <div className="space-y-3 pt-1">
+              <div>
+                <label htmlFor="parcel-description" className={labelClass}>Descrição</label>
+                <textarea
+                  id="parcel-description"
+                  className={`${fieldClass} min-h-[88px] resize-none`}
+                  placeholder="Ex.: envelope com contratos, frágil"
+                  value={form.description}
+                  onChange={(e) => setField('description', e.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label htmlFor="parcel-notes" className={labelClass}>Observações para o prestador</label>
+                <textarea
+                  id="parcel-notes"
+                  className={`${fieldClass} min-h-[88px] resize-none`}
+                  placeholder="Ex.: Deixar na portaria · interfone 12"
+                  value={form.notes}
+                  onChange={(e) => setField('notes', e.target.value)}
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Contatos */}
+        <Card shadow="raised" className="space-y-4">
+          <h2 className="text-base font-semibold text-ink-900">Quem envia e quem recebe</h2>
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Remetente</p>
             <div>
-              <p className="text-sm font-medium text-ink-600 mb-2">Remetente</p>
+              <label htmlFor="sender-name" className={labelClass}>Nome</label>
               <input
-                className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3 mb-2"
-                placeholder="Nome"
+                id="sender-name"
+                className={fieldClass}
+                placeholder="Seu nome completo"
                 value={form.sender.name}
                 onChange={(e) => setNested('sender', 'name', e.target.value)}
-              />
-              <input
-                className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-                placeholder="Telefone"
-                value={form.sender.phone}
-                onChange={(e) => setNested('sender', 'phone', e.target.value)}
+                autoComplete="name"
               />
             </div>
             <div>
-              <p className="text-sm font-medium text-ink-600 mb-2">Destinatário</p>
+              <label htmlFor="sender-phone" className={labelClass}>Telefone</label>
               <input
-                className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3 mb-2"
-                placeholder="Nome"
+                id="sender-phone"
+                className={fieldClass}
+                placeholder="Telefone com DDD"
+                value={form.sender.phone}
+                onChange={(e) => setNested('sender', 'phone', e.target.value)}
+                inputMode="tel"
+                autoComplete="tel"
+              />
+            </div>
+          </div>
+          <div className="border-t border-line pt-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Destinatário</p>
+            <div>
+              <label htmlFor="recipient-name" className={labelClass}>Nome</label>
+              <input
+                id="recipient-name"
+                className={fieldClass}
+                placeholder="Nome de quem vai receber"
                 value={form.recipient.name}
                 onChange={(e) => setNested('recipient', 'name', e.target.value)}
               />
+            </div>
+            <div>
+              <label htmlFor="recipient-phone" className={labelClass}>Telefone</label>
               <input
-                className="w-full bg-surface-alt border border-line rounded-panel px-4 py-3"
-                placeholder="Telefone"
+                id="recipient-phone"
+                className={fieldClass}
+                placeholder="Telefone do destinatário"
                 value={form.recipient.phone}
                 onChange={(e) => setNested('recipient', 'phone', e.target.value)}
+                inputMode="tel"
               />
             </div>
-          </section>
-        )}
+          </div>
+        </Card>
 
-        {STEPS[step] === 'fare' && fareInfo && (
-          <section className="space-y-3">
-            <h2 className="text-xl font-semibold text-ink-900">Confirmar encomenda</h2>
-            <div className="bg-surface-alt border border-line rounded-panel p-4 space-y-2 text-sm">
-              <p><span className="text-ink-400">Veículo:</span> {form.vehicleType}</p>
-              <p><span className="text-ink-400">Retirada:</span> {form.pickup}</p>
-              <p><span className="text-ink-400">Entrega:</span> {form.destination}</p>
-              <p><span className="text-ink-400">Item:</span> {form.itemName} ({SIZE_LABEL[form.size]})</p>
-              <p className="text-2xl font-bold text-ink-900 pt-2">
-                R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}
-              </p>
-              <p className="text-xs text-ink-400">Entrega imediata (Agora)</p>
+        {/* Resumo */}
+        <Card shadow="raised" className="space-y-1">
+          <h2 className="text-base font-semibold text-ink-900 mb-2">Resumo</h2>
+          <DetailRow
+            icon="ri-map-pin-user-fill"
+            title="Coleta"
+            subtitle={form.pickup.trim() || 'Ainda não informado'}
+          />
+          <DetailRow
+            icon="ri-map-pin-2-fill"
+            iconColor="text-danger-500"
+            title="Entrega"
+            subtitle={form.destination.trim() || 'Ainda não informado'}
+          />
+          <DetailRow
+            icon="ri-box-3-line"
+            title={form.itemName.trim() || 'Objeto'}
+            subtitle={`${sizeLabel} · ${vehicleLabel}${form.weightKg ? ` · ${form.weightKg} kg` : ''}`}
+          />
+          <div className="flex items-end justify-between pt-3 border-t border-line mt-2">
+            <div>
+              <p className="text-xs text-ink-400">Estimativa</p>
+              {fareLoading ? (
+                <p className="text-lg font-semibold text-ink-400 flex items-center gap-2">
+                  <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
+                  Calculando…
+                </p>
+              ) : fareInfo?.fare != null ? (
+                <p className="text-2xl font-bold text-ink-900">
+                  R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}
+                </p>
+              ) : (
+                <p className="text-lg font-semibold text-ink-400">—</p>
+              )}
             </div>
-            {fareInfo.warnings?.length > 0 && (
-              <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-panel p-3">
-                {fareInfo.warnings.map((w) => <p key={w}>{w}</p>)}
-              </div>
-            )}
-          </section>
-        )}
+            <p className="text-xs text-ink-400 pb-1">Entrega agora</p>
+          </div>
+          {fareInfo?.warnings?.length > 0 && (
+            <div className="mt-3 text-sm text-ink-600 bg-surface-alt border border-line rounded-panel px-3 py-2.5 space-y-1" role="status">
+              {fareInfo.warnings.map((w) => (
+                <p key={w} className="flex gap-2">
+                  <i className="ri-information-line text-brand-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{w}</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </Card>
       </main>
 
-      <footer className="fixed bottom-0 inset-x-0 p-4 bg-surface border-t border-line">
-        <div className="max-w-lg mx-auto">
-          {STEPS[step] !== 'fare' ? (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={next}
-              className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50"
-            >
-              Continuar
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={confirm}
-              className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50"
-            >
-              {loading ? 'Enviando…' : 'Confirmar encomenda'}
-            </button>
-          )}
+      <footer className="fixed bottom-0 inset-x-0 z-panel bg-surface border-t border-line px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-floating">
+        <div className="max-w-xl mx-auto">
+          <Button
+            loading={loading}
+            disabled={loading || fareLoading || fareInfo?.blocked}
+            onClick={confirm}
+          >
+            Solicitar entrega
+            {fareInfo?.fare != null && !fareLoading ? (
+              <span className="opacity-90 font-medium">
+                · R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}
+              </span>
+            ) : null}
+          </Button>
         </div>
       </footer>
     </div>

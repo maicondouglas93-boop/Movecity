@@ -51,3 +51,13 @@ export async function confirmParcelDelivery(id, pin) {
     const { data } = await api.post(`/parcels/${id}/confirm-delivery`, { pin })
     return data
 }
+
+export async function skipParcelReview(id) {
+    const { data } = await api.post(`/parcels/${id}/skip-review`)
+    return data
+}
+
+export async function skipCaptainParcelReview(id) {
+    const { data } = await api.post(`/parcels/${id}/skip-captain-review`)
+    return data
+}

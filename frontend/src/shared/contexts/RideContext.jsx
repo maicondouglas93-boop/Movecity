@@ -209,7 +209,6 @@ const RideProvider = ({ children }) => {
         if (
             captainParcel
             && PARCEL_RESTORE_STATUSES.includes(captainParcel.status)
-            && captainParcel.status !== 'finished'
             && !captainRide
         ) {
             const key = `captain-parcel:${captainParcel._id}`
@@ -217,7 +216,12 @@ const RideProvider = ({ children }) => {
                 redirectedJobsRef.current.add(key)
             } else if ((path === '/captain-home' || path === '/') && !redirectedJobsRef.current.has(key)) {
                 redirectedJobsRef.current.add(key)
-                navigate('/captain-parcel', { state: { parcel: captainParcel } })
+                navigate('/captain-parcel', {
+                    state: {
+                        parcel: captainParcel,
+                        step: captainParcel.status === 'finished' ? 'rating' : 'active',
+                    },
+                })
             }
         }
     }, [userRide, captainRide, userParcel, captainParcel, location.pathname, navigate])

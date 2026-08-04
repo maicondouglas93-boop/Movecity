@@ -15,3 +15,18 @@ module.exports.notificationTokenLimiter = rateLimit({
     max: 20,
     message: { message: "Muitas tentativas de registro de notificação. Tente novamente em 15 minutos." }
 });
+
+// PIN de entrega: limita brute-force por captain (4 dígitos).
+module.exports.parcelPinLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: (req) => {
+        const captainId = req.captain?._id?.toString?.() || req.ip || 'anon';
+        const parcelId = req.params?.id || 'unknown';
+        return `parcel-pin:${captainId}:${parcelId}`;
+    },
+    message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
+});

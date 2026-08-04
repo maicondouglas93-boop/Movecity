@@ -23,9 +23,7 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
         { new: true }
     ).populate('user');
 
-    // Oferta nunca inclui deliveryPin
-    const offerPayload = parcelWithUser.toObject();
-    delete offerPayload.deliveryPin;
+    const offerPayload = parcelService.toParcelOfferDTO(parcelWithUser);
 
     captains.forEach((captain) => {
         addSocketToRoom(captain.socketId, `parcel_${parcel._id}`);
@@ -86,7 +84,7 @@ module.exports.createParcel = async (req, res) => {
             description: body.description,
             notes: body.notes,
             paymentMethod: body.paymentMethod,
-            user: req.user._id, // nunca sobrescrito pelo body
+            user: req.user._id,
         });
 
         const TRACE_ID = `Parcel:${parcel._id}`;
@@ -94,11 +92,17 @@ module.exports.createParcel = async (req, res) => {
             addSocketToRoom(req.user.socketId, `parcel_${parcel._id}`);
         }
         try {
-            await dispatchParcelToCaptains(parcel, {
+            const offered = await dispatchParcelToCaptains(parcel, {
                 pickup: parcel.pickup,
                 vehicleType: parcel.vehicleType,
                 TRACE_ID,
             });
+            if (offered === 0) {
+                await parcelService.cancelParcelSystem(parcel._id, 'no_providers');
+                return res.status(503).json({
+                    message: 'Nenhum prestador disponível no momento. Tente novamente em instantes.',
+                });
+            }
         } catch (dispatchErr) {
             console.error(`[PARCEL][${TRACE_ID}] dispatch failed:`, dispatchErr.message);
             await parcelService.cancelParcelSystem(parcel._id, 'dispatch_failed');
@@ -176,9 +180,15 @@ module.exports.acceptParcel = async (req, res) => {
 
         emitDriverMapUpdate(req.captain._id, { busy: true });
 
-        const forCaptain = parcel.toObject();
-        delete forCaptain.deliveryPin;
-        return res.status(200).json(forCaptain);
+        if (typeof notificationService.sendRideAccepted === 'function' && parcel.user) {
+            // Reusa canal de aceite com tipo parcel no payload quando possível.
+            notificationService.sendRideAccepted(parcel.user._id || parcel.user, {
+                parcelId: String(parcelId),
+                subjectType: 'parcel',
+            }).catch(() => {});
+        }
+
+        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         console.error(`[AUDIT][${TRACE_ID}] accept fail:`, err.message);
         if (err.message === 'PARCEL_ALREADY_ACCEPTED') {
@@ -193,6 +203,9 @@ module.exports.acceptParcel = async (req, res) => {
         if (err.message === 'CAPTAIN_HAS_ACTIVE_RIDE' || err.message === 'CAPTAIN_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já está em outro serviço ativo.' });
         }
+        if (err.message === 'OUT_OF_RANGE') {
+            return res.status(403).json({ message: 'Você está fora da área desta encomenda.' });
+        }
         if (err.message === 'CAPTAIN_NOT_ALLOWED' || err.message === 'VEHICLE_MISMATCH') {
             return res.status(403).json({ message: 'Não autorizado a aceitar esta encomenda.' });
         }
@@ -201,7 +214,6 @@ module.exports.acceptParcel = async (req, res) => {
 };
 
 module.exports.declineParcel = async (req, res) => {
-    // ACK only — zero mutação de estado.
     await parcelService.declineParcel({
         parcelId: req.params.id,
         captain: req.captain,
@@ -227,7 +239,7 @@ module.exports.updateStatus = async (req, res) => {
             });
         }
 
-        return res.status(200).json(parcel);
+        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         if (err.message === 'INVALID_STATUS_TRANSITION') {
             return res.status(400).json({ message: 'Transição de status inválida' });
@@ -259,7 +271,7 @@ module.exports.confirmDelivery = async (req, res) => {
         }
 
         emitDriverMapUpdate(req.captain._id, { busy: false });
-        return res.status(200).json(parcel);
+        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         if (err.message === 'INVALID_PIN') {
             return res.status(400).json({ message: 'PIN inválido' });
@@ -288,7 +300,14 @@ module.exports.cancelParcel = async (req, res) => {
         });
 
         if (parcel.captain) {
-            emitDriverMapUpdate(parcel.captain._id || parcel.captain, { busy: false });
+            const captainId = parcel.captain._id || parcel.captain;
+            emitDriverMapUpdate(captainId, { busy: false });
+            if (typeof notificationService.sendRideCancelledToCaptain === 'function') {
+                notificationService.sendRideCancelledToCaptain(captainId, {
+                    parcelId: parcel._id.toString(),
+                    subjectType: 'parcel',
+                }).catch(() => {});
+            }
         }
 
         return res.status(200).json(parcel);
@@ -334,6 +353,32 @@ module.exports.submitCaptainReview = async (req, res) => {
         if (err.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         if (err.message === 'Parcel already reviewed') return res.status(409).json({ message: err.message });
         if (err.message === 'Only finished parcels can be reviewed') return res.status(400).json({ message: err.message });
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.skipReview = async (req, res) => {
+    try {
+        const parcel = await parcelService.skipPassengerReview({
+            parcelId: req.params.id,
+            user: req.user._id,
+        });
+        return res.status(200).json({ ok: true, parcelId: parcel._id });
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.skipCaptainReview = async (req, res) => {
+    try {
+        const parcel = await parcelService.skipCaptainReview({
+            parcelId: req.params.id,
+            captain: req.captain._id,
+        });
+        return res.status(200).json({ ok: true, parcelId: parcel._id });
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         return res.status(500).json({ message: err.message });
     }
 };

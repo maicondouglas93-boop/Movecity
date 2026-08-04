@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, query, param } = require('express-validator');
 const parcelController = require('../controllers/parcel.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
+const { parcelPinLimiter } = require('../middlewares/rateLimiter');
 
 router.get('/fare',
     authMiddleware.authUser,
@@ -23,7 +24,7 @@ router.post('/create',
     body('recipient.phone').isString().isLength({ min: 8 }),
     body('itemName').isString().isLength({ min: 2 }),
     body('category').isIn(['documento', 'caixa', 'compras', 'comida', 'outros']),
-    body('weightKg').isFloat({ min: 0 }),
+    body('weightKg').isFloat({ min: 0, max: 100 }),
     body('size').isIn(['small', 'medium', 'large']),
     body('description').optional().isString(),
     body('notes').optional().isString(),
@@ -60,6 +61,18 @@ router.post('/captain-review',
     parcelController.submitCaptainReview
 );
 
+router.post('/:id/skip-review',
+    authMiddleware.authUser,
+    param('id').isMongoId(),
+    parcelController.skipReview
+);
+
+router.post('/:id/skip-captain-review',
+    authMiddleware.authCaptain,
+    param('id').isMongoId(),
+    parcelController.skipCaptainReview
+);
+
 router.post('/:id/accept',
     authMiddleware.authCaptain,
     param('id').isMongoId(),
@@ -87,6 +100,7 @@ router.patch('/:id/status',
 
 router.post('/:id/confirm-delivery',
     authMiddleware.authCaptain,
+    parcelPinLimiter,
     param('id').isMongoId(),
     body('pin').optional().isString(),
     parcelController.confirmDelivery

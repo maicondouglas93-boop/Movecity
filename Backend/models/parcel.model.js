@@ -38,7 +38,7 @@ const parcelSchema = new mongoose.Schema({
         enum: ['documento', 'caixa', 'compras', 'comida', 'outros'],
         required: true,
     },
-    weightKg: { type: Number, required: true, min: 0 },
+    weightKg: { type: Number, required: true, min: 0, max: 100 },
     size: {
         type: String,
         enum: ['small', 'medium', 'large'],
@@ -96,6 +96,8 @@ const parcelSchema = new mongoose.Schema({
     },
     cancellationReason: String,
     cancelledAt: Date,
+    passengerReviewSkippedAt: { type: Date, default: null },
+    captainReviewSkippedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 parcelSchema.index({ status: 1 });
@@ -117,6 +119,29 @@ parcelSchema.index(
                     'collected',
                     'in_transit',
                     'arrived_destination',
+                ],
+            },
+        },
+    }
+);
+
+// Um parcel ativo por usuário (inclui awaiting — impede dual-create TOCTOU).
+parcelSchema.index(
+    { user: 1 },
+    {
+        name: 'user_active_parcel_unique',
+        unique: true,
+        partialFilterExpression: {
+            status: {
+                $in: [
+                    'awaiting_provider',
+                    'provider_accepted',
+                    'going_to_pickup',
+                    'arrived_pickup',
+                    'collected',
+                    'in_transit',
+                    'arrived_destination',
+                    'delivered',
                 ],
             },
         },

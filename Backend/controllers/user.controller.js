@@ -117,6 +117,39 @@ module.exports.getUserProfile = async (req, res, next) => {
     }
 };
 
+module.exports.updateUserProfile = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: errors.array()[0]?.msg || 'Dados inválidos', errors: errors.array() });
+        }
+
+        const { firstname, lastname, phone, cpf, birthDate, gender } = req.body;
+        const user = await userService.updateUserProfile(req.user._id, {
+            firstname,
+            lastname,
+            phone,
+            cpf,
+            birthDate,
+            gender,
+        });
+
+        return res.status(200).json({ user });
+    } catch (err) {
+        if (err.code === 'VALIDATION') {
+            return res.status(400).json({ message: err.message });
+        }
+        if (err.code === 'CONFLICT' || err.code === 11000) {
+            return res.status(409).json({ message: err.message || 'Dados em conflito com outra conta.' });
+        }
+        if (err.message === 'User not found') {
+            return res.status(404).json({ message: 'Usuário não encontrado' });
+        }
+        console.error('Error in updateUserProfile:', err);
+        return res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+};
+
 module.exports.logoutUser = async (req, res, next) => {
     try {
         const { maxAge, ...accessClearOptions } = COOKIE_OPTIONS();

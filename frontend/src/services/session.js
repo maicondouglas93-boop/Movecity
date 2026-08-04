@@ -102,6 +102,7 @@ export function sessionKindForUrl(url = '') {
     if (path.includes('/rides/current')) return 'user';
     if (path.includes('/rides/cancel')) return 'user';
     if (path.includes('/rides/get-fare') || path.includes('/rides/fare')) return 'user';
+    if (path.includes('/support')) return 'user';
 
     return null;
 }

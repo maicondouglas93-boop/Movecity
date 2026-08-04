@@ -46,6 +46,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         match: [ /^\+\d{10,15}$/, 'Please enter a valid E.164 phone number (e.g. +5511999999999)' ]
     },
+    birthDate: {
+        type: Date,
+    },
+    gender: {
+        type: String,
+        enum: [ 'male', 'female', 'other', '' ],
+        default: '',
+    },
     isBlocked: {
         type: Boolean,
         default: false,

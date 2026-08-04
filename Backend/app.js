@@ -17,6 +17,7 @@ const notificationRoutes = require('./routes/notification.routes');
 const chatRoutes = require('./routes/chat.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const vehicleCategoryRoutes = require('./routes/vehicleCategory.routes');
+const supportRoutes = require('./routes/support.routes');
 require('./services/tariffScheduler.service'); // registra o cron que aplica tarifas agendadas
 
 const adminRoutes = require('./routes/admin.routes');
@@ -140,6 +141,7 @@ app.use('/notifications', notificationRoutes);
 app.use('/chat', chatRoutes);
 app.use('/webhooks', webhookRoutes);
 app.use('/vehicle-categories', vehicleCategoryRoutes);
+app.use('/support', supportRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

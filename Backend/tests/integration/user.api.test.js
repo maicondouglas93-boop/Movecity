@@ -81,4 +81,38 @@ describe('User API Integration Tests', () => {
             expect(res.statusCode).toBe(401);
         });
     });
+
+    describe('PUT /users/profile', () => {
+        it('updates personal data for the authenticated user', async () => {
+            const user = await createUser();
+            const token = generateAuthToken(user);
+
+            const res = await request(app)
+                .put('/users/profile')
+                .set('Authorization', `Bearer ${token}`)
+                .send({
+                    firstname: 'Maria',
+                    lastname: 'Silva',
+                    phone: '11987654321',
+                    cpf: '529.982.247-25',
+                    birthDate: '1993-01-07',
+                    gender: 'female',
+                });
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.user.fullname.firstname).toBe('Maria');
+            expect(res.body.user.fullname.lastname).toBe('Silva');
+            expect(res.body.user.phone).toBe('+5511987654321');
+            expect(res.body.user.cpf).toBe('52998224725');
+            expect(res.body.user.gender).toBe('female');
+        });
+
+        it('rejects unauthenticated updates', async () => {
+            const res = await request(app)
+                .put('/users/profile')
+                .send({ firstname: 'X' });
+
+            expect(res.statusCode).toBe(401);
+        });
+    });
 });

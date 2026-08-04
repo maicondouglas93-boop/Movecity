@@ -9,6 +9,7 @@ import { UserDataContext } from '@/contexts/UserContext';
 import { useToast } from '@/contexts/ToastContext';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import Button from '@/shared/components/ui/Button';
+import { getFriendlyErrorMessage } from '@/services/errorMessages';
 
 const personalDataSchema = z.object({
     firstname: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
@@ -49,10 +50,10 @@ const PersonalData = () => {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 
-                const profileData = response.data.user || user;
-                
-                // Update Context
-                if(response.data.user) {
+                // GET /users/profile devolve o user no topo (não em .user).
+                const profileData = response.data?.user || response.data || user;
+
+                if (profileData?._id) {
                     setUser(profileData);
                 }
 
@@ -67,7 +68,7 @@ const PersonalData = () => {
                 });
                 if(profileData?.profilePicture || profileData?.photo) setPhotoPreview(profileData.profilePicture || profileData.photo);
             } catch (error) {
-                console.log("Using local context data, API not ready.");
+                console.warn('Não foi possível carregar o perfil; usando dados locais.', error);
             } finally {
                 setInitialLoading(false);
             }
@@ -78,13 +79,24 @@ const PersonalData = () => {
     const onSubmit = async (data) => {
         setLoading(true);
         try {
-            const response = await axios.put(`${import.meta.env.VITE_BASE_URL}/users/profile`, data, {
+            const response = await axios.put(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
+                firstname: data.firstname,
+                lastname: data.lastname,
+                phone: data.phone,
+                cpf: data.cpf,
+                birthDate: data.birthDate || undefined,
+                gender: data.gender || undefined,
+            }, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             });
-            setUser(response.data.user);
+            const updated = response.data?.user || response.data;
+            if (updated) setUser(updated);
             addToast('Perfil atualizado com sucesso!', 'success');
         } catch (error) {
-            addToast('Perfil atualizado (Modo Offline - API não encontrada)', 'success');
+            addToast(
+                getFriendlyErrorMessage(error, 'Não foi possível salvar seus dados. Tente novamente.'),
+                'error'
+            );
         } finally {
             setLoading(false);
         }

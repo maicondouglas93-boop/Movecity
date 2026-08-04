@@ -26,6 +26,17 @@ router.post('/login', [
 
 router.get('/profile', authMiddleware.authUser, userController.getUserProfile)
 
+router.put('/profile',
+    authMiddleware.authUser,
+    body('firstname').optional().isString().isLength({ min: 2 }).withMessage('Nome deve ter pelo menos 2 caracteres'),
+    body('lastname').optional().isString().isLength({ min: 2 }).withMessage('Sobrenome deve ter pelo menos 2 caracteres'),
+    body('phone').optional({ values: 'falsy' }).isString(),
+    body('cpf').optional({ values: 'falsy' }).isString(),
+    body('birthDate').optional({ values: 'falsy' }).isString(),
+    body('gender').optional({ values: 'falsy' }).isIn([ 'male', 'female', 'other', '' ]).withMessage('Gênero inválido'),
+    userController.updateUserProfile
+)
+
 // Sem authUser de propósito: o ponto do refresh é justamente renovar quando o access
 // token já expirou. A autenticação aqui é o próprio refresh token.
 router.post('/refresh', userController.refreshUserSession)

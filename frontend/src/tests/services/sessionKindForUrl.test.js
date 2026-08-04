@@ -22,6 +22,7 @@ describe('sessionKindForUrl', () => {
         expect(sessionKindForUrl('/rides/current')).toBe('user')
         expect(sessionKindForUrl('/rides/cancel')).toBe('user')
         expect(sessionKindForUrl('/users/profile')).toBe('user')
+        expect(sessionKindForUrl('/support/tickets')).toBe('user')
     })
 
     it('não confunde captain-cancel com cancel do passageiro', () => {

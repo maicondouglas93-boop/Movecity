@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  /* Pull-to-refresh (2026-08-04): o gesto de puxar a tela para baixo no topo do
+     documento é uma feature nativa do Chrome/Chromium (Android, PWA instalado, Edge)
+     — intercepta o toque no nível do viewport e recarrega a página inteira,
+     independente da estrutura de rolagem interna do app. overscroll-behavior-y:
+     contain é a forma recomendada de desligar isso sem tocar em touch-action nem
+     JS (que prejudicaria performance/rolagem, exatamente o que se quer evitar).
+     'contain' (não 'none') mantém o efeito elástico local dentro do elemento —
+     só impede que o excesso de scroll "vaze" para o navegador acionar o reload.
+     Sem efeito no Safari/iOS < 16 (a propriedade é ignorada silenciosamente ali;
+     nessas versões o iOS já não tem o gesto de recarregar, só o bounce visual,
+     que não é afetado). */
+  html, body {
+    overscroll-behavior-y: contain;
+  }
+}
+
 @layer utilities {
   .animate-slide-in-right {
     animation: slideInRight 0.3s ease-out forwards;

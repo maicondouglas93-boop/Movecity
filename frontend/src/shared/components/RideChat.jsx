@@ -175,7 +175,7 @@ const RideChat = ({ ride, isOpen, onClose, currentUserType }) => {
             {/* Chat Area */}
             <div 
                 ref={chatContainerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#e5ddd5]"
+                className="flex-1 overflow-y-auto overscroll-y-contain p-4 space-y-4 bg-[#e5ddd5]"
             >
                 {!isRideActive && (
                     <div className="bg-yellow-100 text-yellow-800 text-xs text-center p-2 rounded-lg my-2 mx-auto max-w-[80%]">

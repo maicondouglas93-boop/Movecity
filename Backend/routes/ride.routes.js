@@ -21,6 +21,7 @@ router.get('/current',
 router.post('/cancel',
     authMiddleware.authUser,
     body('rideId').isMongoId().withMessage('Invalid ride id'),
+    body('reason').optional().isString().isLength({ max: 500 }).withMessage('Invalid reason'),
     rideController.cancelRide
 )
 
@@ -37,6 +38,7 @@ router.get('/pending',
 router.post('/captain-cancel',
     authMiddleware.authCaptain,
     body('rideId').isMongoId().withMessage('Invalid ride id'),
+    body('reason').optional().isString().isLength({ max: 500 }).withMessage('Invalid reason'),
     rideController.captainCancelRide
 )
 

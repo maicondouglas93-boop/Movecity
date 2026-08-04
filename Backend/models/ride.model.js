@@ -97,6 +97,31 @@ const rideSchema = new mongoose.Schema({
         default: 0,
         description: "Taxa de cancelamento (tariffSetting.cancellationFee) quando o passageiro cancela com motorista já a caminho"
     },
+    // Implementação do sistema de cancelamento (2026-08-04): quem cancelou, por quê e
+    // quando. Só é gravado quando o status realmente vira 'cancelled' — o motorista
+    // "desistindo" antes de iniciar (cancelRideByCaptain) NÃO passa por aqui, porque a
+    // corrida não termina, volta pro despacho (ver captainCancellations abaixo).
+    cancelledBy: {
+        type: String,
+        enum: ['passenger', 'captain', 'system'],
+    },
+    cancellationReason: {
+        type: String,
+    },
+    cancelledAt: {
+        type: Date,
+    },
+    // Histórico de motoristas que desistiram desta corrida ANTES de iniciá-la (volta pro
+    // despacho, a corrida em si continua ativa) — diferente de cancelledBy/cancelledAt
+    // acima, que só existem numa corrida efetivamente CANCELLED. Sem isso não haveria
+    // nenhum registro de "por que o motorista X desistiu", já que o documento é
+    // reaproveitado (mesmo _id) para o próximo motorista aceitar.
+    captainCancellations: [{
+        captain: { type: mongoose.Schema.Types.ObjectId, ref: 'captain' },
+        reason: { type: String },
+        atStatus: { type: String },
+        cancelledAt: { type: Date, default: Date.now },
+    }],
     waitTimeFeeCharged: {
         type: Number,
         default: 0,

@@ -14,11 +14,38 @@ const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira
 // demorando mais que o normal. Ver item 5/§9 da auditoria de UX.
 const LookingForDriver = (props) => {
     const [elapsedSeconds, setElapsedSeconds] = useState(0)
+    // Implementação do sistema de cancelamento (2026-08-04): mesmo padrão de
+    // confirmação já usado em WaitingForDriver.jsx — evita cancelamento acidental,
+    // sem o custo de um modal separado pra um estágio de baixo risco (nenhum
+    // motorista comprometido ainda).
+    const [confirmingCancel, setConfirmingCancel] = useState(false)
+    const [cancelling, setCancelling] = useState(false)
 
     useEffect(() => {
         const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
         return () => clearInterval(interval)
     }, [])
+
+    useEffect(() => {
+        if (!confirmingCancel) return
+        const timer = setTimeout(() => setConfirmingCancel(false), 5000)
+        return () => clearTimeout(timer)
+    }, [confirmingCancel])
+
+    const handleCancel = async () => {
+        if (cancelling) return
+        if (!confirmingCancel) {
+            setConfirmingCancel(true)
+            return
+        }
+        setCancelling(true)
+        try {
+            await props.cancelRide()
+        } finally {
+            setCancelling(false)
+            setConfirmingCancel(false)
+        }
+    }
 
     const extractTitle = (addressStr) => {
         if (!addressStr) return '';
@@ -88,8 +115,8 @@ const LookingForDriver = (props) => {
                 />
             </Card>
 
-            <Button variant='danger' onClick={props.cancelRide} className='mt-4'>
-                Cancelar Corrida
+            <Button variant='danger' onClick={handleCancel} loading={cancelling} className='mt-4'>
+                {cancelling ? 'Cancelando...' : confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar Corrida'}
             </Button>
         </div>
     )

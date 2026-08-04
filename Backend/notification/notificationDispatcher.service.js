@@ -183,6 +183,18 @@ module.exports.sendRideCancelledToCaptain = async (captainId, data) => {
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'RIDE_CANCELLED', { ...data, deepLink: DEEP_LINK.captainHome }));
 };
 
+// Implementação do sistema de cancelamento (2026-08-04): o inverso de
+// sendRideCancelledToCaptain — antes só existia notificação de cancelamento numa
+// direção (passageiro → motorista). Quando é o motorista que desiste (a corrida volta
+// pro despacho, não termina — ver cancelRideByCaptain), o passageiro ficava sem
+// nenhuma notificação push, só o evento de socket (que não chega se o app estiver em
+// segundo plano ou o socket tiver caído no instante exato).
+module.exports.sendRideRequeuedToUser = async (userId, data) => {
+    const title = 'Buscando outro motorista';
+    const message = 'Seu motorista anterior não pôde continuar com a corrida. Já estamos procurando outro para você.';
+    queue.enqueue(() => sendToUser(userId, title, message, 'RIDE_CANCELLED', { ...data, deepLink: DEEP_LINK.home }));
+};
+
 // A7 da auditoria de push (2026-08-02): chamadas quando o destinatário não está com o
 // chat aberto no momento (ver socket.js) — com o chat aberto, a entrega já acontece via
 // Socket.IO em tempo real e este push seria redundante.

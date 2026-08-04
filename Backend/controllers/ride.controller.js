@@ -544,17 +544,29 @@ module.exports.captainCancelRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId } = req.body;
+    const { rideId, reason } = req.body;
 
     try {
-        const ride = await rideService.cancelRideByCaptain({ rideId, captain: req.captain._id });
+        const ride = await rideService.cancelRideByCaptain({ rideId, captain: req.captain._id, reason });
 
         const TRACE_ID = `Ride:${ride._id}`;
 
-        sendMessageToRoom(`ride_${ride._id}`, {
+        // Implementação do sistema de cancelamento (2026-08-04): CORRIGIDO — antes usava
+        // sendMessageToRoom(`ride_${id}`), mas essa sala só tem os motoristas CANDIDATOS
+        // do despacho original (addSocketToRoom só é chamado pra motorista, nunca pro
+        // passageiro — ver dispatchRideToCaptains). O evento nunca alcançava o
+        // passageiro de verdade. sendMessageToSocketId manda direto pro socket dele,
+        // igual a todo outro evento direcionado ao passageiro (ride-confirmed,
+        // ride-started, ride-status-updated).
+        sendMessageToSocketId(ride.user.socketId, {
             event: 'ride-cancelled-by-captain',
             data: { rideId: ride._id }
         });
+
+        // Push como reforço — o socket acima só funciona com o app aberto/conectado
+        // naquele instante (mesmo motivo do A6 da auditoria de push, agora na direção
+        // oposta: motorista cancela, passageiro precisa saber mesmo em segundo plano).
+        notificationService.sendRideRequeuedToUser(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
 
         await dispatchRideToCaptains(ride, {
             pickup: ride.pickup,
@@ -575,6 +587,9 @@ module.exports.captainCancelRide = async (req, res) => {
         if (err.message === 'Ride cannot be cancelled at this stage') {
             return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
         }
+        if (err.message === 'Cancellation reason is required at this stage') {
+            return res.status(400).json({ message: 'Informe o motivo do cancelamento.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -585,10 +600,10 @@ module.exports.cancelRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId } = req.body;
+    const { rideId, reason } = req.body;
 
     try {
-        const ride = await rideService.cancelRide({ rideId, user: req.user._id });
+        const ride = await rideService.cancelRide({ rideId, user: req.user._id, reason });
 
         // Notify all captains in the room that the ride was cancelled
         sendMessageToRoom(`ride_${ride._id}`, {

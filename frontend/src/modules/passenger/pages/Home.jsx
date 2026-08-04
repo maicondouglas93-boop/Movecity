@@ -55,7 +55,7 @@ const Home = () => {
     // local e passou a viver no RideContext — que reconsulta o backend a cada
     // abertura/reconexão/retorno do background. Refresh na Home não perde mais a
     // corrida; os handlers de socket abaixo continuam atualizando o mesmo estado.
-    const { userRide: ride, setUserRide: setRide } = useContext(RideContext)
+    const { userRide: ride, setUserRide: setRide, syncUserRide } = useContext(RideContext)
     
     const optionalsPanelRef = useRef(null)
     const paymentPanelRef = useRef(null)
@@ -310,17 +310,32 @@ const Home = () => {
             }
         }
 
+        // Implementação do sistema de cancelamento (2026-08-04): quando o motorista
+        // cancela, a corrida NÃO termina — volta pra 'requested' e é redespachada (ver
+        // Backend/services/ride.service.js: cancelRideByCaptain). Sem este listener, o
+        // passageiro só descobria isso na próxima resincronização do RideContext
+        // (reconexão, volta do background) — podia ficar minutos vendo "motorista a
+        // caminho" com um motorista que já desistiu. O payload só tem o rideId (mesmo
+        // padrão do resto do app); syncUserRide busca o estado real no backend em vez
+        // de tentar reconstruir a corrida a partir de um payload parcial.
+        const handleRideCancelledByCaptain = () => {
+            addToast('Seu motorista não pôde continuar. Buscando outro motorista...', 'info', 5000)
+            syncUserRide()
+        }
+
         socket.on('ride-confirmed', handleRideConfirmed)
         socket.on('ride-started', handleRideStarted)
         socket.on('ride-status-updated', handleRideStatusUpdated)
+        socket.on('ride-cancelled-by-captain', handleRideCancelledByCaptain)
 
         return () => {
             socket.off('connect', handleConnect)
             socket.off('ride-confirmed', handleRideConfirmed)
             socket.off('ride-started', handleRideStarted)
             socket.off('ride-status-updated', handleRideStatusUpdated)
+            socket.off('ride-cancelled-by-captain', handleRideCancelledByCaptain)
         }
-    }, [user])
+    }, [user, syncUserRide])
 
 
     const handlePickupChange = (e) => {

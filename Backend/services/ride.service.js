@@ -40,7 +40,7 @@ const VALID_ORIGINS_BY_TARGET = {
 // motorista desistindo (acima): `captain` e `otp` precisam sair do documento, não só
 // mudar de valor. Retorna `null` quando a transição não é válida a partir do estado
 // atual (ou quando `extraFilter` não bate), e quem chama decide a mensagem/status HTTP.
-async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}) {
+async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}, extraPush = {}) {
     const validOrigins = VALID_ORIGINS_BY_TARGET[toStatus];
     if (!validOrigins) {
         throw new Error(`Transição de status desconhecida: ${toStatus}`);
@@ -48,6 +48,12 @@ async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {},
     const update = { $set: { status: toStatus, ...extraSet } };
     if (Object.keys(extraUnset).length > 0) {
         update.$unset = extraUnset;
+    }
+    // Implementação do sistema de cancelamento (2026-08-04): cancelRideByCaptain usa
+    // isto pra registrar, em captainCancellations, quem desistiu e por quê — sem sair
+    // do padrão atômico (mesmo findOneAndUpdate, nenhuma escrita separada).
+    if (Object.keys(extraPush).length > 0) {
+        update.$push = extraPush;
     }
     return rideModel.findOneAndUpdate(
         { _id: rideId, status: { $in: validOrigins }, ...extraFilter },
@@ -663,11 +669,22 @@ module.exports.getCurrentRide = async ({ user }) => {
     }).populate('user').populate('captain').select('+otp');
 
     // Auto-expire stale 'requested' rides (older than 10 minutes)
+    //
+    // Implementação do sistema de cancelamento (2026-08-04): antes fazia
+    // `ride.status = 'cancelled'; ride.save()` — exatamente o padrão "ler → verificar →
+    // salvar" que o resto deste arquivo eliminou (comentário no topo do arquivo, P2.1 da
+    // auditoria de concorrência). Uma corrida podia ser aceita por um motorista bem no
+    // instante em que este código expirava ela, e o `.save()` sobrescreveria esse aceite
+    // sem checar nada. Migrado pra transitionRide: o filtro `status:'requested'` no
+    // próprio findOneAndUpdate garante que só expira se ainda estiver mesmo pendente.
     if (ride && ride.status === 'requested') {
         const diffInMinutes = (Date.now() - new Date(ride.createdAt).getTime()) / 60000;
         if (diffInMinutes > 10) {
-            ride.status = 'cancelled';
-            await ride.save();
+            await transitionRide(ride._id, 'cancelled', {}, {
+                cancelledBy: 'system',
+                cancellationReason: 'Nenhum motorista aceitou a corrida a tempo',
+                cancelledAt: new Date(),
+            });
             ride = null;
         }
     }
@@ -752,7 +769,13 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
 // aceitar qualquer outra corrida). Diferente de cancelRide (passageiro), aqui a corrida
 // NÃO termina: volta para 'requested' sem motorista nem OTP, pra reentrar no despacho.
 // Sem taxa de cancelamento — desistir é responsabilidade do motorista, não do passageiro.
-module.exports.cancelRideByCaptain = async ({ rideId, captain }) => {
+// Implementação do sistema de cancelamento (2026-08-04): estágios em que o passageiro
+// já teria o motorista literalmente esperando/procurando por ele — cancelar sem dizer
+// por quê deixa o passageiro sem nenhuma explicação de por que "sumiu" um motorista que
+// já estava a caminho ou no local.
+const CAPTAIN_CANCEL_REQUIRES_REASON = ['arrived', 'waiting_passenger'];
+
+module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     if (!rideId || !captain) {
         throw new Error('Ride id and captain are required');
     }
@@ -766,18 +789,29 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain }) => {
         throw new Error('Ride cannot be cancelled at this stage');
     }
 
+    if (CAPTAIN_CANCEL_REQUIRES_REASON.includes(ride.status) && !reason?.trim()) {
+        throw new Error('Cancellation reason is required at this stage');
+    }
+
     const updated = await transitionRide(
         rideId,
         'requested',
         { captain },
         {},
-        { captain: 1, otp: 1 }
+        { captain: 1, otp: 1 },
+        { captainCancellations: { captain, reason: reason?.trim() || undefined, atStatus: ride.status, cancelledAt: new Date() } }
     );
     if (!updated) {
         throw new Error('Ride cannot be cancelled at this stage');
     }
 
-    return updated;
+    // Implementação do sistema de cancelamento (2026-08-04): quem chama precisa do
+    // socketId do passageiro pra avisar em tempo real (sendMessageToSocketId, não a
+    // sala ride_<id> — essa sala só tem os motoristas candidatos do despacho original,
+    // nunca o passageiro; usar sendMessageToRoom aqui seria um evento que não chega em
+    // ninguém). transitionRide não populate por padrão (é usado em contextos que não
+    // precisam disso), então busca de novo — mesmo padrão de acceptRideAtomic/startRide.
+    return rideModel.findById(updated._id).populate('user');
 }
 
 // Auditoria de concorrência do painel administrativo (2026-08-02, Bloco E): antes,
@@ -817,7 +851,7 @@ module.exports.reassignRideByAdmin = async (rideId) => {
     return { ride: updated, previousCaptain };
 };
 
-module.exports.cancelRide = async ({ rideId, user }) => {
+module.exports.cancelRide = async ({ rideId, user, reason }) => {
     if (!rideId || !user) {
         throw new Error('Ride id and user are required');
     }
@@ -851,7 +885,12 @@ module.exports.cancelRide = async ({ rideId, user }) => {
         cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
     }
 
-    const updated = await transitionRide(rideId, 'cancelled', { user }, { cancellationFeeCharged });
+    const updated = await transitionRide(rideId, 'cancelled', { user }, {
+        cancellationFeeCharged,
+        cancelledBy: 'passenger',
+        cancellationReason: reason || undefined,
+        cancelledAt: new Date(),
+    });
     if (!updated) {
         throw new Error('Ride cannot be cancelled at this stage');
     }

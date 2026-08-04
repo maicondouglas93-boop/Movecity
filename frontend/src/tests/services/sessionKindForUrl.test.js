@@ -10,6 +10,7 @@ describe('sessionKindForUrl', () => {
         expect(sessionKindForUrl('/rides/start-ride?rideId=1')).toBe('captain')
         expect(sessionKindForUrl('/rides/captain-cancel')).toBe('captain')
         expect(sessionKindForUrl('/rides/captain-current')).toBe('captain')
+        expect(sessionKindForUrl('/rides/captain-history')).toBe('captain')
         expect(sessionKindForUrl('/rides/pending')).toBe('captain')
         expect(sessionKindForUrl('/rides/abc123/accept')).toBe('captain')
         expect(sessionKindForUrl('https://api.exemplo.com/rides/abc123/accept')).toBe('captain')

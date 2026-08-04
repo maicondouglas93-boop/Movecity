@@ -85,6 +85,105 @@ describe('Ride API Integration Tests', () => {
         });
     });
 
+    describe('GET /rides/captain-history', () => {
+        // Causa raiz da aba Corridas quebrada: o frontend chamava esta rota e ela
+        // não existia (404). Cobertura garante active + histórico + auth.
+        it('returns active ride, pending offers and finished/cancelled history for the authenticated captain', async () => {
+            const active = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'started',
+                fare: 40,
+            });
+            const finished = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'finished',
+                fare: 25,
+            });
+            const cancelled = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'cancelled',
+                cancelledBy: 'passenger',
+                fare: 18,
+            });
+            // Corrida de outro motorista — não pode vazar.
+            const otherCaptain = await createCaptain();
+            await createRide({
+                user: user._id,
+                captain: otherCaptain._id,
+                status: 'finished',
+                fare: 99,
+            });
+
+            const res = await request(app)
+                .get('/rides/captain-history')
+                .set('Authorization', `Bearer ${captainToken}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.activeRide).toBeTruthy();
+            expect(res.body.activeRide._id.toString()).toBe(active._id.toString());
+            expect(res.body.activeRide.status).toBe('started');
+            expect(Array.isArray(res.body.pendingOffers)).toBe(true);
+            expect(res.body.rides.map((r) => r._id.toString()).sort()).toEqual(
+                [finished._id.toString(), cancelled._id.toString()].sort()
+            );
+            expect(res.body.rides.every((r) => r.captain?.toString?.() === captain._id.toString()
+                || r.captain?._id?.toString() === captain._id.toString())).toBe(true);
+            expect(res.body.rides.some((r) => Number(r.fare) === 99)).toBe(false);
+            expect(res.body.total).toBe(2);
+        });
+
+        it('returns empty sections for a captain with no rides', async () => {
+            const res = await request(app)
+                .get('/rides/captain-history')
+                .set('Authorization', `Bearer ${captainToken}`);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.activeRide).toBeNull();
+            expect(res.body.pendingOffers).toEqual([]);
+            expect(res.body.rides).toEqual([]);
+            expect(res.body.total).toBe(0);
+            expect(res.body.hasNext).toBe(false);
+        });
+
+        it('rejects unauthenticated requests', async () => {
+            const res = await request(app).get('/rides/captain-history');
+            expect(res.statusCode).toBe(401);
+        });
+
+        it('keeps active ride outside history pagination', async () => {
+            await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'accepted',
+                fare: 30,
+            });
+            for (let i = 0; i < 3; i++) {
+                await createRide({
+                    user: user._id,
+                    captain: captain._id,
+                    status: 'finished',
+                    fare: 10 + i,
+                });
+            }
+
+            const res = await request(app)
+                .get('/rides/captain-history')
+                .set('Authorization', `Bearer ${captainToken}`)
+                .query({ page: 1, limit: 2 });
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.activeRide).toBeTruthy();
+            expect(res.body.activeRide.status).toBe('accepted');
+            expect(res.body.rides).toHaveLength(2);
+            expect(res.body.rides.every((r) => r.status === 'finished')).toBe(true);
+            expect(res.body.hasNext).toBe(true);
+            expect(res.body.total).toBe(3);
+        });
+    });
+
     describe('GET /rides/history', () => {
         // Regression coverage for M8/M2: o filtro "ongoing" usava status que não existem
         // no enum ('pending', 'ongoing'), então só pegava 'accepted' de fato.

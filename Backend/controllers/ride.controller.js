@@ -527,6 +527,23 @@ module.exports.getCurrentRideForCaptain = async (req, res) => {
     }
 }
 
+// Aba "Corridas" do motorista — identidade vem só do token (authCaptain), nunca de
+// captainId arbitrário no query/body.
+module.exports.getCaptainRideHistory = async (req, res) => {
+    try {
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 20;
+        const data = await rideService.getCaptainRideHistory({
+            captain: req.captain,
+            page,
+            limit,
+        });
+        return res.status(200).json(data);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+}
+
 // Fase B da experiência de corrida ativa (2026-08-03): pull de corridas pendentes
 // compatíveis — o caminho de recuperação para quando o evento 'new-ride' se perdeu
 // (app fechado, push falhou, reconexão). O frontend chama no mount, no reconnect do

@@ -709,6 +709,55 @@ module.exports.getCurrentRideForCaptain = async ({ captain }) => {
     return ride;
 }
 
+// Aba "Corridas" do motorista (2026-08-04): o frontend já chamava
+// GET /rides/captain-history, mas a rota nunca existiu — a tela só via erro/vazio.
+// Resposta em três blocos pra a corrida ativa e as ofertas nunca sumirem atrás da
+// paginação do histórico (finished/cancelled).
+module.exports.getCaptainRideHistory = async ({ captain, page = 1, limit = 20 }) => {
+    if (!captain) {
+        throw new Error('Captain is required');
+    }
+
+    const captainId = captain._id || captain;
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (safePage - 1) * safeLimit;
+
+    const activeRide = await module.exports.getCurrentRideForCaptain({ captain: captainId });
+
+    // Ofertas ainda em 'requested' no raio — não têm `captain` no documento até o aceite.
+    let pendingOffers = [];
+    try {
+        pendingOffers = await module.exports.getPendingRidesForCaptain({ captain });
+    } catch {
+        pendingOffers = [];
+    }
+
+    const historyQuery = {
+        captain: captainId,
+        status: { $in: [ 'finished', 'cancelled' ] },
+    };
+
+    const [ total, rides ] = await Promise.all([
+        rideModel.countDocuments(historyQuery),
+        rideModel.find(historyQuery)
+            .populate('user', 'fullname phone email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(safeLimit),
+    ]);
+
+    return {
+        activeRide: activeRide || null,
+        pendingOffers,
+        rides,
+        page: safePage,
+        limit: safeLimit,
+        total,
+        hasNext: (skip + safeLimit) < total,
+    };
+}
+
 // Fase B da experiência de corrida ativa (2026-08-03): pull de corridas pendentes.
 // O despacho por socket/push é efêmero — se o motorista perdeu o 'new-ride' (app
 // fechado, push falhou, navegador reiniciado), a corrida nunca reaparecia pra ele.

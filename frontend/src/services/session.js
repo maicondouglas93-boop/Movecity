@@ -89,6 +89,7 @@ export function sessionKindForUrl(url = '') {
     // Motorista — ordem importa: captain-cancel contém "cancel".
     if (path.includes('/rides/captain-cancel')) return 'captain';
     if (path.includes('/rides/captain-current')) return 'captain';
+    if (path.includes('/rides/captain-history')) return 'captain';
     if (path.includes('/rides/update-status')) return 'captain';
     if (path.includes('/rides/start-ride')) return 'captain';
     if (path.includes('/rides/pending')) return 'captain';

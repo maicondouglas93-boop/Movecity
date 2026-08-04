@@ -1,9 +1,30 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { usePwaUpdate } from '@/contexts/PwaUpdateContext';
+import { useToast } from '@/contexts/ToastContext';
 
 const Header = () => {
     const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
+    const { checkForUpdate, updateServiceWorker } = usePwaUpdate();
+    const { addToast } = useToast();
+
+    // Botão manual de atualização (2026-08-04): a checagem periódica cobre a maioria
+    // dos casos, mas sair/entrar da conta é navegação client-side (React Router) — não
+    // recarrega a página nem rechecca o Service Worker. Sem este botão, quem ficasse
+    // preso numa versão antiga só se desgrudava fechando o app de verdade ou limpando
+    // o cache manualmente. checkForUpdate() força a checagem agora; se encontrar uma
+    // versão nova, updateServiceWorker(true) aplica e recarrega — senão, avisa que já
+    // está atualizado.
+    const handleUpdateClick = async () => {
+        setMenuOpen(false);
+        const found = await checkForUpdate();
+        if (found) {
+            updateServiceWorker(true);
+        } else {
+            addToast('Você já está na versão mais recente.', 'success');
+        }
+    };
 
     return (
         <>
@@ -41,6 +62,14 @@ const Header = () => {
                             <Link onClick={() => setMenuOpen(false)} to="/account" className="px-5 py-3 flex items-center gap-3 text-ink-600 active:bg-brand-50 active:text-brand-700 transition-colors text-sm font-medium">
                                 <i className="ri-user-3-line text-lg text-ink-400" aria-hidden="true"></i> Conta
                             </Link>
+                            <div className="h-px bg-line my-1 mx-2"></div>
+                            <button
+                                type="button"
+                                onClick={handleUpdateClick}
+                                className="px-5 py-3 flex items-center gap-3 text-ink-600 active:bg-brand-50 active:text-brand-700 transition-colors text-sm font-medium text-left"
+                            >
+                                <i className="ri-refresh-line text-lg text-ink-400" aria-hidden="true"></i> Atualizar app
+                            </button>
                             <div className="h-px bg-line my-1 mx-2"></div>
                             <Link onClick={() => setMenuOpen(false)} to="/user/logout" className="px-5 py-3 flex items-center gap-3 text-danger-500 active:bg-danger-50 transition-colors text-sm font-medium">
                                 <i className="ri-logout-box-r-line text-lg text-danger-500" aria-hidden="true"></i> Sair

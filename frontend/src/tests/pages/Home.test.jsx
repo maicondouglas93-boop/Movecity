@@ -45,6 +45,19 @@ vi.mock('@/services/axios', () => ({
   refreshAccessToken: vi.fn(),
 }));
 
+// Header.jsx (renderizado dentro de Home) passou a usar PwaUpdateContext (2026-08-04)
+// pro botão "Atualizar app" — esse contexto chama useRegisterSW de
+// 'virtual:pwa-register/react', um módulo virtual que só existe dentro do pipeline
+// real do Vite (dev/build), não no ambiente do Vitest. Mocka o contexto direto, no
+// mesmo espírito dos outros mocks de serviço acima.
+vi.mock('@/contexts/PwaUpdateContext', () => ({
+  usePwaUpdate: () => ({
+    needRefresh: false,
+    updateServiceWorker: vi.fn(),
+    checkForUpdate: vi.fn().mockResolvedValue(false),
+  }),
+}));
+
 // Mocks for GSAP
 vi.mock('@gsap/react', () => ({
   useGSAP: vi.fn(),

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { usePwaUpdate } from '@/contexts/PwaUpdateContext';
+import { useToast } from '@/contexts/ToastContext';
 
 // Links do motorista consolidados num menu hamburguer (2026-08-04) — a barra de 5
 // ícones fixa no topo brigava com o espaço da tela em telas pequenas e duplicava o
@@ -17,6 +19,21 @@ const NAV_LINKS = [
 const CaptainHeader = () => {
     const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
+    const { checkForUpdate, updateServiceWorker } = usePwaUpdate();
+    const { addToast } = useToast();
+
+    // Botão manual de atualização (2026-08-04) — ver o mesmo em Header.jsx (passageiro).
+    // Sair/entrar da conta é navegação client-side, não recarrega a página nem rechecca
+    // o Service Worker; este botão força a checagem e aplica na hora se achar algo novo.
+    const handleUpdateClick = async () => {
+        setMenuOpen(false);
+        const found = await checkForUpdate();
+        if (found) {
+            updateServiceWorker(true);
+        } else {
+            addToast('Você já está na versão mais recente.', 'success');
+        }
+    };
 
     return (
         <>
@@ -58,6 +75,14 @@ const CaptainHeader = () => {
                                     </Link>
                                 );
                             })}
+                            <div className="h-px bg-line my-1 mx-2"></div>
+                            <button
+                                type="button"
+                                onClick={handleUpdateClick}
+                                className="px-5 py-3 flex items-center gap-3 text-ink-600 active:bg-brand-50 active:text-brand-700 transition-colors text-sm font-medium text-left"
+                            >
+                                <i className="ri-refresh-line text-lg text-ink-400" aria-hidden="true"></i> Atualizar app
+                            </button>
                             <div className="h-px bg-line my-1 mx-2"></div>
                             <Link onClick={() => setMenuOpen(false)} to="/captain/logout" className="px-5 py-3 flex items-center gap-3 text-danger-500 active:bg-danger-50 transition-colors text-sm font-medium">
                                 <i className="ri-logout-box-r-line text-lg text-danger-500" aria-hidden="true"></i> Sair

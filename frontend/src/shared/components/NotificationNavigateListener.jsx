@@ -16,7 +16,17 @@ const NotificationNavigateListener = () => {
             try {
                 const target = new URL(event.data.url, window.location.origin)
                 if (target.origin !== window.location.origin) return
-                navigate(`${target.pathname}${target.search}${target.hash}`)
+                const next = `${target.pathname}${target.search}${target.hash}`
+                const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+                if (next === current) return
+                // navigate (SPA) primeiro; se a rota não mudar (edge case), força assign.
+                navigate(next)
+                window.setTimeout(() => {
+                    const after = `${window.location.pathname}${window.location.search}${window.location.hash}`
+                    if (after !== next) {
+                        window.location.assign(next)
+                    }
+                }, 250)
             } catch (err) {
                 console.warn('Deep link da notificação inválido:', err)
             }

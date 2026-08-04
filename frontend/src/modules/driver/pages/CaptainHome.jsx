@@ -16,6 +16,7 @@ import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/contexts/ToastContext'
 import CaptainHeader from '@/modules/driver/components/CaptainHeader'
 import { requestFCMToken, onForegroundMessage } from '@/services/fcm'
+import { syncTokenWithSW } from '@/services/swCommunication'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { db } from '@/services/db'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/services/offlineQueue'
@@ -134,6 +135,10 @@ const CaptainHome = () => {
             if (!('Notification' in window)) return;
             if (Notification.permission === 'granted') {
                 await requestFCMToken();
+                // JWT no IndexedDB do SW de push — sem isto o Aceitar da notificação
+                // falha com "sessão expirada" mesmo com o motorista logado no app.
+                const jwt = getAccessToken('captain');
+                if (jwt) await syncTokenWithSW(jwt);
             } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
                 setShowNotificationPrompt(true);
             } else if (Notification.permission === 'denied') {
@@ -170,6 +175,8 @@ const CaptainHome = () => {
         const permission = await Notification.requestPermission()
         if (permission === 'granted') {
             await requestFCMToken();
+            const jwt = getAccessToken('captain');
+            if (jwt) await syncTokenWithSW(jwt);
         }
     }
 
@@ -494,10 +501,13 @@ const CaptainHome = () => {
                 corrida em andamento — o RideContext redireciona uma vez por corrida na
                 restauração, mas se o motorista voltar à Home de propósito (botão Home do
                 CaptainRiding) este é o caminho visível de retorno. */}
+            {/* Abaixo do CaptainHeader (fixed top-0 z-[60] ~64px) — antes ficava em
+                top-3/z-40 e o header tampava o atalho por completo. */}
             {captainRide?.status === 'started' && (
                 <Link
                     to='/captain-riding'
-                    className='absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-brand-500 text-white font-semibold text-sm px-5 py-3 rounded-full shadow-floating active:scale-95 transition-transform'
+                    state={{ ride: captainRide }}
+                    className='fixed top-[4.75rem] left-1/2 -translate-x-1/2 z-[55] flex items-center gap-2 bg-brand-500 text-white font-semibold text-sm px-5 py-3 rounded-full shadow-floating active:scale-95 transition-transform'
                 >
                     <i className="ri-navigation-fill" aria-hidden="true"></i>
                     Corrida em andamento — voltar

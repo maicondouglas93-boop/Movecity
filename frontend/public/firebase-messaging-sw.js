@@ -59,7 +59,6 @@ async function clearToken() {
     });
 }
 
-// Escutar mensagens da página para salvar o token
 self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SYNC_TOKEN') {
         setToken(event.data.token).catch(console.error);
@@ -68,10 +67,6 @@ self.addEventListener('message', (event) => {
     }
 });
 
-// Heads-up (2026-08-04): NEW_RIDE chega como data-only. O SW é a ÚNICA camada que
-// chama showNotification — com vibrate + requireInteraction + renotify, maximizando
-// a chance de o Android Chrome mostrar heads-up. Retornar a Promise é obrigatório:
-// sem isso o Chrome pode mostrar "This site has been updated in the background".
 messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
@@ -84,22 +79,17 @@ messaging.onBackgroundMessage((payload) => {
         icon: '/movecity-icon.jpg',
         badge: '/movecity-icon.jpg',
         data,
-        // Timestamp agora: ajuda o sistema a tratar como alerta recente.
         timestamp: Date.now(),
     };
 
     if (data.type === 'NEW_RIDE') {
-        const canAccept = data.canAcceptInline === 'true';
-        if (canAccept) {
-            notificationOptions.actions = [
-                { action: 'accept', title: '✅ Aceitar' },
-                { action: 'reject', title: '❌ Recusar' },
-            ];
-        }
-        // requireInteraction: não some sozinha (corrida precisa de resposta).
-        // vibrate: no Android Chrome, vibração + som aumentam a chance de heads-up.
-        // renotify + tag: se a mesma corrida for reenviada, o SO alerta de novo em
-        // vez de silenciar uma notificação já existente com a mesma tag.
+        // Sempre oferece ações quando o SO suportar (desktop). No Android Chrome as
+        // actions de Web Push costumam NÃO aparecer — o toque no corpo da notificação
+        // é o caminho principal e precisa abrir o PWA com ?rideOffer=.
+        notificationOptions.actions = [
+            { action: 'accept', title: 'Aceitar' },
+            { action: 'reject', title: 'Recusar' },
+        ];
         notificationOptions.requireInteraction = true;
         notificationOptions.renotify = true;
         notificationOptions.silent = false;
@@ -112,7 +102,6 @@ messaging.onBackgroundMessage((payload) => {
     return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// Lock para evitar múltiplos cliques
 let acceptingRide = false;
 
 const fetchWithTimeout = async (resource, options = {}) => {
@@ -127,10 +116,19 @@ const fetchWithTimeout = async (resource, options = {}) => {
     return response;
 };
 
-// Foca uma janela já aberta do MoveCity (qualquer rota) e pede navegação via
-// postMessage; se não houver, abre uma nova com a URL do deep link (com rideOffer).
+const toAbsoluteUrl = (url) => {
+    try {
+        return new URL(url || '/', self.location.origin).href;
+    } catch {
+        return new URL('/', self.location.origin).href;
+    }
+};
+
+// CRÍTICO (Android Chrome): NÃO chamar notification.close() antes de openWindow/focus.
+// Fechar a notificação primeiro cancela o "user gesture" e o openWindow falha em
+// silêncio — o PWA não abre. Sempre abrir/focar ANTES de fechar.
 const focusOrOpenWindow = async (url) => {
-    const absoluteUrl = new URL(url, self.location.origin).href;
+    const absoluteUrl = toAbsoluteUrl(url);
     const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
 
     for (const client of clientsList) {
@@ -139,132 +137,195 @@ const focusOrOpenWindow = async (url) => {
         } catch {
             continue;
         }
+
         if ('focus' in client) {
             await client.focus();
-            client.postMessage({ type: 'NOTIFICATION_NAVIGATE', url: absoluteUrl });
-            return client;
         }
+
+        // Chrome 92+: navega a janela já aberta para o deep link.
+        if (typeof client.navigate === 'function') {
+            try {
+                await client.navigate(absoluteUrl);
+                return client;
+            } catch (err) {
+                console.warn('[SW] client.navigate falhou, usando postMessage:', err);
+            }
+        }
+
+        client.postMessage({ type: 'NOTIFICATION_NAVIGATE', url: absoluteUrl });
+        return client;
     }
 
     if (self.clients.openWindow) {
         return self.clients.openWindow(absoluteUrl);
     }
+    return null;
 };
 
-self.addEventListener('notificationclick', function(event) {
+const resolveDeepLink = (data) => {
+    // Prefere path relativo (mesma origem do PWA). deepLinkAbsolute só se for same-origin.
+    if (data?.deepLink) return data.deepLink;
+    if (data?.deepLinkAbsolute) {
+        try {
+            const abs = new URL(data.deepLinkAbsolute);
+            if (abs.origin === self.location.origin) {
+                return `${abs.pathname}${abs.search}${abs.hash}`;
+            }
+        } catch (_) { /* ignore */ }
+    }
+    if (data?.rideId) return `/captain-home?rideOffer=${encodeURIComponent(data.rideId)}`;
+    return '/captain-home';
+};
+
+self.addEventListener('notificationclick', (event) => {
     const notification = event.notification;
-    const action = event.action;
+    const action = event.action || '';
     const data = notification.data || {};
+    const targetUrl = resolveDeepLink(data);
+    const rideTag = data.rideId ? `ride-${data.rideId}` : undefined;
 
-    // Deep link vem do backend (data.deepLink). Para NEW_RIDE inclui ?rideOffer=<id>
-    // para a CaptainHome abrir a oferta certa — não a home genérica.
-    const targetUrl = data.deepLink || '/captain-home';
-
-    if (!data.rideId) {
-        notification.close();
-        event.waitUntil(focusOrOpenWindow(targetUrl));
-        return;
-    }
-
-    const apiUrl = data.apiUrl;
-
-    if (action === 'reject') {
-        // Recusar só fecha a notificação — não declina no servidor (decisão de produto
-        // já documentada: a oferta continua no card "Corrida disponível" da Home).
-        notification.close();
-        return;
-    }
-
-    if (action === 'open' || !action) {
-        notification.close();
-        event.waitUntil(focusOrOpenWindow(targetUrl));
-        return;
-    }
-
-    if (action === 'accept') {
-        if (!apiUrl || data.canAcceptInline !== 'true') {
-            notification.close();
-            event.waitUntil(focusOrOpenWindow(targetUrl));
-            return;
-        }
-        if (acceptingRide) return;
-        acceptingRide = true;
-
-        const rideTag = data.rideId ? `ride-${data.rideId}` : undefined;
-
-        event.waitUntil((async () => {
-            try {
+    event.waitUntil((async () => {
+        try {
+            // Toque no corpo / ação "open" / sem ação → abrir PWA na oferta.
+            if (!action || action === 'open') {
+                await focusOrOpenWindow(targetUrl);
                 notification.close();
-                await self.registration.showNotification('⏳ Aceitando...', {
-                    body: 'Aguarde enquanto confirmamos a corrida.',
+                return;
+            }
+
+            if (action === 'reject') {
+                // Recusar: fecha a oferta visualmente e abre o app (sem aceitar).
+                // No Android, só o toque no corpo costuma existir — esta ação é desktop.
+                await focusOrOpenWindow('/captain-home');
+                notification.close();
+                await self.registration.showNotification('Oferta ignorada', {
+                    body: 'Você pode ver outras corridas no app.',
                     icon: '/movecity-icon.jpg',
                     badge: '/movecity-icon.jpg',
                     tag: rideTag,
-                    requireInteraction: true
+                    data: { deepLink: '/captain-home' },
                 });
+                return;
+            }
 
-                const token = await getToken();
-                if (!token) {
-                    throw new Error('UNAUTHORIZED');
+            if (action === 'accept') {
+                const canInline = data.canAcceptInline === 'true' && !!data.apiUrl && !!data.rideId;
+
+                // Sem API/token: abre o app na oferta para aceitar na Home.
+                if (!canInline) {
+                    await focusOrOpenWindow(targetUrl);
+                    notification.close();
+                    return;
                 }
 
-                // Mesmo endpoint atômico da tela do motorista — o backend decide.
-                const response = await fetchWithTimeout(`${apiUrl}/rides/${data.rideId}/accept`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 10000
-                });
+                if (acceptingRide) {
+                    await focusOrOpenWindow(targetUrl);
+                    notification.close();
+                    return;
+                }
+                acceptingRide = true;
 
-                if (response.status === 200) {
-                    await self.registration.showNotification('✅ Corrida Aceita!', {
-                        body: 'Abrindo a viagem...',
+                try {
+                    // Feedback sem fechar a original ainda — mantém o gesto do usuário.
+                    await self.registration.showNotification('Aceitando corrida...', {
+                        body: 'Aguarde enquanto confirmamos.',
                         icon: '/movecity-icon.jpg',
                         badge: '/movecity-icon.jpg',
                         tag: rideTag,
-                        data: { ...data, deepLink: '/captain-riding' }
+                        requireInteraction: true,
+                        data: { ...data, deepLink: '/captain-home' },
                     });
-                    await focusOrOpenWindow('/captain-riding');
-                } else if (response.status === 409) {
-                    let serverMessage = 'Esta corrida não está mais disponível.';
-                    try {
-                        const bodyJson = await response.json();
-                        if (bodyJson?.message) serverMessage = bodyJson.message;
-                    } catch (parseErr) {
-                        // Resposta sem JSON válido — mantém a mensagem genérica.
+
+                    const token = await getToken();
+                    if (!token) {
+                        await focusOrOpenWindow(targetUrl);
+                        notification.close();
+                        await self.registration.showNotification('Abra o app para aceitar', {
+                            body: 'Sessão não encontrada no segundo plano. Entre no app e aceite a corrida.',
+                            icon: '/movecity-icon.jpg',
+                            badge: '/movecity-icon.jpg',
+                            tag: rideTag,
+                            data: { deepLink: targetUrl },
+                        });
+                        return;
                     }
-                    await self.registration.showNotification('❌ Corrida indisponível', {
-                        body: serverMessage,
-                        icon: '/movecity-icon.jpg',
-                        badge: '/movecity-icon.jpg',
-                        tag: rideTag
+
+                    const response = await fetchWithTimeout(`${data.apiUrl}/rides/${data.rideId}/accept`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        timeout: 10000,
                     });
-                } else if (response.status === 401) {
-                    await self.registration.showNotification('❌ Sessão expirada', {
-                        body: 'Faça login novamente para aceitar corridas.',
-                        icon: '/movecity-icon.jpg',
-                        badge: '/movecity-icon.jpg',
-                        tag: rideTag
-                    });
-                    await clearToken();
-                } else {
-                    throw new Error('UNKNOWN_ERROR');
+
+                    if (response.status === 200) {
+                        // Aceita → Home do motorista (ConfirmRidePopUp / OTP), NÃO /captain-riding
+                        // (riding é só com status started).
+                        const homeUrl = '/captain-home';
+                        await focusOrOpenWindow(homeUrl);
+                        notification.close();
+                        await self.registration.showNotification('Corrida aceita', {
+                            body: 'Abrindo o app para continuar.',
+                            icon: '/movecity-icon.jpg',
+                            badge: '/movecity-icon.jpg',
+                            tag: rideTag,
+                            data: { ...data, deepLink: homeUrl },
+                        });
+                    } else if (response.status === 409) {
+                        let serverMessage = 'Esta corrida não está mais disponível.';
+                        try {
+                            const bodyJson = await response.json();
+                            if (bodyJson?.message) serverMessage = bodyJson.message;
+                        } catch (_) { /* ignore */ }
+                        await focusOrOpenWindow('/captain-home');
+                        notification.close();
+                        await self.registration.showNotification('Corrida indisponível', {
+                            body: serverMessage,
+                            icon: '/movecity-icon.jpg',
+                            badge: '/movecity-icon.jpg',
+                            tag: rideTag,
+                            data: { deepLink: '/captain-home' },
+                        });
+                    } else if (response.status === 401) {
+                        await clearToken();
+                        await focusOrOpenWindow('/captain-login');
+                        notification.close();
+                        await self.registration.showNotification('Sessão expirada', {
+                            body: 'Faça login novamente para aceitar corridas.',
+                            icon: '/movecity-icon.jpg',
+                            badge: '/movecity-icon.jpg',
+                            tag: rideTag,
+                            data: { deepLink: '/captain-login' },
+                        });
+                    } else {
+                        await focusOrOpenWindow(targetUrl);
+                        notification.close();
+                        await self.registration.showNotification('Não foi possível aceitar', {
+                            body: 'Abra o app e tente pela oferta na tela inicial.',
+                            icon: '/movecity-icon.jpg',
+                            badge: '/movecity-icon.jpg',
+                            tag: rideTag,
+                            data: { deepLink: targetUrl },
+                        });
+                    }
+                } finally {
+                    acceptingRide = false;
                 }
-            } catch (error) {
-                console.error('Erro ao aceitar corrida pelo SW:', error);
-                await self.registration.showNotification('❌ Erro de Conexão', {
-                    body: error.message === 'UNAUTHORIZED'
-                        ? 'Você precisa estar logado.'
-                        : 'Verifique sua internet e tente abrir o app.',
-                    icon: '/movecity-icon.jpg',
-                    badge: '/movecity-icon.jpg',
-                    tag: rideTag
-                });
-            } finally {
-                acceptingRide = false;
+                return;
             }
-        })());
-    }
+
+            // Qualquer outra ação desconhecida: abre o deep link.
+            await focusOrOpenWindow(targetUrl);
+            notification.close();
+        } catch (error) {
+            console.error('[SW] Falha no notificationclick:', error);
+            try {
+                await focusOrOpenWindow(targetUrl);
+            } catch (_) { /* ignore */ }
+            try {
+                notification.close();
+            } catch (_) { /* ignore */ }
+        }
+    })());
 });

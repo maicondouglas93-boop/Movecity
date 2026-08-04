@@ -83,6 +83,14 @@ const RideProvider = ({ children }) => {
     const syncUserRide = useCallback(() => syncRide('user'), [syncRide])
     const syncCaptainRide = useCallback(() => syncRide('captain'), [syncRide])
 
+    // Pós-corrida (2026-08-04): limpa a corrida ativa do passageiro na fonte de verdade
+    // do app — "Voltar ao Início" e clearTrip da Home dependem disto. finished NÃO é
+    // corrida ativa (/rides/current já a ignora); manter no contexto deixava trajeto
+    // fantasma e o atalho "em andamento" inconsistente.
+    const clearUserRide = useCallback(() => {
+        setUserRide(null)
+    }, [])
+
     // Reconciliação: sempre que o app "volta à vida" por qualquer caminho, consulta o
     // backend imediatamente. Cobre: abertura/refresh (mount), reconexão do socket,
     // retorno do background (visibilitychange), restauração do bfcache (pageshow) e
@@ -164,6 +172,7 @@ const RideProvider = ({ children }) => {
             setCaptainRide,
             syncUserRide,
             syncCaptainRide,
+            clearUserRide,
         }}>
             {children}
         </RideContext.Provider>

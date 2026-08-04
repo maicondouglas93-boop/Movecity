@@ -56,7 +56,7 @@ const Home = () => {
     // local e passou a viver no RideContext — que reconsulta o backend a cada
     // abertura/reconexão/retorno do background. Refresh na Home não perde mais a
     // corrida; os handlers de socket abaixo continuam atualizando o mesmo estado.
-    const { userRide: ride, setUserRide: setRide, syncUserRide } = useContext(RideContext)
+    const { userRide: ride, setUserRide: setRide, syncUserRide, clearUserRide } = useContext(RideContext)
     
     const optionalsPanelRef = useRef(null)
     const paymentPanelRef = useRef(null)
@@ -89,6 +89,20 @@ const Home = () => {
     const location = useLocation()
 
     useEffect(() => {
+        // Pós-corrida (2026-08-04): limpa origem/destino/rota residual ao voltar da
+        // tela de Riding — sem isto o LiveTracking redesenhava o trajeto fantasma.
+        if (location.state?.clearTrip) {
+            clearUserRide?.()
+            setPickup('')
+            setDestination('')
+            setVehicleFound(false)
+            setWaitingForDriver(false)
+            setVehiclePanel(false)
+            setConfirmRidePanel(false)
+            window.history.replaceState({}, document.title)
+            return
+        }
+
         // If coming from Repeat Ride, prefill and find trip
         if (location.state && location.state.pickup && location.state.destination) {
             setPickup(location.state.pickup);
@@ -97,7 +111,7 @@ const Home = () => {
             // clear state so it doesn't loop
             window.history.replaceState({}, document.title)
         }
-    }, [location.state])
+    }, [location.state, clearUserRide])
 
     useEffect(() => {
         // Se a localização já estiver disponível e ainda não temos o pickup, faz o geocode reverso
@@ -218,9 +232,16 @@ const Home = () => {
     // status da corrida — de onde quer que ela tenha vindo (socket, restore ou ação
     // local), a tela reconstrói o estado visual correto.
     useEffect(() => {
-        if (!ride) {
+        if (!ride || ride.status === 'finished' || ride.status === 'cancelled') {
             setVehicleFound(false);
             setWaitingForDriver(false);
+            // cancelada: limpa pedido local. finished: o listener ride-ended / Riding
+            // cuidam do pós-corrida — não redirecionar daqui (evita loop com clearTrip).
+            if (ride?.status === 'cancelled') {
+                clearUserRide?.()
+                setPickup('')
+                setDestination('')
+            }
             return;
         }
         if (ride.status === 'requested') {
@@ -240,7 +261,7 @@ const Home = () => {
             setVehicleFound(false);
             setWaitingForDriver(false);
         }
-    }, [ride?._id, ride?.status])
+    }, [ride?._id, ride?.status, clearUserRide])
 
     useEffect(() => {
         if (!user || !user._id) return;
@@ -306,10 +327,21 @@ const Home = () => {
             syncUserRide()
         }
 
+        // Pós-corrida: se o passageiro estiver na Home (atalho durante 'started') quando
+        // o motorista finalizar, leva ao resumo em /riding — não deixa trajeto morto aqui.
+        const handleRideEnded = (endedRide) => {
+            if (!endedRide?._id) return
+            setRide(endedRide)
+            setVehicleFound(false)
+            setWaitingForDriver(false)
+            navigate('/riding', { state: { ride: endedRide, openPostRide: true } })
+        }
+
         socket.on('ride-confirmed', handleRideConfirmed)
         socket.on('ride-started', handleRideStarted)
         socket.on('ride-status-updated', handleRideStatusUpdated)
         socket.on('ride-cancelled-by-captain', handleRideCancelledByCaptain)
+        socket.on('ride-ended', handleRideEnded)
 
         return () => {
             socket.off('connect', handleConnect)
@@ -317,6 +349,7 @@ const Home = () => {
             socket.off('ride-started', handleRideStarted)
             socket.off('ride-status-updated', handleRideStatusUpdated)
             socket.off('ride-cancelled-by-captain', handleRideCancelledByCaptain)
+            socket.off('ride-ended', handleRideEnded)
         }
     }, [user, syncUserRide])
 
@@ -725,7 +758,6 @@ const Home = () => {
             )}
 
             <div className='h-[100dvh] w-screen'>
-                {/* image for temporary use  */}
                 <LiveTracking 
                     ride={ride} 
                     pickup={pickup} 
@@ -737,7 +769,9 @@ const Home = () => {
                     // visíveis enquanto não há motorista designado (idle ou ainda
                     // procurando). Com corrida aceita, o mapa passa a acompanhar só o
                     // motorista da corrida.
-                    showNearbyDrivers={!ride || ride.status === 'requested'}
+                    showNearbyDrivers={!ride || ride.status === 'requested' || ride.status === 'finished' || ride.status === 'cancelled'}
+                    // Pós-corrida: força remoção de polyline/markers da viagem anterior.
+                    clearTrip={Boolean(location.state?.clearTrip) || ride?.status === 'finished' || ride?.status === 'cancelled'}
                 />
             </div>
             

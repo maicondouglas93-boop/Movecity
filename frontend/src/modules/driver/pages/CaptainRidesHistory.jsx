@@ -167,11 +167,16 @@ const CaptainRidesHistory = () => {
     });
 
     const firstPage = data?.pages?.[0];
-    // Corrida ativa: prioriza o bloco dedicado do backend; RideContext cobre o gap
-    // entre eventos de socket e o próximo refetch da lista.
-    const activeRide = firstPage?.activeRide || (
-        captainRide && ACTIVE_STATUSES.includes(captainRide.status) ? captainRide : null
-    );
+    // RideContext primeiro: é a mesma fonte da Home (onde o atalho já aparece). O
+    // bloco activeRide da API reforça após refresh; null da API NÃO pode apagar o
+    // contexto (senão a aba Corridas esconde a corrida ativa que a Home mostra).
+    const contextActive = captainRide && ACTIVE_STATUSES.includes(captainRide.status)
+        ? captainRide
+        : null;
+    const apiActive = firstPage?.activeRide && ACTIVE_STATUSES.includes(firstPage.activeRide.status)
+        ? firstPage.activeRide
+        : null;
+    const activeRide = contextActive || apiActive;
     const pendingOffers = firstPage?.pendingOffers || [];
     const historyRides = (data?.pages || []).flatMap((page) => page?.rides || []);
 
@@ -180,7 +185,10 @@ const CaptainRidesHistory = () => {
 
     useEffect(() => {
         syncCaptainRide?.();
-    }, [ syncCaptainRide ]);
+        // Ao abrir a aba, força lista fresca — evita cache de erro/vazio de antes do
+        // endpoint existir ou de uma sessão anterior.
+        queryClient.invalidateQueries({ queryKey: [ 'captainHistory' ] });
+    }, [ syncCaptainRide, queryClient ]);
 
     // Realtime: invalida a lista sem abrir outra conexão Socket.IO.
     useEffect(() => {
@@ -210,9 +218,10 @@ const CaptainRidesHistory = () => {
 
     const handleReturnToRide = async (ride) => {
         if (!ride?._id) return;
-        await syncCaptainRide?.();
-        if (ride.status === 'started') {
-            navigate('/captain-riding', { state: { ride } });
+        const synced = await syncCaptainRide?.();
+        const target = (synced && synced._id) ? synced : ride;
+        if (target.status === 'started') {
+            navigate('/captain-riding', { state: { ride: target } });
             return;
         }
         // Pré-início: a Home reabre o ConfirmRidePopUp a partir do RideContext.
@@ -246,105 +255,118 @@ const CaptainRidesHistory = () => {
         }
     };
 
+    const activeRideCard = activeRide ? (
+        <RideRow
+            ride={activeRide}
+            highlight
+            footer={(
+                <div className="mt-4">
+                    <p className="text-sm font-semibold text-brand-700 mb-2">
+                        {activeRide.status === 'started'
+                            ? 'Corrida em andamento'
+                            : 'Corrida ativa'}
+                    </p>
+                    <Button onClick={() => handleReturnToRide(activeRide)}>
+                        {activeRide.status === 'started'
+                            ? 'Voltar para corrida'
+                            : 'Continuar corrida'}
+                    </Button>
+                </div>
+            )}
+        />
+    ) : null;
+
     return (
         <div className="h-screen bg-surface-alt flex flex-col pt-24">
             <PageHeader title="Corridas" className="shadow-raised" />
 
             <div className="flex-1 overflow-y-auto p-4 pb-28">
-                {isLoading ? (
-                    <div className="flex flex-col gap-4" aria-live="polite" aria-busy="true">
-                        <p className="text-sm text-ink-500 mb-1">Carregando corridas...</p>
-                        <RideCardSkeleton />
-                        <RideCardSkeleton />
-                        <RideCardSkeleton />
-                    </div>
-                ) : isError ? (
-                    <EmptyState
-                        variant="error"
-                        icon="ri-wifi-off-line"
-                        title="Não foi possível carregar suas corridas"
-                        description="Verifique sua conexão e tente novamente."
-                        actionLabel={isRefetching ? 'Tentando...' : 'Tentar novamente'}
-                        onAction={refetch}
-                    />
-                ) : isEmpty ? (
-                    <EmptyState
-                        icon="ri-car-slash-line"
-                        title="Nenhuma corrida encontrada"
-                        description="Quando você aceitar ou finalizar corridas, elas aparecem aqui."
-                    />
-                ) : (
-                    <div className="flex flex-col gap-4">
-                        {hasNowSection && (
-                            <>
+                <div className="flex flex-col gap-4">
+                    {/* Card da ativa sempre no topo quando existir — inclusive se o
+                        histórico falhar, pra o motorista conseguir voltar à navegação. */}
+                    {activeRide && (
+                        <>
+                            <SectionTitle>Agora</SectionTitle>
+                            {activeRideCard}
+                        </>
+                    )}
+
+                    {isLoading && !activeRide ? (
+                        <div aria-live="polite" aria-busy="true">
+                            <p className="text-sm text-ink-500 mb-3">Carregando corridas...</p>
+                            <RideCardSkeleton />
+                            <div className="mt-4"><RideCardSkeleton /></div>
+                            <div className="mt-4"><RideCardSkeleton /></div>
+                        </div>
+                    ) : isError && !activeRide ? (
+                        <EmptyState
+                            variant="error"
+                            icon="ri-wifi-off-line"
+                            title="Não foi possível carregar suas corridas"
+                            description="Verifique sua conexão e tente novamente."
+                            actionLabel={isRefetching ? 'Tentando...' : 'Tentar novamente'}
+                            onAction={refetch}
+                        />
+                    ) : isEmpty ? (
+                        <EmptyState
+                            icon="ri-car-slash-line"
+                            title="Nenhuma corrida encontrada"
+                            description="Quando você aceitar ou finalizar corridas, elas aparecem aqui."
+                        />
+                    ) : (
+                        <>
+                            {!activeRide && pendingOffers.length > 0 && (
                                 <SectionTitle>Agora</SectionTitle>
+                            )}
 
-                                {activeRide && (
-                                    <RideRow
-                                        ride={activeRide}
-                                        highlight={activeRide.status === 'started'}
-                                        footer={(
-                                            <div className="mt-4">
-                                                {activeRide.status === 'started' ? (
-                                                    <>
-                                                        <p className="text-sm font-semibold text-brand-700 mb-2">
-                                                            Corrida em andamento
-                                                        </p>
-                                                        <Button onClick={() => handleReturnToRide(activeRide)}>
-                                                            Voltar para corrida
-                                                        </Button>
-                                                    </>
-                                                ) : (
-                                                    <Button
-                                                        variant="secondary"
-                                                        onClick={() => handleReturnToRide(activeRide)}
-                                                    >
-                                                        Continuar corrida
-                                                    </Button>
-                                                )}
-                                            </div>
-                                        )}
-                                    />
-                                )}
+                            {pendingOffers.map((ride) => (
+                                <RideRow
+                                    key={ride._id}
+                                    ride={{ ...ride, status: 'requested' }}
+                                    footer={(
+                                        <div className="mt-4">
+                                            <Button
+                                                loading={acceptingId === ride._id}
+                                                onClick={() => handleAccept(ride)}
+                                            >
+                                                Aceitar corrida
+                                            </Button>
+                                        </div>
+                                    )}
+                                />
+                            ))}
 
-                                {pendingOffers.map((ride) => (
-                                    <RideRow
-                                        key={ride._id}
-                                        ride={{ ...ride, status: 'requested' }}
-                                        footer={(
-                                            <div className="mt-4">
-                                                <Button
-                                                    loading={acceptingId === ride._id}
-                                                    onClick={() => handleAccept(ride)}
-                                                >
-                                                    Aceitar corrida
-                                                </Button>
-                                            </div>
-                                        )}
-                                    />
-                                ))}
-                            </>
-                        )}
+                            {historyRides.length > 0 && (
+                                <>
+                                    <SectionTitle>Histórico</SectionTitle>
+                                    {historyRides.map((ride) => (
+                                        <RideRow key={ride._id} ride={ride} />
+                                    ))}
+                                    {hasNextPage && (
+                                        <Button
+                                            variant="secondary"
+                                            loading={isFetchingNextPage}
+                                            onClick={() => fetchNextPage()}
+                                        >
+                                            Carregar mais
+                                        </Button>
+                                    )}
+                                </>
+                            )}
 
-                        {historyRides.length > 0 && (
-                            <>
-                                <SectionTitle>Histórico</SectionTitle>
-                                {historyRides.map((ride) => (
-                                    <RideRow key={ride._id} ride={ride} />
-                                ))}
-                                {hasNextPage && (
-                                    <Button
-                                        variant="secondary"
-                                        loading={isFetchingNextPage}
-                                        onClick={() => fetchNextPage()}
-                                    >
-                                        Carregar mais
-                                    </Button>
-                                )}
-                            </>
-                        )}
-                    </div>
-                )}
+                            {isError && activeRide && (
+                                <EmptyState
+                                    variant="error"
+                                    icon="ri-wifi-off-line"
+                                    title="Não foi possível carregar o histórico"
+                                    description="A corrida ativa continua disponível acima."
+                                    actionLabel={isRefetching ? 'Tentando...' : 'Tentar novamente'}
+                                    onAction={refetch}
+                                />
+                            )}
+                        </>
+                    )}
+                </div>
             </div>
 
             <CaptainHeader />

@@ -79,7 +79,7 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
 
     // C2 da auditoria de push (2026-08-02): sem BASE_URL em produção o SW apontaria
     // Aceitar para o localhost do próprio celular do motorista.
-    const baseUrl = process.env.BASE_URL;
+    const baseUrl = process.env.BASE_URL || process.env.API_URL || '';
     if (!baseUrl && process.env.NODE_ENV === 'production') {
         console.error('[Notification] AVISO CRÍTICO: BASE_URL não configurado em produção — o botão "Aceitar" da notificação push do motorista vai falhar.');
     }
@@ -87,13 +87,19 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
 
     // Deep link com rideId: ao tocar, CaptainHome abre exatamente essa oferta
     // (não a home genérica). O SW também usa isso no focus/openWindow.
-    const deepLink = `${DEEP_LINK.captainHome}?rideOffer=${encodeURIComponent(data.rideId)}`;
+    const deepLinkPath = `${DEEP_LINK.captainHome}?rideOffer=${encodeURIComponent(data.rideId)}`;
+    // fcmOptions.link precisa de URL absoluta quando possível — relative quebra o
+    // click-through em alguns clientes FCM. FRONTEND_URL está no .env.example.
+    const frontendOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    const deepLink = frontendOrigin ? `${frontendOrigin}${deepLinkPath}` : deepLinkPath;
 
     const payloadData = {
         ...data,
         type: 'NEW_RIDE',
         apiUrl: baseUrl || `http://localhost:${process.env.PORT || 3000}`,
-        deepLink,
+        // Path relativo também vai no data — o SW resolve com self.location.origin.
+        deepLink: deepLinkPath,
+        deepLinkAbsolute: deepLink,
         // String: FCM data só aceita strings (sanitize no transport reforça).
         canAcceptInline: canAcceptInline ? 'true' : 'false',
     };

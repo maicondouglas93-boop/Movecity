@@ -1,5 +1,5 @@
-import React, { useState, useContext, useEffect } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import React, { useState, useContext, useEffect, useCallback } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { SocketContext } from '@/contexts/SocketContext'
 import { UserDataContext } from '@/contexts/UserContext'
 import { RideContext } from '@/contexts/RideContext'
@@ -18,19 +18,47 @@ import { joinWithRetry } from '@/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
 
+const paymentLabel = (method) => {
+    if (method === 'pix') return 'Pix'
+    if (method === 'carteira') return 'Carteira'
+    if (method === 'card' || method === 'cartao') return 'Cartão'
+    if (method === 'cash' || method === 'dinheiro') return 'Dinheiro'
+    return method || '—'
+}
+
+const formatMoney = (value) => {
+    if (value == null || Number.isNaN(Number(value))) return '—'
+    return `R$${Number(value).toFixed(2)}`
+}
+
+const formatDistance = (meters) => {
+    if (meters == null || meters <= 0) return null
+    if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
+    return `${Math.round(meters)} m`
+}
+
+const formatDuration = (seconds) => {
+    if (seconds == null || seconds <= 0) return null
+    const mins = Math.round(seconds / 60)
+    if (mins < 60) return `${mins} min`
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    return m ? `${h} h ${m} min` : `${h} h`
+}
+
+const shortAddress = (address) => {
+    if (!address || typeof address !== 'string') return '—'
+    return address.split(',')[0]
+}
+
 const Riding = () => {
     const location = useLocation()
     const { socket } = useContext(SocketContext)
     const { user } = useContext(UserDataContext)
-    const { userRide, setUserRide, syncUserRide } = useContext(RideContext)
+    const { userRide, setUserRide, syncUserRide, clearUserRide } = useContext(RideContext)
     const navigate = useNavigate()
     const { addToast } = useToast()
 
-    // Fase A da experiência de corrida ativa (2026-08-03): antes, a corrida vinha SÓ de
-    // location.state — um refresh (ou o PWA derrubado em segundo plano) zerava a tela
-    // inteira: motorista, veículo, valor, chat, mapa. Agora começa com o state (resposta
-    // imediata) ou com o que o RideContext já restaurou, e se ambos vierem vazios busca
-    // a corrida real no backend.
     const [ ride, setRideLocal ] = useState(location.state?.ride || userRide || null)
     const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || userRide))
 
@@ -43,17 +71,13 @@ const Riding = () => {
         let cancelled = false
         syncUserRide().then((restored) => {
             if (cancelled) return
-            // null = resposta real do backend (não existe corrida ativa) — não há o que
-            // mostrar aqui. undefined = falha de rede: mantém a tela; o RideContext
-            // re-sincroniza sozinho na volta da internet e o efeito abaixo preenche.
             if (restored === null) {
                 addToast('Nenhuma corrida em andamento encontrada.', 'info')
-                navigate('/home')
+                navigate('/home', { state: { clearTrip: true }, replace: true })
                 return
             }
+            // finished chega via location.state (pós-corrida); /rides/current não devolve finished.
             if (restored && restored.status !== 'started') {
-                // Corrida existe mas ainda não começou — a tela certa é a Home (que
-                // reconstrói o painel de espera com PIN e botão de cancelar).
                 navigate('/home')
                 return
             }
@@ -67,10 +91,6 @@ const Riding = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    // Mantém a corrida local espelhando o contexto (que re-sincroniza no retorno do
-    // background/reconexão). NÃO limpa quando o contexto zera: depois de 'ride-ended' a
-    // corrida deixa de ser "ativa" no backend, mas esta tela ainda precisa dela para o
-    // fluxo de pagamento/avaliação.
     useEffect(() => {
         if (userRide && (!ride || userRide._id === ride._id)) {
             setRideLocal(userRide)
@@ -79,9 +99,11 @@ const Riding = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [userRide])
 
-    const [ showPayModal, setShowPayModal ] = useState(false)
-    // 'payment' -> 'rating' -> 'done'. Corridas pagas pela carteira pulam direto pra 'rating'.
-    const [ modalStep, setModalStep ] = useState('payment')
+    const [ showPayModal, setShowPayModal ] = useState(
+        Boolean(location.state?.ride?.status === 'finished' || location.state?.openPostRide)
+    )
+    // 'summary' -> 'payment' -> 'rating' -> 'done'. Carteira pula payment.
+    const [ modalStep, setModalStep ] = useState('summary')
     const [ loading, setLoading ] = useState(false)
     const [ error, setError ] = useState('')
     const [ isChatOpen, setIsChatOpen ] = useState(false)
@@ -89,14 +111,39 @@ const Riding = () => {
     const [ ratingValue, setRatingValue ] = useState(0)
     const [ ratingComment, setRatingComment ] = useState('')
     const [ submittingReview, setSubmittingReview ] = useState(false)
+    const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
+
+    const rideAmount = ride?.finalPrice ?? ride?.fare
+    const isFinished = ride?.status === 'finished'
+    const paymentStatusLabel = (() => {
+        if (ride?.paymentMethod === 'carteira') return 'Pago pela carteira'
+        if (ride?.paymentStatus === 'paid') return 'Pagamento confirmado'
+        if (ride?.paymentStatus === 'pending') return 'Pagamento em processamento'
+        return null
+    })()
+
+    const goHomeClean = useCallback(() => {
+        clearUserRide?.()
+        setRideLocal(null)
+        setShowPayModal(false)
+        navigate('/home', { state: { clearTrip: true }, replace: true })
+    }, [clearUserRide, navigate])
+
+    const openPostRideFlow = useCallback((endedRide) => {
+        const data = endedRide || ride
+        if (!data?._id) return
+        setRideLocal(data)
+        setUserRide(data)
+        setError('')
+        setModalStep('summary')
+        setShowPayModal(true)
+        addToast('Sua corrida foi concluída.', 'success', 5000)
+    }, [ride, setUserRide, addToast])
 
     useEffect(() => {
         if (!user || !user._id) return;
 
         const handleConnect = () => {
-            // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
-            // (2026-08-03): joinWithRetry renova o token e tenta de novo se o atual já
-            // estiver vencido — ver docs/plans/2026-08-03-auditoria-regressao-push.md.
             joinWithRetry(socket, { userId: user._id, userType: 'user' })
         }
 
@@ -109,52 +156,35 @@ const Riding = () => {
         return () => {
             socket.off('connect', handleConnect)
         }
-    }, [user])
+    }, [user, socket])
 
     useEffect(() => {
         const handleRideEnded = (endedRide) => {
-            // Atualiza o RideContext com a corrida finalizada — sem isso, o contexto
-            // ficava com status 'started' obsoleto e a Home mostraria "corrida em
-            // andamento" pra uma corrida que já acabou (até a próxima sincronização).
-            if (endedRide?._id) {
-                setUserRide(endedRide)
-            }
-            // Corrida paga pela carteira: o valor já foi debitado na solicitação, não
-            // há nada a "acertar" — vai direto para a avaliação do motorista.
-            if (ride?.paymentMethod === 'carteira') {
-                setModalStep('rating')
+            openPostRideFlow(endedRide)
+            const amount = endedRide?.finalPrice ?? endedRide?.fare ?? ride?.fare
+            if (endedRide?.paymentMethod === 'carteira' || ride?.paymentMethod === 'carteira') {
                 addToast('Viagem concluída! Que tal avaliar o motorista?', 'money', 6000)
-            } else {
-                setModalStep('payment')
-                addToast(
-                    `Viagem concluída! Pague R$${ride?.fare}`,
-                    'money',
-                    6000,
-                    'Escolha sua forma de pagamento abaixo'
-                )
+            } else if (amount != null) {
+                addToast(`Viagem concluída! Valor: ${formatMoney(amount)}`, 'money', 6000)
             }
-            setShowPayModal(true)
         }
 
-        const handleReceiveMessage = (msg) => {
+        const handleReceiveMessage = () => {
             if (!isChatOpen) {
                 setUnreadCount(prev => prev + 1);
                 addToast('Nova mensagem do motorista', 'info');
-
-                // Play notification sound
                 try {
                     const audio = new Audio('/sounds/new-ride.wav');
-                    audio.play().catch(e => console.log(e));
-                } catch (e) {}
+                    audio.play().catch(() => {});
+                } catch (_) { /* ignore */ }
             }
         }
 
-        // P3.1 da auditoria de concorrência (2026-08-02): o backend já emitia este evento
-        // quando o motorista confirmava o recebimento (rides/confirm-payment), mas nenhum
-        // frontend escutava — o passageiro nunca sabia que o motorista tinha confirmado
-        // do lado dele. Só um aviso; o passageiro já avança pro passo de avaliação
-        // localmente assim que confirma "Já paguei", sem depender deste evento.
-        const handlePaymentConfirmed = () => {
+        const handlePaymentConfirmed = (updated) => {
+            if (updated?._id) {
+                setRideLocal((prev) => (prev && prev._id === updated._id ? { ...prev, ...updated } : prev))
+                setUserRide((prev) => (prev && prev._id === updated._id ? { ...prev, ...updated } : prev))
+            }
             addToast('O motorista confirmou o recebimento do pagamento.', 'success')
         }
 
@@ -167,14 +197,20 @@ const Riding = () => {
             socket.off('receive-message', handleReceiveMessage)
             socket.off('payment-confirmed', handlePaymentConfirmed)
         }
-    }, [socket, ride, isChatOpen, addToast])
+    }, [socket, ride, isChatOpen, addToast, openPostRideFlow, setUserRide])
 
-    // Reset unread count when chat opens
+    // Abre pós-corrida se a tela já montou com status finished (ex.: veio da Home).
+    useEffect(() => {
+        if (ride?.status === 'finished' && !showPayModal) {
+            setModalStep('summary')
+            setShowPayModal(true)
+        }
+    }, [ride?.status, showPayModal])
+
     useEffect(() => {
         if (isChatOpen) setUnreadCount(0);
     }, [isChatOpen])
 
-    // Fetch initial unread count
     useEffect(() => {
         const fetchUnread = async () => {
             try {
@@ -184,14 +220,11 @@ const Riding = () => {
                 if (response.data.chat) {
                     setUnreadCount(response.data.chat.unreadUser || 0);
                 }
-            } catch (err) {}
+            } catch (_) { /* ignore */ }
         };
-        if (ride?._id) fetchUnread();
-    }, [ride])
+        if (ride?._id && !isFinished) fetchUnread();
+    }, [ride?._id, isFinished])
 
-    // O acerto (dinheiro ou pix) é feito diretamente com o motorista — o app não
-    // processa nenhum pagamento. Este botão só avisa o motorista que o passageiro
-    // confirma ter pago, para ele liberar a corrida do lado dele.
     async function handleConfirmPayment() {
         setError('')
         setLoading(true)
@@ -203,9 +236,6 @@ const Riding = () => {
             })
             setModalStep('rating')
         } catch (err) {
-            // Auditoria PWA (2026-08-03, M3): mesma rede de segurança que já existia só
-            // pro app do motorista — sem isto, uma queda de rede bem na hora de confirmar
-            // "Já paguei" simplesmente perdia a ação.
             if (!navigator.onLine || err.message === 'Network Error') {
                 enqueueOfflineAction({
                     type: 'pay-ride',
@@ -228,12 +258,27 @@ const Riding = () => {
         setSubmittingReview(true)
         try {
             await submitReview({ rideId: ride._id, rating: ratingValue, comment: ratingComment })
+            setAlreadyReviewed(true)
+            setModalStep('done')
         } catch (err) {
-            // Não bloqueia o fim do fluxo por causa da avaliação — só avisa.
-            addToast(getFriendlyErrorMessage(err, 'Não foi possível enviar a avaliação.'), 'error')
+            if (err.response?.status === 409) {
+                setAlreadyReviewed(true)
+                addToast('Você já avaliou esta corrida.', 'info')
+                setModalStep('done')
+            } else {
+                addToast(getFriendlyErrorMessage(err, 'Não foi possível enviar a avaliação.'), 'error')
+                setModalStep('done')
+            }
         } finally {
             setSubmittingReview(false)
-            setModalStep('done')
+        }
+    }
+
+    const continueFromSummary = () => {
+        if (ride?.paymentMethod === 'carteira' || ride?.paymentStatus === 'paid') {
+            setModalStep('rating')
+        } else {
+            setModalStep('payment')
         }
     }
 
@@ -246,37 +291,43 @@ const Riding = () => {
         )
     }
 
+    const distanceLabel = formatDistance(ride?.actualDistance)
+    const durationLabel = formatDuration(ride?.actualTime)
+    const captainName = ride?.captain?.fullname?.firstname
+        ? `${ride.captain.fullname.firstname}${ride.captain.fullname.lastname ? ` ${ride.captain.fullname.lastname}` : ''}`
+        : null
+
     return (
         <div className='h-screen relative'>
-            {/* Auditoria PWA (2026-08-03, M2): esta é a tela de corrida em andamento do
-                passageiro — se o socket cair aqui, tudo ficava congelado sem nenhum
-                aviso; as outras telas de tempo real já tinham o banner, esta não. */}
             <ConnectionBanner />
             <div className='fixed right-3 top-3 z-10 flex flex-col gap-2'>
-                <Link
-                    to='/home'
+                <button
+                    type="button"
+                    onClick={goHomeClean}
                     aria-label="Voltar para o início"
                     className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised text-ink-900'
                 >
                     <i className="text-lg ri-home-5-line" aria-hidden="true"></i>
-                </Link>
-                <button
-                    type="button"
-                    onClick={() => setIsChatOpen(true)}
-                    aria-label="Abrir chat com o motorista"
-                    className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative text-ink-900'
-                >
-                    <i className="text-lg ri-chat-3-line" aria-hidden="true"></i>
-                    {unreadCount > 0 && (
-                        <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold'>
-                            {unreadCount > 9 ? '9+' : unreadCount}
-                        </span>
-                    )}
                 </button>
+                {!isFinished && (
+                    <button
+                        type="button"
+                        onClick={() => setIsChatOpen(true)}
+                        aria-label="Abrir chat com o motorista"
+                        className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised relative text-ink-900'
+                    >
+                        <i className="text-lg ri-chat-3-line" aria-hidden="true"></i>
+                        {unreadCount > 0 && (
+                            <span className='absolute -top-1 -right-1 bg-danger-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold'>
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </span>
+                        )}
+                    </button>
+                )}
             </div>
 
             <div className='h-1/2'>
-                <LiveTracking ride={ride} />
+                <LiveTracking ride={ride} clearTrip={isFinished} />
             </div>
 
             <div className='h-1/2 p-4 overflow-y-auto overscroll-y-contain'>
@@ -296,67 +347,127 @@ const Riding = () => {
                     <DetailRow
                         icon="ri-map-pin-2-fill"
                         iconColor="text-danger-500"
-                        title={ride?.destination?.split(',')[0]}
+                        title={shortAddress(ride?.destination)}
                         subtitle={ride?.destination}
                         className='px-3'
                     />
                     <DetailRow
                         icon="ri-currency-line"
-                        title={`R$${ride?.fare}`}
-                        subtitle="Valor Total"
+                        title={formatMoney(rideAmount)}
+                        subtitle={isFinished ? 'Valor final' : 'Valor estimado'}
                         className='px-3'
                     />
                 </Card>
 
-                {ride?.paymentMethod === 'carteira' ? (
+                {isFinished ? (
+                    <Button
+                        onClick={() => { setModalStep('summary'); setShowPayModal(true) }}
+                        className='mt-4'
+                    >
+                        Ver resumo da corrida
+                    </Button>
+                ) : ride?.paymentMethod === 'carteira' ? (
                     <div className='flex flex-col gap-2 mt-4'>
                         <div className='w-full bg-brand-50 border border-brand-200 text-brand-700 font-semibold p-3 rounded-panel text-center flex items-center justify-center gap-2'>
                             <i className="ri-checkbox-circle-fill" aria-hidden="true"></i> Já pago pela carteira
                         </div>
-                        <Button
-                            variant='secondary'
-                            onClick={() => { setModalStep('rating'); setShowPayModal(true) }}
-                        >
-                            Avaliar Motorista
-                        </Button>
                     </div>
                 ) : (
-                    <Button
-                        onClick={() => { setModalStep('payment'); setShowPayModal(true) }}
-                        className='mt-4'
-                    >
-                        Acertar Pagamento
-                    </Button>
+                    <p className='text-sm text-ink-400 mt-4 text-center'>
+                        Ao finalizar, o motorista encerrará a corrida e você verá o resumo.
+                    </p>
                 )}
             </div>
 
-            {/* ── Modal pós-corrida: 'payment' -> 'rating' -> 'done' ──
-                Fechamento unificado com o resto do app: alça no topo, não mais o ícone
-                de X que só esse modal usava (item 13 da auditoria de UX). */}
             {showPayModal && (
                 <div className='fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm'>
-                    <div className='relative w-full max-w-md bg-surface rounded-t-3xl px-6 pt-8 pb-8 shadow-2xl animate-slide-up'>
+                    <div className='relative w-full max-w-md bg-surface rounded-t-3xl px-6 pt-8 pb-8 shadow-2xl animate-slide-up max-h-[90dvh] overflow-y-auto'>
                         {modalStep !== 'done' && (
                             <button
                                 type="button"
-                                onClick={() => setShowPayModal(false)}
-                                aria-label="Fechar"
+                                onClick={goHomeClean}
+                                aria-label="Fechar e voltar ao início"
                                 className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
                             >
                                 <i className="text-2xl ri-arrow-down-wide-line" aria-hidden="true"></i>
                             </button>
                         )}
 
+                        {modalStep === 'summary' && (
+                            <>
+                                <h2 className='text-2xl font-bold text-ink-900 mb-1'>Corrida concluída</h2>
+                                <p className='text-sm text-ink-400 mb-5'>Sua corrida foi concluída.</p>
+
+                                <Card padding='p-1' className='divide-y divide-line mb-4'>
+                                    <DetailRow
+                                        icon="ri-map-pin-user-fill"
+                                        iconColor="text-brand-500"
+                                        title="Origem"
+                                        subtitle={ride?.pickup || '—'}
+                                        className='px-3'
+                                    />
+                                    <DetailRow
+                                        icon="ri-map-pin-2-fill"
+                                        iconColor="text-danger-500"
+                                        title="Destino"
+                                        subtitle={ride?.destination || '—'}
+                                        className='px-3'
+                                    />
+                                    <DetailRow
+                                        icon="ri-currency-line"
+                                        title={formatMoney(rideAmount)}
+                                        subtitle="Valor"
+                                        className='px-3'
+                                    />
+                                    <DetailRow
+                                        icon="ri-bank-card-line"
+                                        title={paymentLabel(ride?.paymentMethod)}
+                                        subtitle={paymentStatusLabel || 'Forma de pagamento'}
+                                        className='px-3'
+                                    />
+                                    {captainName && (
+                                        <DetailRow
+                                            icon="ri-user-star-line"
+                                            title={captainName}
+                                            subtitle={[
+                                                ride?.captain?.vehicle?.plate,
+                                                vehicleLabels[ride?.captain?.vehicle?.vehicleType] || ride?.vehicleType,
+                                            ].filter(Boolean).join(' · ') || 'Motorista'}
+                                            className='px-3'
+                                        />
+                                    )}
+                                    {(distanceLabel || durationLabel) && (
+                                        <DetailRow
+                                            icon="ri-route-line"
+                                            title={[distanceLabel, durationLabel].filter(Boolean).join(' · ')}
+                                            subtitle="Distância e duração"
+                                            className='px-3'
+                                        />
+                                    )}
+                                </Card>
+
+                                <Button onClick={continueFromSummary}>
+                                    Continuar
+                                </Button>
+                            </>
+                        )}
+
                         {modalStep === 'payment' && (
                             <>
-                                <h2 className='text-2xl font-bold text-ink-900 mb-6'>Acertar R${ride?.fare}</h2>
+                                <h2 className='text-2xl font-bold text-ink-900 mb-6'>
+                                    Acertar {formatMoney(rideAmount)}
+                                </h2>
 
                                 <div className='bg-amber-50 border border-amber-300 rounded-panel p-4 mb-6 flex gap-3 items-center'>
                                     <i className="ri-information-line text-amber-500 text-xl flex-shrink-0" aria-hidden="true"></i>
                                     <p className='text-sm text-amber-700'>
-                                        Pague <strong>R${ride?.fare}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
+                                        Pague <strong>{formatMoney(rideAmount)}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
                                     </p>
                                 </div>
+
+                                {paymentStatusLabel && (
+                                    <p className='text-sm text-ink-500 mb-4 text-center'>{paymentStatusLabel}</p>
+                                )}
 
                                 {error && (
                                     <div className='bg-danger-50 border border-danger-500/30 rounded-panel p-3 mb-4 flex gap-2 items-center'>
@@ -368,49 +479,60 @@ const Riding = () => {
                                 <Button onClick={handleConfirmPayment} loading={loading}>
                                     Já paguei o motorista
                                 </Button>
+                                <Button variant='ghost' className='mt-2' onClick={() => setModalStep('rating')}>
+                                    Pular
+                                </Button>
                             </>
                         )}
 
                         {modalStep === 'rating' && (
                             <>
-                                <h2 className='text-2xl font-bold text-ink-900 mb-2'>Avalie a corrida</h2>
+                                <h2 className='text-2xl font-bold text-ink-900 mb-2'>Como foi sua viagem?</h2>
                                 <p className='text-sm text-ink-400 mb-5'>
-                                    Como foi sua viagem com {ride?.captain?.fullname?.firstname || 'o motorista'}?
+                                    Avalie {ride?.captain?.fullname?.firstname || 'o motorista'}
                                 </p>
 
-                                <div className='flex justify-center gap-2 mb-5'>
-                                    {[1, 2, 3, 4, 5].map(star => (
-                                        <button
-                                            key={star}
-                                            type='button'
-                                            onClick={() => setRatingValue(star)}
-                                            aria-label={`${star} ${star === 1 ? 'estrela' : 'estrelas'}`}
-                                            aria-pressed={star <= ratingValue}
-                                            className='p-1 min-w-[44px] min-h-[44px] flex items-center justify-center'
-                                        >
-                                            <i className={`text-4xl ${star <= ratingValue ? 'ri-star-fill text-amber-400' : 'ri-star-line text-ink-400/40'}`} aria-hidden="true"></i>
-                                        </button>
-                                    ))}
-                                </div>
+                                {alreadyReviewed ? (
+                                    <p className='text-sm text-brand-600 text-center mb-5'>Você já avaliou esta corrida.</p>
+                                ) : (
+                                    <>
+                                        <div className='flex justify-center gap-2 mb-5'>
+                                            {[1, 2, 3, 4, 5].map(star => (
+                                                <button
+                                                    key={star}
+                                                    type='button'
+                                                    onClick={() => setRatingValue(star)}
+                                                    aria-label={`${star} ${star === 1 ? 'estrela' : 'estrelas'}`}
+                                                    aria-pressed={star <= ratingValue}
+                                                    className='p-1 min-w-[44px] min-h-[44px] flex items-center justify-center'
+                                                >
+                                                    <i className={`text-4xl ${star <= ratingValue ? 'ri-star-fill text-amber-400' : 'ri-star-line text-ink-400/40'}`} aria-hidden="true"></i>
+                                                </button>
+                                            ))}
+                                        </div>
 
-                                <textarea
-                                    value={ratingComment}
-                                    onChange={e => setRatingComment(e.target.value)}
-                                    placeholder='Deixe um comentário (opcional)'
-                                    rows={3}
-                                    className='w-full border border-line rounded-panel px-4 py-3 text-base text-ink-900 placeholder-ink-400 focus:border-brand-500 focus:outline-none mb-5 resize-none'
-                                />
+                                        <textarea
+                                            value={ratingComment}
+                                            onChange={e => setRatingComment(e.target.value)}
+                                            placeholder='Deixe um comentário (opcional)'
+                                            rows={3}
+                                            className='w-full border border-line rounded-panel px-4 py-3 text-base text-ink-900 placeholder-ink-400 focus:border-brand-500 focus:outline-none mb-5 resize-none'
+                                        />
+                                    </>
+                                )}
 
-                                <Button
-                                    onClick={handleSubmitReview}
-                                    disabled={!ratingValue}
-                                    loading={submittingReview}
-                                    className='mb-2'
-                                >
-                                    Enviar Avaliação
-                                </Button>
+                                {!alreadyReviewed && (
+                                    <Button
+                                        onClick={handleSubmitReview}
+                                        disabled={!ratingValue}
+                                        loading={submittingReview}
+                                        className='mb-2'
+                                    >
+                                        Enviar Avaliação
+                                    </Button>
+                                )}
                                 <Button variant='ghost' onClick={() => setModalStep('done')}>
-                                    Pular
+                                    {alreadyReviewed ? 'Continuar' : 'Pular'}
                                 </Button>
                             </>
                         )}
@@ -421,9 +543,9 @@ const Riding = () => {
                                     <i className="ri-checkbox-circle-fill text-5xl text-brand-500" aria-hidden="true"></i>
                                 </div>
                                 <h2 className='text-2xl font-bold text-ink-900 mb-1'>Tudo certo!</h2>
-                                <p className='text-ink-400 mb-8'>Obrigado por viajar conosco 🙏</p>
-                                <Button onClick={() => navigate('/home')}>
-                                    Voltar ao Início
+                                <p className='text-ink-400 mb-8 text-center'>Obrigado por viajar conosco. Você já pode pedir uma nova corrida.</p>
+                                <Button onClick={goHomeClean}>
+                                    Voltar para início
                                 </Button>
                             </div>
                         )}
@@ -431,12 +553,14 @@ const Riding = () => {
                 </div>
             )}
 
-            <RideChat
-                ride={ride}
-                isOpen={isChatOpen}
-                onClose={() => setIsChatOpen(false)}
-                currentUserType="user"
-            />
+            {!isFinished && (
+                <RideChat
+                    ride={ride}
+                    isOpen={isChatOpen}
+                    onClose={() => setIsChatOpen(false)}
+                    currentUserType="user"
+                />
+            )}
         </div>
     )
 }

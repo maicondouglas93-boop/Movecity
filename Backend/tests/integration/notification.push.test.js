@@ -632,6 +632,9 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
         expect(payload.webpush.notification).toBeUndefined();
         expect(payload.webpush.headers.Urgency).toBe('high');
         expect(payload.data.deepLink).toBe('/captain-home?rideOffer=ride-125');
+        // Com FRONTEND_URL no ambiente, o absolute inclui a origem do PWA.
+        expect(String(payload.data.deepLinkAbsolute)).toContain('/captain-home?rideOffer=ride-125');
+        expect(payload.webpush.fcmOptions.link).toContain('/captain-home?rideOffer=ride-125');
         expect(payload.data.apiUrl).toBeTruthy();
         expect(payload.data.canAcceptInline).toBe('true');
         expect(payload.data.type).toBe('NEW_RIDE');

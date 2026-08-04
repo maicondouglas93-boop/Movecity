@@ -176,8 +176,12 @@ const LiveTracking = (props) => {
         }
     }, [userLocation]); // Syncs automatically when global location updates
 
+    const rideIsTerminal = ['finished', 'cancelled'].includes(props.ride?.status);
+    const shouldClearTrip = Boolean(props.clearTrip) || rideIsTerminal;
+
     // Initialize captain position from ride details if available
     useEffect(() => {
+        if (shouldClearTrip) return;
         if (props.ride?.captain?.location?.ltd && props.ride?.captain?.location?.lng) {
             const newPos = {
                 lat: props.ride.captain.location.ltd,
@@ -185,13 +189,41 @@ const LiveTracking = (props) => {
             };
             setCaptainPosition(newPos);
         }
-    }, [props.ride]);
+    }, [props.ride, shouldClearTrip]);
 
-    // Listen for real-time captain location updates
+    // Pós-corrida (2026-08-04): remove polyline/markers na fonte — esconder a rota no
+    // CSS deixava o estado vivo e a Home redesenhava o trajeto fantasma.
     useEffect(() => {
-        if (!socket) return;
+        if (!shouldClearTrip) return;
+
+        setPickupCoords(null);
+        setDestinationCoords(null);
+        setRouteCoords([]);
+        setRouteSteps([]);
+        setCaptainPosition(null);
+        prevCaptainPosRef.current = null;
+        hasFitBoundsRef.current = false;
+        hasCaptainMarkerRef.current = false;
+        routeSummaryRef.current = null;
+
+        if (providerRef.current) {
+            providerRef.current.removeMarker('pickup');
+            providerRef.current.removeMarker('destination');
+            providerRef.current.removeMarker('captain');
+            providerRef.current.removeRoute();
+        }
+    }, [shouldClearTrip, props.ride?._id, props.ride?.status, props.clearTrip]);
+
+    // Listen for real-time captain location updates — só em corrida ativa.
+    useEffect(() => {
+        if (!socket || shouldClearTrip) return;
 
         const handleCaptainLocationUpdated = (data) => {
+            if (!data || data.ltd == null || data.lng == null) return;
+            // Ignora updates de outra corrida / payload sem rideId compatível.
+            if (props.ride?._id && data.rideId && String(data.rideId) !== String(props.ride._id)) {
+                return;
+            }
             setCaptainPosition({
                 lat: data.ltd,
                 lng: data.lng
@@ -203,11 +235,23 @@ const LiveTracking = (props) => {
         return () => {
             socket.off('captain-location-updated', handleCaptainLocationUpdated);
         };
-    }, [socket]);
+    }, [socket, shouldClearTrip, props.ride?._id]);
 
     // Initialize pickup and destination coordinates from props/ride
     useEffect(() => {
         const fetchCoords = async () => {
+            if (shouldClearTrip) {
+                setPickupCoords(null);
+                setDestinationCoords(null);
+                setRouteCoords([]);
+                if (providerRef.current) {
+                    providerRef.current.removeMarker('pickup');
+                    providerRef.current.removeMarker('destination');
+                    providerRef.current.removeRoute();
+                }
+                return;
+            }
+
             const activePickup = props.ride?.pickup || props.pickup;
             const activeDestination = props.ride?.destination || props.destination;
 
@@ -252,7 +296,7 @@ const LiveTracking = (props) => {
         }, 800);
 
         return () => clearTimeout(debounceTimer);
-    }, [props.ride, props.pickup, props.destination]);
+    }, [props.ride, props.pickup, props.destination, shouldClearTrip]);
 
     // Busca a rota conforme a fase da corrida.
     // Fase D (2026-08-03): passou a usar GET /maps/get-route em vez de chamar o
@@ -262,6 +306,7 @@ const LiveTracking = (props) => {
     // as manobras. O endpoint novo devolve polyline + steps normalizados.
     useEffect(() => {
         const fetchRoute = async () => {
+            if (shouldClearTrip) return;
             if (!pickupCoords || !destinationCoords) return;
 
             let startLat = pickupCoords.lat;
@@ -331,7 +376,7 @@ const LiveTracking = (props) => {
 
         fetchRoute();
         // routeVersion é o gatilho do recálculo por desvio de rota (modo navegação).
-    }, [pickupCoords, destinationCoords, props.ride?.status, routeVersion]);
+    }, [pickupCoords, destinationCoords, props.ride?.status, routeVersion, shouldClearTrip, props.navigationMode]);
 
     // ====== MAP INITIALIZATION — RUNS ONLY ONCE ======
     useEffect(() => {
@@ -860,6 +905,7 @@ const LiveTracking = (props) => {
     // Update captain position marker smoothly with linear interpolation
     useEffect(() => {
         if (!providerRef.current || !captainPosition) return;
+        if (shouldClearTrip) return;
         // Fase D: na tela do motorista em navegação, 'captainPosition' é a posição DELE
         // mesmo voltando pelo socket — desenhar esse marcador criaria um segundo
         // veículo, atrasado, brigando com a seta de navegação pela câmera.
@@ -927,7 +973,7 @@ const LiveTracking = (props) => {
                 cancelAnimationFrame(animationFrameId);
             }
         };
-    }, [captainPosition, props.navigationMode, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType]);
+    }, [captainPosition, props.navigationMode, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType, shouldClearTrip]);
 
     // HUD de fase da corrida — antes só cobria 'accepted' e 'ongoing' (este último nunca
     // existiu no enum real do backend), então o card de progresso nunca aparecia durante

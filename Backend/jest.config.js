@@ -10,8 +10,8 @@ module.exports = {
   moduleNameMapper: {
     '^firebase-admin$': '<rootDir>/tests/mocks/firebase-admin.mock.js',
     '^firebase-admin/auth$': '<rootDir>/tests/mocks/firebase-admin.mock.js',
-    '^firebase-admin/storage$': '<rootDir>/tests/mocks/firebase-admin.mock.js',
-    '^uuid$': '<rootDir>/tests/mocks/uuid.mock.js'
+    '^uuid$': '<rootDir>/tests/mocks/uuid.mock.js',
+    '^cloudinary$': '<rootDir>/tests/mocks/cloudinary.mock.js'
   },
   collectCoverageFrom: [
     'src/**/*.js',

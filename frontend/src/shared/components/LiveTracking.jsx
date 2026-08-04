@@ -3,7 +3,13 @@ import { SocketContext } from '@/contexts/SocketContext'
 import { LocationContext } from '@/contexts/LocationContext'
 import { createMapProvider } from '@/services/maps'
 import EmptyState from '@/shared/components/ui/EmptyState'
+import api from '@/services/axios'
 import { getAccessToken } from '@/services/session'
+import {
+    addressFromInput,
+    coordFromInput,
+    sanitizeCoord,
+} from '@/services/maps/parseLocation'
 import {
     cameraCenterForFollow,
     computeBearing,
@@ -35,15 +41,6 @@ const REROUTE_DISTANCE_M = 70;
 // Intervalo mínimo entre recálculos de rota — o endpoint tem custo por chamada e um
 // GPS instável não pode disparar uma rota nova por segundo.
 const REROUTE_MIN_INTERVAL_MS = 20000;
-
-const sanitizeCoord = (lat, lng) => {
-    if (lat === null || lat === undefined || lat === '' || isNaN(Number(lat))) return null;
-    if (lng === null || lng === undefined || lng === '' || isNaN(Number(lng))) return null;
-    const nLat = Number(lat);
-    const nLng = Number(lng);
-    if (nLat < -90 || nLat > 90 || nLng < -180 || nLng > 180) return null;
-    return { lat: nLat, lng: nLng };
-};
 
 const getRemainingRoute = (route, position) => {
     if (!route || route.length === 0) return [];
@@ -226,44 +223,24 @@ const LiveTracking = (props) => {
                 return;
             }
 
-            const token = getAccessToken('user') || getAccessToken('captain');
-            if (!token) return;
+            const resolveCoord = async (input, known) => {
+                const local = coordFromInput(known) || coordFromInput(input);
+                if (local) return local;
+                const address = addressFromInput(input);
+                if (!address || address.length < 3) return null;
+                // api (@/services/axios) renova token em 401 — fetch cru não.
+                const { data } = await api.get('/maps/get-coordinates', { params: { address } });
+                return sanitizeCoord(data.ltd, data.lng);
+            };
 
             try {
                 if (activePickup) {
-                    const parsed = typeof activePickup === 'object' ? activePickup : { address: activePickup };
-                    const coord = sanitizeCoord(parsed.lat, parsed.lng);
-
-                    if (coord) {
-                        setPickupCoords(coord);
-                    } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
-                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(parsed.address)}`, {
-                            headers: { Authorization: `Bearer ${token}` }
-                        });
-                        const data = await response.json();
-                        const fetchedCoord = sanitizeCoord(data.ltd, data.lng);
-                        if (fetchedCoord) {
-                            setPickupCoords(fetchedCoord);
-                        }
-                    }
+                    const coord = await resolveCoord(activePickup, props.ride?.pickupCoordinates);
+                    if (coord) setPickupCoords(coord);
                 }
-
                 if (activeDestination) {
-                    const parsed = typeof activeDestination === 'object' ? activeDestination : { address: activeDestination };
-                    const coord = sanitizeCoord(parsed.lat, parsed.lng);
-
-                    if (coord) {
-                        setDestinationCoords(coord);
-                    } else if (parsed.address && typeof parsed.address === 'string' && parsed.address.length >= 3) {
-                        const response = await fetch(`${import.meta.env.VITE_BASE_URL}/maps/get-coordinates?address=${encodeURIComponent(parsed.address)}`, {
-                            headers: { Authorization: `Bearer ${token}` }
-                        });
-                        const data = await response.json();
-                        const fetchedCoord = sanitizeCoord(data.ltd, data.lng);
-                        if (fetchedCoord) {
-                            setDestinationCoords(fetchedCoord);
-                        }
-                    }
+                    const coord = await resolveCoord(activeDestination, props.ride?.destinationCoordinates);
+                    if (coord) setDestinationCoords(coord);
                 }
             } catch (err) {
                 console.error('Error fetching coords:', err);
@@ -318,8 +295,7 @@ const LiveTracking = (props) => {
             }
 
             const fallbackLine = [[startLat, startLng], [endLat, endLng]];
-            const token = getAccessToken('user') || getAccessToken('captain');
-            if (!token) {
+            if (!getAccessToken('user') && !getAccessToken('captain')) {
                 setRouteCoords(fallbackLine);
                 return;
             }
@@ -331,12 +307,9 @@ const LiveTracking = (props) => {
                 // exige (uma coordenada inteira cairia no geocoder e viraria endereço).
                 const origin = `${startLat.toFixed(6)},${startLng.toFixed(6)}`;
                 const destination = `${endLat.toFixed(6)},${endLng.toFixed(6)}`;
-                const response = await fetch(
-                    `${import.meta.env.VITE_BASE_URL}/maps/get-route?origin=${origin}&destination=${destination}`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
+                const { data } = await api.get('/maps/get-route', {
+                    params: { origin, destination }
+                });
 
                 setRouteCoords(Array.isArray(data.polyline) && data.polyline.length > 0 ? data.polyline : fallbackLine);
                 setRouteSteps(Array.isArray(data.steps) ? data.steps : []);

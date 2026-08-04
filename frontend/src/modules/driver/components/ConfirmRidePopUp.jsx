@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/services/axios'
 import { enqueueOfflineAction } from '@/services/offlineQueue'
-import { getAccessToken } from '@/services/session'
 import * as Sentry from '@sentry/react'
 import Avatar from '@/shared/components/Avatar'
 import Button from '@/shared/components/ui/Button'
@@ -44,13 +43,10 @@ const ConfirmRidePopUp = (props) => {
     const cancelRide = async () => {
         setCancelling(true)
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`, {
-                rideId: props.ride._id
-            }, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
-                }
-            })
+            // Via api (@/services/axios): token do motorista + refresh automático em
+            // 401. Antes usava axios cru com header manual — access token de 15 min
+            // vencido gerava 401 sem renovação (botões "A caminho"/"Cheguei" mortos).
+            await api.post('/rides/captain-cancel', { rideId: props.ride._id })
             addToast('Corrida liberada — buscando outro motorista para o passageiro.', 'info')
             // Limpa a corrida no RideContext na hora — sem isso, o efeito de restauração
             // do CaptainHome ainda veria a corrida antiga até a próxima sincronização.
@@ -68,13 +64,9 @@ const ConfirmRidePopUp = (props) => {
     const updateStatus = async (status) => {
         setLoading(true)
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/update-status`, {
+            await api.post('/rides/update-status', {
                 rideId: props.ride._id,
                 status: status
-            }, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
-                }
             })
             setRideStatus(status)
         } catch (err) {
@@ -103,13 +95,10 @@ const ConfirmRidePopUp = (props) => {
         setError('')
         setLoading(true)
         try {
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/start-ride`, {
+            const response = await api.get('/rides/start-ride', {
                 params: {
                     rideId: props.ride._id,
                     otp: otp
-                },
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
                 }
             })
 

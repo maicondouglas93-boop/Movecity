@@ -74,9 +74,34 @@ export function clearAllSessions() {
 
 // Qual sessão uma requisição usa é decidido pela rota — o mesmo navegador pode ter
 // login de passageiro e de motorista ao mesmo tempo (comum em testes na mesma máquina).
+//
+// Correção 401 do motorista (2026-08-03): access token dura 15 min. Rotas de corrida
+// do motorista (/rides/update-status, /accept, …) antes caíam no fallback genérico
+// `user || captain` — com sessão dupla usava o token do PASSAGEIRO (authCaptain → 401)
+// e, nos fluxos com axios/fetch cru, nem disparava o refresh. Classificar aqui é o
+// que permite o interceptor renovar o token certo.
 export function sessionKindForUrl(url = '') {
-    if (url.includes('/captains')) return 'captain';
-    if (url.includes('/users')) return 'user';
+    const path = String(url).split('?')[0];
+
+    if (path.includes('/captains')) return 'captain';
+    if (path.includes('/users')) return 'user';
+
+    // Motorista — ordem importa: captain-cancel contém "cancel".
+    if (path.includes('/rides/captain-cancel')) return 'captain';
+    if (path.includes('/rides/captain-current')) return 'captain';
+    if (path.includes('/rides/update-status')) return 'captain';
+    if (path.includes('/rides/start-ride')) return 'captain';
+    if (path.includes('/rides/pending')) return 'captain';
+    if (path.includes('/rides/end-ride')) return 'captain';
+    if (path.includes('/rides/confirm-payment')) return 'captain';
+    if (/\/rides\/[^/]+\/accept(?:\/|$)/.test(path)) return 'captain';
+
+    // Passageiro
+    if (path.includes('/rides/create')) return 'user';
+    if (path.includes('/rides/current')) return 'user';
+    if (path.includes('/rides/cancel')) return 'user';
+    if (path.includes('/rides/get-fare') || path.includes('/rides/fare')) return 'user';
+
     return null;
 }
 

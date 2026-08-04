@@ -303,20 +303,21 @@ module.exports.toggleOnline = async (req, res, next) => {
         // apareceria no próximo update de localização, ~10s). Um motorista que ficar
         // online no meio de uma corrida é corrigido pelo 'driver-busy' do fluxo de
         // localização logo em seguida.
-        const { sendMessageToRoom } = require('../socket');
+        const { sendMessageToRoom, emitDriverMapUpdate, clearDriverMapState } = require('../socket');
         if (!isOnline) {
+            // Esquece o último estado publicado: quando este motorista voltar, o primeiro
+            // evento dele precisa sair na hora em vez de ser deduplicado contra o estado
+            // de antes de sair do ar.
+            clearDriverMapState(captain._id);
             sendMessageToRoom('map-viewers', {
                 event: 'driver-offline',
                 data: { driverId: captain._id.toString() }
             });
         } else if (captain.location && captain.location.ltd != null && captain.location.lng != null) {
-            sendMessageToRoom('map-viewers', {
-                event: 'driver-location',
-                data: {
-                    driverId: captain._id.toString(),
-                    vehicleType: captain.vehicle?.vehicleType || 'car',
-                    location: { ltd: captain.location.ltd, lng: captain.location.lng }
-                }
+            emitDriverMapUpdate(captain._id, {
+                busy: false,
+                vehicleType: captain.vehicle?.vehicleType || 'car',
+                location: { ltd: captain.location.ltd, lng: captain.location.lng }
             });
         }
 

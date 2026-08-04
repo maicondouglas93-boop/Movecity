@@ -6,6 +6,7 @@ import EmptyState from '@/shared/components/ui/EmptyState'
 import { getAccessToken } from '@/services/session'
 import {
     cameraCenterForFollow,
+    computeBearing,
     distanceMeters,
     dynamicZoom,
     lerp,
@@ -126,7 +127,7 @@ const LiveTracking = (props) => {
     // (atualização incremental — nunca recria a lista inteira) e um único loop de
     // rAF interpolando todos os marcadores com animação pendente, pra escalar pra
     // centenas de motoristas sem um loop por marcador.
-    const driversRef = useRef(new Map()); // driverId -> { current, from, target, startTime, vehicleType }
+    const driversRef = useRef(new Map()); // driverId -> { current, from, target, startTime, vehicleType, heading }
     const driversAnimRef = useRef(null);
 
     // Fase D (2026-08-03): estado do modo navegação.
@@ -440,6 +441,12 @@ const LiveTracking = (props) => {
         // marcador por 2s em vez de teleportar a cada update.
         const ANIMATION_MS = 2000;
 
+        // Limiares da direção do marcador. Abaixo de 8m o deslocamento é indistinguível
+        // de deriva do GPS e o rumo calculado seria ruído puro; abaixo de 12° a mudança
+        // não é perceptível e só custaria um redesenho de ícone.
+        const MIN_BEARING_DISTANCE_M = 8;
+        const MIN_BEARING_CHANGE_DEG = 12;
+
         const ensureAnimationLoop = () => {
             if (driversAnimRef.current) return;
             const step = (now) => {
@@ -466,14 +473,30 @@ const LiveTracking = (props) => {
             const id = String(driverId);
             const existing = driversRef.current.get(id);
             if (!existing) {
-                driversRef.current.set(id, { current: pos, from: pos, target: null, startTime: 0, vehicleType });
+                driversRef.current.set(id, { current: pos, from: pos, target: null, startTime: 0, vehicleType, heading: null });
                 providerRef.current.placeMarker(`driver_${id}`, pos, { type: vehicleType || 'car' });
                 return;
             }
             if (vehicleType && existing.vehicleType !== vehicleType) {
                 existing.vehicleType = vehicleType;
                 providerRef.current.setMarkerIcon(`driver_${id}`, vehicleType);
+                // Trocar o ícone recria o elemento no Leaflet e leva junto a rotação
+                // aplicada por CSS; reaplica para o ponteiro não sumir.
+                if (existing.heading != null) providerRef.current.setMarkerRotation(`driver_${id}`, existing.heading);
             }
+
+            // Direção pelo delta entre posições: o backend só manda coordenada, e o
+            // heading do GPS do motorista não trafega neste evento.
+            const moved = distanceMeters(existing.current, pos);
+            if (moved != null && moved >= MIN_BEARING_DISTANCE_M) {
+                const bearing = computeBearing(existing.current, pos);
+                if (bearing != null
+                    && (existing.heading == null || Math.abs(shortestAngleDelta(bearing, existing.heading)) >= MIN_BEARING_CHANGE_DEG)) {
+                    existing.heading = bearing;
+                    providerRef.current.setMarkerRotation(`driver_${id}`, bearing);
+                }
+            }
+
             existing.from = existing.current;
             existing.target = pos;
             existing.startTime = performance.now();

@@ -40,10 +40,18 @@ const VEHICLE_EMOJI = {
     auto: '🚕',
 }
 
-function vehicleIconUrl(type) {
+// Fase C (2026-08-03): o ícone ganhou um ponteiro externo que indica a direção do
+// motorista. O emoji continua sempre em pé de propósito — girar o círculo inteiro só
+// deixaria o emoji tombado, sem comunicar direção (um 🚗 de lado não é uma seta). Sem
+// heading conhecido (motorista parado ou recém-visto) o ponteiro não é desenhado, em vez
+// de apontar para o norte e mentir.
+function vehicleIconUrl(type, rotation = null) {
     const emoji = VEHICLE_EMOJI[type] || VEHICLE_EMOJI.car
     const ringColor = type === 'auto' ? '#facc15' : '#ffffff' // aproxima o acento amarelo do "auto" original
-    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#000" stroke="${ringColor}" stroke-width="2"/><text x="20" y="27" font-size="18" text-anchor="middle">${emoji}</text></svg>`)
+    const pointer = Number.isFinite(rotation)
+        ? `<g transform="rotate(${rotation.toFixed(0)} 24 24)"><path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></g>`
+        : ''
+    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<circle cx="24" cy="24" r="16" fill="#000" stroke="${ringColor}" stroke-width="2"/><text x="24" y="30" font-size="16" text-anchor="middle">${emoji}</text></svg>`)
 }
 
 const USER_ICON_URL = svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" fill-opacity="0.35"/><circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/></svg>`)
@@ -73,11 +81,11 @@ export function createGoogleMapsProvider() {
     let radiusCircle = null
     let vectorMap = false
 
-    function resolveIcon(type, rotation = 0) {
+    function resolveIcon(type, rotation = null) {
         if (type === 'navigator') {
             return {
                 path: NAVIGATOR_PATH,
-                rotation,
+                rotation: rotation ?? 0,
                 scale: 1.7,
                 fillColor: '#111111',
                 fillOpacity: 1,
@@ -94,7 +102,7 @@ export function createGoogleMapsProvider() {
         } else if (type === 'destination') {
             url = DESTINATION_ICON_URL; size = 28; anchor = 14
         } else {
-            url = vehicleIconUrl(type); size = 40; anchor = 20
+            url = vehicleIconUrl(type, rotation); size = 48; anchor = 24
         }
         return {
             url,
@@ -106,7 +114,7 @@ export function createGoogleMapsProvider() {
     function placeMarker(id, position, options = {}) {
         if (!map) return
         markerTypes[id] = options.type
-        const icon = resolveIcon(options.type, markerRotations[id] || 0)
+        const icon = resolveIcon(options.type, markerRotations[id] ?? null)
         const existing = markers[id]
         if (existing) {
             existing.setPosition({ lat: position.lat, lng: position.lng })
@@ -134,17 +142,20 @@ export function createGoogleMapsProvider() {
         const marker = markers[id]
         if (!marker) return
         markerTypes[id] = type
-        marker.setIcon(resolveIcon(type, markerRotations[id] || 0))
+        marker.setIcon(resolveIcon(type, markerRotations[id] ?? null))
     }
 
-    // Fase D: só o Symbol do tipo 'navigator' gira. Nos ícones de imagem a rotação é
-    // ignorada de propósito (regerar o data-URI a cada grau custaria caro no rAF).
+    // O Symbol do tipo 'navigator' gira nativamente, de graça — é o que sustenta o loop de
+    // navegação a 60fps. Os ícones de veículo são imagens e exigem regerar o data-URI, o
+    // que só é viável porque quem os usa (frota no mapa do passageiro) chama isto no
+    // máximo a cada poucos segundos por motorista, e não a cada frame.
     function setMarkerRotation(id, degrees) {
         const marker = markers[id]
-        if (!marker || !Number.isFinite(degrees)) return
-        if (markerTypes[id] !== 'navigator') return
+        const type = markerTypes[id]
+        if (!marker || !Number.isFinite(degrees) || type === 'user' || type === 'pickup' || type === 'destination') return
+        if (markerRotations[id] === degrees) return
         markerRotations[id] = degrees
-        marker.setIcon(resolveIcon('navigator', degrees))
+        marker.setIcon(resolveIcon(type, degrees))
     }
 
     function removeMarker(id) {

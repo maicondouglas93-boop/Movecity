@@ -262,14 +262,19 @@ function initializeSocket(server) {
             // já consultado acima — nenhuma query extra. Motorista em corrida vira
             // 'driver-busy' (some do mapa); disponível vira 'driver-location'. O filtro
             // espelha availabilityFilter(): quem não seria despachado não aparece.
+            const isAvailableOnMap = !ride
+                && captainDoc && captainDoc.isOnline && !captainDoc.isBlocked
+                && captainDoc.canReceiveRides !== false && captainDoc.approvalStatus === 'aprovado';
+
             if (ride) {
-                io.to('map-viewers').emit('driver-busy', { driverId: userId });
-            } else if (
-                captainDoc && captainDoc.isOnline && !captainDoc.isBlocked
-                && captainDoc.canReceiveRides !== false && captainDoc.approvalStatus === 'aprovado'
-            ) {
-                io.to('map-viewers').emit('driver-location', {
-                    driverId: userId,
+                // Só na TRANSIÇÃO para ocupado. Em corrida a posição chega a cada 5s, e
+                // reemitir 'driver-busy' a cada uma delas mandaria a mesma informação
+                // repetidas vezes para todos os passageiros com o mapa aberto — eles já
+                // removeram esse motorista na primeira.
+                emitDriverMapUpdate(userId, { busy: true });
+            } else if (isAvailableOnMap) {
+                emitDriverMapUpdate(userId, {
+                    busy: false,
                     vehicleType: captainDoc.vehicle?.vehicleType || 'car',
                     location: { ltd: location.ltd, lng: location.lng }
                 });
@@ -494,6 +499,41 @@ const sendMessageToRoom = (roomName, messageObject) => {
     }
 }
 
+// Último estado que a sala 'map-viewers' já recebeu de cada motorista. Existe para não
+// repetir informação: o cliente manda posição a cada 5–10s, mas o mapa do passageiro só
+// precisa saber quando algo MUDA (ficou ocupado, voltou a ficar livre) ou quando o
+// motorista de fato andou. Uma entrada por motorista ativo, liberada no toggle offline.
+const driverMapState = new Map();
+const DRIVER_LOCATION_MIN_INTERVAL_MS = 4000;
+
+const emitDriverMapUpdate = (driverId, { busy, vehicleType, location }) => {
+    if (!io) return;
+    const key = String(driverId);
+    const previous = driverMapState.get(key);
+
+    if (busy) {
+        if (previous && previous.busy) return;
+        driverMapState.set(key, { busy: true, lastEmitAt: Date.now() });
+        io.to('map-viewers').emit('driver-busy', { driverId: key });
+        return;
+    }
+
+    // Voltar de ocupado para disponível é uma mudança de estado: emite na hora, sem
+    // esperar a janela do throttle (senão o motorista demoraria a reaparecer no mapa).
+    const becameAvailable = !previous || previous.busy;
+    if (!becameAvailable && Date.now() - previous.lastEmitAt < DRIVER_LOCATION_MIN_INTERVAL_MS) return;
+
+    driverMapState.set(key, { busy: false, lastEmitAt: Date.now() });
+    io.to('map-viewers').emit('driver-location', { driverId: key, vehicleType, location });
+}
+
+// Chamado quando o motorista sai do ar ou é liberado de uma corrida: esquece o último
+// estado para que o próximo evento seja emitido imediatamente, sem cair no throttle nem
+// na deduplicação de 'driver-busy'.
+const clearDriverMapState = (driverId) => {
+    driverMapState.delete(String(driverId));
+}
+
 // P3.2 da auditoria de concorrência (2026-08-02): usado no bloqueio administrativo de
 // usuário/motorista — sem derrubar o socket ativo, a pessoa bloqueada continua recebendo
 // eventos em tempo real (inclusive novas corridas, se for motorista) até fechar o app
@@ -507,4 +547,4 @@ const disconnectSocket = (socketId) => {
     }
 }
 
-module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, disconnectSocket };
+module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, disconnectSocket, emitDriverMapUpdate, clearDriverMapState };

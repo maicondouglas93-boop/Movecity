@@ -7,7 +7,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'testsecret';
 
 const { createServer } = require('http');
 const { io: Client } = require('socket.io-client');
-const { initializeSocket } = require('../../socket');
+const { initializeSocket, emitDriverMapUpdate } = require('../../socket');
 const { createCaptain } = require('../factories/captain.factory');
 const { createUser } = require('../factories/user.factory');
 const { createRide } = require('../factories/ride.factory');
@@ -98,6 +98,51 @@ describe('Mapa do passageiro em tempo real (Fase C)', () => {
         const payload = await busy;
         expect(payload.driverId).toBe(captain._id.toString());
         expect(leakedLocation).toBe(false);
+    });
+
+    it('não repete driver-busy a cada posição do motorista em corrida', async () => {
+        const user = await createUser();
+        const captain = await createCaptain({ isOnline: true });
+        await createRide({ user: user._id, captain: captain._id, status: 'started' });
+
+        const viewerSocket = await connect();
+        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const captainSocket = await connectCaptain(captain);
+
+        let busyCount = 0;
+        viewerSocket.on('driver-busy', () => { busyCount += 1; });
+
+        // Em corrida a posição chega a cada ~5s; o passageiro já removeu o marcador na
+        // primeira. Repetir só gastaria banda de todo mundo com o mapa aberto.
+        captainSocket.emit('update-location-captain', { location: CAPTAIN_POS });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        captainSocket.emit('update-location-captain', { location: { ltd: CAPTAIN_POS.ltd + 0.001, lng: CAPTAIN_POS.lng } });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        expect(busyCount).toBe(1);
+    });
+
+    it('motorista liberado da corrida reaparece no mapa imediatamente, sem esperar o throttle', async () => {
+        const user = await createUser();
+        const captain = await createCaptain({ isOnline: true });
+
+        const viewerSocket = await connect();
+        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const driverId = captain._id.toString();
+        emitDriverMapUpdate(driverId, { busy: true });
+
+        // Caminho do fim de corrida (endRide/cancelRideByCaptain): voltar de ocupado para
+        // disponível é mudança de estado e passa na frente da janela de throttle.
+        const received = waitFor(viewerSocket, 'driver-location');
+        emitDriverMapUpdate(driverId, { busy: false, vehicleType: 'car', location: CAPTAIN_POS });
+
+        const payload = await received;
+        expect(payload.driverId).toBe(driverId);
+        expect(payload.location).toEqual(CAPTAIN_POS);
     });
 
     it('subscribe sem token válido não entra na sala (posição de frota é dado sensível)', async () => {

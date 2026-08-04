@@ -151,16 +151,36 @@ describe('googleMapsProvider — câmera de navegação (Fase D)', () => {
         expect(marker.icon.rotation).toBe(90)
     })
 
-    it('ignora rotação em marcador de imagem em vez de quebrar o ícone', async () => {
+    it('gira o marcador de veículo regerando o SVG, sem ponteiro antes de haver rumo', async () => {
         const provider = await loadGoogleProvider()
         await initProvider(provider)
 
-        provider.placeMarker('captain', { lat: -23.5, lng: -46.6 }, { type: 'car' })
-        expect(() => provider.setMarkerRotation('captain', 90)).not.toThrow()
+        provider.placeMarker('driver_1', { lat: -23.5, lng: -46.6 }, { type: 'car' })
+        const marker = currentStub.markerInstances[currentStub.markerInstances.length - 1]
+        const semRumo = decodeURIComponent(marker.icon.url)
+        expect(semRumo).not.toContain('rotate(')
+
+        provider.setMarkerRotation('driver_1', 90)
+        const comRumo = decodeURIComponent(marker.icon.url)
+        expect(comRumo).toContain('rotate(90 24 24)')
+        // Continua sendo imagem (não vira Symbol) e mantém o mesmo ponto de ancoragem,
+        // senão o marcador saltaria no mapa ao ganhar direção.
+        expect(marker.icon.path).toBeUndefined()
+        expect(marker.icon.anchor).toEqual({ x: 24, y: 24 })
+    })
+
+    it('ignora rotação em marcadores que não representam direção', async () => {
+        const provider = await loadGoogleProvider()
+        await initProvider(provider)
+
+        provider.placeMarker('user', { lat: -23.5, lng: -46.6 }, { type: 'user' })
+        const antes = currentStub.markerInstances[currentStub.markerInstances.length - 1].icon.url
+
+        expect(() => provider.setMarkerRotation('user', 90)).not.toThrow()
         expect(() => provider.setMarkerRotation('inexistente', 90)).not.toThrow()
 
         const marker = currentStub.markerInstances[currentStub.markerInstances.length - 1]
-        expect(marker.icon.url).toBeTruthy()
+        expect(marker.icon.url).toBe(antes)
     })
 })
 
@@ -198,12 +218,36 @@ describe('leafletProvider — degradação sem câmera (Fase D)', () => {
         provider.placeMarker('navigator', { lat: -23.55, lng: -46.63 }, { type: 'navigator' })
         provider.setMarkerRotation('navigator', 45)
 
-        const rotator = document.querySelector('.leaflet-navigator-rotator')
+        const rotator = document.querySelector('.leaflet-marker-rotator')
         expect(rotator).not.toBeNull()
         expect(rotator.style.transform).toBe('rotate(45deg)')
         // O transform do elemento externo é do Leaflet (posicionamento) — sobrescrevê-lo
         // jogaria o marcador para o canto da tela.
         expect(rotator.parentElement.style.transform).not.toContain('rotate(45deg)')
+
+        provider.destroy()
+    })
+
+    it('mantém o ponteiro de direção do veículo invisível até haver rumo conhecido', async () => {
+        vi.resetModules()
+        const { createLeafletProvider } = await import('@/services/maps/leafletProvider')
+        const provider = createLeafletProvider()
+
+        const node = document.createElement('div')
+        node.style.width = '400px'
+        node.style.height = '400px'
+        document.body.appendChild(node)
+        await provider.init(node, { center: { lat: -23.55, lng: -46.63 }, zoom: 14 })
+
+        provider.placeMarker('driver_1', { lat: -23.55, lng: -46.63 }, { type: 'car' })
+
+        const rotator = document.querySelector('.leaflet-marker-rotator')
+        // Motorista recém-visto ainda não tem rumo: apontar para o norte seria mentira.
+        expect(rotator.style.opacity).toBe('0')
+
+        provider.setMarkerRotation('driver_1', 120)
+        expect(rotator.style.transform).toBe('rotate(120deg)')
+        expect(rotator.style.opacity).toBe('1')
 
         provider.destroy()
     })

@@ -13,47 +13,36 @@ L.Icon.Default.mergeOptions({
     shadowUrl: markerShadow,
 });
 
+// Fase C (2026-08-03): ponteiro de direção. Nasce invisível e só aparece quando
+// setMarkerRotation recebe um heading — motorista parado não aponta para lugar nenhum.
+// Gira só o ponteiro: o ícone do veículo fica em pé para continuar legível.
+const directionPointer = `
+  <div class="leaflet-marker-rotator absolute inset-0" style="transform: rotate(0deg); transform-origin: 50% 50%; opacity: 0;">
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  </div>
+`;
+
+const vehicleIcon = (iconClass, colorClasses) => L.divIcon({
+    html: `
+      <div class="relative h-12 w-12">
+        ${directionPointer}
+        <div class="absolute inset-2 flex items-center justify-center ${colorClasses} rounded-full border-2 border-white shadow-xl">
+          <i class="${iconClass} text-lg"></i>
+        </div>
+      </div>
+    `,
+    className: 'custom-vehicle-icon',
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+});
+
 const vehicleIcons = {
-    car: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-car-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    moto: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-motorbike-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    motorcycle: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-white rounded-full border-2 border-white shadow-xl">
-            <i class="ri-motorbike-fill text-xl"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
-    auto: L.divIcon({
-        html: `
-          <div class="flex items-center justify-center h-10 w-10 bg-black text-yellow-400 rounded-full border-2 border-white shadow-xl">
-            <i class="ri-taxi-fill text-xl text-yellow-400"></i>
-          </div>
-        `,
-        className: 'custom-vehicle-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-    }),
+    car: vehicleIcon('ri-car-fill', 'bg-black text-white'),
+    moto: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
+    motorcycle: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
+    auto: vehicleIcon('ri-taxi-fill', 'bg-black text-yellow-400'),
 };
 
 const userPositionIcon = L.divIcon({
@@ -95,7 +84,7 @@ const destinationIcon = L.divIcon({
 // para onde o veículo aponta, mesmo no fallback 2D.
 const navigatorIcon = L.divIcon({
     html: `
-      <div class="leaflet-navigator-rotator" style="transform: rotate(0deg); transform-origin: 50% 50%;">
+      <div class="leaflet-marker-rotator" style="transform: rotate(0deg); transform-origin: 50% 50%;">
         <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-12 -12 24 24">
           <path d="M 0,-9 L 6.5,8 L 0,4 L -6.5,8 Z" fill="#111111" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
         </svg>
@@ -156,8 +145,10 @@ export function createLeafletProvider() {
     function setMarkerRotation(id, degrees) {
         const marker = markers[id];
         if (!marker || !Number.isFinite(degrees) || typeof marker.getElement !== 'function') return;
-        const rotator = marker.getElement()?.querySelector('.leaflet-navigator-rotator');
-        if (rotator) rotator.style.transform = `rotate(${degrees}deg)`;
+        const rotator = marker.getElement()?.querySelector('.leaflet-marker-rotator');
+        if (!rotator) return;
+        rotator.style.transform = `rotate(${degrees}deg)`;
+        rotator.style.opacity = '1';
     }
 
     // Leaflet é 2D top-down: não existe heading nem tilt de câmera. Devolver false aqui

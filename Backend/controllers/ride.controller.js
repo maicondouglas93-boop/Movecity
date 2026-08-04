@@ -1,7 +1,7 @@
 const rideService = require('../services/ride.service');
 const { validationResult } = require('express-validator');
 const mapService = require('../services/maps.service');
-const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom } = require('../socket');
+const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMapUpdate } = require('../socket');
 const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
@@ -170,10 +170,7 @@ async function performAcceptRide(rideId, captain, res) {
         // Fase C (2026-08-03): o motorista aceitou — sai imediatamente do mapa dos
         // passageiros que observam motoristas disponíveis. Sem isto, ele só sumiria no
         // próximo update de localização (~10s), aparecendo como "livre" sem estar.
-        sendMessageToRoom('map-viewers', {
-            event: 'driver-busy',
-            data: { driverId: captain._id.toString() }
-        });
+        emitDriverMapUpdate(captain._id, { busy: true });
 
         // Delete otp from response sent to captain for security
         const rideForCaptain = ride.toObject();
@@ -299,6 +296,25 @@ module.exports.updateRideStatus = async (req, res) => {
     }
 }
 
+// Fase C (2026-08-03): o motorista volta ao mapa dos passageiros assim que é liberado da
+// corrida. Sem isto ele reapareceria só no próximo ping de localização — até ~10s parecendo
+// indisponível para quem está pedindo carro ao lado dele.
+const announceCaptainAvailable = (captain, ride) => {
+    if (!captain || captain.isOnline === false || captain.canReceiveRides === false) return;
+
+    // `lastLocation` é gravada durante a corrida e é mais fresca que `captain.location`,
+    // que vem do perfil em cache.
+    const ltd = ride?.lastLocation?.lat ?? captain.location?.ltd;
+    const lng = ride?.lastLocation?.lng ?? captain.location?.lng;
+    if (ltd == null || lng == null) return;
+
+    emitDriverMapUpdate(captain._id, {
+        busy: false,
+        vehicleType: captain.vehicle?.vehicleType || 'car',
+        location: { ltd, lng }
+    });
+}
+
 module.exports.endRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -315,6 +331,8 @@ module.exports.endRide = async (req, res) => {
             data: ride
         })
         notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+
+        announceCaptainAvailable(req.captain, ride);
 
         // Invalidate dashboard and history cache
         deleteCache('dashboard:today');
@@ -540,6 +558,8 @@ module.exports.captainCancelRide = async (req, res) => {
             TRACE_ID,
             excludeCaptainId: req.captain._id
         });
+
+        announceCaptainAvailable(req.captain, ride);
 
         deleteCache('dashboard:today');
 

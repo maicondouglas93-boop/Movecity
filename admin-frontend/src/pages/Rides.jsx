@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, memo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
@@ -6,13 +6,13 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
-import {
-  Search, MapPin, Navigation, MoreVertical, X, Clock, CreditCard, User, Car, Download,
-  CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, RotateCcw, AlertTriangle, ShieldAlert
-} from 'lucide-react';
+import { Search, Download, CheckSquare, Square, Map as MapIcon } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import RideRow from '../components/rides/RideRow';
+import RideDrawer from '../components/rides/RideDrawer';
+import { timeAgo } from '../components/rides/rideUi';
 
 // Fix leaflet icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -65,41 +65,9 @@ const fetchLiveMap = async () => {
   return data;
 };
 
-// Relative time helper
-function timeAgo(date) {
-  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-  let interval = seconds / 31536000;
-  if (interval > 1) return Math.floor(interval) + " anos atrás";
-  interval = seconds / 2592000;
-  if (interval > 1) return Math.floor(interval) + " meses atrás";
-  interval = seconds / 86400;
-  if (interval > 1) return Math.floor(interval) + " dias atrás";
-  interval = seconds / 3600;
-  if (interval > 1) return Math.floor(interval) + " horas atrás";
-  interval = seconds / 60;
-  if (interval > 1) return Math.floor(interval) + " min atrás";
-  return "Agora mesmo";
-}
-
-const statusColors = {
-  requested: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-  accepted: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-  going_to_pickup: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
-  arrived: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-  started: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-  finished: 'bg-green-500/10 text-green-500 border-green-500/20',
-  cancelled: 'bg-red-500/10 text-red-500 border-red-500/20',
-};
-
-const statusNames = {
-  requested: 'Procurando',
-  accepted: 'Aceita',
-  going_to_pickup: 'A caminho',
-  arrived: 'Motorista Chegou',
-  started: 'Em andamento',
-  finished: 'Finalizada',
-  cancelled: 'Cancelada',
-};
+// Fase 3 da auditoria de production readiness (M3, 2026-08-05): timeAgo, cores/nomes
+// de status e os subcomponentes RideRow/RideActionMenu/RideDrawer saíram deste
+// arquivo (passava de 780 linhas) para components/rides/ — sem mudança de comportamento.
 
 const fetchRides = async ({ queryKey }) => {
   const [_key, page, filters] = queryKey;
@@ -521,260 +489,3 @@ export default function Rides() {
   );
 }
 
-// ==========================================
-// SUBCOMPONENTS
-// ==========================================
-
-// Bloco J (2026-08-02, achado R33): mesmo raciocínio de CaptainRow em Captains.jsx —
-// cada ping de GPS recriava liveDrivers e re-renderizava a tabela inteira, mesmo essa
-// linha não exibindo nenhum dado de liveDrivers diretamente. React.memo evita refazer
-// o trabalho de render de todas as linhas não afetadas.
-const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpenDrawer, onAction }) {
-  return (
-    <tr onClick={() => onOpenDrawer(ride)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
-      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-        <button onClick={() => onToggleSelect(ride._id)}>
-          {isSelected ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4 text-text-muted" />}
-        </button>
-      </td>
-      <td className="px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
-            <User className="w-4 h-4 text-text-muted" />
-          </div>
-          <div>
-            <p className="font-medium">{ride.user?.fullname?.firstname || 'Passageiro'}</p>
-            <p className="text-xs text-text-muted">{ride.captain?.fullname?.firstname ? `Motorista: ${ride.captain.fullname.firstname}` : 'Buscando motorista...'}</p>
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-4">
-        <div className="flex flex-col gap-1">
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-background rounded border border-border capitalize">
-            <Car className="w-3 h-3 text-text-muted" /> {ride.vehicleType}
-          </span>
-          <span className="inline-flex items-center gap-1 text-xs text-text-muted capitalize">
-            <CreditCard className="w-3 h-3" /> {ride.paymentMethod}
-          </span>
-        </div>
-      </td>
-      <td className="px-4 py-4">
-        <p className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</p>
-        <p className="text-xs text-text-muted">Comis: R$ {ride.commissionAmount ? ride.commissionAmount.toFixed(2) : '-'}</p>
-      </td>
-      <td className="px-4 py-4">
-        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusColors[ride.status] || 'bg-background'}`}>
-          {statusNames[ride.status] || ride.status}
-        </span>
-      </td>
-      <td className="px-4 py-4 text-xs">
-        <p className="text-text">{new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-        <p className="text-text-muted">{timeAgo(ride.createdAt)}</p>
-      </td>
-      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-        <RideActionMenu ride={ride} onAction={onAction} />
-      </td>
-    </tr>
-  );
-});
-
-function RideActionMenu({ ride, onAction }) {
-  const [open, setOpen] = useState(false);
-
-  // Fecha clicando fora
-  useEffect(() => {
-    const handleClick = () => setOpen(false);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
-
-  return (
-    <div className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
-      <button 
-        onClick={() => setOpen(!open)}
-        className="p-1.5 rounded-md hover:bg-background border border-transparent hover:border-border transition-colors text-text-muted"
-      >
-        <MoreVertical className="w-4 h-4" />
-      </button>
-      
-      {open && (
-        <div className="absolute right-0 mt-2 w-48 bg-surface border border-border rounded-lg shadow-xl z-50 py-1">
-          <button onClick={() => onAction(ride, 'view')} className="w-full text-left px-4 py-2 text-sm hover:bg-background flex items-center gap-2">
-            <Search className="w-4 h-4" /> Ver Ficha Completa
-          </button>
-          
-          {ride.status === 'requested' && (
-            <>
-              <button onClick={() => onAction(ride, 'reassign')} className="w-full text-left px-4 py-2 text-sm hover:bg-background flex items-center gap-2 text-warning">
-                <RotateCcw className="w-4 h-4" /> Reatribuir
-              </button>
-            </>
-          )}
-
-          {!['cancelled', 'finished'].includes(ride.status) && (
-            <button onClick={() => onAction(ride, 'cancel')} className="w-full text-left px-4 py-2 text-sm hover:bg-danger/10 flex items-center gap-2 text-danger">
-              <ShieldAlert className="w-4 h-4" /> Cancelar Operação
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RideDrawer({ ride, onClose, onAction }) {
-  if (!ride) return null;
-
-  // Fake timeline events for visual demo
-  const events = [
-    { label: 'Solicitada', time: new Date(ride.createdAt), done: true },
-    { label: 'Motorista Aceitou', time: new Date(new Date(ride.createdAt).getTime() + 120000), done: ['accepted', 'going_to_pickup', 'arrived', 'started', 'finished'].includes(ride.status) },
-    { label: 'Chegou no local', time: new Date(new Date(ride.createdAt).getTime() + 300000), done: ['arrived', 'started', 'finished'].includes(ride.status) },
-    { label: 'Iniciada', time: new Date(new Date(ride.createdAt).getTime() + 360000), done: ['started', 'finished'].includes(ride.status) },
-    { label: 'Finalizada', time: new Date(new Date(ride.createdAt).getTime() + 1200000), done: ride.status === 'finished' },
-  ];
-
-  if (ride.status === 'cancelled') {
-    events.push({ label: 'Cancelada', time: new Date(ride.updatedAt), done: true, isCancel: true });
-  }
-
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/50 z-[2000] transition-opacity" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-surface border-l border-border shadow-2xl z-[2001] flex flex-col transform transition-transform duration-300 translate-x-0">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border bg-background/50">
-          <div>
-            <h2 className="text-lg font-bold">Ficha da Corrida</h2>
-            <p className="text-xs text-text-muted">ID: {ride._id}</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-background rounded-full transition-colors"><X className="w-5 h-5" /></button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          
-          {/* Status Alert */}
-          <div className={`p-4 border rounded-xl flex items-start gap-3 ${statusColors[ride.status] || 'border-border bg-background'}`}>
-            <Activity className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-sm uppercase">{statusNames[ride.status] || ride.status}</p>
-              <p className="text-xs mt-1 opacity-80">Atualizado {timeAgo(ride.updatedAt)}</p>
-              {ride.status === 'cancelled' && ride.observation && (
-                <div className="mt-2 p-2 bg-black/20 rounded border border-white/10 text-xs">
-                  <strong>Motivo:</strong> {ride.observation}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Actions (Inside Drawer) */}
-          {!['cancelled', 'finished'].includes(ride.status) && (
-            <div className="flex gap-2">
-               <button onClick={() => { onClose(); onAction(ride, 'cancel'); }} className="flex-1 py-2 bg-danger/10 text-danger text-sm font-medium rounded-lg border border-danger/20 hover:bg-danger/20 transition-colors">
-                  Cancelar Corrida
-               </button>
-               {ride.status === 'requested' && (
-                 <button onClick={() => { onClose(); onAction(ride, 'reassign'); }} className="flex-1 py-2 bg-warning/10 text-warning text-sm font-medium rounded-lg border border-warning/20 hover:bg-warning/20 transition-colors">
-                    Reatribuir
-                 </button>
-               )}
-            </div>
-          )}
-
-          {/* Route Info */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted">Trajeto</h3>
-            <div className="relative pl-6 space-y-4">
-              <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-border"></div>
-              
-              <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-primary ring-4 ring-background"></div>
-                <p className="text-sm font-medium">{ride.pickup}</p>
-                <p className="text-xs text-text-muted">Origem</p>
-              </div>
-              
-              <div className="relative">
-                <div className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-indigo-500 ring-4 ring-background"></div>
-                <p className="text-sm font-medium">{ride.destination}</p>
-                <p className="text-xs text-text-muted">Destino</p>
-              </div>
-            </div>
-          </div>
-
-          {/* People */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-background p-3 rounded-xl border border-border">
-              <p className="text-xs text-text-muted mb-2 uppercase font-semibold">Passageiro</p>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center"><User className="w-4 h-4 text-text-muted" /></div>
-                <div className="overflow-hidden">
-                  <p className="text-sm font-medium truncate">{ride.user?.fullname?.firstname} {ride.user?.fullname?.lastname}</p>
-                  <p className="text-xs text-text-muted truncate">{ride.user?.phone}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-background p-3 rounded-xl border border-border">
-              <p className="text-xs text-text-muted mb-2 uppercase font-semibold">Motorista</p>
-              {ride.captain ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center"><Car className="w-4 h-4 text-text-muted" /></div>
-                  <div className="overflow-hidden">
-                    <p className="text-sm font-medium truncate">{ride.captain?.fullname?.firstname}</p>
-                    <p className="text-xs text-text-muted truncate">{ride.captain?.vehicle?.plate}</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-text-muted italic py-1">Nenhum atribuído</p>
-              )}
-            </div>
-          </div>
-
-          {/* Payment */}
-          <div className="space-y-2 bg-background p-4 rounded-xl border border-border">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-3">Financeiro</h3>
-            <div className="flex justify-between text-sm">
-              <span className="text-text-muted">Valor da Corrida</span>
-              <span className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-text-muted">Comissão Plataforma</span>
-              <span className="font-medium text-primary">R$ {ride.commissionAmount?.toFixed(2) || '-'}</span>
-            </div>
-            <div className="flex justify-between text-sm pt-2 border-t border-border">
-              <span className="text-text-muted">Método</span>
-              <span className="font-medium text-text uppercase flex items-center gap-1">
-                <CreditCard className="w-4 h-4" /> {ride.paymentMethod}
-              </span>
-            </div>
-          </div>
-
-          {/* Timeline (Simulated for visual) */}
-          <div className="space-y-4 pt-4 border-t border-border">
-             <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted">Timeline (Eventos)</h3>
-             <div className="space-y-4">
-                {events.map((evt, idx) => {
-                   if(!evt.done && evt.label !== 'Cancelada' && ride.status === 'cancelled') return null; // Skip pending events if cancelled
-                   return (
-                     <div key={idx} className={`flex gap-3 ${evt.done ? 'opacity-100' : 'opacity-40'}`}>
-                        <div className="flex flex-col items-center">
-                           <div className={`w-3 h-3 rounded-full mt-1 ${evt.isCancel ? 'bg-danger' : evt.done ? 'bg-primary' : 'bg-border'}`}></div>
-                           {idx < events.length - 1 && <div className={`w-0.5 h-full my-1 ${evt.done ? 'bg-primary/50' : 'bg-border'}`}></div>}
-                        </div>
-                        <div className="pb-4">
-                           <p className={`text-sm font-medium ${evt.isCancel ? 'text-danger' : 'text-text'}`}>{evt.label}</p>
-                           {evt.done && <p className="text-xs text-text-muted">{evt.time.toLocaleTimeString()}</p>}
-                        </div>
-                     </div>
-                   )
-                })}
-             </div>
-          </div>
-
-        </div>
-      </div>
-    </>
-  )
-}

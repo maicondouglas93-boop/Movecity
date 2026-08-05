@@ -57,20 +57,20 @@ const pwaPlugin = VitePWA({
         name: 'Pedir corrida',
         short_name: 'Pedir corrida',
         url: '/home',
-        icons: [{ src: '/movecity-icon.jpg', sizes: '192x192', type: 'image/jpeg' }],
+        icons: [{ src: '/pwa-icon-192.png', sizes: '192x192', type: 'image/png' }],
       },
     ],
+    // Fase 3 da auditoria de production readiness (M4, 2026-08-05): o manifest usava
+    // um único JPEG 1024px declarado como 192/512 — JPEG não tem transparência, o
+    // navegador redimensionava na instalação e não existia variante maskable, então
+    // Android adaptava o ícone cortando/emoldurando de qualquer jeito. PNGs reais nos
+    // dois tamanhos + maskable com a arte na zona segura (gerados de movecity-icon.jpg
+    // com sharp — ver docs no PR da fase 3).
     icons: [
-      {
-        src: '/movecity-icon.jpg', // Usando um ícone existente
-        sizes: '192x192',
-        type: 'image/jpeg'
-      },
-      {
-        src: '/movecity-icon.jpg',
-        sizes: '512x512',
-        type: 'image/jpeg'
-      }
+      { src: '/pwa-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/pwa-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/pwa-icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: '/pwa-icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ]
   }
 })

@@ -31,6 +31,12 @@ export function NotificationInboxProvider({ children }) {
   const [badgeCount, setBadgeCount] = useState(0)
   const [ringPulse, setRingPulse] = useState(false)
   const badgeClearedRef = useRef(false)
+  const pulseTimerRef = useRef(null)
+
+  // Fase 3 (M1, 2026-08-05): limpa o timer do pulse no unmount do provider.
+  useEffect(() => () => {
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current)
+  }, [])
 
   const hasSession = Boolean(getAccessToken('user') || getAccessToken('captain'))
 
@@ -63,7 +69,10 @@ export function NotificationInboxProvider({ children }) {
     badgeClearedRef.current = false
     setBadgeCount((c) => c + 1)
     setRingPulse(true)
-    setTimeout(() => setRingPulse(false), 1200)
+    // Fase 3 (M1, 2026-08-05): rastreia o timer do pulse — notificações em sequência
+    // não empilham timers, e o unmount não deixa setState pendente pra trás.
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current)
+    pulseTimerRef.current = setTimeout(() => setRingPulse(false), 1200)
     playSoftChime()
     if (dto?.title) {
       addToast(dto.title, 'info', 4000, dto.description || dto.message)

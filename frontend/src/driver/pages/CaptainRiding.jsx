@@ -51,13 +51,11 @@ const CaptainRiding = () => {
     // Começa ligada — o motorista chegou aqui justamente para dirigir até o destino —
     // mas dá para desligar e ver a rota inteira de cima quando ele quiser se situar.
     // Sem destino (presencial pending) navegação turn-by-turn não tem rota — começa desligada.
+    // Painel inferior sempre aberto com as infos essenciais (sem expandir/recolher).
     const [ navigationMode, setNavigationMode ] = useState(
         () => !(location.state?.ride?.destinationPending || captainRide?.destinationPending)
     )
     const [ navInfo, setNavInfo ] = useState(null)
-    // Painel inferior recolhido por padrão: o mapa é o que importa dirigindo. Os dados
-    // do passageiro continuam a um toque de distância.
-    const [ hudExpanded, setHudExpanded ] = useState(false)
 
     const handleNavigationUpdate = useCallback((info) => setNavInfo(info), [])
 
@@ -359,25 +357,12 @@ const CaptainRiding = () => {
                 </div>
             </div>
 
-            {/* Bottom HUD.
-                Fase D (2026-08-03): antes este card era fixo e alto (foto do veículo,
-                nome, destino, valor), comendo quase um terço da tela justamente onde a
-                câmera de navegação coloca o veículo. Agora é uma barra fina com o que
-                se lê de relance dirigindo — ETA, distância restante e "Concluir" — e o
-                resto abre com um toque, sem sair da tela. */}
+            {/* Bottom HUD — sempre aberto, altura pelo conteúdo; mapa ocupa o restante. */}
             <div className='absolute bottom-0 left-0 right-0 z-overlay'>
-                <div className='bg-surface border-t border-line rounded-t-3xl shadow-floating select-none'>
-                    <button
-                        type="button"
-                        onClick={() => setHudExpanded(v => !v)}
-                        aria-expanded={hudExpanded}
-                        aria-label={hudExpanded ? 'Recolher detalhes da corrida' : 'Ver detalhes da corrida'}
-                        className='w-full flex justify-center pt-3 pb-2'
-                    >
-                        <div className='h-1.5 w-12 bg-line rounded-full'></div>
-                    </button>
+                <div className='bg-surface border-t border-line rounded-t-3xl shadow-floating select-none px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
+                    <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
 
-                    <div className='px-4 pb-4 flex items-center justify-between gap-3'>
+                    <div className='flex items-center justify-between gap-3 mb-2.5'>
                         <div className='min-w-0'>
                             {isPresential ? (
                                 <>
@@ -392,12 +377,6 @@ const CaptainRiding = () => {
                                         Tempo {String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:{String(elapsedSec % 60).padStart(2, '0')}
                                         {' · '}
                                         Distância {(liveDistance / 1000).toFixed(1)} km
-                                    </p>
-                                    <p className='text-xs text-ink-400 truncate mt-0.5'>
-                                        Destino{' '}
-                                        {rideData?.destinationPending
-                                            ? 'Será definido ao finalizar'
-                                            : (rideData?.destination?.split(',')[0] || '—')}
                                     </p>
                                 </>
                             ) : navInfo?.etaMinutes != null ? (
@@ -424,7 +403,6 @@ const CaptainRiding = () => {
                             )}
                         </div>
 
-                        {/* Complete button */}
                         <button
                             type="button"
                             onClick={() => setFinishRidePanel(true)}
@@ -435,42 +413,39 @@ const CaptainRiding = () => {
                         </button>
                     </div>
 
-                    {hudExpanded && (
-                        <div className='px-4 pb-4 pt-1 border-t border-line space-y-2'>
-                            {rideData?.user ? (
-                                <PassengerIdentityCard user={rideData.user} showPhoto compact />
-                            ) : isPresential ? (
-                                <p className='text-sm text-ink-600'>Passageiro presencial (sem conta vinculada)</p>
-                            ) : null}
-                            <div className='flex items-center gap-2.5 min-w-0'>
-                                <img
-                                    src={vehicleImg}
-                                    alt={vehicleLabel}
-                                    className='h-10 w-14 object-contain flex-shrink-0'
-                                    width="1024"
-                                    height="1024"
-                                    loading="lazy"
-                                />
-                                <div className='min-w-0'>
-                                    <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
-                                        <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0" aria-hidden="true"></i>
-                                        {rideData?.destinationPending
-                                            ? 'Será definido ao finalizar'
-                                            : (rideData?.destination || 'Destino')}
-                                    </p>
-                                    <p className='text-xs text-ink-600 font-medium'>
-                                        {rideData?.destinationPending
-                                            ? 'Preço ao finalizar'
-                                            : (rideData?.fare ? `R$${rideData.fare}` : '')}
-                                    </p>
-                                </div>
-                            </div>
+                    {rideData?.user ? (
+                        <PassengerIdentityCard user={rideData.user} showPhoto compact className="mb-2" />
+                    ) : isPresential ? (
+                        <p className='text-xs text-ink-600 mb-2'>Passageiro presencial (sem conta vinculada)</p>
+                    ) : null}
+
+                    <div className='flex items-center gap-2.5 min-w-0'>
+                        <img
+                            src={vehicleImg}
+                            alt={vehicleLabel}
+                            className='h-10 w-14 object-contain flex-shrink-0'
+                            width="1024"
+                            height="1024"
+                            loading="lazy"
+                        />
+                        <div className='min-w-0 flex-1'>
+                            <p className='text-xs text-ink-900 font-medium truncate flex items-center gap-1'>
+                                <i className="ri-map-pin-2-fill text-danger-500 text-xs flex-shrink-0" aria-hidden="true"></i>
+                                {rideData?.destinationPending
+                                    ? 'Destino ao finalizar'
+                                    : (rideData?.destination?.split(',')[0] || 'Destino')}
+                            </p>
+                            <p className='text-xs text-ink-600 font-medium'>
+                                {rideData?.destinationPending
+                                    ? 'Preço ao finalizar'
+                                    : (rideData?.fare ? `R$${rideData.fare}` : '')}
+                            </p>
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
 
-            <BottomSheet expandable open={finishRidePanel} onClose={() => setFinishRidePanel(false)}>
+            <BottomSheet open={finishRidePanel} onClose={() => setFinishRidePanel(false)}>
                 <FinishRide
                     ride={rideData}
                     setFinishRidePanel={setFinishRidePanel}

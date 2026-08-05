@@ -206,7 +206,7 @@ const CaptainParcelRiding = () => {
           </button>
         )}
       </div>
-      <div className="px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 max-h-[35dvh] overflow-y-auto overscroll-y-contain rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating">
+      <div className="px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating">
         <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
         {step === 'payment' ? (
           <div className="space-y-2.5">

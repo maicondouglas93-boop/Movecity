@@ -1,6 +1,6 @@
 jest.mock('../../notification/tokenRegistry.service', () => ({
     getTokensForUser: jest.fn().mockResolvedValue(['tok-schedule-user']),
-    getTokensForCaptain: jest.fn().mockResolvedValue([]),
+    getTokensForCaptain: jest.fn().mockResolvedValue(['tok-schedule-captain']),
     removeInvalidTokens: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -118,6 +118,34 @@ describe('Fase 3 — notificações de agendamento', () => {
         await new Promise((r) => setTimeout(r, 150));
         const doc = await Notification.findOne({ userId: user._id, type: 'SCHEDULE_ACTIVATED' });
         expect(doc).toBeTruthy();
+    });
+
+    it('oferta agendada usa conteúdo específico e deep link da oferta', async () => {
+        const captainId = new mongoose.Types.ObjectId();
+        notificationDispatcher.sendNewRide(captainId, {
+            rideId: new mongoose.Types.ObjectId().toString(),
+            isScheduled: true,
+        });
+
+        await new Promise((r) => setTimeout(r, 150));
+
+        const doc = await Notification.findOne({ captainId, type: 'NEW_RIDE' });
+        expect(doc.title).toBe('Novo agendamento disponível');
+        expect(doc.message).toBe('Uma nova corrida agendada está disponível para aceite.');
+        const payload = pushTransport.sendPush.mock.calls[0][1];
+        expect(payload.data.deepLink).toMatch(/^\/captain-home\?rideOffer=/);
+    });
+
+    it('duas execuções não enviam duas pushes da mesma oferta ao motorista', async () => {
+        const captainId = new mongoose.Types.ObjectId();
+        const rideId = new mongoose.Types.ObjectId().toString();
+
+        notificationDispatcher.sendNewRide(captainId, { rideId, isScheduled: true });
+        notificationDispatcher.sendNewRide(captainId, { rideId, isScheduled: true });
+        await new Promise((r) => setTimeout(r, 250));
+
+        expect(await Notification.countDocuments({ captainId, type: 'NEW_RIDE', referenceId: rideId })).toBe(1);
+        expect(pushTransport.sendPush).toHaveBeenCalledTimes(1);
     });
 
     it('enum aceita tipos SCHEDULE_*', () => {

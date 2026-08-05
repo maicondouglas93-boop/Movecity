@@ -42,11 +42,11 @@ function sanitizeCaptainRideHistoryPayload(data) {
 // a corrida voltava a 'requested' mas nenhum motorista era notificado, ficando travada.
 async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
     const dispatchService = require('../services/dispatch.service');
-    // Encomenda ativa no motorista bloqueia oferta de corrida (exclusão mútua).
+    // Motorista com qualquer trabalho ativo não pode aceitar outra oferta.
     const { pickupCoordinates, captains: matchingCaptains } = await dispatchService.findCaptainsNearPickup(
         pickup,
         vehicleType,
-        { TRACE_ID, excludeCaptainId, excludeActiveRide: false, excludeActiveParcel: true }
+        { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true }
     );
 
     console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
@@ -86,6 +86,8 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
             estimatedTime: rideWithUser.estimatedTime,
             vehicleType: rideWithUser.vehicleType || vehicleType,
             passengerName: rideWithUser.user?.fullname?.firstname || '',
+            isScheduled: Boolean(rideWithUser.scheduledAt),
+            scheduledAt: rideWithUser.scheduledAt,
         }, TRACE_ID).catch(console.error);
     });
 

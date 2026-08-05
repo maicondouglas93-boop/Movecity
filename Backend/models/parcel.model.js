@@ -64,6 +64,14 @@ const parcelSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    dispatchLeaseUntil: {
+        type: Date,
+        default: null,
+    },
+    dispatchLastAttemptAt: {
+        type: Date,
+        default: null,
+    },
     dispatchLastError: {
         type: String,
         default: null,

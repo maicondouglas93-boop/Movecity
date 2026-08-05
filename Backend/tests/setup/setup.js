@@ -1,4 +1,5 @@
 process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'testsecret';
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { connect, closeDatabase, clearDatabase } = require('./testDatabase');
@@ -62,6 +63,10 @@ beforeAll(async () => {
     // indexava rideId:null e gerava E11000 na 2ª comissão de encomenda.
     if (mongoose.modelNames().includes('transaction')) {
         await mongoose.model('transaction').syncIndexes();
+    }
+
+    if (mongoose.modelNames().includes('notification')) {
+        await mongoose.model('notification').syncIndexes();
     }
 });
 

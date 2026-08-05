@@ -42,6 +42,8 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
                 vehicleType: parcelWithUser.vehicleType,
                 itemName: parcelWithUser.itemName,
                 size: parcelWithUser.size,
+                isScheduled: Boolean(parcelWithUser.scheduledAt),
+                scheduledAt: parcelWithUser.scheduledAt,
             }, TRACE_ID).catch(console.error);
         }
     });

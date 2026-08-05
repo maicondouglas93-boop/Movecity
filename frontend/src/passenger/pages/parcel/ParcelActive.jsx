@@ -344,24 +344,17 @@ const ParcelActive = () => {
     try {
       const token = getAccessToken('user')
       const message = `PIN da entrega: ${parcel.deliveryPin}`
-      const { data } = await axios.post(
+      await axios.post(
         `${import.meta.env.VITE_BASE_URL}/chat/send`,
         {
           subjectType: 'parcel',
           subjectId: parcel._id,
           message,
           type: 'text',
+          operationalType: 'delivery_pin',
         },
         { headers: { Authorization: `Bearer ${token}` } },
       )
-      if (socket) {
-        socket.emit('send-message', {
-          subjectType: 'parcel',
-          subjectId: parcel._id,
-          token,
-          message: data,
-        })
-      }
       addToast('PIN enviado ao motorista pelo chat', 'success')
       setIsChatOpen(true)
     } catch {

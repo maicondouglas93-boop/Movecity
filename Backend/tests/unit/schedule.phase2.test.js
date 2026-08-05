@@ -82,7 +82,12 @@ describe('Fase 2 — agendamento (SCH-A2/M1/M2/M3)', () => {
             for (let i = 1; i < MAX; i += 1) {
                 await rideModel.updateOne(
                     { _id: ride._id },
-                    { $set: { activatedAt: new Date(Date.now() - 60 * 1000) } }
+                    {
+                        $set: {
+                            activatedAt: new Date(Date.now() - 60 * 1000),
+                            dispatchLeaseUntil: new Date(Date.now() - 1000),
+                        },
+                    }
                 );
                 await scheduleService.redispatchOpenScheduledRides();
             }
@@ -105,7 +110,12 @@ describe('Fase 2 — agendamento (SCH-A2/M1/M2/M3)', () => {
             for (let i = 1; i < MAX; i += 1) {
                 await parcelModel.updateOne(
                     { _id: parcel._id },
-                    { $set: { activatedAt: new Date(Date.now() - 60 * 1000) } }
+                    {
+                        $set: {
+                            activatedAt: new Date(Date.now() - 60 * 1000),
+                            dispatchLeaseUntil: new Date(Date.now() - 1000),
+                        },
+                    }
                 );
                 await scheduleService.redispatchOpenScheduledParcels();
             }
@@ -114,6 +124,23 @@ describe('Fase 2 — agendamento (SCH-A2/M1/M2/M3)', () => {
             expect(doc.status).toBe('cancelled');
             expect(doc.cancellationReason).toBe('no_drivers');
             expect(doc.dispatchAttempts).toBe(MAX);
+        });
+
+        it('duas execuções concorrentes adquirem um único lease de redispatch', async () => {
+            const ride = await rideModel.create(makeRideDoc({
+                status: 'requested',
+                activatedAt: new Date(Date.now() - 60 * 1000),
+                dispatchLeaseUntil: new Date(Date.now() - 1000),
+            }));
+
+            await Promise.all([
+                scheduleService.redispatchOpenScheduledRides(),
+                scheduleService.redispatchOpenScheduledRides(),
+            ]);
+
+            expect(rideController.dispatchRideToCaptains).toHaveBeenCalledTimes(1);
+            const persisted = await rideModel.findById(ride._id);
+            expect(persisted.dispatchLeaseUntil.getTime()).toBeGreaterThan(Date.now());
         });
     });
 

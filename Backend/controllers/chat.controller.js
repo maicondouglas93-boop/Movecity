@@ -58,7 +58,7 @@ module.exports.sendMessage = async (req, res) => {
         }
 
         const subjectInput = subjectFromReq(req);
-        const { message, type } = req.body;
+        const { message, type, operationalType } = req.body;
         const userOrCaptain = req.user || req.captain;
         const senderType = req.user ? 'user' : 'captain';
 
@@ -73,7 +73,16 @@ module.exports.sendMessage = async (req, res) => {
             return res.status(400).json({ message: 'Cannot send message. Chat subject is not active.' });
         }
 
-        const sanitizedMessage = message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        let messageToPersist = message;
+        if (operationalType === 'delivery_pin') {
+            if (subject.subjectType !== 'parcel' || senderType !== 'user' || !subject.doc.deliveryPin) {
+                return res.status(400).json({ message: 'Invalid operational PIN message.' });
+            }
+            // O valor operacional vem do banco, não do texto controlado pelo cliente.
+            messageToPersist = `PIN da entrega: ${subject.doc.deliveryPin}`;
+        }
+
+        const sanitizedMessage = messageToPersist.replace(/</g, "&lt;").replace(/>/g, "&gt;");
         const badWords = ['palavrao1', 'palavrao2'];
         const isProfane = badWords.some(word => sanitizedMessage.toLowerCase().includes(word));
         if (isProfane) {
@@ -81,6 +90,8 @@ module.exports.sendMessage = async (req, res) => {
         }
 
         const chat = await chatService.getOrCreateChat(subjectInput);
+        const recipientType = senderType === 'user' ? 'captain' : 'user';
+        const recipientId = recipientType === 'captain' ? subject.captainId : subject.userId;
 
         const newMessage = await chatService.saveMessage({
             chatId: chat._id,
@@ -89,9 +100,25 @@ module.exports.sendMessage = async (req, res) => {
             rideId: subject.subjectType === 'ride' ? subject.subjectId : undefined,
             senderId: userOrCaptain._id,
             senderType,
+            recipientId,
+            recipientType,
             message: sanitizedMessage,
-            type
+            type,
+            operationalType,
         });
+
+        try {
+            const { publishPersistedChatMessage } = require('../socket');
+            await publishPersistedChatMessage({
+                subject,
+                message: newMessage,
+                senderType,
+            });
+        } catch (deliveryError) {
+            // Persistência já confirmou sucesso. Histórico recupera a mensagem mesmo
+            // se Socket.IO/FCM estiver temporariamente indisponível.
+            console.error('[Chat] Mensagem persistida; falha no realtime/push:', deliveryError.message);
+        }
 
         res.status(201).json(newMessage);
     } catch (err) {

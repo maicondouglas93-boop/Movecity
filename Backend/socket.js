@@ -41,6 +41,54 @@ const removeChatPresence = (key, type) => {
 
 const isChatPresent = (key, type) => (chatPresence.get(key)?.[type] || 0) > 0;
 
+/**
+ * Publica somente mensagens que já foram persistidas pelo endpoint HTTP.
+ * A gravação no Mongo é a fonte de verdade; Socket.IO e FCM são consequências dela.
+ */
+const publishPersistedChatMessage = async ({ subject, message, senderType }) => {
+    const subjectType = subject?.subjectType === 'parcel' ? 'parcel' : 'ride';
+    const subjectId = subject?.subjectId;
+    const key = chatRoomKey({ subjectType, subjectId, rideId: subjectId });
+    if (!key) return { realtimeRecipients: 0, pushQueued: false };
+
+    const recipientType = senderType === 'user' ? 'captain' : 'user';
+    let realtimeRecipients = 0;
+
+    if (io) {
+        const roomSockets = io.sockets.adapter.rooms.get(chatRoomName(key)) || new Set();
+        for (const socketId of roomSockets) {
+            const targetSocket = io.sockets.sockets.get(socketId);
+            const identity = targetSocket?.data.chatIdentities?.get(key);
+            if (identity?.type === recipientType) {
+                targetSocket.emit('receive-message', message);
+                realtimeRecipients += 1;
+            }
+        }
+    }
+
+    // Uma mensagem operacional não deve revelar o PIN na tela bloqueada. O conteúdo
+    // integral continua no histórico persistido e chega em realtime quando o chat está aberto.
+    const preview = message?.operationalType === 'delivery_pin'
+        ? 'Você recebeu um PIN pelo chat. Abra o app para visualizar.'
+        : (typeof message?.message === 'string' ? message.message.slice(0, 100) : 'Nova mensagem');
+    const pushMeta = subjectType === 'parcel'
+        ? { subjectType, subjectId: String(subjectId), parcelId: String(subjectId) }
+        : { subjectType, subjectId: String(subjectId), rideId: String(subjectId) };
+
+    if (realtimeRecipients === 0 && !isChatPresent(key, recipientType)) {
+        if (recipientType === 'captain' && subject.captainId) {
+            await notificationDispatcher.sendChatMessageToCaptain(subject.captainId, preview, pushMeta);
+            return { realtimeRecipients, pushQueued: true };
+        }
+        if (recipientType === 'user' && subject.userId) {
+            await notificationDispatcher.sendChatMessageToUser(subject.userId, preview, pushMeta);
+            return { realtimeRecipients, pushQueued: true };
+        }
+    }
+
+    return { realtimeRecipients, pushQueued: false };
+};
+
 function initializeSocket(server) {
     const allowedOrigins = [
         "http://localhost:5173",
@@ -446,53 +494,16 @@ function initializeSocket(server) {
             }
         });
 
-        socket.on('send-message', async (data) => {
+        socket.on('send-message', async (data, ack) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const subjectId = data?.subjectId || data?.rideId;
             const rideId = data?.rideId || (subjectType === 'ride' ? subjectId : undefined);
             const key = chatRoomKey({ subjectType, subjectId, rideId });
-            const { message } = data || {};
-            if (!hasChatAccess(key)) return;
-
-            socket.to(chatRoomName(key)).emit('receive-message', message);
-
-            // A7 da auditoria de push (2026-08-02): "App aberto -> Socket.IO; App
-            // fechado -> Firebase Push". O relay acima já cobre o primeiro caso; isto
-            // aqui cobre o segundo, que antes simplesmente não existia — quem não
-            // estava com o chat aberto nunca sabia que recebeu uma mensagem.
-            try {
-                const senderIdentity = socket.data.chatIdentities?.get(key);
-                if (!senderIdentity) return;
-
-                const recipientType = senderIdentity.type === 'user' ? 'captain' : 'user';
-                if (isChatPresent(key, recipientType)) return;
-
-                const preview = typeof message?.message === 'string' ? message.message.slice(0, 100) : 'Nova mensagem';
-                const pushMeta = subjectType === 'parcel'
-                    ? { subjectType: 'parcel', subjectId: String(subjectId), parcelId: String(subjectId) }
-                    : { rideId: String(subjectId || rideId) };
-
-                if (subjectType === 'parcel') {
-                    const parcel = await parcelModel.findById(subjectId).select('user captain');
-                    if (!parcel) return;
-                    if (recipientType === 'captain' && parcel.captain) {
-                        notificationDispatcher.sendChatMessageToCaptain(parcel.captain, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
-                    } else if (recipientType === 'user' && parcel.user) {
-                        notificationDispatcher.sendChatMessageToUser(parcel.user, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
-                    }
-                    return;
-                }
-
-                const ride = await rideModel.findById(subjectId || rideId).select('user captain');
-                if (!ride) return;
-
-                if (recipientType === 'captain' && ride.captain) {
-                    notificationDispatcher.sendChatMessageToCaptain(ride.captain, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
-                } else if (recipientType === 'user' && ride.user) {
-                    notificationDispatcher.sendChatMessageToUser(ride.user, preview, pushMeta).catch(err => console.error('[Chat Push]', err.message));
-                }
-            } catch (err) {
-                console.error('[Chat Push] Erro ao processar fallback de push:', err.message);
+            // Compatibilidade com clientes antigos: a mensagem já foi persistida e
+            // publicada pelo POST /chat/send. Não retransmitimos payload vindo do
+            // cliente, pois isso duplicava eventos/push e permitia forjar mensagens.
+            if (typeof ack === 'function') {
+                ack({ ok: hasChatAccess(key), relayedBy: 'http' });
             }
         });
 
@@ -650,4 +661,13 @@ const disconnectSocket = (socketId) => {
     }
 }
 
-module.exports = { initializeSocket, sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, disconnectSocket, emitDriverMapUpdate, clearDriverMapState };
+module.exports = {
+    initializeSocket,
+    sendMessageToSocketId,
+    addSocketToRoom,
+    sendMessageToRoom,
+    publishPersistedChatMessage,
+    disconnectSocket,
+    emitDriverMapUpdate,
+    clearDriverMapState,
+};

@@ -28,7 +28,7 @@ module.exports.resolveSubject = async ({ subjectType, subjectId, rideId } = {}) 
     const normalized = normalizeSubject({ subjectType, subjectId, rideId });
 
     if (normalized.subjectType === 'parcel') {
-        const parcel = await parcelModel.findById(normalized.subjectId);
+        const parcel = await parcelModel.findById(normalized.subjectId).select('+deliveryPin');
         if (!parcel) throw new Error('SUBJECT_NOT_FOUND');
         return {
             ...normalized,
@@ -40,7 +40,7 @@ module.exports.resolveSubject = async ({ subjectType, subjectId, rideId } = {}) 
         };
     }
 
-    const ride = await rideModel.findById(normalized.subjectId);
+    const ride = await rideModel.findById(normalized.subjectId).select('+otp');
     if (!ride) throw new Error('SUBJECT_NOT_FOUND');
     return {
         ...normalized,
@@ -86,6 +86,15 @@ module.exports.getOrCreateChat = async ({ subjectType, subjectId, rideId } = {})
             passengerId: subject.userId,
             captainId: subject.captainId,
         });
+    } else if (
+        chat.passengerId?.toString() !== subject.userId?.toString()
+        || chat.captainId?.toString() !== subject.captainId?.toString()
+    ) {
+        // Um redespacho pode trocar o motorista depois que o chat foi criado. A
+        // autorização usa o subject atual; mantenha os metadados persistidos alinhados.
+        chat.passengerId = subject.userId;
+        chat.captainId = subject.captainId;
+        await chat.save();
     }
 
     return chat;
@@ -99,7 +108,19 @@ module.exports.getChatMessages = async (chatId, limit = 50, skip = 0) => {
 };
 
 module.exports.saveMessage = async (data) => {
-    const { chatId, subjectType, subjectId, rideId, senderId, senderType, message, type } = data;
+    const {
+        chatId,
+        subjectType,
+        subjectId,
+        rideId,
+        senderId,
+        senderType,
+        recipientId,
+        recipientType,
+        message,
+        type,
+        operationalType,
+    } = data;
     const normalized = normalizeSubject({ subjectType, subjectId, rideId });
 
     const newMessage = await messageModel.create({
@@ -109,8 +130,11 @@ module.exports.saveMessage = async (data) => {
         rideId: normalized.subjectType === 'ride' ? normalized.subjectId : undefined,
         senderId,
         senderType,
+        recipientId,
+        recipientType,
         message,
-        type: type || 'text'
+        type: type || 'text',
+        operationalType: operationalType || null,
     });
 
     const updateData = { lastMessage: newMessage._id };

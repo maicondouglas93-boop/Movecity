@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { getCache, setCache } = require('../../cache/cache');
 const { haversineKm } = require('./geo.util');
+const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 // Geocoding reverso via Nominatim — não existia no código original (Home.jsx chama
 // Photon direto do browser). Adicionado para simetria com google.provider.js, sem
@@ -71,7 +72,15 @@ module.exports.getAddressCoordinate = async (address) => {
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
 
     try {
+        const started = Date.now();
         const response = await axios.get(url, { timeout: 3000 });
+        trackUsageSafe({
+            service: 'google_maps',
+            sku: 'geocoding',
+            latencyMs: Date.now() - started,
+            ok: response.data.status === 'OK',
+            statusCode: response.data.status === 'OK' ? 200 : 400,
+        });
         if (response.data.status === 'OK') {
             const location = response.data.results[ 0 ].geometry.location;
             const result = { ltd: location.lat, lng: location.lng };
@@ -390,7 +399,15 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
     }
 
     try {
+        const started = Date.now();
         const response = await axios.get(url, { timeout: 3000 });
+        trackUsageSafe({
+            service: 'google_maps',
+            sku: 'places_autocomplete',
+            latencyMs: Date.now() - started,
+            ok: response.data.status === 'OK',
+            statusCode: response.data.status === 'OK' ? 200 : 400,
+        });
         if (response.data.status === 'OK') {
             const suggestions = response.data.predictions.map(prediction => {
                 const parts = prediction.description.split(',');

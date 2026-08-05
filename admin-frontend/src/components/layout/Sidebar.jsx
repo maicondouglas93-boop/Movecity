@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Map, CreditCard,
   Bell, LogOut, Receipt, FileText, ClipboardList, Tag,
-  BarChart3, Package
+  BarChart3, Package, Activity
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -13,6 +13,7 @@ import { useAuth } from '../../contexts/AuthContext';
 // "Configurações" foi removido daqui — linkava pra uma rota (/settings) que nunca existiu.
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
+  { icon: Activity, label: 'Monitoramento', path: '/monitoring', roles: ['super_admin'] },
   { icon: Map, label: 'Corridas & Mapa', path: '/rides' },
   { icon: Package, label: 'Encomendas', path: '/parcels' },
   { icon: Users, label: 'Passageiros', path: '/users' },

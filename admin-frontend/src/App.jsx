@@ -23,6 +23,7 @@ const Logs = lazy(() => import('./pages/Logs'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Promotions = lazy(() => import('./pages/Promotions'));
 const Reports = lazy(() => import('./pages/Reports'));
+const ServicesMonitoring = lazy(() => import('./pages/ServicesMonitoring'));
 
 const PageLoading = () => (
   <div className="min-h-[50vh] flex items-center justify-center text-text-muted text-sm">Carregando...</div>
@@ -88,6 +89,7 @@ function App() {
             <Route element={<Layout />}>
               <Route path="/logs" element={<Logs />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/monitoring" element={<ServicesMonitoring />} />
             </Route>
           </Route>
 

@@ -149,7 +149,12 @@ describe('Schedule API Integration (Fase 6.2)', () => {
         for (let i = 1; i < MAX; i += 1) {
             await parcelModel.updateOne(
                 { _id: parcel._id },
-                { $set: { activatedAt: new Date(Date.now() - 60 * 1000) } }
+                {
+                    $set: {
+                        activatedAt: new Date(Date.now() - 60 * 1000),
+                        dispatchLeaseUntil: new Date(Date.now() - 1000),
+                    },
+                }
             );
             await scheduleService.redispatchOpenScheduledParcels();
         }

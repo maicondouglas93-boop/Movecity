@@ -53,62 +53,65 @@ const LookingForDriver = (props) => {
         return addressStr.split(',')[0] || '';
     };
 
-    const extractAddress = (addressStr) => {
-        if (!addressStr) return '';
-        if (typeof addressStr === 'object') return addressStr.address;
-        return addressStr.replace(/\s*\(-?\d+\.\d+,\s*-?\d+\.\d+\)$/, '');
-    };
-
     const minutes = Math.floor(elapsedSeconds / 60)
     const seconds = elapsedSeconds % 60
     const elapsedLabel = `${minutes}:${String(seconds).padStart(2, '0')}`
     const isTakingLong = elapsedSeconds >= 60
+    const fareValue = props.fare?.fare?.[props.vehicleType]
 
     return (
-        <div className='pb-6'>
-            <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Buscando um Motorista</h3>
-
-            <div className='flex flex-col items-center mb-4'>
-                <div className='relative h-16 w-16 flex items-center justify-center'>
-                    <div className='absolute inset-0 rounded-full border-4 border-brand-300 animate-ping opacity-55'></div>
-                    <div className='absolute inset-2 rounded-full border-4 border-brand-400 animate-ping opacity-75 animation-delay-150'></div>
-                    <img className='h-12 w-12 absolute rounded-full object-contain bg-surface p-1 shadow-raised border border-brand-200' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />
+        <div className='pb-2'>
+            <div className='flex items-center gap-3 mb-3'>
+                <div className='relative h-12 w-12 flex-shrink-0 flex items-center justify-center'>
+                    <div className='absolute inset-0 rounded-full border-2 border-brand-300 animate-ping opacity-55'></div>
+                    <img
+                        className='h-10 w-10 absolute rounded-full object-contain bg-surface p-0.5 shadow-raised border border-brand-200'
+                        src={vehicleImages[props.vehicleType] || vehicleImages.car}
+                        alt=""
+                        width="1024"
+                        height="1024"
+                        loading="lazy"
+                    />
                 </div>
-                <p className='text-sm text-brand-700 mt-2'>Buscando motoristas próximos...</p>
-                <p className='text-xs text-ink-400 mt-1 tabular-nums'>{elapsedLabel}</p>
+                <div className='min-w-0 flex-1'>
+                    <h3 className='text-base font-semibold text-ink-900 leading-tight'>Buscando motorista</h3>
+                    <p className='text-xs text-brand-700 mt-0.5'>
+                        Próximos… <span className='tabular-nums text-ink-400'>{elapsedLabel}</span>
+                    </p>
+                </div>
+                {fareValue != null && (
+                    <div className='text-right flex-shrink-0'>
+                        <p className='text-sm font-bold text-ink-900'>R${fareValue}</p>
+                        <p className='text-[11px] text-ink-400'>{paymentLabel(props.paymentMethod)}</p>
+                    </div>
+                )}
             </div>
 
             {isTakingLong && (
-                <div className='flex gap-2 items-start bg-surface-alt rounded-panel p-3 mb-4'>
-                    <i className="ri-time-line text-ink-400 text-lg flex-shrink-0 mt-0.5" aria-hidden="true"></i>
-                    <p className='text-sm text-ink-600'>Isso está demorando mais que o normal. Você pode continuar aguardando ou cancelar a busca.</p>
+                <div className='flex gap-2 items-center bg-surface-alt rounded-panel px-2.5 py-2 mb-2.5'>
+                    <i className="ri-time-line text-ink-400 text-base flex-shrink-0" aria-hidden="true"></i>
+                    <p className='text-xs text-ink-600'>Demorando mais que o normal — aguarde ou cancele.</p>
                 </div>
             )}
 
-            <Card padding='p-1' className='divide-y divide-line'>
+            <Card padding='p-0.5' className='divide-y divide-line'>
                 <DetailRow
+                    compact
                     icon="ri-map-pin-user-fill"
                     title={extractTitle(props.pickup)}
-                    subtitle={extractAddress(props.pickup)}
-                    className='px-3'
+                    className='px-2'
                 />
                 <DetailRow
+                    compact
                     icon="ri-map-pin-2-fill"
                     iconColor="text-danger-500"
                     title={extractTitle(props.destination)}
-                    subtitle={extractAddress(props.destination)}
-                    className='px-3'
-                />
-                <DetailRow
-                    icon="ri-currency-line"
-                    title={props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]}` : ''}
-                    subtitle={`${paymentLabel(props.paymentMethod)} (Estimativa)`}
-                    className='px-3'
+                    className='px-2'
                 />
             </Card>
 
-            <Button variant='danger' onClick={handleCancel} loading={cancelling} className='mt-4'>
-                {cancelling ? 'Cancelando...' : confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar Corrida'}
+            <Button variant='danger' onClick={handleCancel} loading={cancelling} className='mt-3 !min-h-[44px] !text-sm'>
+                {cancelling ? 'Cancelando...' : confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar corrida'}
             </Button>
         </div>
     )

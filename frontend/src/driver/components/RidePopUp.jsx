@@ -28,11 +28,25 @@ const RidePopUp = (props) => {
     // informação que mais pesa na decisão de aceitar — antes não existia em lugar nenhum.
     const distanceToPickupKm = haversineKm(userLocation, props.ride?.pickupCoordinates)
     const vehicleLabel = vehicleLabels[props.ride?.vehicleType] || props.ride?.vehicleType
+    const etaMins = props.ride?.estimatedTime ? Math.round(props.ride.estimatedTime / 60) : null
+    const tripKm = props.ride?.estimatedDistance
+        ? (props.ride.estimatedDistance / 1000).toFixed(1)
+        : null
+    const payLabel = props.ride?.paymentMethod === 'card'
+        ? 'Cartão'
+        : props.ride?.paymentMethod === 'pix'
+            ? 'PIX'
+            : 'Dinheiro'
 
     return (
-        <div>
-            <div className='flex items-center justify-between mb-4'>
-                <h3 className='text-2xl font-semibold text-ink-900'>Nova Corrida Disponível!</h3>
+        <div className="pb-1">
+            <div className='flex items-center justify-between mb-2.5'>
+                <h3 className='text-base font-semibold text-ink-900'>Nova corrida</h3>
+                {props.ride?.fare != null && (
+                    <p className="text-lg font-bold text-ink-900">
+                        R$ {props.ride?.fare?.toFixed ? props.ride.fare.toFixed(2) : props.ride?.fare}
+                    </p>
+                )}
             </div>
 
             {/* Oferta: sem foto (privacidade pré-aceite) — só primeiro nome. */}
@@ -41,82 +55,64 @@ const RidePopUp = (props) => {
                     fullname: { firstname: props.ride?.user?.fullname?.firstname || 'Passageiro' },
                 }}
                 showPhoto={false}
+                compact
                 subtitle={vehicleLabel}
                 trailing={
                     <div className="text-right">
-                        <h5 className="text-xl font-bold text-ink-900">
+                        <p className="text-base font-bold text-ink-900">
                             {distanceToPickupKm != null ? `${distanceToPickupKm.toFixed(1)} km` : '—'}
-                        </h5>
-                        <p className="text-xs text-ink-600">até você</p>
+                        </p>
+                        <p className="text-[10px] text-ink-500">até você</p>
                     </div>
                 }
             />
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full mt-5'>
-                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                        <i className="ri-map-pin-user-fill text-brand-500 text-lg"></i>
-                        <div>
-                            <h3 className='text-base font-semibold text-ink-900'>{props.ride?.pickup?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.pickup}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                        <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
-                        <div>
-                            <h3 className='text-base font-semibold text-ink-900'>{props.ride?.destination?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.destination}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                        <i className="ri-time-line text-amber-500 text-lg"></i>
-                        <div>
-                            <h3 className='text-base font-semibold text-ink-900'>
-                                {props.ride?.estimatedTime ? `${Math.round(props.ride.estimatedTime / 60)} mins` : '—'}
-                                {props.ride?.estimatedDistance && (
-                                    <span className='text-sm font-normal text-ink-600 ml-2'>
-                                        ({(props.ride.estimatedDistance / 1000).toFixed(1)} km da corrida)
-                                    </span>
-                                )}
-                            </h3>
-                            <p className='text-sm -mt-1 text-ink-600'>Tempo Estimado</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line text-brand-500 text-lg"></i>
-                        <div className='w-full'>
-                            {/* Antes mostrava "estimatedPriceMin - estimatedPriceMax" — os dois
-                                campos são sempre o MESMO número (ver ride.service.js), então a
-                                tela sempre exibia uma "faixa" de um único valor duplicado. */}
-                            <h3 className='text-base font-semibold text-ink-900'>
-                                R$ {props.ride?.fare?.toFixed ? props.ride.fare.toFixed(2) : props.ride?.fare}
-                            </h3>
-                            <div className='flex justify-between items-center text-sm -mt-1 text-ink-600'>
-                                <p>Pagamento: {props.ride?.paymentMethod === 'card' ? 'Cartão' : props.ride?.paymentMethod === 'pix' ? 'PIX' : 'Dinheiro'}</p>
-                                <p className='text-danger-500 font-medium'>Taxa: R$ {props.ride?.commissionAmount?.toFixed(2) ?? '—'}</p>
-                            </div>
-                        </div>
-                    </div>
+
+            <div className='mt-2.5 space-y-1.5'>
+                <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                    <i className="ri-map-pin-user-fill text-brand-500 flex-shrink-0" aria-hidden="true" />
+                    <span className="truncate font-medium">{props.ride?.pickup?.split(',')[0]}</span>
+                </p>
+                <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                    <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
+                    <span className="truncate font-medium">{props.ride?.destination?.split(',')[0]}</span>
+                </p>
+                <div className='flex items-center gap-3 text-[11px] text-ink-500 pt-0.5'>
+                    <span className="inline-flex items-center gap-1">
+                        <i className="ri-time-line text-amber-500" aria-hidden="true" />
+                        {etaMins != null ? `${etaMins} min` : '—'}
+                        {tripKm ? ` · ${tripKm} km` : ''}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <i className="ri-bank-card-line" aria-hidden="true" />
+                        {payLabel}
+                    </span>
+                    {props.ride?.commissionAmount != null && (
+                        <span className="text-danger-500 font-medium ml-auto">
+                            Taxa R$ {props.ride.commissionAmount?.toFixed?.(2) ?? props.ride.commissionAmount}
+                        </span>
+                    )}
                 </div>
-                <div className='mt-3 w-full flex gap-2'>
-                    <Button
-                        onClick={() => {
-                            props.setConfirmRidePopupPanel(true)
-                            props.confirmRide()
-                        }}
-                        fullWidth={false}
-                        className="flex-1"
-                    >
-                        <i className="ri-checkbox-circle-line mr-1"></i>Aceitar
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        fullWidth={false}
-                        className="flex-1"
-                        onClick={() => {
-                            props.setRidePopupPanel(false)
-                        }}
-                    >Ignorar</Button>
-                </div>
+            </div>
+
+            <div className='mt-3 w-full flex gap-2'>
+                <Button
+                    onClick={() => {
+                        props.setConfirmRidePopupPanel(true)
+                        props.confirmRide()
+                    }}
+                    fullWidth={false}
+                    className="flex-1 !min-h-[44px] !text-sm"
+                >
+                    <i className="ri-checkbox-circle-line mr-1"></i>Aceitar
+                </Button>
+                <Button
+                    variant="secondary"
+                    fullWidth={false}
+                    className="flex-1 !min-h-[44px] !text-sm"
+                    onClick={() => {
+                        props.setRidePopupPanel(false)
+                    }}
+                >Ignorar</Button>
             </div>
         </div>
     )

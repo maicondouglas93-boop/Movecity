@@ -337,7 +337,6 @@ const ParcelActive = () => {
   const showRating = parcel.status === 'finished' && !rated
   const showPin = Boolean(parcel.deliveryPin) && PIN_VISIBLE_STATUSES.includes(parcel.status)
   const pinEmphasized = PIN_EMPHASIS.includes(parcel.status)
-  const mapHeight = searching ? 'h-[38dvh]' : 'h-[46dvh]'
 
   const sendPinViaChat = async () => {
     if (!parcel?._id || !parcel.deliveryPin || sendingPin) return
@@ -374,8 +373,8 @@ const ParcelActive = () => {
 
   return (
     <div className="h-[100dvh] flex flex-col md:flex-row bg-surface overflow-hidden">
-      {/* Mapa */}
-      <div className={`${mapHeight} md:h-full md:flex-1 relative flex-shrink-0`}>
+      {/* Mapa — ocupa o restante; painel inferior ~35% */}
+      <div className="flex-1 min-h-0 md:h-full md:flex-1 relative">
         <LiveTracking
           pickup={parcel.pickupCoordinates}
           destination={parcel.destinationCoordinates}
@@ -403,30 +402,30 @@ const ParcelActive = () => {
         )}
       </div>
 
-      {/* Painel */}
-      <div className="flex-1 min-h-0 md:max-w-md md:border-l bg-surface border-t md:border-t-0 border-line rounded-t-3xl md:rounded-none shadow-floating md:shadow-none -mt-3 md:mt-0 relative z-10 flex flex-col">
-        <div className="mx-auto mt-2.5 mb-1 h-1 w-10 rounded-full bg-line flex-shrink-0" aria-hidden="true" />
+      {/* Painel — ~35% da tela; mapa dominante */}
+      <div className="flex-shrink-0 w-full md:max-w-md md:h-full md:border-l bg-surface border-t md:border-t-0 border-line rounded-t-3xl md:rounded-none shadow-floating md:shadow-none -mt-3 md:mt-0 relative z-10 flex flex-col max-h-[38dvh] md:max-h-none">
+        <div className="mx-auto mt-2 mb-0.5 h-1 w-10 rounded-full bg-line flex-shrink-0" aria-hidden="true" />
 
-        <div className="flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
+        <div className="flex-1 overflow-y-auto px-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
           {/* Status */}
-          <div className="pt-1">
-            <div className="flex items-start gap-3">
+          <div className="pt-0.5">
+            <div className="flex items-start gap-2.5">
               {searching ? (
-                <span className="mt-1 flex-shrink-0 w-3 h-3 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
+                <span className="mt-1 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
               ) : (
-                <span className="mt-1 flex-shrink-0 w-3 h-3 rounded-full bg-brand-500" aria-hidden="true" />
+                <span className="mt-1 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-brand-500" aria-hidden="true" />
               )}
               <div className="min-w-0 flex-1">
-                <h1 className="text-lg font-semibold text-ink-900 leading-tight">{copy.title}</h1>
+                <h1 className="text-base font-semibold text-ink-900 leading-tight">{copy.title}</h1>
                 {copy.subtitle && (
-                  <p className="text-sm text-ink-400 mt-0.5">{copy.subtitle}</p>
+                  <p className="text-xs text-ink-400 mt-0.5 truncate">{copy.subtitle}</p>
                 )}
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="text-base font-bold text-ink-900">
+                <p className="text-sm font-bold text-ink-900">
                   R$ {Number(parcel.fare || 0).toFixed(2).replace('.', ',')}
                 </p>
-                <p className="text-[11px] text-ink-400">
+                <p className="text-[10px] text-ink-400">
                   {parcel.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'}
                 </p>
               </div>
@@ -440,16 +439,17 @@ const ParcelActive = () => {
             <DriverIdentityCard
               captain={captain}
               vehicleTypeFallback={parcel.vehicleType}
+              compact
             />
           )}
 
           {/* Procurando — animação + rota */}
           {searching && (
-            <div className="rounded-panel border border-line bg-brand-50/60 px-4 py-3 flex items-center gap-3" role="status">
-              <i className="ri-radar-line text-2xl text-brand-600 animate-pulse" aria-hidden="true" />
+            <div className="rounded-panel border border-line bg-brand-50/60 px-3 py-2 flex items-center gap-2.5" role="status">
+              <i className="ri-radar-line text-xl text-brand-600 animate-pulse" aria-hidden="true" />
               <div className="min-w-0">
-                <p className="text-sm font-medium text-ink-900">Buscando prestadores próximos</p>
-                <p className="text-xs text-ink-400 truncate">
+                <p className="text-xs font-medium text-ink-900">Buscando prestadores próximos</p>
+                <p className="text-[11px] text-ink-400 truncate">
                   {shortAddress(parcel.pickup)} → {shortAddress(parcel.destination)}
                 </p>
               </div>
@@ -459,62 +459,58 @@ const ParcelActive = () => {
           {/* PIN — visível o tempo todo após o motorista aceitar */}
           {showPin && (
             <div
-              className={`rounded-panel border px-3 py-3 space-y-2.5 ${
+              className={`rounded-panel border px-2.5 py-2 space-y-1.5 ${
                 pinEmphasized
                   ? 'bg-brand-50 border-brand-200'
                   : 'bg-surface-alt border-line'
               }`}
             >
-              <p className="text-sm text-ink-600 text-center leading-snug">
-                O recebedor da encomenda deverá informar esse PIN ao motorista
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex-shrink-0">
-                  <p className="text-[11px] text-ink-400 uppercase tracking-wide">PIN</p>
-                  <p className="text-[11px] text-ink-400">Entrega</p>
-                </div>
+              <div className="flex items-center gap-2.5">
+                <p className="text-[10px] text-ink-400 uppercase tracking-wide flex-shrink-0">PIN</p>
                 <p
-                  className={`flex-1 text-center font-bold tracking-[0.35em] leading-none ${
-                    pinEmphasized ? 'text-3xl text-brand-600' : 'text-2xl text-ink-900'
+                  className={`flex-1 text-center font-bold tracking-[0.3em] leading-none ${
+                    pinEmphasized ? 'text-2xl text-brand-600' : 'text-xl text-ink-900'
                   }`}
                 >
                   {parcel.deliveryPin}
                 </p>
-                <i className="ri-lock-2-line text-lg text-brand-500 flex-shrink-0" aria-hidden="true" />
+                <i className="ri-lock-2-line text-base text-brand-500 flex-shrink-0" aria-hidden="true" />
               </div>
               {canChat && (
                 <button
                   type="button"
                   disabled={sendingPin}
                   onClick={sendPinViaChat}
-                  className="w-full min-h-[44px] rounded-panel border border-brand-200 bg-white text-brand-700 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full min-h-[40px] rounded-panel border border-brand-200 bg-white text-brand-700 text-xs font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
-                  <i className="ri-chat-smile-2-line text-lg" aria-hidden="true" />
-                  {sendingPin ? 'Enviando…' : 'Enviar PIN pelo chat'}
+                  <i className="ri-chat-smile-2-line text-base" aria-hidden="true" />
+                  {sendingPin ? 'Enviando…' : 'Enviar PIN no chat'}
                 </button>
               )}
             </div>
           )}
 
-          {/* Rota colapsável */}
+          {/* Destinatário + rota colapsável */}
           <div>
             <button
               type="button"
               onClick={() => setRouteOpen((v) => !v)}
-              className="w-full flex items-center justify-between min-h-[40px] text-xs font-medium text-ink-400"
+              className="w-full flex items-center justify-between min-h-[36px] text-xs font-medium text-ink-400"
               aria-expanded={routeOpen}
             >
               <span className="truncate">
-                {parcel.itemName}
+                {parcel.recipient?.name
+                  ? `${parcel.recipient.name}${parcel.itemName ? ` · ${parcel.itemName}` : ''}`
+                  : parcel.itemName}
                 {parcel.vehicleType ? ` · ${parcel.vehicleType === 'moto' ? 'Moto' : 'Carro'}` : ''}
               </span>
               <span className="flex items-center gap-1 flex-shrink-0 ml-2">
-                {routeOpen ? 'Ocultar rota' : 'Ver rota'}
+                {routeOpen ? 'Ocultar' : 'Detalhes'}
                 <i className={`ri-arrow-${routeOpen ? 'up' : 'down'}-s-line`} aria-hidden="true" />
               </span>
             </button>
             {routeOpen && (
-              <div className="space-y-2 pb-1">
+              <div className="space-y-1.5 pb-0.5">
                 <p className="text-xs text-ink-600 flex items-start gap-2">
                   <i className="ri-map-pin-user-fill text-brand-500 mt-0.5" aria-hidden="true" />
                   <span>{parcel.pickup}</span>
@@ -523,13 +519,10 @@ const ParcelActive = () => {
                   <i className="ri-map-pin-2-fill text-danger-500 mt-0.5" aria-hidden="true" />
                   <span>{parcel.destination}</span>
                 </p>
-                {parcel.recipient?.name && (
+                {parcel.recipient?.phone && (
                   <p className="text-xs text-ink-600 flex items-start gap-2">
-                    <i className="ri-user-received-line text-ink-400 mt-0.5" aria-hidden="true" />
-                    <span>
-                      {parcel.recipient.name}
-                      {parcel.recipient.phone ? ` · ${parcel.recipient.phone}` : ''}
-                    </span>
+                    <i className="ri-phone-line text-ink-400 mt-0.5" aria-hidden="true" />
+                    <span>{parcel.recipient.phone}</span>
                   </p>
                 )}
               </div>
@@ -600,6 +593,7 @@ const ParcelActive = () => {
               variant="danger"
               loading={cancelling}
               onClick={handleCancel}
+              className="!min-h-[40px] !text-sm"
             >
               {confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar encomenda'}
             </Button>

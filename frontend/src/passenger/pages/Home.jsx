@@ -1005,12 +1005,14 @@ const Home = () => {
                     </button>
                 </div>
             )}
-            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            {/* Painéis do fluxo de corrida: altura inicial ~35–40% (mapa dominante).
+                Conteúdo longo continua rolável; max 80% mantém o mapa visível. */}
+            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <VehiclePanel
                     selectVehicle={setVehicleType}
                     fare={fare} setConfirmRidePanel={setConfirmRidePanel} setVehiclePanel={setVehiclePanel} />
             </div>
-            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <ConfirmRide
                     createRide={createRide}
                     pickup={pickup}
@@ -1026,7 +1028,7 @@ const Home = () => {
                     setPromoCode={setPromoCode}
                 />
             </div>
-            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <OptionalsPanel
                     setOptionalsPanel={setOptionalsPanel}
                     setOptionals={setOptionals}
@@ -1034,7 +1036,7 @@ const Home = () => {
                     setRequestFemaleDriver={setRequestFemaleDriver}
                 />
             </div>
-            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-12 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <PaymentOptionsPanel
                     setPaymentPanel={setPaymentPanel}
                     paymentMethod={paymentMethod}
@@ -1044,7 +1046,7 @@ const Home = () => {
                     walletBalance={user?.walletBalance}
                 />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-6 pb-[env(safe-area-inset-bottom,16px)] rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[38dvh] overflow-y-auto overscroll-y-contain'>
                 <LookingForDriver
                     createRide={createRide}
                     pickup={pickup}
@@ -1054,8 +1056,8 @@ const Home = () => {
                     paymentMethod={paymentMethod}
                     cancelRide={cancelRide} />
             </div>
-            {/* Painel compacto: deixa o mapa livre pra acompanhar o motorista (2026-08-04). */}
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[42dvh] overflow-y-auto overscroll-y-contain'>
+            {/* Painel compacto: deixa o mapa livre pra acompanhar o motorista. */}
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[35dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}

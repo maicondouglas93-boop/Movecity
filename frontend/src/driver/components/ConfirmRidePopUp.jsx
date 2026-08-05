@@ -156,52 +156,47 @@ const ConfirmRidePopUp = (props) => {
     }
 
     return (
-        <div>
-            <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Iniciar a Corrida</h3>
-            <div className='mt-4'>
-                <PassengerIdentityCard
-                    user={props.ride?.user}
-                    showPhoto
-                    trailing={
-                        <h5 className='text-lg font-bold text-ink-900'>
-                            {props.ride?.estimatedDistance
-                                ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} KM`
-                                : '—'}
-                        </h5>
-                    }
-                />
+        <div className="pb-1">
+            <div className='flex items-center justify-between mb-2.5 gap-2'>
+                <h3 className='text-base font-semibold text-ink-900'>Iniciar corrida</h3>
+                {props.ride?.fare != null && (
+                    <p className="text-base font-bold text-ink-900">R${props.ride.fare}</p>
+                )}
             </div>
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full mt-5'>
-                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                        <i className="ri-map-pin-user-fill text-brand-500"></i>
-                        <div>
-                            <h3 className='text-base font-medium text-ink-900'>{props.ride?.pickup?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.pickup}</p>
-                        </div>
+            <PassengerIdentityCard
+                user={props.ride?.user}
+                showPhoto
+                compact
+                trailing={
+                    <div className="text-right">
+                        <p className='text-sm font-bold text-ink-900'>
+                            {props.ride?.estimatedDistance
+                                ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} km`
+                                : '—'}
+                        </p>
+                        <p className="text-[10px] text-ink-500">
+                            {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
+                        </p>
                     </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                        <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
-                        <div>
-                            <h3 className='text-base font-medium text-ink-900'>{props.ride?.destination?.split(',')[0]}</h3>
-                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.destination}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line text-brand-500"></i>
-                        <div>
-                            <h3 className='text-base font-medium text-ink-900'>R${props.ride?.fare}</h3>
-                            <p className='text-sm -mt-1 text-ink-600'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
-                        </div>
-                    </div>
-                </div>
+                }
+            />
+            <div className='mt-2.5 space-y-1.5'>
+                <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                    <i className="ri-map-pin-user-fill text-brand-500 flex-shrink-0" aria-hidden="true" />
+                    <span className="truncate font-medium">{props.ride?.pickup?.split(',')[0]}</span>
+                </p>
+                <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                    <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
+                    <span className="truncate font-medium">{props.ride?.destination?.split(',')[0]}</span>
+                </p>
+            </div>
 
-                <div className='mt-4 w-full'>
+            <div className='mt-3 w-full'>
                     {rideStatus === 'accepted' && (
                         <Button
                             onClick={() => updateStatus('going_to_pickup')}
                             loading={loading}
-                            className="mt-4"
+                            className="!min-h-[44px] !text-sm"
                         >
                             A caminho
                         </Button>
@@ -211,7 +206,7 @@ const ConfirmRidePopUp = (props) => {
                         <Button
                             onClick={() => updateStatus('arrived')}
                             loading={loading}
-                            className="mt-4"
+                            className="!min-h-[44px] !text-sm"
                         >
                             Cheguei ao local
                         </Button>
@@ -219,7 +214,7 @@ const ConfirmRidePopUp = (props) => {
 
                     {rideStatus === 'arrived' && (
                         <form onSubmit={submitHandler}>
-                            <label htmlFor="captain-otp-input" className='block text-sm font-medium text-ink-600 mb-1'>Digite o PIN do passageiro</label>
+                            <label htmlFor="captain-otp-input" className='block text-xs font-medium text-ink-600 mb-1'>PIN do passageiro</label>
                             <input
                                 id="captain-otp-input"
                                 value={otp}
@@ -230,20 +225,20 @@ const ConfirmRidePopUp = (props) => {
                                 }}
                                 type="text"
                                 inputMode="numeric"
-                                className='bg-surface-alt px-6 py-4 font-mono text-2xl text-center tracking-widest rounded-panel w-full mt-2 border-2 border-transparent focus:border-brand-500 focus:bg-brand-50 focus:outline-none transition-colors'
+                                className='bg-surface-alt px-4 py-3 font-mono text-xl text-center tracking-widest rounded-panel w-full border-2 border-transparent focus:border-brand-500 focus:bg-brand-50 focus:outline-none transition-colors'
                                 placeholder='• • • • • •'
                                 maxLength={6}
                             />
 
                             {error && (
-                                <div className='flex items-center gap-2 bg-danger-50 border border-danger-500/30 rounded-panel p-3 mt-3'>
+                                <div className='flex items-center gap-2 bg-danger-50 border border-danger-500/30 rounded-panel p-2.5 mt-2'>
                                     <i className="ri-error-warning-line text-danger-500"></i>
-                                    <p className='text-sm text-danger-600'>{error}</p>
+                                    <p className='text-xs text-danger-600'>{error}</p>
                                 </div>
                             )}
 
-                            <Button type="submit" loading={loading} className="mt-4">
-                                Iniciar Corrida
+                            <Button type="submit" loading={loading} className="mt-2.5 !min-h-[44px] !text-sm">
+                                Iniciar corrida
                             </Button>
                         </form>
                     )}
@@ -252,9 +247,8 @@ const ConfirmRidePopUp = (props) => {
                         type="button"
                         variant="secondary"
                         onClick={openCancelModal}
-                        className="mt-2"
+                        className="mt-2 !min-h-[40px] !text-sm"
                     >Cancelar</Button>
-                </div>
             </div>
 
             {showCancelModal && (

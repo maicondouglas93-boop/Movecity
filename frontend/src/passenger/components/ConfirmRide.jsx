@@ -11,82 +11,84 @@ const ConfirmRide = (props) => {
         return addressStr.split(',')[0] || '';
     };
 
-    const extractAddress = (addressStr) => {
-        if (!addressStr) return '';
-        if (typeof addressStr === 'object') return addressStr.address;
-        return addressStr.replace(/\s*\(-?\d+\.\d+,\s*-?\d+\.\d+\)$/, '');
-    };
-
     const paymentLabel = props.paymentMethod === 'pix' ? 'Pix' : props.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro';
-    const paymentIconClass = props.paymentMethod === 'pix' ? 'ri-instance-line' : props.paymentMethod === 'card' ? 'ri-bank-card-fill' : 'ri-money-dollar-box-fill';
-    const paymentIconColor = props.paymentMethod === 'pix' ? 'text-teal-500' : props.paymentMethod === 'card' ? 'text-blue-500' : 'text-brand-500';
+    const paymentIconClass = props.paymentMethod === 'pix' ? 'ri-qr-code-line' : props.paymentMethod === 'card' ? 'ri-bank-card-fill' : 'ri-money-dollar-box-fill';
+    const paymentIconColor = props.paymentMethod === 'pix' ? 'text-teal-500' : props.paymentMethod === 'card' ? 'text-blue-500' : 'text-brand-500'
+    const fareValue = props.fare?.fare?.[props.vehicleType]
 
     return (
-        <div className='pb-6'>
-            <h3 className='text-xl font-semibold mb-4 text-ink-900'>Confirme sua corrida</h3>
-
-            <div className='flex flex-col gap-3'>
-                {/* Veículo + opcionais */}
-                <div className='flex items-center justify-between'>
-                    <div className='flex items-center gap-3'>
-                        <img className='h-12 object-contain' src={vehicleImages[props.vehicleType] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />
-                        <p className='text-sm font-medium text-ink-600'>{vehicleLabels[props.vehicleType]}</p>
+        <div className='pb-2'>
+            <div className='flex items-center justify-between gap-2 mb-3'>
+                <div className='flex items-center gap-2.5 min-w-0'>
+                    <img
+                        className='h-10 w-14 object-contain flex-shrink-0'
+                        src={vehicleImages[props.vehicleType] || vehicleImages.car}
+                        alt=""
+                        width="1024"
+                        height="1024"
+                        loading="lazy"
+                    />
+                    <div className='min-w-0'>
+                        <h3 className='text-base font-semibold text-ink-900 truncate'>Confirmar corrida</h3>
+                        <p className='text-xs text-ink-500 truncate'>{vehicleLabels[props.vehicleType]}</p>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => props.setOptionalsPanel(true)}
-                        className='min-h-[44px] px-4 rounded-full border border-line text-sm font-medium text-ink-600 active:bg-surface-alt flex items-center gap-2'
-                    >
-                        <i className="ri-box-3-fill text-brand-500" aria-hidden="true"></i> Opcionais
-                    </button>
                 </div>
+                <button
+                    type="button"
+                    onClick={() => props.setOptionalsPanel(true)}
+                    className='min-h-[40px] px-3 rounded-full border border-line text-xs font-medium text-ink-600 active:bg-surface-alt flex items-center gap-1.5 flex-shrink-0'
+                >
+                    <i className="ri-box-3-fill text-brand-500" aria-hidden="true"></i> Opcionais
+                </button>
+            </div>
 
-                {/* Trajeto */}
-                <Card padding='p-1' className='divide-y divide-line'>
+            <div className='flex flex-col gap-2'>
+                <Card padding='p-0.5' className='divide-y divide-line'>
                     <DetailRow
+                        compact
                         icon="ri-map-pin-user-fill"
                         title={extractTitle(props.pickup)}
-                        subtitle={extractAddress(props.pickup)}
-                        className='px-3'
+                        className='px-2'
                     />
                     <DetailRow
+                        compact
                         icon="ri-map-pin-2-fill"
                         iconColor="text-danger-500"
                         title={extractTitle(props.destination)}
-                        subtitle={extractAddress(props.destination)}
-                        className='px-3'
+                        className='px-2'
                     />
                 </Card>
 
-                {/* Pagamento + preço */}
-                <Card padding='p-1' className='divide-y divide-line'>
+                <Card padding='p-0.5' className='divide-y divide-line'>
                     <DetailRow
+                        compact
                         icon={paymentIconClass}
                         iconColor={paymentIconColor}
                         title={paymentLabel}
-                        subtitle="Forma de pagamento"
+                        subtitle="Pagamento"
                         onClick={() => props.setPaymentPanel(true)}
-                        trailing={<i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>}
-                        className='px-3'
+                        trailing={<i className="ri-arrow-right-s-line text-lg text-ink-400" aria-hidden="true"></i>}
+                        className='px-2'
                     />
                     <DetailRow
+                        compact
                         icon="ri-currency-line"
-                        title={props.fare?.fare?.[props.vehicleType] ? `R$${props.fare.fare[props.vehicleType]}` : ''}
-                        subtitle={props.fare?.showAsEstimate !== false ? 'Valor estimado' : 'Valor da corrida'}
-                        className='px-3'
+                        title={fareValue != null ? `R$${fareValue}` : ''}
+                        subtitle={props.fare?.showAsEstimate !== false ? 'Estimativa' : 'Valor'}
+                        className='px-2'
                     />
                 </Card>
 
                 {/* Bloco H (2026-08-02): cupom é opcional — o código só é enviado junto
                     com a criação da corrida (sem endpoint de validação separado); um
                     código inválido não trava a confirmação, só não desconta nada. */}
-                <div className='flex items-center gap-2 border border-line rounded-panel px-3 py-2.5'>
-                    <i className="ri-coupon-3-line text-brand-500 text-lg" aria-hidden="true"></i>
+                <div className='flex items-center gap-2 border border-line rounded-panel px-3 py-2'>
+                    <i className="ri-coupon-3-line text-brand-500 text-base" aria-hidden="true"></i>
                     <input
                         type="text"
                         value={props.promoCode}
                         onChange={(e) => props.setPromoCode(e.target.value.toUpperCase())}
-                        placeholder="Cupom de desconto (opcional)"
+                        placeholder="Cupom (opcional)"
                         className='flex-1 text-sm text-ink-900 placeholder:text-ink-400 outline-none bg-transparent min-w-0'
                     />
                 </div>
@@ -98,9 +100,9 @@ const ConfirmRide = (props) => {
                     props.setConfirmRidePanel(false)
                     props.createRide()
                 }}
-                className='mt-4'
+                className='mt-3 !min-h-[44px] !text-sm'
             >
-                Confirmar Corrida
+                Confirmar corrida
             </Button>
         </div>
     )

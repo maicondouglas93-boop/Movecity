@@ -1059,8 +1059,8 @@ module.exports.toParcelOfferDTO = (parcel) => {
         size: raw.size,
         description: raw.description,
         notes: raw.notes,
-        // Oferta: só o líquido do motorista (sem bruto/comissão).
-        fare: driverAmount,
+        // Oferta: valor que o passageiro paga + líquido (sem comissão/%).
+        fare: raw.fare,
         driverAmount,
         estimatedDistance: raw.estimatedDistance,
         estimatedTime: raw.estimatedTime,

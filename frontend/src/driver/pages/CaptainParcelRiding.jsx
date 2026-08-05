@@ -162,7 +162,7 @@ const CaptainParcelRiding = () => {
     }
   }
 
-  const driverAmount = Number(parcel?.driverAmount ?? parcel?.fare ?? 0) || 0
+  const passengerAmount = Number(parcel?.fare ?? 0) || 0
   const payLabel = parcel?.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'
 
   const submitRating = async () => {
@@ -215,8 +215,8 @@ const CaptainParcelRiding = () => {
               Cliente paga por <strong>{payLabel}</strong> direto a você.
             </p>
             <div className="rounded-panel border border-line bg-surface-alt px-3 py-3 text-center">
-              <p className="text-xs text-ink-600 mb-0.5">Você recebe</p>
-              <p className="text-2xl font-black text-brand-600">R$ {driverAmount.toFixed(2)}</p>
+              <p className="text-xs text-ink-600 mb-0.5">Cliente deve pagar</p>
+              <p className="text-2xl font-black text-brand-600">R$ {passengerAmount.toFixed(2)}</p>
             </div>
             <button
               type="button"
@@ -271,7 +271,7 @@ const CaptainParcelRiding = () => {
                 compact
                 trailing={
                   <div className="text-right">
-                    <p className="text-sm font-bold text-ink-900">R$ {driverAmount.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-ink-900">R$ {passengerAmount.toFixed(2)}</p>
                     <p className="text-[10px] text-ink-400">{payLabel}</p>
                   </div>
                 }

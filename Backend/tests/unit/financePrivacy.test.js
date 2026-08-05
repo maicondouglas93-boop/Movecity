@@ -20,7 +20,7 @@ describe('financePrivacy', () => {
     });
 
     describe('sanitizeCaptainFinance', () => {
-        it('remove comissão/bruto e expõe só líquido', () => {
+        it('mantém valor do passageiro, remove comissão e expõe líquido', () => {
             const out = sanitizeCaptainFinance({
                 _id: 'r1',
                 fare: 20,
@@ -33,8 +33,8 @@ describe('financePrivacy', () => {
             });
 
             expect(out.driverAmount).toBe(16);
-            expect(out.fare).toBe(16);
-            expect(out.finalPrice).toBe(16);
+            expect(out.fare).toBe(20);
+            expect(out.finalPrice).toBe(20);
             expect(out.commissionAmount).toBeUndefined();
             expect(out.commissionPercent).toBeUndefined();
             expect(out.fareBreakdown).toBeUndefined();

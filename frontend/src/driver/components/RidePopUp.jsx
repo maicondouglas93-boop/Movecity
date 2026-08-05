@@ -86,9 +86,9 @@ const RidePopUp = (props) => {
                         <i className="ri-bank-card-line" aria-hidden="true" />
                         {payLabel}
                     </span>
-                    {(props.ride?.driverAmount != null || props.ride?.fare != null) && (
+                    {(props.ride?.fare != null || props.ride?.finalPrice != null) && (
                         <span className="text-brand-600 font-semibold ml-auto">
-                            R$ {Number(props.ride.driverAmount ?? props.ride.fare).toFixed(2)}
+                            R$ {Number(props.ride.finalPrice ?? props.ride.fare).toFixed(2)}
                         </span>
                     )}
                 </div>

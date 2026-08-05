@@ -74,11 +74,12 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
         // rejection capaz de derrubar o processo — o service já tem try/catch interno
         // desde a mesma auditoria, isto é defesa em profundidade.
-        // Payload rico pro body da push (2026-08-04): fare líquido, rota, distância, tempo,
-        // passageiro e categoria — sem botões Aceitar/Recusar na notificação.
+        // Payload rico pro body da push (2026-08-04): valor do passageiro, rota, distância,
+        // tempo, passageiro e categoria — sem botões Aceitar/Recusar na notificação.
+        // Sem comissão/% no payload (sanitização financeira).
         notificationService.sendNewRide(captain._id, {
             rideId: rideWithUser._id.toString(),
-            fare: computeDriverAmount(rideWithUser),
+            fare: rideWithUser.finalPrice ?? rideWithUser.fare,
             pickup: rideWithUser.pickup,
             destination: rideWithUser.destination,
             estimatedDistance: rideWithUser.estimatedDistance,
@@ -346,7 +347,7 @@ module.exports.estimatePresentialFare = async (req, res) => {
             clientLat: lat != null ? Number(lat) : null,
             clientLng: lng != null ? Number(lng) : null,
         });
-        // Motorista: só líquido — sem fareBreakdown/comissão.
+        // Motorista vê o valor a cobrar do passageiro; sem fareBreakdown/comissão.
         const driverAmount = computeDriverAmount({
             fare: estimate.fare,
             commissionAmount: estimate.fareBreakdown?.platformCommission,
@@ -355,7 +356,7 @@ module.exports.estimatePresentialFare = async (req, res) => {
             pickupCoordinates: estimate.pickupCoordinates,
             estimatedDistance: estimate.estimatedDistance,
             estimatedTime: estimate.estimatedTime,
-            fare: driverAmount,
+            fare: estimate.fare,
             driverAmount,
         });
     } catch (err) {

@@ -1,6 +1,8 @@
 /**
- * Privacidade financeira do motorista: a API pode calcular/armazenar comissão,
- * mas respostas autenticadas como captain não devem expor bruto nem split.
+ * Privacidade financeira do motorista:
+ * - Pode ver o valor que o passageiro deve pagar (fare / finalPrice).
+ * - Não recebe comissão, % nem breakdown que detalhe a taxa da plataforma.
+ * - `driverAmount` (líquido) fica disponível para ganhos/carteira.
  */
 
 function toPlain(doc) {
@@ -31,12 +33,10 @@ const COMMISSION_KEYS = [
 ];
 
 /**
- * Remove campos que revelam comissão / split da plataforma.
- * Mantém campos operacionais; adiciona `driverAmount` (líquido).
- * Substitui `fare`/`finalPrice` pelo líquido para telas legadas que ainda leem esses campos
- * não exibirem o bruto pago pelo passageiro.
+ * Remove campos de comissão/split. Mantém fare/finalPrice (valor do passageiro)
+ * e adiciona driverAmount (líquido) para telas de ganhos.
  */
-function sanitizeCaptainFinance(doc, { keepGrossFare = false } = {}) {
+function sanitizeCaptainFinance(doc) {
     if (!doc) return doc;
     const raw = toPlain(doc);
     const driverAmount = computeDriverAmount(raw);
@@ -45,29 +45,21 @@ function sanitizeCaptainFinance(doc, { keepGrossFare = false } = {}) {
         delete raw[key];
     }
 
-    // Snapshot aninhado em outros formatos
     if (raw.pricing && typeof raw.pricing === 'object') {
         delete raw.pricing.commissionPercent;
         delete raw.pricing.commissionAmount;
     }
 
     raw.driverAmount = driverAmount;
-
-    if (!keepGrossFare) {
-        // Histórico / resumo / detalhes: nunca expor bruto ao motorista.
-        if (raw.fare !== undefined) raw.fare = driverAmount;
-        if (raw.finalPrice !== undefined) raw.finalPrice = driverAmount;
-    }
-
     return raw;
 }
 
-function sanitizeCaptainFinanceList(docs, opts) {
+function sanitizeCaptainFinanceList(docs) {
     if (!Array.isArray(docs)) return docs;
-    return docs.map((d) => sanitizeCaptainFinance(d, opts));
+    return docs.map((d) => sanitizeCaptainFinance(d));
 }
 
-/** Earnings breakdown sem gross/commission. */
+/** Earnings breakdown sem gross/commission por corrida (só líquido). */
 function sanitizeEarningsBreakdown(breakdown) {
     if (!breakdown) return breakdown;
     return {

@@ -34,12 +34,11 @@ const FinishRide = (props) => {
     const { setCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
 
-    // Antes de finalizar, mostra a estimativa líquida (driverAmount se a API já sanitizou).
-    // Depois de finalizar, usa a corrida real devolvida pelo servidor (também líquida).
+    // Valor que o passageiro deve pagar (bruto operacional).
+    // driverAmount (líquido) fica para ganhos — não misturar na cobrança em espécie.
     const chargeRide = endedRide || props.ride
-    const driverAmount = Number(
-        chargeRide?.driverAmount
-        ?? chargeRide?.finalPrice
+    const passengerAmount = Number(
+        chargeRide?.finalPrice
         ?? chargeRide?.fare
         ?? 0
     ) || 0
@@ -209,7 +208,7 @@ const FinishRide = (props) => {
                             <span className="font-semibold text-ink-900">
                                 {props.ride?.destinationPending
                                     ? 'Preço ao finalizar'
-                                    : `R$ ${props.ride?.driverAmount ?? props.ride?.fare ?? '—'}`}
+                                    : `R$ ${props.ride?.finalPrice ?? props.ride?.fare ?? '—'}`}
                             </span>
                             <span className="text-ink-500">
                                 · {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
@@ -261,15 +260,15 @@ const FinishRide = (props) => {
                         <>
                             <h3 className='text-xl font-bold text-amber-700'>Serviço concluído</h3>
                             <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar.</p>
-                            <p className='text-2xl font-bold text-ink-900 mt-2'>Você recebeu</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {driverAmount.toFixed(2)}</p>
+                            <p className='text-2xl font-bold text-ink-900 mt-2'>Valor do passageiro</p>
+                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
                             <p className='text-ink-600 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>
                             <h3 className='text-xl font-bold text-brand-700'>Serviço concluído</h3>
-                            <p className='text-ink-600 text-center'>Você recebeu</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {driverAmount.toFixed(2)}</p>
+                            <p className='text-ink-600 text-center'>Pagamento confirmado</p>
+                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
                         </>
                     )}
                 </div>
@@ -278,10 +277,10 @@ const FinishRide = (props) => {
                     <h3 className='text-2xl font-semibold mb-3 text-ink-900'>Confirmar Pagamento</h3>
                     <p className='text-ink-600 mb-5'>Receba o pagamento do passageiro e confirme abaixo.</p>
 
-                    {/* Resumo: só o líquido do motorista (sem bruto/comissão). */}
+                    {/* Valor que o passageiro deve pagar (sem comissão/%). */}
                     <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
-                        <p className='text-ink-600 text-sm mb-1'>Você recebe</p>
-                        <p className='text-brand-600 text-3xl font-black'>R$ {driverAmount.toFixed(2)}</p>
+                        <p className='text-ink-600 text-sm mb-1'>Cliente deve pagar</p>
+                        <p className='text-brand-600 text-3xl font-black'>R$ {passengerAmount.toFixed(2)}</p>
                     </div>
 
                     <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>

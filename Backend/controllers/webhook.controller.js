@@ -32,10 +32,9 @@ module.exports.handleAsaasWebhook = async (req, res) => {
                     recharge.status = 'paid';
                     await recharge.save();
                     
-                    // Credit driver wallet
+                    // Credit driver wallet (sem rideId — null colidia no índice único parcial)
                     await walletService.createTransaction({
                         captainId: recharge.captainId,
-                        rideId: null,
                         type: 'recharge',
                         paymentMethod: recharge.method.replace('asaas_', ''), // pix, boleto, card
                         amount: recharge.amount,

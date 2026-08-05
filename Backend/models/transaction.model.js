@@ -55,13 +55,17 @@ const transactionSchema = new mongoose.Schema({
 // Rede de segurança contra pagamento duplicado: no máximo um lançamento de pagamento
 // e um de comissão por corrida/encomenda. A guarda de verdade é o findOneAndUpdate
 // condicional em confirmPayment*; estes índices cobrem regressões futuras.
-// Partial com rideId/parcelId existentes evita colisão entre docs com campo ausente.
+//
+// Importante: usar $type:'objectId' (não só $exists:true). Em MongoDB, rideId:null
+// "$exists" — então um índice parcial com $exists:true ainda indexa null e a 2ª
+// comissão de encomenda (sem rideId real) estoura E11000 dup key { rideId:null,
+// type:"commission" }. Só ObjectId válido entra no índice.
 transactionSchema.index(
     { rideId: 1, type: 1 },
     {
         unique: true,
         partialFilterExpression: {
-            rideId: { $exists: true },
+            rideId: { $type: 'objectId' },
             type: { $in: ['ride_payment', 'commission'] },
         },
     }
@@ -71,7 +75,7 @@ transactionSchema.index(
     {
         unique: true,
         partialFilterExpression: {
-            parcelId: { $exists: true },
+            parcelId: { $type: 'objectId' },
             type: { $in: ['parcel_payment', 'commission'] },
         },
     }

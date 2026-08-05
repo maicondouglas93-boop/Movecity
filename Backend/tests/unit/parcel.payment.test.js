@@ -164,6 +164,30 @@ describe('parcel payment (Decisão A)', () => {
         expect(txs.filter((t) => t.type === 'commission')).toHaveLength(1);
     });
 
+    // Regressão do E11000 { rideId:null, type:"commission" }: cada encomenda grava
+    // comissão sem rideId; o índice parcial só pode indexar ObjectId real.
+    it('duas encomendas liquidadas não colidem no índice rideId+type', async () => {
+        const first = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
+        const second = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
+
+        await expect(parcelService.confirmParcelPayment({
+            parcelId: first.parcel._id,
+            captain: first.captain,
+        })).resolves.toBeDefined();
+
+        await expect(parcelService.confirmParcelPayment({
+            parcelId: second.parcel._id,
+            captain: second.captain,
+        })).resolves.toBeDefined();
+
+        const commissions = await transactionModel.find({ type: 'commission' });
+        expect(commissions).toHaveLength(2);
+        for (const tx of commissions) {
+            expect(tx.rideId).toBeUndefined();
+            expect(tx.parcelId).toBeDefined();
+        }
+    });
+
     it('getCurrentParcelForCaptain mantém unpaid finished até liquidar', async () => {
         const { captain, parcel } = await seedParcelReadyForPayment();
         const current = await parcelService.getCurrentParcelForCaptain(captain._id);

@@ -70,6 +70,31 @@ describe('Wallet Service', () => {
             expect(result.wallet.creditBalance).toBe(80);
             expect(result.wallet.totalCommissionPaid).toBe(20);
             expect(result.transaction.balanceAfter).toBe(80);
+            expect(result.transaction.rideId).toBeUndefined();
+        });
+
+        it('múltiplas comissões sem rideId não geram E11000 duplicate key', async () => {
+            await mongoose.model('transaction').syncIndexes();
+            await walletModel.create({ captainId, creditBalance: 100 });
+
+            await createTransaction({
+                captainId,
+                type: 'commission',
+                paymentMethod: 'wallet',
+                amount: 10,
+                description: 'Commission A',
+            });
+            await expect(createTransaction({
+                captainId,
+                type: 'commission',
+                paymentMethod: 'wallet',
+                amount: 15,
+                description: 'Commission B',
+            })).resolves.toBeDefined();
+
+            const commissions = await transactionModel.find({ captainId, type: 'commission' });
+            expect(commissions).toHaveLength(2);
+            expect(commissions.every((t) => t.rideId == null)).toBe(true);
         });
 
         it('should add to pendingBalance and totalEarned for card ride_payment', async () => {

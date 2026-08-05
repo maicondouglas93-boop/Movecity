@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
@@ -24,7 +24,7 @@ const CaptainWallet = () => {
         queryKey: ['captainWallet'],
         queryFn: async () => {
             const token = getAccessToken('captain')
-            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } })
             return res.data.wallet
         }
     })
@@ -33,7 +33,7 @@ const CaptainWallet = () => {
         queryKey: ['captainTransactions'],
         queryFn: async () => {
             const token = getAccessToken('captain')
-            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
             return res.data.transactions
         }
     })
@@ -48,7 +48,7 @@ const CaptainWallet = () => {
     const requestPayoutMutation = useMutation({
         mutationFn: async () => {
             const token = getAccessToken('captain')
-            const res = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/payouts`, {}, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/payouts`, {}, { headers: { Authorization: `Bearer ${token}` } })
             return res.data
         },
         onSuccess: () => {

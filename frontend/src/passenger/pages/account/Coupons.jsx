@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAccessToken } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import Button from '@/shared/components/ui/Button';
@@ -16,7 +16,7 @@ const Coupons = () => {
     useEffect(() => {
         const fetchCoupons = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/coupons`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/users/coupons`, {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 setCoupons(response.data.coupons || []);

@@ -1,4 +1,4 @@
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { db } from '@/shared/services/db'
 import { getAccessToken } from '@/shared/services/session'
 
@@ -106,7 +106,13 @@ export async function replayOfflineActions({ onResolved, onAlreadyApplied, onPer
         }
 
         try {
-            const response = await axios(config)
+            // Fase 1 (C1, 2026-08-05): via instância configurada — timeout de 10s,
+            // withCredentials e refresh automático em 401. O header Authorization
+            // explícito de buildRequestConfig é respeitado pelo interceptor (o token
+            // tem que bater com o dono da ação, não com o fallback user>captain).
+            // Falha de rede continua sem resposta HTTP → cai no branch retentável
+            // abaixo, sem deslogar ninguém.
+            const response = await api(config)
             await db.offlineActions.delete(action.id)
             onResolved?.(action, response)
         } catch (err) {

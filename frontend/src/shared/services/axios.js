@@ -21,6 +21,17 @@ const api = axios.create({
 
 // Interceptor de Requisição: Injeta o token se existir
 api.interceptors.request.use((config) => {
+    // Fase 1 da auditoria de production readiness (C1, 2026-08-05): as chamadas
+    // migradas do axios cru podem trazer Authorization explícito — em rotas que
+    // sessionKindForUrl não classifica (ex: /captains/wallet vem com o prefixo
+    // /captains, mas /notifications/token e /chat/* não), sobrescrever o header
+    // explícito trocaria o token certo pelo fallback (user > captain) e quebraria a
+    // sessão dupla. Header explícito do chamador sempre vence.
+    const explicitAuth = typeof config.headers?.get === 'function'
+        ? config.headers.get('Authorization')
+        : config.headers?.Authorization;
+    if (explicitAuth) return config;
+
     // Escolhe o token com base na rota para evitar conflitos em testes na mesma máquina
     const kind = sessionKindForUrl(config.url || '');
     const token = kind

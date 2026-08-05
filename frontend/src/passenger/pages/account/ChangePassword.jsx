@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { useToast } from '@/shared/contexts/ToastContext';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import Button from '@/shared/components/ui/Button';
@@ -53,7 +53,7 @@ const ChangePassword = () => {
     const onSubmit = async (data) => {
         setLoading(true);
         try {
-            await axios.put(`${import.meta.env.VITE_BASE_URL}/users/password`, {
+            await api.put(`${import.meta.env.VITE_BASE_URL}/users/password`, {
                 currentPassword: data.currentPassword,
                 newPassword: data.newPassword
             }, {

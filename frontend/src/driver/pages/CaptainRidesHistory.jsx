@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { useNavigate } from 'react-router-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import CaptainHeader from '@/driver/components/CaptainHeader';
@@ -159,7 +159,7 @@ const CaptainRidesHistory = () => {
         queryKey: [ 'captainHistory' ],
         queryFn: async ({ pageParam = 1 }) => {
             const token = getAccessToken('captain');
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-history`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-history`, {
                 params: { page: pageParam, limit: 20 },
                 headers: { Authorization: `Bearer ${token}` },
             });
@@ -235,7 +235,7 @@ const CaptainRidesHistory = () => {
         if (!ride?._id || acceptingId) return;
         setAcceptingId(ride._id);
         try {
-            const response = await axios.post(
+            const response = await api.post(
                 `${import.meta.env.VITE_BASE_URL}/rides/${ride._id}/accept`,
                 {},
                 { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }

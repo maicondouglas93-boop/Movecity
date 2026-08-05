@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { useToast } from '@/shared/contexts/ToastContext';
 import PageHeader from '@/shared/components/ui/PageHeader';
@@ -47,7 +47,7 @@ const PersonalData = () => {
         // Fetch actual profile data
         const fetchProfile = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 
@@ -80,7 +80,7 @@ const PersonalData = () => {
     const onSubmit = async (data) => {
         setLoading(true);
         try {
-            const response = await axios.put(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
+            const response = await api.put(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
                 firstname: data.firstname,
                 lastname: data.lastname,
                 phone: data.phone,
@@ -123,7 +123,7 @@ const PersonalData = () => {
         try {
             const formData = new FormData();
             formData.append('image', file);
-            const response = await axios.post(
+            const response = await api.post(
                 `${import.meta.env.VITE_BASE_URL}/uploads/profile`,
                 formData,
                 {

@@ -10,6 +10,8 @@ import SessionSplash from '@/shared/components/ui/SessionSplash'
 // Auditoria de autenticação e sessão persistente (2026-08-02).
 // Ver o comentário equivalente em UserLogout.jsx — os mesmos três problemas existiam
 // aqui (chamada fora de useEffect, sem catch, sem revogar o refresh token).
+// Fase 1 (C1, 2026-08-05): axios cru mantido de propósito (401 no logout não deve
+// disparar refresh); só o timeout da instância é espelhado nas chamadas.
 export const CaptainLogout = () => {
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
@@ -28,6 +30,7 @@ export const CaptainLogout = () => {
                         headers: { Authorization: `Bearer ${token}` },
                         params: { token: fcmToken },
                         withCredentials: true,
+                        timeout: 10000,
                     })
                 }
             } catch {
@@ -41,6 +44,7 @@ export const CaptainLogout = () => {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
                 params: refreshToken ? { refreshToken } : {},
                 withCredentials: true,
+                timeout: 10000,
             }).catch(() => {
                 // Sair não pode depender do servidor responder.
             })

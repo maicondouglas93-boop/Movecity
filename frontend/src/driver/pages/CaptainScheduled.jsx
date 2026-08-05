@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import { getAccessToken } from '@/shared/services/session'
@@ -26,7 +26,7 @@ const CaptainScheduled = () => {
     let alive = true
     ;(async () => {
       try {
-        const { data } = await axios.get(
+        const { data } = await api.get(
           `${import.meta.env.VITE_BASE_URL}/captains/scheduled-upcoming`,
           { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } },
         )

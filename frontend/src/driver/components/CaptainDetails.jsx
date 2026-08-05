@@ -4,7 +4,7 @@ import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { useToast } from '@/shared/contexts/ToastContext'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { getAccessToken } from '@/shared/services/session'
 
 const PANEL_BG = 'bg-[#0B3D2E]'
@@ -26,7 +26,7 @@ const CaptainDetails = ({ children = null }) => {
     const fetchSummary = async () => {
         try {
             const token = getAccessToken('captain')
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/summary`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/summary`, {
                 headers: { Authorization: `Bearer ${token}` },
             })
             setSummary(response.data)
@@ -69,7 +69,7 @@ const CaptainDetails = ({ children = null }) => {
 
         setLoadingToggle(true)
         try {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/toggle-online`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/toggle-online`, {
                 isOnline: !isOnline,
             }, {
                 headers: {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getAccessToken } from '@/shared/services/session'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import Button from '@/shared/components/ui/Button'
@@ -31,7 +31,7 @@ const Scheduled = () => {
 
   const fetchScheduled = async () => {
     try {
-      const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/scheduled`, {
+      const response = await api.get(`${import.meta.env.VITE_BASE_URL}/users/scheduled`, {
         headers: { Authorization: `Bearer ${getAccessToken('user')}` },
       })
       setScheduled(response.data.scheduled || [])
@@ -51,7 +51,7 @@ const Scheduled = () => {
     if (cancellingId) return
     setCancellingId(item._id)
     try {
-      await axios.post(
+      await api.post(
         `${import.meta.env.VITE_BASE_URL}/schedules/mine/cancel`,
         { kind: item.kind, id: item._id },
         { headers: { Authorization: `Bearer ${getAccessToken('user')}` } },

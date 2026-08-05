@@ -1,21 +1,34 @@
 /* eslint-disable no-undef */
-// SW_VERSION: 2026-08-05-no-ride-actions — bump força update do worker em clientes
-// que ainda tinham Aceitar/Recusar em cache.
+// SW_VERSION: 2026-08-05-config-via-query — Fase 1 da auditoria de production
+// readiness (C4): a config Firebase saiu do código versionado. Arquivos em public/
+// não passam pelo build do Vite (import.meta.env não existe aqui), então quem
+// registra este worker (src/shared/services/fcm.js) anexa a config na query string
+// da URL de registro — ela fica gravada na registration e sobrevive a restarts do
+// worker, inclusive push em background com o app fechado.
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
+const swParams = new URLSearchParams(self.location.search);
 const firebaseConfig = {
-    apiKey: "AIzaSyBR8Kw7upDB9mpntUsRInL7sSgWiEXVbOU",
-    authDomain: "movecity-12a8d.firebaseapp.com",
-    projectId: "movecity-12a8d",
-    storageBucket: "movecity-12a8d.firebasestorage.app",
-    messagingSenderId: "130874019505",
-    appId: "1:130874019505:web:5ee27a5f42159b89375c90",
+    apiKey: swParams.get('apiKey') || '',
+    authDomain: swParams.get('authDomain') || '',
+    projectId: swParams.get('projectId') || '',
+    storageBucket: swParams.get('storageBucket') || '',
+    messagingSenderId: swParams.get('messagingSenderId') || '',
+    appId: swParams.get('appId') || '',
 };
 
-firebase.initializeApp(firebaseConfig);
+// Sem config (registro antigo em cache ou variáveis ausentes no build), o push por
+// Firebase fica desativado — mas o worker continua vivo para SYNC_TOKEN/notificationclick.
+const hasFirebaseConfig = !!(firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId);
 
-const messaging = firebase.messaging();
+let messaging = null;
+if (hasFirebaseConfig) {
+    firebase.initializeApp(firebaseConfig);
+    messaging = firebase.messaging();
+} else {
+    console.warn('[firebase-messaging-sw.js] Config Firebase ausente na query string do registro — push em background desativado.');
+}
 
 // IndexedDB Helper
 const DB_NAME = 'MoveCitySW';
@@ -70,7 +83,7 @@ self.addEventListener('message', (event) => {
     }
 });
 
-messaging.onBackgroundMessage((payload) => {
+if (messaging) messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
     const data = payload.data || {};

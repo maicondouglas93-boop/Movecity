@@ -1,16 +1,18 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import RideChat from '@/shared/components/RideChat';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 
-vi.mock('axios', () => ({
+// Fase 1 (C1): RideChat migrou do axios cru para a instância configurada.
+vi.mock('@/shared/services/axios', () => ({
     default: {
         get: vi.fn(),
         patch: vi.fn(),
         post: vi.fn(),
     },
+    refreshAccessToken: vi.fn(),
 }));
 
 vi.mock('@/shared/services/session', () => ({
@@ -25,9 +27,9 @@ describe('RideChat — PIN operacional', () => {
             on: vi.fn(),
             off: vi.fn(),
         };
-        axios.get.mockResolvedValue({ data: { messages: [] } });
-        axios.patch.mockResolvedValue({ data: {} });
-        axios.post.mockResolvedValue({
+        api.get.mockResolvedValue({ data: { messages: [] } });
+        api.patch.mockResolvedValue({ data: {} });
+        api.post.mockResolvedValue({
             data: {
                 _id: 'message-1',
                 message: 'PIN da entrega: 4321',
@@ -50,11 +52,11 @@ describe('RideChat — PIN operacional', () => {
             </SocketContext.Provider>
         );
 
-        await waitFor(() => expect(axios.patch).toHaveBeenCalled());
+        await waitFor(() => expect(api.patch).toHaveBeenCalled());
         fireEvent.click(screen.getByRole('button', { name: /enviar pin/i }));
 
-        await waitFor(() => expect(axios.post).toHaveBeenCalled());
-        expect(axios.post.mock.calls[0][1]).toEqual(expect.objectContaining({
+        await waitFor(() => expect(api.post).toHaveBeenCalled());
+        expect(api.post.mock.calls[0][1]).toEqual(expect.objectContaining({
             subjectType: 'parcel',
             subjectId: 'parcel-1',
             operationalType: 'delivery_pin',

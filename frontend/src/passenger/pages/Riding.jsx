@@ -4,7 +4,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import LiveTracking from '@/shared/components/LiveTracking'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
@@ -216,7 +216,7 @@ const Riding = () => {
     useEffect(() => {
         const fetchUnread = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${ride?._id}`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/chat/${ride?._id}`, {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 if (response.data.chat) {
@@ -231,7 +231,7 @@ const Riding = () => {
         setError('')
         setLoading(true)
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
+            await api.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
                 rideId: ride._id
             }, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` }

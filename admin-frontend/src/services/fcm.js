@@ -39,6 +39,20 @@ const messagingReady = isSupported()
 const FCM_SW_URL = '/firebase-messaging-sw.js';
 const FCM_SW_SCOPE = '/firebase-cloud-messaging-push-scope';
 
+// Fase 1 da auditoria de production readiness (C4, 2026-08-05): mesma técnica do app
+// do passageiro/motorista — a config Firebase é anexada na query string da URL de
+// registro (public/ não passa pelo build do Vite, então o SW não enxerga
+// import.meta.env). Fonte: app.options, populada pelas VITE_FIREBASE_*.
+const buildFcmSwUrl = () => {
+    const cfg = app?.options || {};
+    const params = new URLSearchParams();
+    ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].forEach((key) => {
+        if (cfg[key]) params.set(key, cfg[key]);
+    });
+    const query = params.toString();
+    return query ? `${FCM_SW_URL}?${query}` : FCM_SW_URL;
+};
+
 const waitForActive = (registration) => {
     if (registration.active) return Promise.resolve(registration);
     const worker = registration.installing || registration.waiting;
@@ -59,7 +73,7 @@ const getFcmRegistration = () => {
     if (!('serviceWorker' in navigator)) return Promise.resolve(null);
     if (!registrationPromise) {
         registrationPromise = navigator.serviceWorker
-            .register(FCM_SW_URL, { scope: FCM_SW_SCOPE })
+            .register(buildFcmSwUrl(), { scope: FCM_SW_SCOPE })
             .then(waitForActive)
             .catch((error) => {
                 console.warn('Falha ao registrar o Service Worker de push:', error.message);

@@ -12,7 +12,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/shared/contexts/ToastContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
@@ -72,7 +72,7 @@ const CaptainHome = () => {
 
     const syncPendingRides = async () => {
         try {
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
                 headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
             setPendingRides(Array.isArray(response.data) ? response.data : [])
@@ -114,7 +114,7 @@ const CaptainHome = () => {
     const refreshApprovalStatus = async () => {
         setRefreshingApproval(true)
         try {
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/profile`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/profile`, {
                 headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
             setCaptain(response.data.captain)
@@ -218,7 +218,7 @@ const CaptainHome = () => {
 
     const syncScheduledUpcoming = useCallback(async () => {
         try {
-            const { data } = await axios.get(
+            const { data } = await api.get(
                 `${import.meta.env.VITE_BASE_URL}/captains/scheduled-upcoming`,
                 { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } },
             )
@@ -461,7 +461,7 @@ const CaptainHome = () => {
         let cancelled = false
         ;(async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
                     headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
                 })
                 if (cancelled) return
@@ -577,7 +577,7 @@ const CaptainHome = () => {
             // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
             // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
             // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/${targetRide._id}/accept`, {}, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/${targetRide._id}/accept`, {}, {
                 headers: {
                     Authorization: `Bearer ${getAccessToken('captain')}`
                 }

@@ -1,6 +1,6 @@
 import React, { useContext, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { getAccessToken } from '@/shared/services/session'
 import { useToast } from '@/shared/contexts/ToastContext'
@@ -34,10 +34,10 @@ const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
             const formData = new FormData()
             formData.append('image', file)
             formData.append('docType', docKey)
-            const uploadRes = await axios.post(`${import.meta.env.VITE_BASE_URL}/uploads/document`, formData, {
+            const uploadRes = await api.post(`${import.meta.env.VITE_BASE_URL}/uploads/document`, formData, {
                 headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
-            const patchRes = await axios.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {
+            const patchRes = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {
                 docType: docKey,
                 url: uploadRes.data.url
             }, {
@@ -108,7 +108,7 @@ const CaptainDocuments = () => {
     const saveDocumentInfo = async (payload, setSaving, successLabel) => {
         setSaving(true)
         try {
-            const res = await axios.patch(`${import.meta.env.VITE_BASE_URL}/captains/document-info`, payload, {
+            const res = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/document-info`, payload, {
                 headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
             })
             setCaptain(res.data.captain)

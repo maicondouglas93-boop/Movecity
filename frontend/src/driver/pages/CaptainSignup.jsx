@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import Button from '@/shared/components/ui/Button'
@@ -99,7 +99,7 @@ const CaptainSignup = () => {
     }
 
     try {
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/register`, captainData)
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/register`, captainData)
 
       if (response.status === 201) {
         const data = response.data
@@ -112,7 +112,7 @@ const CaptainSignup = () => {
           try {
             const formData = new FormData()
             formData.append('image', photoFile)
-            const uploadRes = await axios.post(
+            const uploadRes = await api.post(
               `${import.meta.env.VITE_BASE_URL}/uploads/captain-profile`,
               formData,
               {

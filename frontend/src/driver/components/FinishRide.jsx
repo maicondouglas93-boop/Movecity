@@ -1,6 +1,6 @@
 import React, { useState, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
@@ -47,7 +47,7 @@ const FinishRide = (props) => {
 
     const endRideMutation = useMutation({
         mutationFn: async () => {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
                 rideId: props.ride._id
             }, {
                 headers: {
@@ -95,7 +95,7 @@ const FinishRide = (props) => {
 
     const confirmPaymentMutation = useMutation({
         mutationFn: async () => {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm-payment`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm-payment`, {
                 rideId: props.ride._id
             }, {
                 headers: {
@@ -151,7 +151,7 @@ const FinishRide = (props) => {
         }
         setSubmittingRating(true)
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/captain-review`, {
+            await api.post(`${import.meta.env.VITE_BASE_URL}/rides/captain-review`, {
                 rideId: props.ride._id,
                 rating: ratingValue
             }, {

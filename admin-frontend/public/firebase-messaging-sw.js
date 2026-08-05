@@ -5,20 +5,32 @@ importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-comp
 // administrativo. Bem mais simples que o do app do motorista (frontend/public/
 // firebase-messaging-sw.js) — não existe nenhuma ação tipo "aceitar corrida" pra
 // processar aqui, só mostrar a notificação e, ao clicar, abrir o painel.
+//
+// Fase 1 da auditoria de production readiness (C4, 2026-08-05): a config Firebase
+// saiu do código versionado — quem registra este worker (src/services/fcm.js) anexa
+// a config na query string da URL de registro, e ela sobrevive a restarts porque faz
+// parte da URL registrada.
+const swParams = new URLSearchParams(self.location.search);
 const firebaseConfig = {
-    apiKey: "AIzaSyBR8Kw7upDB9mpntUsRInL7sSgWiEXVbOU",
-    authDomain: "movecity-12a8d.firebaseapp.com",
-    projectId: "movecity-12a8d",
-    storageBucket: "movecity-12a8d.firebasestorage.app",
-    messagingSenderId: "130874019505",
-    appId: "1:130874019505:web:5ee27a5f42159b89375c90",
+    apiKey: swParams.get('apiKey') || '',
+    authDomain: swParams.get('authDomain') || '',
+    projectId: swParams.get('projectId') || '',
+    storageBucket: swParams.get('storageBucket') || '',
+    messagingSenderId: swParams.get('messagingSenderId') || '',
+    appId: swParams.get('appId') || '',
 };
 
-firebase.initializeApp(firebaseConfig);
+const hasFirebaseConfig = !!(firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId);
 
-const messaging = firebase.messaging();
+let messaging = null;
+if (hasFirebaseConfig) {
+    firebase.initializeApp(firebaseConfig);
+    messaging = firebase.messaging();
+} else {
+    console.warn('[admin firebase-messaging-sw.js] Config Firebase ausente na query string do registro — push em background desativado.');
+}
 
-messaging.onBackgroundMessage((payload) => {
+if (messaging) messaging.onBackgroundMessage((payload) => {
     console.log('[admin firebase-messaging-sw.js] Received background message ', payload);
     const notificationTitle = payload.notification?.title || payload.data?.title || 'MoveCity Admin';
 

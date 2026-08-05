@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import axios from 'axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { getAccessToken, onSessionChanged } from '@/shared/services/session'
-import { refreshAccessToken } from '@/shared/services/axios'
+import api, { refreshAccessToken } from '@/shared/services/axios'
 
 // Fase A da experiência de corrida ativa (2026-08-03) + restore de encomenda.
 //
@@ -47,7 +46,7 @@ async function fetchActive(kind, endpointMap, allowRetry = true) {
     if (!token) return null
 
     try {
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}${endpointMap[kind]}`, {
+        const response = await api.get(`${import.meta.env.VITE_BASE_URL}${endpointMap[kind]}`, {
             headers: { Authorization: `Bearer ${token}` }
         })
         return response.data || null

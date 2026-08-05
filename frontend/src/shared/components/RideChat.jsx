@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { getAccessToken } from '@/shared/services/session';
 
@@ -69,12 +69,12 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
                 const path = type === 'parcel'
                     ? `${import.meta.env.VITE_BASE_URL}/chat/parcel/${subjectId}`
                     : `${import.meta.env.VITE_BASE_URL}/chat/${subjectId}`;
-                const response = await axios.get(path, {
+                const response = await api.get(path, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (response.data.messages) {
                     setMessages(response.data.messages);
-                    await axios.patch(`${import.meta.env.VITE_BASE_URL}/chat/read`, restSubjectBody(), {
+                    await api.patch(`${import.meta.env.VITE_BASE_URL}/chat/read`, restSubjectBody(), {
                         headers: { Authorization: `Bearer ${token}` }
                     });
                 }
@@ -164,7 +164,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         scrollToBottom();
 
         try {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
                 ...restSubjectBody(),
                 message: textToSend,
                 type: 'text',

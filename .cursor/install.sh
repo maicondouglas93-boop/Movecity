@@ -41,6 +41,19 @@ if [ ! -f frontend/.env ]; then
   cat > frontend/.env <<'EOF'
 VITE_BASE_URL=http://localhost:3000
 VITE_MAPS_PROVIDER=leaflet
+
+# Firebase: valores PLACEHOLDER só de dev. firebase.js chama initializeApp()/getAuth()
+# no carregamento do módulo, então telas que importam Firebase (login/cadastro) ficam
+# em branco se estas variáveis estiverem ausentes. O login com Google de verdade exige
+# um projeto Firebase real; com estes valores fictícios só esse recurso opcional fica
+# indisponível — o resto do app (incl. login/cadastro por e-mail) funciona normalmente.
+VITE_FIREBASE_API_KEY=AIzaSyDummyKeyForLocalDevelopment12345
+VITE_FIREBASE_AUTH_DOMAIN=movecity-dev.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=movecity-dev
+VITE_FIREBASE_STORAGE_BUCKET=movecity-dev.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789012
+VITE_FIREBASE_APP_ID=1:123456789012:web:abc123def456
+VITE_FIREBASE_MEASUREMENT_ID=G-MEASUREMENT123
 EOF
 fi
 
@@ -48,6 +61,15 @@ if [ ! -f admin-frontend/.env ]; then
   echo "==> Criando admin-frontend/.env (dev)"
   cat > admin-frontend/.env <<'EOF'
 VITE_API_URL=http://localhost:3000/api
+
+# Firebase: valores PLACEHOLDER só de dev (mesmo motivo do frontend). Usados apenas
+# pelo canal de push do painel; recursos de push exigem um projeto Firebase real.
+VITE_FIREBASE_API_KEY=AIzaSyDummyKeyForLocalDevelopment12345
+VITE_FIREBASE_AUTH_DOMAIN=movecity-dev.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=movecity-dev
+VITE_FIREBASE_STORAGE_BUCKET=movecity-dev.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789012
+VITE_FIREBASE_APP_ID=1:123456789012:web:abc123def456
 EOF
 fi
 

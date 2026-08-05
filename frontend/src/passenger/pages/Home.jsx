@@ -818,39 +818,38 @@ const Home = () => {
                                 <span className="text-ink-900 font-semibold text-base">Para onde vamos?</span>
                             </button>
 
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (ride) {
-                                        addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
-                                        return
-                                    }
-                                    if (userParcel) {
-                                        navigate('/encomenda/ativa', { state: { parcel: userParcel } })
-                                        return
-                                    }
-                                    navigate('/encomenda')
-                                }}
-                                className="w-full mt-3 bg-surface-alt border border-line px-5 py-3.5 rounded-panel flex items-center gap-3 active:scale-[0.98] transition-transform"
-                            >
-                                <i className="ri-box-3-line text-xl text-brand-500" aria-hidden="true"></i>
-                                <span className="flex-1 text-left text-ink-900 font-semibold text-base">
-                                    {userParcel ? 'Encomenda em andamento' : 'Fazer uma encomenda'}
-                                </span>
-                                <i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>
-                            </button>
                             <div className="mt-3 flex gap-2">
                                 <button
                                     type="button"
+                                    onClick={() => {
+                                        if (ride) {
+                                            addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
+                                            return
+                                        }
+                                        if (userParcel) {
+                                            navigate('/encomenda/ativa', { state: { parcel: userParcel } })
+                                            return
+                                        }
+                                        navigate('/encomenda')
+                                    }}
+                                    className="flex-1 min-w-0 bg-surface-alt border border-line px-3 py-3.5 rounded-panel flex items-center gap-2 active:scale-[0.98] transition-transform"
+                                    aria-label={userParcel ? 'Encomenda em andamento' : 'Fazer uma encomenda'}
+                                >
+                                    <i className="ri-box-3-line text-xl text-brand-500 shrink-0" aria-hidden="true"></i>
+                                    <span className="flex-1 min-w-0 text-left text-ink-900 font-semibold text-sm leading-tight truncate">
+                                        {userParcel ? 'Em andamento' : 'Encomenda'}
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => navigate('/agendar')}
-                                    className="flex-1 bg-surface-alt border border-line px-4 py-3.5 rounded-panel flex items-center gap-3 active:scale-[0.98] transition-transform"
+                                    className="flex-1 min-w-0 bg-surface-alt border border-line px-3 py-3.5 rounded-panel flex items-center gap-2 active:scale-[0.98] transition-transform"
                                     aria-label="Agendar corrida ou encomenda"
                                 >
-                                    <i className="ri-calendar-event-line text-xl text-brand-500" aria-hidden="true" />
-                                    <span className="flex-1 text-left text-ink-900 font-semibold text-sm">
+                                    <i className="ri-calendar-event-line text-xl text-brand-500 shrink-0" aria-hidden="true" />
+                                    <span className="flex-1 min-w-0 text-left text-ink-900 font-semibold text-sm leading-tight truncate">
                                         Agendar
                                     </span>
-                                    <i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true" />
                                 </button>
                             </div>
 

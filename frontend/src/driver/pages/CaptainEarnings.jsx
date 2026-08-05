@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { useQuery } from '@tanstack/react-query';
 import CaptainHeader from '@/driver/components/CaptainHeader';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
@@ -26,7 +26,7 @@ const CaptainEarnings = () => {
         queryKey: ['captainEarnings', range],
         queryFn: async () => {
             const token = getAccessToken('captain');
-            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=${range}`, {
+            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=${range}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             return res.data;

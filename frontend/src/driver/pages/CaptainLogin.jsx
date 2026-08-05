@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import Button from '@/shared/components/ui/Button'
 
@@ -34,7 +34,7 @@ const Captainlogin = () => {
     }
 
     try {
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/captains/login`, captainData)
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/login`, captainData)
 
       if (response.status === 200) {
         const data = response.data

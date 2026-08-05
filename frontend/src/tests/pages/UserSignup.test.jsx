@@ -2,12 +2,16 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import UserSignup from '@/passenger/pages/UserSignup';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
 
-vi.mock('axios');
+// Fase 1 (C1): a página migrou do axios cru para a instância configurada.
+vi.mock('@/shared/services/axios', () => ({
+  default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  refreshAccessToken: vi.fn(),
+}));
 vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(),
   GoogleAuthProvider: vi.fn(),
@@ -55,7 +59,7 @@ describe('UserSignup Component', () => {
   });
 
   it('handles successful signup', async () => {
-    axios.post.mockResolvedValueOnce({
+    api.post.mockResolvedValueOnce({
       status: 201,
       data: {
         token: 'fake-jwt-token',
@@ -75,7 +79,7 @@ describe('UserSignup Component', () => {
     fireEvent.click(screen.getByRole('button', { name: /criar conta/i }));
 
     await waitFor(() => {
-      expect(axios.post).toHaveBeenCalledWith(`${import.meta.env.VITE_BASE_URL}/users/register`, {
+      expect(api.post).toHaveBeenCalledWith(`${import.meta.env.VITE_BASE_URL}/users/register`, {
         fullname: { firstname: 'Jane', lastname: 'Doe' },
         cpf: '12345678901',
         phone: '+5511999999999',

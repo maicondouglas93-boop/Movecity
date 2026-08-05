@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { useToast } from '@/shared/contexts/ToastContext';
 import Button from '@/shared/components/ui/Button';
 import { clearSession, getAccessToken } from '@/shared/services/session';
@@ -18,7 +18,7 @@ const DeleteAccount = () => {
     const handleDelete = async () => {
         setLoading(true);
         try {
-            await axios.delete(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
+            await api.delete(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` },
                 data: { password } // Enviando senha para confirmação no backend
             });

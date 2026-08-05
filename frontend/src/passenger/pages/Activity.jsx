@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getAccessToken } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import Header from '@/passenger/components/Header';
 import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
@@ -23,7 +23,7 @@ const Activity = () => {
         if (loading) return;
         setLoading(true);
         try {
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/history`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/history`, {
                 params: {
                     page: pageNum,
                     limit: 10,

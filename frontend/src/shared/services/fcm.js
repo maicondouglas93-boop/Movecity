@@ -1,6 +1,6 @@
 import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 import { app } from '@/shared/services/firebase';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { getAccessToken } from '@/shared/services/session';
 
 let messaging = null;
@@ -47,6 +47,22 @@ const messagingReady = isSupported()
 const FCM_SW_URL = '/firebase-messaging-sw.js';
 const FCM_SW_SCOPE = '/firebase-cloud-messaging-push-scope';
 
+// Fase 1 da auditoria de production readiness (C4, 2026-08-05): a config Firebase
+// saiu do texto do service worker (public/ não passa pelo build do Vite, então o SW
+// não enxerga import.meta.env). Ela é anexada aqui na query string da URL de
+// registro — o SW lê de self.location.search. A URL registrada (com query) fica na
+// registration do navegador, então o worker reiniciado em background continua com a
+// config. Fonte: app.options (services/firebase.js), já populada pelas VITE_FIREBASE_*.
+const buildFcmSwUrl = () => {
+    const cfg = app?.options || {};
+    const params = new URLSearchParams();
+    ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].forEach((key) => {
+        if (cfg[key]) params.set(key, cfg[key]);
+    });
+    const query = params.toString();
+    return query ? `${FCM_SW_URL}?${query}` : FCM_SW_URL;
+};
+
 const waitForActive = (registration) => {
     if (registration.active) return Promise.resolve(registration);
     const worker = registration.installing || registration.waiting;
@@ -75,7 +91,7 @@ export const getFcmRegistration = () => {
     if (!('serviceWorker' in navigator)) return Promise.resolve(null);
     if (!registrationPromise) {
         registrationPromise = navigator.serviceWorker
-            .register(FCM_SW_URL, { scope: FCM_SW_SCOPE, updateViaCache: 'none' })
+            .register(buildFcmSwUrl(), { scope: FCM_SW_SCOPE, updateViaCache: 'none' })
             .then(async (registration) => {
                 // Garante que o SW novo (sem Aceitar/Recusar) substitui o antigo em cache.
                 try {
@@ -117,7 +133,7 @@ export const requestFCMToken = async () => {
                 // Send token to backend
                 const token = getAccessToken('user') || getAccessToken('captain');
                 if (token) {
-                    await axios.post(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
+                    await api.post(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
                         token: currentToken,
                         device: navigator.userAgent
                     }, {

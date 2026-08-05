@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import DetailRow from '@/shared/components/ui/DetailRow';
 import Button from '@/shared/components/ui/Button';
@@ -76,7 +76,7 @@ const Help = () => {
 
     useEffect(() => {
         let cancelled = false;
-        axios.get(`${import.meta.env.VITE_BASE_URL}/support/contact`)
+        api.get(`${import.meta.env.VITE_BASE_URL}/support/contact`)
             .then((res) => {
                 if (cancelled) return;
                 setContact({
@@ -128,7 +128,7 @@ const Help = () => {
         setLoadingTickets(true);
         setView('history');
         try {
-            const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/support/tickets`, {
+            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/support/tickets`, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` },
             });
             setTickets(Array.isArray(res.data?.tickets) ? res.data.tickets : []);
@@ -148,7 +148,7 @@ const Help = () => {
         }
         setSubmitting(true);
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/support/tickets`, {
+            await api.post(`${import.meta.env.VITE_BASE_URL}/support/tickets`, {
                 category: form.category,
                 message: form.message.trim(),
             }, {

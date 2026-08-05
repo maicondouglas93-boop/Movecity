@@ -2,13 +2,17 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import UserLogin from '@/passenger/pages/UserLogin';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
 
-// Mock dependências externas
-vi.mock('axios');
+// Mock dependências externas — Fase 1 (C1): a página migrou do axios cru para a
+// instância configurada (@/shared/services/axios), então é ela que precisa ser mockada.
+vi.mock('@/shared/services/axios', () => ({
+  default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  refreshAccessToken: vi.fn(),
+}));
 vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(),
   GoogleAuthProvider: vi.fn(),
@@ -56,7 +60,7 @@ describe('UserLogin Component', () => {
   });
 
   it('handles successful login', async () => {
-    axios.post.mockResolvedValueOnce({
+    api.post.mockResolvedValueOnce({
       status: 200,
       data: {
         token: 'fake-jwt-token',
@@ -72,7 +76,7 @@ describe('UserLogin Component', () => {
     fireEvent.click(screen.getByRole('button', { name: /entrar$/i }));
 
     await waitFor(() => {
-      expect(axios.post).toHaveBeenCalledWith(`${import.meta.env.VITE_BASE_URL}/users/login`, {
+      expect(api.post).toHaveBeenCalledWith(`${import.meta.env.VITE_BASE_URL}/users/login`, {
         email: 'test@test.com',
         password: 'password123'
       });
@@ -82,7 +86,7 @@ describe('UserLogin Component', () => {
   });
 
   it('handles failed login', async () => {
-    axios.post.mockRejectedValueOnce({
+    api.post.mockRejectedValueOnce({
       response: { data: { message: 'Invalid credentials' } }
     });
 

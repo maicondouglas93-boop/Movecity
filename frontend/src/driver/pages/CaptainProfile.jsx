@@ -1,6 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
 import CaptainHeader from '@/driver/components/CaptainHeader';
 import Avatar from '@/shared/components/Avatar';
@@ -178,7 +178,7 @@ const CaptainProfile = () => {
         try {
             const formData = new FormData();
             formData.append('image', file);
-            const response = await axios.post(
+            const response = await api.post(
                 `${import.meta.env.VITE_BASE_URL}/uploads/captain-profile`,
                 formData,
                 {

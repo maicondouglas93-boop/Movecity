@@ -19,6 +19,8 @@ import SessionSplash from '@/shared/components/ui/SessionSplash'
 //
 // Usa axios puro de propósito (não a instância com interceptor): um 401 aqui não deve
 // disparar renovação silenciosa — estamos justamente encerrando a sessão.
+// Fase 1 (C1, 2026-08-05): exceção mantida na auditoria de axios cru — só o timeout
+// da instância é espelhado abaixo, pra saída nunca ficar pendurada num request.
 export const UserLogout = () => {
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
@@ -39,6 +41,7 @@ export const UserLogout = () => {
                         headers: { Authorization: `Bearer ${token}` },
                         params: { token: fcmToken },
                         withCredentials: true,
+                        timeout: 10000,
                     })
                 }
             } catch {
@@ -52,6 +55,7 @@ export const UserLogout = () => {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
                 params: refreshToken ? { refreshToken } : {},
                 withCredentials: true,
+                timeout: 10000,
             }).catch(() => {
                 // Falha ao avisar o servidor não pode impedir o usuário de sair do
                 // aplicativo. A sessão local é limpa de qualquer forma; o refresh token

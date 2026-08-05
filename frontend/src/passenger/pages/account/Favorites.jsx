@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAccessToken } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import DetailRow from '@/shared/components/ui/DetailRow';
 import EmptyState from '@/shared/components/ui/EmptyState';
@@ -16,7 +16,7 @@ const Favorites = () => {
     useEffect(() => {
         const fetchFavorites = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/favorites`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/users/favorites`, {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 setFavorites(response.data.favorites || []);

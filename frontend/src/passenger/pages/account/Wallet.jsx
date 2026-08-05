@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAccessToken } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import EmptyState from '@/shared/components/ui/EmptyState';
 
@@ -15,7 +15,7 @@ const Wallet = () => {
     useEffect(() => {
         const fetchWallet = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/users/wallet`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/users/wallet`, {
                     headers: { Authorization: `Bearer ${getAccessToken('user')}` }
                 });
                 setBalance(response.data.balance || 0);

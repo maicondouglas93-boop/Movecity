@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import LiveTracking from '@/shared/components/LiveTracking'
 import RideChat from '@/shared/components/RideChat'
@@ -343,7 +343,7 @@ const ParcelActive = () => {
     try {
       const token = getAccessToken('user')
       const message = `PIN da entrega: ${parcel.deliveryPin}`
-      await axios.post(
+      await api.post(
         `${import.meta.env.VITE_BASE_URL}/chat/send`,
         {
           subjectType: 'parcel',

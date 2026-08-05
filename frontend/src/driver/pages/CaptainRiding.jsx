@@ -8,7 +8,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
@@ -102,7 +102,7 @@ const CaptainRiding = () => {
         }
 
         let cancelled = false
-        axios.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-current`, {
+        api.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-current`, {
             headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
         }).then(response => {
             if (cancelled) return
@@ -230,7 +230,7 @@ const CaptainRiding = () => {
     useEffect(() => {
         const fetchUnread = async () => {
             try {
-                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
+                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
                     headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
                 });
                 if (response.data.chat) {

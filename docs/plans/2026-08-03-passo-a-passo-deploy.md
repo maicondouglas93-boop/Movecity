@@ -86,16 +86,20 @@ Vercel → projeto do **admin** (`movecity-admin`) → Settings → Environment 
 
 | Chave | Valor |
 |---|---|
-| `VITE_FIREBASE_API_KEY` | `AIzaSyBR8Kw7upDB9mpntUsRInL7sSgWiEXVbOU` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `movecity-12a8d.firebaseapp.com` |
-| `VITE_FIREBASE_PROJECT_ID` | `movecity-12a8d` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `movecity-12a8d.firebasestorage.app` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `130874019505` |
-| `VITE_FIREBASE_APP_ID` | `1:130874019505:web:5ee27a5f42159b89375c90` |
-| `VITE_FIREBASE_VAPID_KEY` | `BCCPnb_gyOHMUbnL-_uAld9Uv6v4nhy3uIfmM6gd5i5fTS-arA10zrdNi8e5af-uCjsequ_580Zm8H3T1HZQXf0` |
+| `VITE_FIREBASE_API_KEY` | `<configurar-no-ambiente — Firebase Console > Configurações do projeto > Geral>` |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_PROJECT_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_STORAGE_BUCKET` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_APP_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_VAPID_KEY` | `<configurar-no-ambiente — Firebase Console > Cloud Messaging > Web Push certificates>` |
 
-São os mesmos valores do app do passageiro (mesmo projeto Firebase) e **não são segredo**
-— já vão no bundle do navegador e estão em texto claro no service worker commitado.
+São os mesmos valores do app do passageiro (mesmo projeto Firebase). A API key de
+cliente Firebase não é um segredo clássico (vai no bundle do navegador), mas os
+valores **não ficam mais versionados** neste repositório — Fase 1 da auditoria de
+production readiness (C4, 2026-08-05): pegue-os no Firebase Console e cadastre só no
+painel de deploy. Garanta também que a API key tenha **restrições de domínio/API** no
+Google Cloud Console (isso não é configurável por código).
 
 Confira também se `VITE_API_URL` já existe nesse projeto (deve ser
 `https://movecity.onrender.com/api`). Se o painel já funciona hoje, então já está lá.

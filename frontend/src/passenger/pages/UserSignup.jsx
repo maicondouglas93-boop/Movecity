@@ -1,6 +1,6 @@
 import React, { useState, useContext, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 
 import { useToast } from '@/shared/contexts/ToastContext'
@@ -38,7 +38,7 @@ const UserSignup = () => {
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
 
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
         idToken: idToken
       })
 
@@ -73,7 +73,7 @@ const UserSignup = () => {
     }
 
     try {
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/register`, newUser)
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/register`, newUser)
 
       if (response.status === 201) {
         const data = response.data

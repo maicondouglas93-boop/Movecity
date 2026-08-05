@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import CaptainHeader from '@/driver/components/CaptainHeader'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import Button from '@/shared/components/ui/Button'
@@ -182,7 +182,7 @@ const CaptainPresentialRide = () => {
     }
     setLoading(true)
     try {
-      await axios.post(
+      await api.post(
         `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
         { rideId: ride._id, reason: 'Cancelamento de corrida presencial' },
         { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }

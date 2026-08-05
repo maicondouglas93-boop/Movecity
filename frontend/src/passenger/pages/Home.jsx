@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import axios from 'axios';
+import api from '@/shared/services/axios';
 import 'remixicon/fonts/remixicon.css'
 import LocationSearchPanel from '@/passenger/components/LocationSearchPanel';
 import VehiclePanel from '@/passenger/components/VehiclePanel';
@@ -367,7 +367,7 @@ const Home = () => {
                         params.lat = userLocation.lat;
                         params.lng = userLocation.lng;
                     }
-                    const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
+                    const response = await api.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
                         headers: {
                             Authorization: `Bearer ${getAccessToken('user')}`
@@ -403,7 +403,7 @@ const Home = () => {
                         params.lat = userLocation.lat;
                         params.lng = userLocation.lng;
                     }
-                    const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
+                    const response = await api.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
                         headers: {
                             Authorization: `Bearer ${getAccessToken('user')}`
@@ -575,7 +575,7 @@ const Home = () => {
         // olhando pra tela inicial sem nenhum indício de que algo estava carregando.
         setFareLoading(true)
         try {
-            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
+            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
                 params: { pickup: pickupStr, destination: destStr },
                 headers: {
                     Authorization: `Bearer ${getAccessToken('user')}`
@@ -607,7 +607,7 @@ const Home = () => {
         console.log(`[AUDIT] Passageiro iniciando request para criar corrida. Pickup: ${pickupStr}, Dest: ${destStr}, Vehicle: ${vehicleType}`);
 
         try {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
                 pickup: pickupStr,
                 destination: destStr,
                 vehicleType,
@@ -653,7 +653,7 @@ const Home = () => {
         
         addToast('Cancelando corrida...', 'info');
         try {
-            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
                 rideId: ride._id
             }, {
                 headers: {

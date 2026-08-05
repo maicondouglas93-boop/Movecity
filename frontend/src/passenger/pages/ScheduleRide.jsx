@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import Button from '@/shared/components/ui/Button'
 import Card from '@/shared/components/ui/Card'
@@ -42,7 +42,7 @@ const ScheduleRide = () => {
     const timer = setTimeout(async () => {
       setFareLoading(true)
       try {
-        const { data } = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
+        const { data } = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
           params: { pickup: pickup.trim(), destination: destination.trim() },
           headers: { Authorization: `Bearer ${getAccessToken('user')}` },
         })
@@ -73,7 +73,7 @@ const ScheduleRide = () => {
 
     setLoading(true)
     try {
-      await axios.post(
+      await api.post(
         `${import.meta.env.VITE_BASE_URL}/rides/create`,
         {
           pickup: pickup.trim(),

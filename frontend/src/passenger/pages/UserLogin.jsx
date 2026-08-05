@@ -2,7 +2,7 @@ import React, { useState, useContext, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 
 import { useToast } from '@/shared/contexts/ToastContext'
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
@@ -35,7 +35,7 @@ const UserLogin = () => {
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
 
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
         idToken: idToken
       })
 
@@ -66,7 +66,7 @@ const UserLogin = () => {
     }
 
     try {
-      const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/login`, userData)
+      const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/login`, userData)
 
       if (response.status === 200) {
         const data = response.data

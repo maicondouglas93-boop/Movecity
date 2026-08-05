@@ -68,14 +68,18 @@ configuração aqui, o botão "Entrar com o Google" também para de funcionar.
 
 | Chave | Valor |
 |---|---|
-| `VITE_FIREBASE_API_KEY` | `AIzaSyBR8Kw7upDB9mpntUsRInL7sSgWiEXVbOU` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `movecity-12a8d.firebaseapp.com` |
-| `VITE_FIREBASE_PROJECT_ID` | `movecity-12a8d` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `movecity-12a8d.firebasestorage.app` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `130874019505` |
-| `VITE_FIREBASE_APP_ID` | `1:130874019505:web:5ee27a5f42159b89375c90` |
-| `VITE_FIREBASE_VAPID_KEY` | `BCCPnb_gyOHMUbnL-_uAld9Uv6v4nhy3uIfmM6gd5i5fTS-arA10zrdNi8e5af-uCjsequ_580Zm8H3T1HZQXf0` |
-| `VITE_FIREBASE_MEASUREMENT_ID` | `G-TMD2F0X2FE` *(opcional — só Analytics)* |
+| `VITE_FIREBASE_API_KEY` | `<configurar-no-ambiente — Firebase Console > Configurações do projeto > Geral>` |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_PROJECT_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_STORAGE_BUCKET` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_APP_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_VAPID_KEY` | `<configurar-no-ambiente — Firebase Console > Cloud Messaging > Web Push certificates>` |
+| `VITE_FIREBASE_MEASUREMENT_ID` | `<configurar-no-ambiente>` *(opcional — só Analytics)* |
+
+> Fase 1 da auditoria de production readiness (C4, 2026-08-05): os valores reais foram
+> removidos deste documento — pegue-os no Firebase Console e cadastre só no painel de
+> deploy. Não versione valores operacionais completos no repositório.
 
 A `VITE_VAPID_KEY` é o que permite gerar o token de push. Sem ela, o app não gera token e
 nunca recebe notificação — **sem erro visível**, só um aviso no console.
@@ -94,13 +98,13 @@ não recebe alertas (novo motorista, denúncia, problema de pagamento).
 
 | Chave | Valor |
 |---|---|
-| `VITE_FIREBASE_API_KEY` | `AIzaSyBR8Kw7upDB9mpntUsRInL7sSgWiEXVbOU` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `movecity-12a8d.firebaseapp.com` |
-| `VITE_FIREBASE_PROJECT_ID` | `movecity-12a8d` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `movecity-12a8d.firebasestorage.app` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `130874019505` |
-| `VITE_FIREBASE_APP_ID` | `1:130874019505:web:5ee27a5f42159b89375c90` |
-| `VITE_FIREBASE_VAPID_KEY` | `BCCPnb_gyOHMUbnL-_uAld9Uv6v4nhy3uIfmM6gd5i5fTS-arA10zrdNi8e5af-uCjsequ_580Zm8H3T1HZQXf0` |
+| `VITE_FIREBASE_API_KEY` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_PROJECT_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_STORAGE_BUCKET` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_APP_ID` | `<configurar-no-ambiente>` |
+| `VITE_FIREBASE_VAPID_KEY` | `<configurar-no-ambiente>` |
 
 São **os mesmos valores** do bloco 2 — mesmo projeto Firebase. A diferença é que aqui
 `VITE_FIREBASE_MEASUREMENT_ID` **não** é usada; não precisa cadastrar.

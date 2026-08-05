@@ -128,10 +128,17 @@ module.exports.sendNewParcel = async (captainId, data, traceId = '[AUDIT]') => {
     const routeLabel = pickupShort && destShort
         ? `${pickupShort} → ${destShort}`
         : (pickupShort || destShort || null);
+    const distanceKm = typeof data.estimatedDistance === 'number' && data.estimatedDistance > 0
+        ? `${(data.estimatedDistance / 1000).toFixed(1).replace('.', ',')} km`
+        : null;
+    const durationMin = typeof data.estimatedTime === 'number' && data.estimatedTime > 0
+        ? `${Math.max(1, Math.round(data.estimatedTime / 60))} min`
+        : null;
 
     const title = fareLabel ? `Nova encomenda · ${fareLabel}` : 'Nova encomenda disponível';
     const message = [
         routeLabel,
+        [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
         data.itemName ? `Item: ${data.itemName}` : null,
         data.vehicleType,
         data.size ? `Tamanho: ${data.size}` : null,
@@ -169,6 +176,8 @@ const DEEP_LINK = {
     captainProfile: '/captain/profile',
     riding: '/riding',
     home: '/home',
+    scheduled: '/scheduled',
+    parcelActive: '/encomenda/ativa',
 };
 
 // O painel administrativo grava o deepLink de uma campanha como um nome lógico
@@ -230,6 +239,51 @@ module.exports.sendRideRequeuedToUser = async (userId, data) => {
     const title = 'Buscando outro motorista';
     const message = 'Seu motorista anterior não pôde continuar com a corrida. Já estamos procurando outro para você.';
     queue.enqueue(() => sendToUser(userId, title, message, 'RIDE_CANCELLED', { ...data, deepLink: DEEP_LINK.home }));
+};
+
+// --- Agendamento (Fase 3) ---
+
+module.exports.sendScheduleCreated = async (userId, data = {}) => {
+    const kindLabel = data.kind === 'parcel' ? 'encomenda' : 'corrida';
+    const title = 'Agendamento confirmado';
+    const message = `Sua ${kindLabel} foi agendada. Começamos a buscar motorista perto do horário.`;
+    queue.enqueue(() => sendToUser(userId, title, message, 'SCHEDULE_CREATED', {
+        ...data,
+        deepLink: DEEP_LINK.scheduled,
+    }));
+};
+
+module.exports.sendScheduleActivated = async (userId, data = {}) => {
+    const kindLabel = data.kind === 'parcel' ? 'encomenda' : 'corrida';
+    const title = 'Buscando motorista';
+    const message = `Estamos buscando um motorista para sua ${kindLabel} agendada.`;
+    const deepLink = data.kind === 'parcel' ? DEEP_LINK.parcelActive : DEEP_LINK.home;
+    queue.enqueue(() => sendToUser(userId, title, message, 'SCHEDULE_ACTIVATED', {
+        ...data,
+        deepLink,
+    }));
+};
+
+module.exports.sendScheduleNoDriver = async (userId, data = {}) => {
+    const kindLabel = data.kind === 'parcel' ? 'encomenda' : 'corrida';
+    const title = 'Não encontramos motorista';
+    const message = data.message
+        || `Não foi possível encontrar motorista para sua ${kindLabel} agendada. Você pode remarcar quando quiser.`;
+    queue.enqueue(() => sendToUser(userId, title, message, 'SCHEDULE_NO_DRIVER', {
+        ...data,
+        deepLink: DEEP_LINK.scheduled,
+    }));
+};
+
+/** Reserva o tipo no enum; cron T−30 (fase 3b) ainda não dispara. */
+module.exports.sendScheduleReminder = async (userId, data = {}) => {
+    const kindLabel = data.kind === 'parcel' ? 'encomenda' : 'corrida';
+    const title = 'Lembrete de agendamento';
+    const message = `Sua ${kindLabel} agendada está próxima. Em breve buscaremos um motorista.`;
+    queue.enqueue(() => sendToUser(userId, title, message, 'SCHEDULE_REMINDER', {
+        ...data,
+        deepLink: DEEP_LINK.scheduled,
+    }));
 };
 
 // A7 da auditoria de push (2026-08-02): chamadas quando o destinatário não está com o

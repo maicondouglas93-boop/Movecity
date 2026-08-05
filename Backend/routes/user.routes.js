@@ -43,6 +43,7 @@ router.post('/refresh', userController.refreshUserSession)
 
 router.get('/logout', authMiddleware.authUser, userController.logoutUser)
 
-
+// Lista unificada de corridas/encomendas agendadas (compat FE Scheduled.jsx).
+router.get('/scheduled', authMiddleware.authUser, require('../controllers/schedule.controller').listMine)
 
 module.exports = router;

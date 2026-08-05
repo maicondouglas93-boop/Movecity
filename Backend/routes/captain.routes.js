@@ -88,4 +88,10 @@ router.post('/toggle-online',
     captainController.toggleOnline
 )
 
+router.get(
+    '/scheduled-upcoming',
+    authMiddleware.authCaptain,
+    require('../controllers/schedule.controller').listCaptainUpcoming
+)
+
 module.exports = router;

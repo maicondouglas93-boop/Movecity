@@ -47,8 +47,26 @@ const parcelSchema = new mongoose.Schema({
     description: { type: String, default: '', trim: true },
     notes: { type: String, default: '', trim: true },
     schedule: {
-        mode: { type: String, enum: ['now'], default: 'now' },
+        mode: { type: String, enum: ['now', 'later'], default: 'now' },
         at: { type: Date, default: null },
+    },
+    scheduledAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    // Momento scheduled → awaiting_provider (Fase 1 agendamento).
+    activatedAt: {
+        type: Date,
+        default: null,
+    },
+    dispatchAttempts: {
+        type: Number,
+        default: 0,
+    },
+    dispatchLastError: {
+        type: String,
+        default: null,
     },
     fare: { type: Number, required: true },
     estimatedDistance: { type: Number }, // meters
@@ -63,6 +81,7 @@ const parcelSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: [
+            'scheduled',
             'awaiting_provider',
             'provider_accepted',
             'going_to_pickup',
@@ -111,6 +130,9 @@ parcelSchema.index({ status: 1 });
 parcelSchema.index({ user: 1 });
 parcelSchema.index({ captain: 1 });
 parcelSchema.index({ createdAt: -1 });
+// SCH-M1 Fase 2: cron de ativação + listagens por janela.
+parcelSchema.index({ status: 1, scheduledAt: 1 });
+parcelSchema.index({ status: 1, activatedAt: 1 });
 
 parcelSchema.index(
     { captain: 1 },

@@ -43,9 +43,14 @@ const Account = () => {
                     trailing={<i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>}
                     className="px-4"
                 />
-                {/* Cupons, Cartões, Agendadas e Favoritos escondidos até existir backend real
-                    (rotas /coupons /cards /scheduled /favorites e a carteira do passageiro
-                    continuam implementadas, só não estão linkadas daqui — ver A7 na auditoria) */}
+                <DetailRow
+                    icon="ri-calendar-event-fill"
+                    title="Agendamentos"
+                    onClick={() => navigate('/scheduled')}
+                    trailing={<i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true" />}
+                    className="px-4"
+                />
+                {/* Cupons, Cartões e Favoritos escondidos até existir backend real */}
                 <DetailRow
                     icon="ri-lifebuoy-fill"
                     title="Ajuda"

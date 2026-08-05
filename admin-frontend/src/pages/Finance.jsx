@@ -39,7 +39,7 @@ export default function Finance() {
   const [selectedPayouts, setSelectedPayouts] = useState([]);
   const [activePayoutDrawer, setActivePayoutDrawer] = useState(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['payouts', page, filters],
     queryFn: async () => {
       const params = new URLSearchParams({ page, limit: 15, ...filters });
@@ -48,6 +48,9 @@ export default function Finance() {
     },
     placeholderData: keepPreviousData
   });
+
+  const formatMoney = (value) =>
+    Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -93,16 +96,17 @@ export default function Finance() {
     downloadCsv(csvUri, `financeiro_${new Date().getTime()}.csv`);
   };
 
-  // Mock data for the chart
-  const chartData = [
-    { name: 'Seg', valor: 400 },
-    { name: 'Ter', valor: 300 },
-    { name: 'Qua', valor: 600 },
-    { name: 'Qui', valor: 800 },
-    { name: 'Sex', valor: 500 },
-    { name: 'Sáb', valor: 900 },
-    { name: 'Dom', valor: 1200 },
-  ];
+  const chartData = data?.chartSeries?.length
+    ? data.chartSeries
+    : [
+        { name: 'Seg', valor: 0 },
+        { name: 'Ter', valor: 0 },
+        { name: 'Qua', valor: 0 },
+        { name: 'Qui', valor: 0 },
+        { name: 'Sex', valor: 0 },
+        { name: 'Sáb', valor: 0 },
+        { name: 'Dom', valor: 0 },
+      ];
 
   return (
     <div className="flex h-[calc(100vh-6rem)] overflow-hidden bg-background">
@@ -117,27 +121,42 @@ export default function Finance() {
             </div>
           </div>
 
+          {isError && (
+            <div className="bg-danger/10 border border-danger/30 text-danger rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-3">
+              <span>{error?.response?.data?.message || error?.message || 'Falha ao carregar o financeiro.'}</span>
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="px-3 py-1 rounded-lg border border-danger/40 text-xs font-semibold"
+              >
+                {isRefetching ? 'Tentando…' : 'Tentar de novo'}
+              </button>
+            </div>
+          )}
+
           {/* Quick Stats Summary */}
           {data?.summary && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
                 <div className="flex items-center gap-2 mb-2 text-text-muted"><Wallet className="w-4 h-4"/><p className="text-sm font-medium">Saldo Plataforma</p></div>
-                <p className="text-2xl font-bold">{data.summary.platformBalance !== null ? `R$ ${data.summary.platformBalance}` : 'Não disponível'}</p>
-                <p className="text-xs text-text-muted mt-1">Acumulado líquido</p>
+                <p className="text-2xl font-bold">{formatMoney(data.summary.platformBalance)}</p>
+                <p className="text-xs text-text-muted mt-1">
+                  Comissões totais · mês {formatMoney(data.summary.commissionMonth)} · hoje {formatMoney(data.summary.commissionToday)}
+                </p>
               </div>
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
                 <div className="flex items-center gap-2 mb-2 text-warning"><Clock className="w-4 h-4"/><p className="text-sm font-medium">Saídas Previstas</p></div>
-                <p className="text-2xl font-bold">R$ {data.summary.pendingAmount?.toFixed(2) || '0.00'}</p>
+                <p className="text-2xl font-bold">{formatMoney(data.summary.pendingAmount)}</p>
                 <p className="text-xs text-text-muted mt-1">Repasses pendentes</p>
               </div>
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
                 <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos Hoje</p></div>
-                <p className="text-2xl font-bold">R$ {data.summary.paidToday?.toFixed(2) || '0.00'}</p>
+                <p className="text-2xl font-bold">{formatMoney(data.summary.paidToday)}</p>
                 <p className="text-xs text-text-muted mt-1">Volume liberado hoje</p>
               </div>
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
                 <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos no Mês</p></div>
-                <p className="text-2xl font-bold">R$ {data.summary.paidMonth?.toFixed(2) || '0.00'}</p>
+                <p className="text-2xl font-bold">{formatMoney(data.summary.paidMonth)}</p>
                 <p className="text-xs text-text-muted mt-1">Total do mês</p>
               </div>
               <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
@@ -155,9 +174,10 @@ export default function Finance() {
             </div>
           )}
 
-          {/* Optional Chart */}
+          {/* Gráfico real — comissões dos últimos 7 dias */}
           <div className="h-32 w-full mt-4 bg-background border border-border rounded-xl p-2 hidden md:block">
-            <ResponsiveContainer width="100%" height="100%">
+            <p className="text-[10px] uppercase tracking-wide text-text-muted px-2 pt-1">Comissões — últimos 7 dias</p>
+            <ResponsiveContainer width="100%" height="85%">
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorValor" x1="0" y1="0" x2="0" y2="1">
@@ -166,7 +186,15 @@ export default function Finance() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }} itemStyle={{ color: '#fff' }} />
+                <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                  itemStyle={{ color: '#fff' }}
+                  formatter={(value, key) => [
+                    formatMoney(value),
+                    key === 'valor' || key === 'commission' ? 'Comissão' : key === 'payouts' ? 'Saques pagos' : key,
+                  ]}
+                />
                 <Area type="monotone" dataKey="valor" stroke="#3b82f6" fillOpacity={1} fill="url(#colorValor)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -249,7 +277,16 @@ export default function Finance() {
               {isLoading ? (
                 <tr><td colSpan="6" className="px-6 py-8 text-center text-text-muted">Carregando...</td></tr>
               ) : data?.payouts?.length === 0 ? (
-                <tr><td colSpan="6" className="px-6 py-8 text-center text-text-muted">Nenhum repasse encontrado.</td></tr>
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-text-muted">
+                    Nenhum pedido de saque encontrado.
+                    {(data?.summary?.platformBalance > 0) && (
+                      <span className="block mt-1 text-xs">
+                        Há comissões registradas no saldo da plataforma — a lista abaixo só mostra solicitações de repasse dos motoristas.
+                      </span>
+                    )}
+                  </td>
+                </tr>
               ) : (
                 data?.payouts?.map((payout) => {
                   const isSelected = selectedPayouts.includes(payout._id);

@@ -6,9 +6,19 @@ const globalSettingModel = require('../../models/globalSetting.model');
 // globalSetting mas o painel só lia/escrevia tariffSetting — o admin não tinha como ver
 // ou editar a comissão real (o simulador usava 15% fixo enquanto o real era 20%).
 describe('Admin Service — getTariffs / updateGlobalSettings merge', () => {
+    beforeEach(async () => {
+        await tariffSettingModel.deleteMany({});
+        await globalSettingModel.deleteMany({});
+    });
+
     it('should include platformCommission/cardFee fields from globalSetting in getTariffs', async () => {
         await tariffSettingModel.create({ cancellationFee: 5 });
-        await globalSettingModel.create({ platformCommission: 25, cardFeePercent: 3, cardFeeFixed: 1.5 });
+        await globalSettingModel.create({
+            platformCommission: 25,
+            platformCommissions: { ride: 25, presential: 25, parcel: 25 },
+            cardFeePercent: 3,
+            cardFeeFixed: 1.5,
+        });
 
         const result = await adminService.getTariffs();
 
@@ -40,5 +50,50 @@ describe('Admin Service — getTariffs / updateGlobalSettings merge', () => {
 
         expect(result.platformCommission).toBe(22);
         expect(result.cardFeePercent).toBe(2.5);
+    });
+
+    it('getTariffs migra e devolve platformCommissions', async () => {
+        await tariffSettingModel.create({});
+        // Simula doc legado: só top-level. Nested defaults do schema (20) não podem
+        // apagar o legado 18 — ensure reconstrói a partir de platformCommission.
+        await globalSettingModel.collection.insertOne({
+            platformCommission: 18,
+            cardFeePercent: 0,
+            cardFeeFixed: 0,
+            minFare: 5,
+            pricePerKm: 2,
+            pricePerMinute: 0.5,
+        });
+
+        const result = await adminService.getTariffs();
+
+        expect(result.platformCommission).toBe(18);
+        expect(result.platformCommissions).toMatchObject({
+            ride: 18,
+            presential: 18,
+            parcel: 18,
+        });
+    });
+
+    it('updateGlobalSettings salva comissões por serviço e sincroniza legado com ride', async () => {
+        await tariffSettingModel.create({});
+        await globalSettingModel.create({ platformCommission: 20 });
+
+        const result = await adminService.updateGlobalSettings({
+            platformCommissions: { ride: 12, presential: 8, parcel: 22 },
+        });
+
+        expect(result.platformCommission).toBe(12);
+        expect(result.platformCommissions).toMatchObject({
+            ride: 12,
+            presential: 8,
+            parcel: 22,
+        });
+
+        const gs = await globalSettingModel.findOne();
+        expect(gs.platformCommission).toBe(12);
+        expect(gs.platformCommissions.ride).toBe(12);
+        expect(gs.platformCommissions.presential).toBe(8);
+        expect(gs.platformCommissions.parcel).toBe(22);
     });
 });

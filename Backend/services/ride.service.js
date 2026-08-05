@@ -28,7 +28,8 @@ const VALID_ORIGINS_BY_TARGET = {
     waiting_passenger: ['arrived'],
     started: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     finished: ['started'],
-    cancelled: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
+    // SCH-M3 Fase 2: scheduled cancelável via /rides/cancel (mesmo motor de transição).
+    cancelled: ['scheduled', 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     // Única reversão da máquina (todo o resto é progressão linear ou término): motorista
     // desiste de uma corrida já aceita, mas antes de iniciar (auditoria de UX, 2026-08-02).
     // Não é um avanço nem um estado terminal — devolve a corrida ao pool de despacho pra
@@ -147,29 +148,38 @@ function getOtp(num) {
 }
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null
+    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null, scheduledAt = null
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
     }
 
-    // Exclusão mútua user: não criar corrida se há encomenda ativa.
-    const parcelModel = require('../models/parcel.model');
-    const dispatchService = require('./dispatch.service');
-    const activeParcel = await parcelModel.exists({
-        user,
-        status: {
-            $in: [
-                'awaiting_provider',
-                ...dispatchService.ACTIVE_PARCEL_STATUSES,
-                'delivered',
-            ],
-        },
-    });
-    if (activeParcel) {
-        const err = new Error('USER_HAS_ACTIVE_PARCEL');
-        err.code = 'USER_HAS_ACTIVE_PARCEL';
-        throw err;
+    let parsedSchedule = null;
+    if (scheduledAt) {
+        const scheduleService = require('./schedule.service');
+        parsedSchedule = scheduleService.assertValidScheduledAt(scheduledAt);
+    }
+
+    // Exclusão mútua user: não criar corrida imediata se há encomenda ativa.
+    // Agendamento futuro não conflita com encomenda em andamento.
+    if (!parsedSchedule) {
+        const parcelModel = require('../models/parcel.model');
+        const dispatchService = require('./dispatch.service');
+        const activeParcel = await parcelModel.exists({
+            user,
+            status: {
+                $in: [
+                    'awaiting_provider',
+                    ...dispatchService.ACTIVE_PARCEL_STATUSES,
+                    'delivered',
+                ],
+            },
+        });
+        if (activeParcel) {
+            const err = new Error('USER_HAS_ACTIVE_PARCEL');
+            err.code = 'USER_HAS_ACTIVE_PARCEL';
+            throw err;
+        }
     }
 
     // Calcular rota e tempo real
@@ -181,7 +191,10 @@ module.exports.createRide = async ({
     // concorrência, 2026-08-02) — guardada na corrida e reutilizada em endRide, pra uma
     // mudança de tarifa feita pelo admin durante a corrida não alterar o valor que o
     // passageiro já viu e aceitou na confirmação.
-    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
+        vehicleType,
+        serviceKind: 'ride',
+    });
 
     // Usar o Pricing Engine Oficial
     const pricing = await PricingEngine.calculateFare({
@@ -189,7 +202,8 @@ module.exports.createRide = async ({
         time,
         vehicleType,
         paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod, // Use a fallback method for calculation if carteira
-        configSnapshot: pricingSnapshot
+        configSnapshot: pricingSnapshot,
+        serviceKind: 'ride',
     });
 
     // Calcular opcionais
@@ -213,6 +227,17 @@ module.exports.createRide = async ({
     }
 
     let finalPrice = pricing.finalFare + optionalsTotal;
+
+    // Fase 4 (agendamento): no booking NÃO debita carteira nem consome cupom.
+    // Intenção de wallet/cupom fica guardada e é liquidada na ativação
+    // (settleScheduledRideFinance). Fare/commission snapshot continua congelado aqui.
+    const useWalletScheduled = !!(parsedSchedule && useWalletBalance);
+    if (parsedSchedule) {
+        useWalletBalance = false;
+    }
+    const promoCodeScheduled = (parsedSchedule && promoCode)
+        ? String(promoCode).toUpperCase().trim()
+        : null;
 
     // Bloco H (2026-08-02, achados F3/F4): aplica o cupom ANTES do desconto de carteira,
     // pra useWalletBalance cobrir o valor já com desconto, não o valor cheio. Um código
@@ -258,6 +283,24 @@ module.exports.createRide = async ({
     // Amount to be paid via normal method
     const paymentAmount = finalPrice - walletAmountUsed;
 
+    // Agendadas: coords cedo para upcoming por raio (SCH-C3 / Fase 2.4). Imediatas: despacho grava.
+    let pickupCoordinates;
+    let destinationCoordinates;
+    if (parsedSchedule) {
+        try {
+            const pickupCoord = await mapService.getAddressCoordinate(pickup);
+            pickupCoordinates = { lat: pickupCoord.ltd, lng: pickupCoord.lng };
+        } catch {
+            pickupCoordinates = undefined;
+        }
+        try {
+            const destCoord = await mapService.getAddressCoordinate(destination);
+            destinationCoordinates = { lat: destCoord.ltd, lng: destCoord.lng };
+        } catch {
+            destinationCoordinates = undefined;
+        }
+    }
+
     const ride = await rideModel.create({
         user,
         pickup,
@@ -275,13 +318,17 @@ module.exports.createRide = async ({
         vehicleType,
         source: 'passenger_requested',
         destinationPending: false,
-        status: 'requested',
+        status: parsedSchedule ? 'scheduled' : 'requested',
+        scheduledAt: parsedSchedule,
+        promoCodeScheduled,
+        useWalletScheduled,
+        pickupCoordinates,
+        destinationCoordinates,
         estimatedDistance: distance,
         estimatedTime: time,
         estimatedPriceMin: pricing.finalFare,
         estimatedPriceMax: pricing.finalFare,
-        commissionPercent: pricing.fareBreakdown.platformCommission > 0
-            ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100) : 0,
+        commissionPercent: pricing.commissionPercent ?? 0,
         commissionAmount: pricing.commissionAmount,
         fareBreakdown: pricing.fareBreakdown,
         pricingSnapshot,
@@ -289,28 +336,135 @@ module.exports.createRide = async ({
         duration: time
     });
 
-    if (paymentAmount > 0 || walletAmountUsed > 0) {
-        await paymentModel.create({
-            rideId: ride._id,
-            userId: user,
-            amount: finalPrice,
-            method: paymentMethod,
-            status: paymentMethod === 'carteira' ? 'approved' : 'pending'
-        });
-    }
+    // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
+    if (!parsedSchedule) {
+        if (paymentAmount > 0 || walletAmountUsed > 0) {
+            await paymentModel.create({
+                rideId: ride._id,
+                userId: user,
+                amount: finalPrice,
+                method: paymentMethod,
+                status: paymentMethod === 'carteira' ? 'approved' : 'pending'
+            });
+        }
 
-    if (promotionApplied) {
-        const promotionService = require('./promotion.service');
-        await promotionService.recordPromotionUsage({
-            promotionId: promotionApplied,
-            userId: user,
-            rideId: ride._id,
-            discountAmount
-        });
+        if (promotionApplied) {
+            const promotionService = require('./promotion.service');
+            await promotionService.recordPromotionUsage({
+                promotionId: promotionApplied,
+                userId: user,
+                rideId: ride._id,
+                discountAmount
+            });
+        }
     }
 
     return { ride, promoError };
 }
+
+/**
+ * Fase 4: liquida wallet/cupom/payment de corrida agendada na ativação (idempotente).
+ * Não bloqueia o despacho se falhar parcialmente — grava o que conseguir e marca settled.
+ */
+module.exports.settleScheduledRideFinance = async (rideId) => {
+    const ride = await rideModel.findOne({
+        _id: rideId,
+        scheduledAt: { $ne: null },
+        scheduleFinanceSettledAt: null,
+    });
+    if (!ride) return null;
+
+    const promotionService = require('./promotion.service');
+    const promotionUsageModel = require('../models/promotionUsage.model');
+
+    if (ride.promotionApplied && (ride.discountAmount || 0) > 0) {
+        const already = await promotionUsageModel.exists({ rideId: ride._id });
+        if (!already) {
+            await promotionService.recordPromotionUsage({
+                promotionId: ride.promotionApplied,
+                userId: ride.user,
+                rideId: ride._id,
+                discountAmount: ride.discountAmount,
+            });
+        }
+    } else if (ride.promoCodeScheduled && !ride.promotionApplied) {
+        const base = (ride.fare || 0) + (Array.isArray(ride.optionals)
+            ? ride.optionals.reduce((s, o) => s + (o.price || 0), 0)
+            : 0);
+        const result = await promotionService.findApplicablePromotion({
+            code: ride.promoCodeScheduled,
+            userId: ride.user,
+            vehicleType: ride.vehicleType,
+            paymentMethod: ride.paymentMethod === 'carteira' ? 'pix' : ride.paymentMethod,
+            rideValue: base,
+        });
+        if (result?.promotion) {
+            const discountAmount = result.discountAmount;
+            const finalPrice = Math.max(0, base - discountAmount);
+            await rideModel.updateOne(
+                { _id: ride._id },
+                {
+                    $set: {
+                        promotionApplied: result.promotion._id,
+                        discountAmount,
+                        finalPrice,
+                    },
+                }
+            );
+            ride.promotionApplied = result.promotion._id;
+            ride.discountAmount = discountAmount;
+            ride.finalPrice = finalPrice;
+            await promotionService.recordPromotionUsage({
+                promotionId: result.promotion._id,
+                userId: ride.user,
+                rideId: ride._id,
+                discountAmount,
+            });
+        }
+    }
+
+    let walletAmountUsed = ride.walletAmountUsed || 0;
+    let paymentMethod = ride.paymentMethod;
+    const finalPrice = ride.finalPrice || ride.fare || 0;
+
+    if (ride.useWalletScheduled && walletAmountUsed === 0 && finalPrice > 0) {
+        const userData = await userModel.findById(ride.user);
+        if (userData && userData.walletBalance > 0) {
+            if (userData.walletBalance >= finalPrice) {
+                walletAmountUsed = finalPrice;
+                paymentMethod = 'carteira';
+            } else {
+                walletAmountUsed = userData.walletBalance;
+            }
+            userData.walletBalance -= walletAmountUsed;
+            await userData.save();
+        }
+    }
+
+    const paymentAmount = finalPrice - walletAmountUsed;
+    const hasPayment = await paymentModel.exists({ rideId: ride._id });
+    if (!hasPayment && (paymentAmount > 0 || walletAmountUsed > 0)) {
+        await paymentModel.create({
+            rideId: ride._id,
+            userId: ride.user,
+            amount: finalPrice,
+            method: paymentMethod,
+            status: paymentMethod === 'carteira' ? 'approved' : 'pending',
+        });
+    }
+
+    return rideModel.findOneAndUpdate(
+        { _id: rideId, scheduleFinanceSettledAt: null },
+        {
+            $set: {
+                scheduleFinanceSettledAt: new Date(),
+                walletAmountUsed,
+                paymentMethod,
+            },
+        },
+        { new: true }
+    );
+};
 
 function isValidGpsCoord(lat, lng) {
     return Number.isFinite(lat)
@@ -478,7 +632,10 @@ module.exports.createPresentialRide = async ({
             throw err;
         }
 
-        const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+        const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
+            vehicleType,
+            serviceKind: 'presential',
+        });
         const otp = getOtp(6);
         const originTimestamp = new Date();
 
@@ -507,14 +664,13 @@ module.exports.createPresentialRide = async ({
                 vehicleType,
                 paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod,
                 configSnapshot: pricingSnapshot,
+                serviceKind: 'presential',
             });
             fare = pricing.finalFare;
             finalPrice = pricing.finalFare;
             fareBreakdown = pricing.fareBreakdown;
             commissionAmount = pricing.commissionAmount;
-            commissionPercent = pricing.fareBreakdown.platformCommission > 0
-                ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100)
-                : 0;
+            commissionPercent = pricing.commissionPercent ?? 0;
 
             try {
                 const dest = await mapService.getAddressCoordinate(destination);
@@ -535,9 +691,12 @@ module.exports.createPresentialRide = async ({
             // Não chama calculateFare(0) — isso retornaria minFare e enganaria a UI.
             fare = 0;
             finalPrice = 0;
-            fareBreakdown = { pendingDestination: true };
+            fareBreakdown = { pendingDestination: true, serviceKind: 'presential' };
             commissionAmount = 0;
-            commissionPercent = pricingSnapshot?.globalSetting?.platformCommission ?? 20;
+            commissionPercent = pricingSnapshot?.commissionPercent
+                ?? pricingSnapshot?.globalSetting?.platformCommissions?.presential
+                ?? pricingSnapshot?.globalSetting?.platformCommission
+                ?? 20;
         }
 
         const ridePayload = {
@@ -645,13 +804,17 @@ module.exports.estimatePresentialFare = async ({ captain, destination, clientLat
         `${origin.lat},${origin.lng}`,
         destination
     );
-    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({ vehicleType });
+    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
+        vehicleType,
+        serviceKind: 'presential',
+    });
     const pricing = await PricingEngine.calculateFare({
         distance: distanceTime.distance.value,
         time: distanceTime.duration.value,
         vehicleType,
         paymentMethod: 'cash',
         configSnapshot: pricingSnapshot,
+        serviceKind: 'presential',
     });
 
     return {
@@ -939,6 +1102,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
             throw err;
         }
         try {
+            const endServiceKind = ride.source === 'driver_initiated' ? 'presential' : 'ride';
             const pricing = await PricingEngine.calculateFare({
                 distance: actualDistance,
                 time: actualTimeSeconds,
@@ -950,15 +1114,14 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 // corrida estava em andamento mudava o preço cobrado no final.
                 // `|| null` cobre corridas criadas antes desta mudança (sem snapshot
                 // guardado) — cai de volta pro comportamento antigo (config vigente).
-                configSnapshot: ride.pricingSnapshot || null
+                configSnapshot: ride.pricingSnapshot || null,
+                serviceKind: endServiceKind,
             });
             finalPrice = pricing.finalFare;
             pricingUpdate = {
                 fareBreakdown: pricing.fareBreakdown,
                 commissionAmount: pricing.commissionAmount,
-                commissionPercent: pricing.fareBreakdown.platformCommission > 0
-                    ? Math.round((pricing.fareBreakdown.platformCommission / pricing.finalFare) * 100)
-                    : ride.commissionPercent,
+                commissionPercent: pricing.commissionPercent ?? ride.commissionPercent,
             };
         } catch (e) {
             // Auditoria A3: não engolir falha de pricing — especialmente presencial.
@@ -1227,7 +1390,9 @@ module.exports.getCurrentRide = async ({ user }) => {
     // sem checar nada. Migrado pra transitionRide: o filtro `status:'requested'` no
     // próprio findOneAndUpdate garante que só expira se ainda estiver mesmo pendente.
     if (ride && ride.status === 'requested') {
-        const diffInMinutes = (Date.now() - new Date(ride.createdAt).getTime()) / 60000;
+        // SCH-C1: pós-ativação de agendada usa activatedAt; imediata usa createdAt.
+        const clock = ride.activatedAt || ride.createdAt;
+        const diffInMinutes = (Date.now() - new Date(clock).getTime()) / 60000;
         if (diffInMinutes > 10) {
             await transitionRide(ride._id, 'cancelled', {}, {
                 cancelledBy: 'system',
@@ -1367,7 +1532,11 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         // Presencial nunca fica em requested, mas o filtro evita vazamento futuro.
         source: { $ne: 'driver_initiated' },
         vehicleType,
-        createdAt: { $gte: cutoff },
+        // SCH-C1: agendada ativada → activatedAt; imediata (activatedAt null) → createdAt.
+        $or: [
+            { activatedAt: { $gte: cutoff } },
+            { activatedAt: null, createdAt: { $gte: cutoff } },
+        ],
         // pickupCoordinates é persistido no despacho; sem ele não dá pra aplicar o raio.
         'pickupCoordinates.lat': { $exists: true }
     }).populate('user', 'fullname').sort({ createdAt: -1 }).limit(20);

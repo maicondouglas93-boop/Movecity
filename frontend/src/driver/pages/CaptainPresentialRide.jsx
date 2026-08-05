@@ -4,6 +4,7 @@ import axios from 'axios'
 import CaptainHeader from '@/driver/components/CaptainHeader'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import Button from '@/shared/components/ui/Button'
+import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
@@ -40,8 +41,6 @@ const CaptainPresentialRide = () => {
   const [step, setStep] = useState(STEPS.CHOICE)
   const [destinationPending, setDestinationPending] = useState(false)
   const [destination, setDestination] = useState('')
-  const [suggestions, setSuggestions] = useState([])
-  const [searching, setSearching] = useState(false)
   const [estimate, setEstimate] = useState(null)
   const [estimating, setEstimating] = useState(false)
   const [ride, setRide] = useState(null)
@@ -81,35 +80,6 @@ const CaptainPresentialRide = () => {
     }
   }, [captainRide, captainParcel, navigate])
 
-  useEffect(() => {
-    if (step !== STEPS.DESTINATION) return
-    const q = destination.trim()
-    if (q.length < 3) {
-      setSuggestions([])
-      return undefined
-    }
-    const timer = setTimeout(async () => {
-      setSearching(true)
-      try {
-        const params = { input: q }
-        if (userLocation?.lat != null) {
-          params.lat = userLocation.lat
-          params.lng = userLocation.lng
-        }
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
-          headers: { Authorization: `Bearer ${getAccessToken('captain')}` },
-          params,
-        })
-        setSuggestions(Array.isArray(response.data) ? response.data : [])
-      } catch {
-        setSuggestions([])
-      } finally {
-        setSearching(false)
-      }
-    }, 350)
-    return () => clearTimeout(timer)
-  }, [destination, step, userLocation?.lat, userLocation?.lng])
-
   const coordsPayload = () => ({
     ...(userLocation?.lat != null ? { lat: userLocation.lat, lng: userLocation.lng } : {}),
   })
@@ -126,14 +96,17 @@ const CaptainPresentialRide = () => {
     setStep(STEPS.CONFIRM)
   }
 
-  const selectSuggestion = async (value) => {
-    const address = typeof value === 'string' ? value : (value?.description || value?.place_name || '')
-    setDestination(address)
-    setSuggestions([])
+  const confirmDestination = async (address) => {
+    const resolved = String(address || '').trim()
+    if (resolved.length < 3) {
+      addToast('Informe o endereço de destino', 'error')
+      return
+    }
+    setDestination(resolved)
     setEstimating(true)
     try {
       const data = await estimatePresentialFare({
-        destination: address,
+        destination: resolved,
         ...coordsPayload(),
       })
       setEstimate(data)
@@ -273,41 +246,22 @@ const CaptainPresentialRide = () => {
 
         {step === STEPS.DESTINATION && (
           <div className="space-y-3">
-            <label className="block text-sm font-medium text-ink-600" htmlFor="presential-destination">
-              Destino
-            </label>
-            <input
+            <AddressAutocomplete
               id="presential-destination"
-              type="text"
+              label="Destino"
               value={destination}
-              onChange={(e) => setDestination(e.target.value)}
+              onChange={setDestination}
+              onResolved={confirmDestination}
               placeholder="Digite o endereço de destino"
-              className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-ink-900"
-              autoComplete="off"
+              biasLocation={userLocation}
+              disabled={estimating}
+              icon="ri-map-pin-2-fill"
+              inputClassName="w-full min-h-[48px] pl-10 pr-10 rounded-panel border border-line bg-surface text-ink-900 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
-            {searching && <p className="text-xs text-ink-400">Buscando endereços…</p>}
-            <ul className="space-y-2">
-              {suggestions.map((s, idx) => {
-                const label = typeof s === 'string' ? s : (s.description || s.place_name || '')
-                return (
-                  <li key={`${idx}-${label}`}>
-                    <button
-                      type="button"
-                      onClick={() => selectSuggestion(s)}
-                      disabled={estimating}
-                      className="w-full text-left px-3 py-3 rounded-panel bg-surface border border-line text-sm text-ink-900"
-                    >
-                      <i className="ri-map-pin-line text-brand-500 mr-2" aria-hidden="true" />
-                      {label}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
             {destination.trim().length >= 3 && (
               <Button
                 type="button"
-                onClick={() => selectSuggestion(destination.trim())}
+                onClick={() => confirmDestination(destination.trim())}
                 loading={estimating}
                 disabled={estimating}
               >

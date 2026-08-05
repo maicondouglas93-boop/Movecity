@@ -103,6 +103,7 @@ export function sessionKindForUrl(url = '') {
     // Encomendas — motorista
     if (path.includes('/parcels/pending')) return 'captain';
     if (path.includes('/parcels/captain-current')) return 'captain';
+    if (path.includes('/parcels/captain-history')) return 'captain';
     if (path.includes('/parcels/captain-review')) return 'captain';
     if (/\/parcels\/[^/]+\/(accept|decline|confirm-delivery)(?:\/|$)/.test(path)) return 'captain';
     if (/\/parcels\/[^/]+\/status(?:\/|$)/.test(path)) return 'captain';

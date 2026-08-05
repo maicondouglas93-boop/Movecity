@@ -663,6 +663,37 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
         expect(payload.title).toBe('Nova corrida disponível');
     });
 
+    it('nova encomenda grava NEW_PARCEL e envia push data-only com deep link', async () => {
+        const captain = await createCaptain();
+        await NotificationToken.create({ captainId: captain._id, token: 'tok-deeplink-newparcel', device: 'test' });
+
+        notificationDispatcher.sendNewParcel(captain._id, {
+            parcelId: 'parcel-125',
+            fare: 22,
+            pickup: 'Av. Paulista, 1000',
+            destination: 'Travessa João Caetano, 99',
+            estimatedDistance: 3000,
+            estimatedTime: 480,
+            vehicleType: 'moto',
+            itemName: 'Documento',
+            size: 'small',
+        });
+
+        const payload = await waitForPayload();
+        expect(payload.dataOnly).toBe(true);
+        expect(payload.data.type).toBe('NEW_PARCEL');
+        expect(payload.data.deepLink).toBe('/captain-home?parcelOffer=parcel-125');
+        expect(payload.title).toContain('R$ 22,00');
+        expect(payload.message).toContain('Av. Paulista');
+        expect(payload.message).toContain('Documento');
+
+        const saved = await waitFor(() =>
+            Notification.findOne({ captainId: captain._id, type: 'NEW_PARCEL' })
+        );
+        expect(saved).toBeTruthy();
+        expect(saved.status).toBe('sent');
+    });
+
     it('campanha traduz o deepLink lógico do painel para uma rota real com barra inicial', async () => {
         const user = await createUser();
         await NotificationToken.create({ userId: user._id, token: 'tok-deeplink-campaign', device: 'test' });

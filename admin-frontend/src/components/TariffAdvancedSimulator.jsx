@@ -162,11 +162,11 @@ export default function TariffAdvancedSimulator({ values, platformCommission = 1
         
         <div className="border-t border-border pt-3 space-y-2">
           <div className="flex justify-between text-sm">
-            <span className="text-success font-medium">Motorista Recebe ({(100-platformCommission)}%)</span>
+            <span className="text-success font-medium">Motorista Recebe ({(100 - platformCommission)}% · corrida app)</span>
             <span className="text-success">R$ <span>{driverEarnings.toFixed(2)}</span></span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-primary font-medium">Plataforma Recebe ({platformCommission}%)</span>
+            <span className="text-primary font-medium">Plataforma Recebe ({platformCommission}% · corrida app)</span>
             <span className="text-primary">R$ <span>{platformFee.toFixed(2)}</span></span>
           </div>
         </div>

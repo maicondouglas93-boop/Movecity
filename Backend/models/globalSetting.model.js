@@ -2,10 +2,17 @@ const mongoose = require('mongoose');
 
 // optimisticConcurrency: ver comentário em tariffSetting.model.js (Bloco E, achado C1).
 const globalSettingSchema = new mongoose.Schema({
+    // Legado: espelho de platformCommissions.ride (compat leitores antigos).
     platformCommission: {
         type: Number,
         required: true,
         default: 20
+    },
+    // Comissão da plataforma por tipo de serviço (produção).
+    platformCommissions: {
+        ride: { type: Number, default: 20, min: 0, max: 100 },
+        presential: { type: Number, default: 20, min: 0, max: 100 },
+        parcel: { type: Number, default: 20, min: 0, max: 100 },
     },
     minFare: {
         type: Number,

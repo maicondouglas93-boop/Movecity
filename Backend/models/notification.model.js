@@ -29,7 +29,15 @@ const notificationSchema = new mongoose.Schema({
         // de documento — mesma granularidade grossa já usada por PAYMENT/RECHARGE
         // (o título/mensagem distingue o cenário específico).
         type: String,
-        enum: ['NEW_RIDE', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED', 'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN', 'RECHARGE', 'DOCUMENT'],
+        // NEW_PARCEL: oferta de encomenda ao motorista (mesmo canal FCM de NEW_RIDE).
+        // Sem este valor no enum, Notification.create rejeitava e o push nunca saía.
+        // SCHEDULE_*: agendamento (Fase 3) — tipos próprios para analytics (não reusar RIDE_CANCELLED).
+        enum: [
+            'NEW_RIDE', 'NEW_PARCEL', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED',
+            'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN',
+            'RECHARGE', 'DOCUMENT',
+            'SCHEDULE_CREATED', 'SCHEDULE_ACTIVATED', 'SCHEDULE_NO_DRIVER', 'SCHEDULE_REMINDER',
+        ],
         default: 'NEW_RIDE'
     },
     targetAudience: {

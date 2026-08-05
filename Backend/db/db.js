@@ -181,6 +181,7 @@ async function seedTestData() {
 
             await globalSettingModel.create({
                 platformCommission: 20,
+                platformCommissions: { ride: 20, presential: 20, parcel: 20 },
                 minFare: 5.0,
                 pricePerKm: 2.0,
                 pricePerMinute: 0.5

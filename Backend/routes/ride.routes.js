@@ -11,6 +11,7 @@ router.post('/create',
     body('pickup').isString().isLength({ min: 3 }).withMessage('Invalid pickup address'),
     body('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination address'),
     body('vehicleType').isString().isLength({ min: 1 }).withMessage('Invalid vehicle type'),
+    body('scheduledAt').optional({ values: 'null' }).isISO8601().withMessage('scheduledAt must be ISO8601'),
     rideController.createRide
 )
 

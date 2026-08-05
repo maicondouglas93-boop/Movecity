@@ -1,10 +1,12 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import LiveTracking from '@/shared/components/LiveTracking'
 import RideChat from '@/shared/components/RideChat'
 import { cancelParcel, getCurrentParcel, skipParcelReview } from '@/shared/services/parcelApi'
 import { submitReview } from '@/shared/services/reviewApi'
+import { getAccessToken } from '@/shared/services/session'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import Button from '@/shared/components/ui/Button'
@@ -84,6 +86,15 @@ const CANCEL_STATUSES = [
   'provider_accepted',
   'going_to_pickup',
   'arrived_pickup',
+]
+
+const PIN_VISIBLE_STATUSES = [
+  'provider_accepted',
+  'going_to_pickup',
+  'arrived_pickup',
+  'collected',
+  'in_transit',
+  'arrived_destination',
 ]
 
 const PIN_EMPHASIS = ['collected', 'in_transit', 'arrived_destination']
@@ -182,6 +193,7 @@ const ParcelActive = () => {
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [routeOpen, setRouteOpen] = useState(false)
+  const [sendingPin, setSendingPin] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -206,13 +218,22 @@ const ParcelActive = () => {
 
   useEffect(() => {
     if (!socket) return undefined
+    // deliveryPin é select:false no BE — sockets não trazem o PIN; preserva o local.
+    const mergeParcel = (data) => {
+      setParcel((prev) => {
+        const next = {
+          ...data,
+          deliveryPin: data?.deliveryPin || prev?.deliveryPin,
+        }
+        setUserParcel(next)
+        return next
+      })
+    }
     const onUpdate = (data) => {
-      setParcel(data)
-      setUserParcel(data)
+      mergeParcel(data)
     }
     const onEnded = (data) => {
-      setParcel(data)
-      setUserParcel(data)
+      mergeParcel(data)
       addToast('Encomenda finalizada', 'success')
     }
     const onCancelled = () => {
@@ -314,10 +335,42 @@ const ParcelActive = () => {
   const searching = parcel.status === 'awaiting_provider'
   const canChat = CHAT_STATUSES.includes(parcel.status) && !!captain
   const showRating = parcel.status === 'finished' && !rated
-  const showPin = Boolean(parcel.deliveryPin)
-    && !['finished', 'cancelled', 'delivered'].includes(parcel.status)
+  const showPin = Boolean(parcel.deliveryPin) && PIN_VISIBLE_STATUSES.includes(parcel.status)
   const pinEmphasized = PIN_EMPHASIS.includes(parcel.status)
   const mapHeight = searching ? 'h-[38dvh]' : 'h-[46dvh]'
+
+  const sendPinViaChat = async () => {
+    if (!parcel?._id || !parcel.deliveryPin || sendingPin) return
+    setSendingPin(true)
+    try {
+      const token = getAccessToken('user')
+      const message = `PIN da entrega: ${parcel.deliveryPin}`
+      const { data } = await axios.post(
+        `${import.meta.env.VITE_BASE_URL}/chat/send`,
+        {
+          subjectType: 'parcel',
+          subjectId: parcel._id,
+          message,
+          type: 'text',
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      if (socket) {
+        socket.emit('send-message', {
+          subjectType: 'parcel',
+          subjectId: parcel._id,
+          token,
+          message: data,
+        })
+      }
+      addToast('PIN enviado ao motorista pelo chat', 'success')
+      setIsChatOpen(true)
+    } catch {
+      addToast('Não foi possível enviar o PIN pelo chat', 'error')
+    } finally {
+      setSendingPin(false)
+    }
+  }
 
   return (
     <div className="h-[100dvh] flex flex-col md:flex-row bg-surface overflow-hidden">
@@ -403,27 +456,43 @@ const ParcelActive = () => {
             </div>
           )}
 
-          {/* PIN */}
+          {/* PIN — visível o tempo todo após o motorista aceitar */}
           {showPin && (
             <div
-              className={`rounded-panel border px-3 py-2.5 flex items-center gap-3 ${
+              className={`rounded-panel border px-3 py-3 space-y-2.5 ${
                 pinEmphasized
                   ? 'bg-brand-50 border-brand-200'
                   : 'bg-surface-alt border-line'
               }`}
             >
-              <div className="flex-shrink-0">
-                <p className="text-[11px] text-ink-400 uppercase tracking-wide">PIN</p>
-                <p className="text-[11px] text-ink-400">Destinatário</p>
-              </div>
-              <p
-                className={`flex-1 text-center font-bold tracking-[0.35em] leading-none ${
-                  pinEmphasized ? 'text-3xl text-brand-600' : 'text-2xl text-ink-900'
-                }`}
-              >
-                {parcel.deliveryPin}
+              <p className="text-sm text-ink-600 text-center leading-snug">
+                O recebedor da encomenda deverá informar esse PIN ao motorista
               </p>
-              <i className="ri-lock-2-line text-lg text-brand-500 flex-shrink-0" aria-hidden="true" />
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0">
+                  <p className="text-[11px] text-ink-400 uppercase tracking-wide">PIN</p>
+                  <p className="text-[11px] text-ink-400">Entrega</p>
+                </div>
+                <p
+                  className={`flex-1 text-center font-bold tracking-[0.35em] leading-none ${
+                    pinEmphasized ? 'text-3xl text-brand-600' : 'text-2xl text-ink-900'
+                  }`}
+                >
+                  {parcel.deliveryPin}
+                </p>
+                <i className="ri-lock-2-line text-lg text-brand-500 flex-shrink-0" aria-hidden="true" />
+              </div>
+              {canChat && (
+                <button
+                  type="button"
+                  disabled={sendingPin}
+                  onClick={sendPinViaChat}
+                  className="w-full min-h-[44px] rounded-panel border border-brand-200 bg-white text-brand-700 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <i className="ri-chat-smile-2-line text-lg" aria-hidden="true" />
+                  {sendingPin ? 'Enviando…' : 'Enviar PIN pelo chat'}
+                </button>
+              )}
             </div>
           )}
 
@@ -545,6 +614,7 @@ const ParcelActive = () => {
           isOpen={isChatOpen}
           onClose={() => setIsChatOpen(false)}
           currentUserType="user"
+          deliveryPin={parcel.deliveryPin}
         />
       )}
     </div>

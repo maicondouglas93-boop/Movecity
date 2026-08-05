@@ -50,8 +50,41 @@ const rideSchema = new mongoose.Schema({
 
     status: {
         type: String,
-        enum: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'finished', 'cancelled' ],
+        enum: [ 'scheduled', 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'finished', 'cancelled' ],
         default: 'requested',
+    },
+    // Preenchido quando status === 'scheduled'; despacho ocorre perto do horário.
+    scheduledAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    // Momento em que saiu de scheduled → requested (Fase 1 agendamento).
+    // Relógio de expire/pending pós-ativação; createdAt permanece o booking original.
+    activatedAt: {
+        type: Date,
+        default: null,
+    },
+    dispatchAttempts: {
+        type: Number,
+        default: 0,
+    },
+    dispatchLastError: {
+        type: String,
+        default: null,
+    },
+    // Fase 4 financeiro: cupom/wallet NÃO são liquidados no booking — só na ativação.
+    promoCodeScheduled: {
+        type: String,
+        default: null,
+    },
+    useWalletScheduled: {
+        type: Boolean,
+        default: false,
+    },
+    scheduleFinanceSettledAt: {
+        type: Date,
+        default: null,
     },
 
     duration: {
@@ -239,6 +272,9 @@ rideSchema.index({ status: 1 });
 rideSchema.index({ captain: 1 });
 rideSchema.index({ user: 1 });
 rideSchema.index({ createdAt: -1 });
+// SCH-M1 Fase 2: cron de ativação + listagens por janela.
+rideSchema.index({ status: 1, scheduledAt: 1 });
+rideSchema.index({ status: 1, activatedAt: 1 });
 
 // Um motorista só pode ter uma corrida ativa por vez (C2 da auditoria de concorrência,
 // 2026-08-02) — antes, nada impedia aceitar duas corridas simultâneas: o

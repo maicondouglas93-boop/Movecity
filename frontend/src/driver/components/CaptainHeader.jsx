@@ -11,7 +11,9 @@ import InstallAppButton from '@/shared/components/ui/InstallAppButton';
 // pontas do app consistentes.
 const NAV_LINKS = [
     { to: '/captain-home', label: 'Início', icon: 'ri-home-5-line' },
+    { to: '/captain/scheduled', label: 'Agendados', icon: 'ri-calendar-event-line' },
     { to: '/captain/rides', label: 'Corridas', icon: 'ri-car-line' },
+    { to: '/captain/parcels', label: 'Encomendas', icon: 'ri-box-3-line' },
     { to: '/captain-wallet', label: 'Carteira', icon: 'ri-wallet-3-line' },
     { to: '/captain/earnings', label: 'Ganhos', icon: 'ri-bar-chart-line' },
     { to: '/captain/profile', label: 'Perfil', icon: 'ri-user-3-line' },

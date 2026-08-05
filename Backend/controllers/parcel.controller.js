@@ -37,6 +37,8 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
                 fare: parcelWithUser.fare,
                 pickup: parcelWithUser.pickup,
                 destination: parcelWithUser.destination,
+                estimatedDistance: parcelWithUser.estimatedDistance,
+                estimatedTime: parcelWithUser.estimatedTime,
                 vehicleType: parcelWithUser.vehicleType,
                 itemName: parcelWithUser.itemName,
                 size: parcelWithUser.size,
@@ -84,6 +86,7 @@ module.exports.createParcel = async (req, res) => {
             description: body.description,
             notes: body.notes,
             paymentMethod: body.paymentMethod,
+            scheduledAt: body.scheduledAt,
             user: req.user._id,
         });
 
@@ -91,22 +94,35 @@ module.exports.createParcel = async (req, res) => {
         if (req.user?.socketId) {
             addSocketToRoom(req.user.socketId, `parcel_${parcel._id}`);
         }
-        try {
-            const offered = await dispatchParcelToCaptains(parcel, {
-                pickup: parcel.pickup,
-                vehicleType: parcel.vehicleType,
-                TRACE_ID,
-            });
-            if (offered === 0) {
-                await parcelService.cancelParcelSystem(parcel._id, 'no_providers');
-                return res.status(503).json({
-                    message: 'Nenhum prestador disponível no momento. Tente novamente em instantes.',
+
+        // Agendada: sem despacho agora — o cron ativa perto do horário.
+        if (parcel.status === 'scheduled') {
+            if (typeof notificationService.sendScheduleCreated === 'function') {
+                notificationService.sendScheduleCreated(req.user._id, {
+                    kind: 'parcel',
+                    id: parcel._id.toString(),
+                    parcelId: parcel._id.toString(),
+                    scheduledAt: parcel.scheduledAt,
                 });
             }
-        } catch (dispatchErr) {
-            console.error(`[PARCEL][${TRACE_ID}] dispatch failed:`, dispatchErr.message);
-            await parcelService.cancelParcelSystem(parcel._id, 'dispatch_failed');
-            return res.status(502).json({ message: 'Falha ao despachar encomenda. Tente novamente.' });
+        } else {
+            try {
+                const offered = await dispatchParcelToCaptains(parcel, {
+                    pickup: parcel.pickup,
+                    vehicleType: parcel.vehicleType,
+                    TRACE_ID,
+                });
+                if (offered === 0) {
+                    await parcelService.cancelParcelSystem(parcel._id, 'no_providers');
+                    return res.status(503).json({
+                        message: 'Nenhum prestador disponível no momento. Tente novamente em instantes.',
+                    });
+                }
+            } catch (dispatchErr) {
+                console.error(`[PARCEL][${TRACE_ID}] dispatch failed:`, dispatchErr.message);
+                await parcelService.cancelParcelSystem(parcel._id, 'dispatch_failed');
+                return res.status(502).json({ message: 'Falha ao despachar encomenda. Tente novamente.' });
+            }
         }
 
         const withPin = await parcelModel.findById(parcel._id).select('+deliveryPin').populate('captain');
@@ -123,6 +139,15 @@ module.exports.createParcel = async (req, res) => {
         }
         if (err.code === 'INVALID_PAYMENT_METHOD' || err.message === 'INVALID_PAYMENT_METHOD') {
             return res.status(400).json({ message: 'Forma de pagamento inválida. Use dinheiro ou Pix.' });
+        }
+        if (err.code === 'SCHEDULE_TOO_SOON') {
+            return res.status(400).json({ message: 'Agende com pelo menos 15 minutos de antecedência.' });
+        }
+        if (err.code === 'SCHEDULE_TOO_FAR') {
+            return res.status(400).json({ message: 'Agendamento máximo de 7 dias.' });
+        }
+        if (err.code === 'INVALID_SCHEDULED_AT') {
+            return res.status(400).json({ message: 'Data/hora de agendamento inválida.' });
         }
         console.error('[PARCEL] create error:', err);
         return res.status(500).json({ message: err.message });
@@ -151,6 +176,19 @@ module.exports.getPending = async (req, res) => {
     try {
         const parcels = await parcelService.getPendingParcelsForCaptain({ captain: req.captain });
         return res.status(200).json(parcels);
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.getCaptainHistory = async (req, res) => {
+    try {
+        const data = await parcelService.getCaptainParcelHistory({
+            captain: req.captain,
+            page: req.query.page,
+            limit: req.query.limit,
+        });
+        return res.status(200).json(data);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

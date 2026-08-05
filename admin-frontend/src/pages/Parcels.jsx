@@ -12,13 +12,136 @@ const STATUS_LABEL = {
   delivered: 'Entregue',
   finished: 'Finalizada',
   cancelled: 'Cancelada',
+  scheduled: 'Agendada',
 };
+
+const EMPTY_VEHICLE = {
+  baseFare: 0,
+  perKm: 0,
+  perMinute: 0,
+  minimumFare: 0,
+  maxWeightKg: 10,
+  maxPackageSize: 'medium',
+  requireDeliveryPin: true,
+  blockIncompatibleVehicle: true,
+};
+
+const normalizeSettings = (raw) => {
+  const dp = raw?.deliveryPricing || {};
+  return {
+    ...raw,
+    deliveryPricing: {
+      moto: { ...EMPTY_VEHICLE, maxWeightKg: 10, maxPackageSize: 'medium', ...dp.moto },
+      car: { ...EMPTY_VEHICLE, maxWeightKg: 50, maxPackageSize: 'large', baseFare: 10, minimumFare: 12, ...dp.car },
+    },
+  };
+};
+
+function VehicleTariffCard({ title, icon, vehicleKey, pricing, onChange }) {
+  const set = (key, value) => onChange(vehicleKey, { ...pricing, [key]: value });
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-4 space-y-3 flex-1 min-w-[280px]">
+      <h3 className="font-semibold text-text flex items-center gap-2">
+        <span aria-hidden="true">{icon}</span>
+        {title}
+      </h3>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Tarifa base (R$)</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.baseFare ?? ''}
+            onChange={(e) => set('baseFare', Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Por km (R$)</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.perKm ?? ''}
+            onChange={(e) => set('perKm', Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Por minuto (R$)</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.perMinute ?? ''}
+            onChange={(e) => set('perMinute', Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Tarifa mínima (R$)</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.minimumFare ?? ''}
+            onChange={(e) => set('minimumFare', Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Peso máximo (kg)</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.maxWeightKg ?? ''}
+            onChange={(e) => set('maxWeightKg', Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-text-muted">Tamanho máximo</span>
+          <select
+            className="border border-border rounded-lg px-3 py-2 bg-background"
+            value={pricing.maxPackageSize || 'medium'}
+            onChange={(e) => set('maxPackageSize', e.target.value)}
+          >
+            <option value="small">Pequeno</option>
+            <option value="medium">Médio</option>
+            <option value="large">Grande</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 col-span-2">
+          <input
+            type="checkbox"
+            checked={!!pricing.requireDeliveryPin}
+            onChange={(e) => set('requireDeliveryPin', e.target.checked)}
+          />
+          Exigir PIN na entrega
+        </label>
+        <label className="flex items-center gap-2 col-span-2">
+          <input
+            type="checkbox"
+            checked={!!pricing.blockIncompatibleVehicle}
+            onChange={(e) => set('blockIncompatibleVehicle', e.target.checked)}
+          />
+          Bloquear veículo incompatível (peso/tamanho)
+        </label>
+      </div>
+    </div>
+  );
+}
 
 export default function Parcels() {
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -28,9 +151,10 @@ export default function Parcels() {
         api.get('/admin/parcel-settings'),
       ]);
       setItems(listRes.data.items || []);
-      setSettings(settingsRes.data);
+      setSettings(normalizeSettings(settingsRes.data));
     } catch (err) {
       console.error(err);
+      setSaveMsg(err.response?.data?.message || 'Falha ao carregar configurações');
     } finally {
       setLoading(false);
     }
@@ -44,66 +168,73 @@ export default function Parcels() {
     load();
   };
 
+  const patchVehicle = (vehicleKey, nextPricing) => {
+    setSettings((prev) => ({
+      ...prev,
+      deliveryPricing: {
+        ...prev.deliveryPricing,
+        [vehicleKey]: nextPricing,
+      },
+    }));
+  };
+
   const saveSettings = async () => {
-    await api.put('/admin/parcel-settings', settings);
-    alert('Tarifas de encomenda salvas');
-    load();
+    if (!settings?.deliveryPricing) return;
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const { data } = await api.put('/admin/parcel-settings', {
+        deliveryPricing: settings.deliveryPricing,
+      });
+      setSettings(normalizeSettings(data));
+      setSaveMsg('Tarifas salvas. Moto e carro usam configurações independentes no cálculo.');
+    } catch (err) {
+      console.error(err);
+      setSaveMsg(err.response?.data?.message || 'Erro ao salvar (verifique se você é super_admin).');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="p-6 space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-text">Encomendas</h1>
-        <p className="text-sm text-text-muted mt-1">Listagem e tarifas do módulo de entregas</p>
+        <p className="text-sm text-text-muted mt-1">
+          Listagem e tarifas. Moto e carro têm tabelas independentes — o preço do cliente usa só a do veículo escolhido.
+        </p>
       </div>
 
-      {settings && (
-        <section className="bg-surface border border-border rounded-xl p-4 space-y-3 max-w-xl">
-          <h2 className="font-semibold">Tarifas & regras</h2>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {['baseFare', 'perKm', 'perMinute', 'minimumFare', 'motoMaxWeightKg'].map((key) => (
-              <label key={key} className="flex flex-col gap-1">
-                <span className="text-text-muted">{key}</span>
-                <input
-                  type="number"
-                  className="border border-border rounded-lg px-3 py-2"
-                  value={settings[key] ?? ''}
-                  onChange={(e) => setSettings({ ...settings, [key]: Number(e.target.value) })}
-                />
-              </label>
-            ))}
-            <label className="flex flex-col gap-1">
-              <span className="text-text-muted">motoMaxSize</span>
-              <select
-                className="border border-border rounded-lg px-3 py-2"
-                value={settings.motoMaxSize || 'medium'}
-                onChange={(e) => setSettings({ ...settings, motoMaxSize: e.target.value })}
-              >
-                <option value="small">small</option>
-                <option value="medium">medium</option>
-                <option value="large">large</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 col-span-2">
-              <input
-                type="checkbox"
-                checked={!!settings.requireDeliveryPin}
-                onChange={(e) => setSettings({ ...settings, requireDeliveryPin: e.target.checked })}
-              />
-              Exigir PIN na entrega
-            </label>
-            <label className="flex items-center gap-2 col-span-2">
-              <input
-                type="checkbox"
-                checked={!!settings.blockIncompatibleMoto}
-                onChange={(e) => setSettings({ ...settings, blockIncompatibleMoto: e.target.checked })}
-              />
-              Bloquear moto incompatível (tamanho/peso)
-            </label>
+      {settings?.deliveryPricing && (
+        <section className="space-y-3">
+          <h2 className="font-semibold text-lg">Tarifas & regras por veículo</h2>
+          <div className="flex flex-wrap gap-4">
+            <VehicleTariffCard
+              title="Entregas de Moto"
+              icon="🏍️"
+              vehicleKey="moto"
+              pricing={settings.deliveryPricing.moto}
+              onChange={patchVehicle}
+            />
+            <VehicleTariffCard
+              title="Entregas de Carro"
+              icon="🚗"
+              vehicleKey="car"
+              pricing={settings.deliveryPricing.car}
+              onChange={patchVehicle}
+            />
           </div>
-          <button type="button" onClick={saveSettings} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium">
-            Salvar tarifas
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={saveSettings}
+              className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-50"
+            >
+              {saving ? 'Salvando…' : 'Salvar tarifas'}
+            </button>
+            {saveMsg && <p className="text-sm text-text-muted">{saveMsg}</p>}
+          </div>
         </section>
       )}
 

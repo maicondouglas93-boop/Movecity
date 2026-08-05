@@ -3,6 +3,11 @@ const VehicleCategory = require('../models/vehicleCategory.model');
 const PricingRule = require('../models/pricingRule.model');
 const GlobalSetting = require('../models/globalSetting.model');
 const Coupon = require('../models/coupon.model');
+const {
+    resolvePlatformCommission,
+    ensurePlatformCommissions,
+    DEFAULT_COMMISSION,
+} = require('../utils/platformCommission');
 
 class PricingEngine {
     
@@ -14,31 +19,57 @@ class PricingEngine {
      * tarifa/comissão feitas pelo admin enquanto a corrida já estava em andamento.
      * @param {Object} params
      * @param {String} params.vehicleType Nome da categoria (ex: 'car')
+     * @param {String} [params.serviceKind='ride'] 'ride' | 'presential'
      * @returns {Object} snapshot pronto pra passar como `configSnapshot` em calculateFare
      */
-    static async buildConfigSnapshot({ vehicleType }) {
+    static async buildConfigSnapshot({ vehicleType, serviceKind = 'ride' }) {
         const [tariffSetting, globalSetting, category, rules] = await PricingEngine._fetchLiveConfig(vehicleType);
 
         if (!category) {
             throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
         }
 
+        const gsPlain = globalSetting
+            ? (typeof globalSetting.toObject === 'function' ? globalSetting.toObject() : { ...globalSetting })
+            : {
+                platformCommission: DEFAULT_COMMISSION,
+                platformCommissions: {
+                    ride: DEFAULT_COMMISSION,
+                    presential: DEFAULT_COMMISSION,
+                    parcel: DEFAULT_COMMISSION,
+                },
+                cardFeePercent: 0,
+                cardFeeFixed: 0,
+            };
+
+        const kind = serviceKind === 'presential' ? 'presential' : 'ride';
+        const commissionPercent = resolvePlatformCommission(gsPlain, kind);
+
         return {
             tariffSetting: tariffSetting ? tariffSetting.toObject() : {},
-            globalSetting: globalSetting ? globalSetting.toObject() : { platformCommission: 20, cardFeePercent: 0, cardFeeFixed: 0 },
+            globalSetting: gsPlain,
             category: category.toObject(),
             rules: rules.map(r => r.toObject()),
+            serviceKind: kind,
+            commissionPercent,
             capturedAt: new Date()
         };
     }
 
     static async _fetchLiveConfig(vehicleType) {
-        return Promise.all([
+        const [tariffSetting, globalSettingRaw, category, rules] = await Promise.all([
             TariffSetting.findOne(),
             GlobalSetting.findOne(),
             VehicleCategory.findOne({ name: vehicleType, isActive: true }),
             PricingRule.find({ isActive: true }).sort({ priority: 1 })
         ]);
+
+        let globalSetting = globalSettingRaw;
+        if (globalSetting) {
+            globalSetting = await ensurePlatformCommissions(globalSetting);
+        }
+
+        return [tariffSetting, globalSetting, category, rules];
     }
 
     /**
@@ -50,14 +81,25 @@ class PricingEngine {
      * @param {String} params.paymentMethod (opcional) 'cash', 'card', 'pix'
      * @param {String} params.couponCode (opcional) Código do cupom
      * @param {Date} params.requestDate (opcional) Data da solicitação
+     * @param {String} [params.serviceKind='ride'] 'ride' | 'presential' — ignorado se
+     *   configSnapshot já trouxer serviceKind congelado.
      * @param {Object} params.configSnapshot (opcional) Snapshot de `buildConfigSnapshot` —
      *   quando presente, usa essa configuração congelada em vez de consultar o banco de
      *   novo (P2.2 da auditoria de concorrência). Ausente (padrão): comportamento de
      *   sempre, consulta a configuração vigente — usado pra cotações (`getFare`) e pra
      *   montar o snapshot inicial em `createRide`.
-     * @returns {Object} { finalFare, fareBreakdown, commissionAmount }
+     * @returns {Object} { finalFare, fareBreakdown, commissionAmount, commissionPercent }
      */
-    static async calculateFare({ distance, time, vehicleType, paymentMethod = 'cash', couponCode = null, requestDate = new Date(), configSnapshot = null }) {
+    static async calculateFare({
+        distance,
+        time,
+        vehicleType,
+        paymentMethod = 'cash',
+        couponCode = null,
+        requestDate = new Date(),
+        configSnapshot = null,
+        serviceKind = 'ride',
+    }) {
 
         // 1. Carregar Configurações Globais e do Veículo — do snapshot congelado, se vier
         // um, senão consulta o banco (comportamento de sempre).
@@ -69,12 +111,27 @@ class PricingEngine {
         }
 
         tariffSetting = tariffSetting || {};
-        globalSetting = globalSetting || { platformCommission: 20, cardFeePercent: 0, cardFeeFixed: 0 };
+        globalSetting = globalSetting || {
+            platformCommission: DEFAULT_COMMISSION,
+            platformCommissions: {
+                ride: DEFAULT_COMMISSION,
+                presential: DEFAULT_COMMISSION,
+                parcel: DEFAULT_COMMISSION,
+            },
+            cardFeePercent: 0,
+            cardFeeFixed: 0,
+        };
         rules = rules || [];
 
         if (!category) {
             throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
         }
+
+        const kind = (configSnapshot && configSnapshot.serviceKind)
+            || (serviceKind === 'presential' ? 'presential' : 'ride');
+        const commissionPercent = (configSnapshot && Number.isFinite(Number(configSnapshot.commissionPercent)))
+            ? Number(configSnapshot.commissionPercent)
+            : resolvePlatformCommission(globalSetting, kind);
 
         // Setup variáveis do breakdown
         const breakdown = {
@@ -86,6 +143,8 @@ class PricingEngine {
             cardFee: 0,
             couponDiscount: 0,
             platformCommission: 0,
+            commissionPercent,
+            serviceKind: kind,
             finalFare: 0,
             driverNetEarnings: 0
         };
@@ -157,7 +216,7 @@ class PricingEngine {
 
         // A comissão da plataforma incide sobre o valor SEM a taxa do cartão e SEM descontos do cupom
         const baseForCommission = subtotal - breakdown.cardFee;
-        breakdown.platformCommission = baseForCommission * (globalSetting.platformCommission / 100);
+        breakdown.platformCommission = baseForCommission * (commissionPercent / 100);
 
         // 7. Cupons de Desconto
         if (couponCode) {
@@ -203,6 +262,7 @@ class PricingEngine {
         return {
             finalFare: breakdown.finalFare,
             commissionAmount: breakdown.platformCommission,
+            commissionPercent,
             fareBreakdown: breakdown
         };
     }

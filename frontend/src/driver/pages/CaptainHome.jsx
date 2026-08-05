@@ -56,6 +56,7 @@ const CaptainHome = () => {
     const [ pendingRides, setPendingRides ] = useState([])
     const [ parcelOffer, setParcelOffer ] = useState(null)
     const [ parcelPopupOpen, setParcelPopupOpen ] = useState(false)
+    const [ scheduledUpcoming, setScheduledUpcoming ] = useState([])
 
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
@@ -215,6 +216,18 @@ const CaptainHome = () => {
     const parcelOfferRef = useRef(parcelOffer)
     useEffect(() => { parcelOfferRef.current = parcelOffer }, [parcelOffer])
 
+    const syncScheduledUpcoming = useCallback(async () => {
+        try {
+            const { data } = await axios.get(
+                `${import.meta.env.VITE_BASE_URL}/captains/scheduled-upcoming`,
+                { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } },
+            )
+            setScheduledUpcoming(data.upcoming || [])
+        } catch {
+            /* ignore */
+        }
+    }, [])
+
     const syncPendingParcels = useCallback(async () => {
         if (captainRideRef.current || captainParcelRef.current) return
         try {
@@ -244,6 +257,7 @@ const CaptainHome = () => {
                 // Fase B: reconexão pode ter perdido eventos 'new-ride'/'new-parcel'.
                 syncPendingRides()
                 syncPendingParcels()
+                syncScheduledUpcoming()
             })
         }
 
@@ -345,6 +359,7 @@ const CaptainHome = () => {
         }
 
         const handleNewParcel = (data) => {
+            const TRACE_ID = `Parcel:${data._id}`
             if (captainRideRef.current || rideRef.current || captainParcelRef.current) return
             setParcelOffer(data)
             setParcelPopupOpen(true)
@@ -355,6 +370,17 @@ const CaptainHome = () => {
             } catch { /* ignore */ }
             if (navigator.vibrate) {
                 navigator.vibrate([500, 200, 500])
+            }
+            addToast(
+                `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · R$ ${Number(data.fare || 0).toFixed(2)}`,
+                'ride',
+            )
+            if ('Notification' in window && Notification.permission === 'granted') {
+                showBrowserNotification(
+                    'Nova encomenda disponível 📦',
+                    `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
+                )
+                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
             }
         }
 
@@ -382,7 +408,7 @@ const CaptainHome = () => {
             socket.off('new-parcel', handleNewParcel)
             socket.off('parcel-taken', handleParcelTaken)
         }
-    }, [captain, socket, addToast, syncPendingParcels])
+    }, [captain, socket, addToast, syncPendingParcels, syncScheduledUpcoming])
 
     // --- Fase B: sincronização das corridas/encomendas pendentes ---
     // Push (socket) é efêmero: se o app estava fechado, minimizado ou sem
@@ -393,16 +419,19 @@ const CaptainHome = () => {
 
         syncPendingRides()
         syncPendingParcels()
+        syncScheduledUpcoming()
 
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
                 syncPendingRides()
                 syncPendingParcels()
+                syncScheduledUpcoming()
             }
         }
         const handleOnline = () => {
             syncPendingRides()
             syncPendingParcels()
+            syncScheduledUpcoming()
         }
 
         document.addEventListener('visibilitychange', handleVisibility)
@@ -414,7 +443,7 @@ const CaptainHome = () => {
             window.removeEventListener('online', handleOnline)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [captain?._id, syncPendingParcels])
+    }, [captain?._id, syncPendingParcels, syncScheduledUpcoming])
 
     // Heads-up (2026-08-04): deep link da notificação (?rideOffer=<id>). Abre o popup
     // da oferta real consultando o backend — nunca confia só no rideId do push.
@@ -633,7 +662,7 @@ const CaptainHome = () => {
                     <div className='h-[40vh] relative shadow-raised z-panel'>
                         <LiveTracking ride={ride} showSearchRadius={true} />
                     </div>
-                    <div className='h-[60vh] p-4 overflow-y-auto overscroll-y-contain pb-24'>
+                    <div className='h-[60vh] p-4 overflow-y-auto overscroll-y-contain pb-24 bg-surface-alt'>
                         {/* Fase B da experiência de corrida ativa (2026-08-03): card
                             persistente de corrida pendente. Diferente do popup (que o
                             motorista pode ignorar ou perder), este card fica na Home
@@ -736,37 +765,98 @@ const CaptainHome = () => {
                             </div>
                         )}
 
-                        {!captainRide && !captainParcel && (
-                            <div className="mb-4">
-                                <p className="text-xs font-semibold tracking-wide text-ink-400 uppercase mb-2">Corridas</p>
-                                <div className="space-y-2">
-                                    <div className="bg-surface border border-line rounded-panel p-4">
-                                        <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
-                                            <i className="ri-taxi-fill text-brand-500" aria-hidden="true" />
-                                            Corrida pelo MoveCity
-                                        </p>
-                                        <p className="text-xs text-ink-600 mt-1">
-                                            Aguarde solicitações de passageiros próximos. Fique online para receber ofertas.
+                        <CaptainDetails>
+                            {!captainRide && !captainParcel && (
+                                <>
+                                    {/* GO solto — corrida presencial, sem card e sem vizinhos */}
+                                    <div className="flex flex-col items-center py-1 gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => navigate('/captain-presential')}
+                                            aria-label="Iniciar uma corrida presencial"
+                                            className="relative w-16 h-16 rounded-full bg-brand-500 text-white flex items-center justify-center shadow-floating active:scale-95 animate-go-pulse"
+                                        >
+                                            <span
+                                                className="absolute inset-0 rounded-full bg-brand-500 animate-go-ring pointer-events-none"
+                                                aria-hidden="true"
+                                            />
+                                            <span className="relative text-lg font-black tracking-wide">GO</span>
+                                        </button>
+                                        <p className="text-xs font-semibold text-ink-600">
+                                            Iniciar uma corrida
                                         </p>
                                     </div>
+
+                                    <div>
+                                        <p className="text-[11px] font-bold tracking-wider text-ink-400 uppercase mb-2.5 px-0.5">
+                                            Escolha o modo
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div
+                                                className="relative flex flex-col bg-white border-2 border-brand-500 rounded-2xl p-2.5 min-h-[120px] shadow-raised"
+                                                aria-current="true"
+                                            >
+                                                <span
+                                                    className="absolute top-2 right-2 w-5 h-5 rounded-full bg-brand-500 text-white flex items-center justify-center"
+                                                    aria-hidden="true"
+                                                >
+                                                    <i className="ri-check-line text-xs leading-none" />
+                                                </span>
+                                                <i className="ri-taxi-line text-lg text-[#0B3D2E]" aria-hidden="true" />
+                                                <p className="text-[12px] font-bold text-ink-900 mt-2 leading-snug">
+                                                    Corrida pelo MoveCity
+                                                </p>
+                                                <p className="text-[10px] text-ink-600 mt-1 leading-snug">
+                                                    Receba solicitações de passageiros próximos.
+                                                </p>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => navigate('/captain/parcels')}
+                                                className="relative flex flex-col bg-white border border-line rounded-2xl p-2.5 min-h-[120px] shadow-raised text-left active:scale-[0.98] transition-transform"
+                                            >
+                                                <i className="ri-user-star-line text-lg text-[#0B3D2E]" aria-hidden="true" />
+                                                <p className="text-[12px] font-bold text-ink-900 mt-2 leading-snug">
+                                                    Encomendas
+                                                </p>
+                                                <p className="text-[10px] text-ink-600 mt-1 leading-snug">
+                                                    Faça entregas e coletas para seus clientes.
+                                                </p>
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <button
                                         type="button"
-                                        onClick={() => navigate('/captain-presential')}
-                                        className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+                                        onClick={() => navigate('/captain/scheduled')}
+                                        className="w-full text-left bg-white border border-line rounded-2xl p-3.5 active:scale-[0.99] transition-transform shadow-raised"
                                     >
-                                        <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
-                                            <i className="ri-user-shared-fill text-brand-500" aria-hidden="true" />
-                                            Corrida presencial
-                                        </p>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+                                                <i className="ri-calendar-event-line text-brand-600" aria-hidden="true" />
+                                                Serviços agendados
+                                            </p>
+                                            {scheduledUpcoming.length > 0 && (
+                                                <span className="text-xs font-bold bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full">
+                                                    {scheduledUpcoming.length}
+                                                </span>
+                                            )}
+                                        </div>
                                         <p className="text-xs text-ink-600 mt-1">
-                                            Passageiro já está com você — inicia sem despacho para outros motoristas.
+                                            {scheduledUpcoming.length > 0
+                                                ? `Próximo: ${new Date(scheduledUpcoming[0].scheduledAt).toLocaleString('pt-BR', {
+                                                    day: '2-digit',
+                                                    month: 'short',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                })} · ${scheduledUpcoming[0].kind === 'parcel' ? 'encomenda' : 'corrida'}`
+                                                : 'Prévia filtrada (raio e veículo). Aceite só na oferta real.'}
                                         </p>
                                     </button>
-                                </div>
-                            </div>
-                        )}
-
-                        <CaptainDetails />
+                                </>
+                            )}
+                        </CaptainDetails>
                     </div>
                 </>
             )}

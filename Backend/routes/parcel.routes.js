@@ -29,12 +29,14 @@ router.post('/create',
     body('description').optional().isString(),
     body('notes').optional().isString(),
     body('paymentMethod').optional().isIn(['cash', 'pix']),
+    body('scheduledAt').optional({ values: 'null' }).isISO8601().withMessage('scheduledAt must be ISO8601'),
     parcelController.createParcel
 );
 
 router.get('/current', authMiddleware.authUser, parcelController.getCurrent);
 router.get('/captain-current', authMiddleware.authCaptain, parcelController.getCurrentForCaptain);
 router.get('/pending', authMiddleware.authCaptain, parcelController.getPending);
+router.get('/captain-history', authMiddleware.authCaptain, parcelController.getCaptainHistory);
 
 router.post('/review',
     authMiddleware.authUser,

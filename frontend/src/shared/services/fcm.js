@@ -75,8 +75,14 @@ export const getFcmRegistration = () => {
     if (!('serviceWorker' in navigator)) return Promise.resolve(null);
     if (!registrationPromise) {
         registrationPromise = navigator.serviceWorker
-            .register(FCM_SW_URL, { scope: FCM_SW_SCOPE })
-            .then(waitForActive)
+            .register(FCM_SW_URL, { scope: FCM_SW_SCOPE, updateViaCache: 'none' })
+            .then(async (registration) => {
+                // Garante que o SW novo (sem Aceitar/Recusar) substitui o antigo em cache.
+                try {
+                    await registration.update();
+                } catch (_) { /* ignore */ }
+                return waitForActive(registration);
+            })
             .catch((error) => {
                 console.warn('Falha ao registrar o Service Worker de push:', error.message);
                 registrationPromise = null;

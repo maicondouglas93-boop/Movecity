@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
@@ -9,6 +9,8 @@ import Button from '@/shared/components/ui/Button'
 import Card from '@/shared/components/ui/Card'
 import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
 import DetailRow from '@/shared/components/ui/DetailRow'
+import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
+import { LocationContext } from '@/shared/contexts/LocationContext'
 
 const SIZE_OPTIONS = [
   { id: 'small', label: 'Pequeno', hint: 'Envelope, documentos' },
@@ -29,10 +31,18 @@ const fieldClass =
 
 const labelClass = 'block text-sm font-medium text-ink-600 mb-1.5'
 
+const toLocalInputValue = (date) => {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 const ParcelWizard = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  const scheduleMode = Boolean(location.state?.scheduleMode)
   const { user } = useContext(UserDataContext)
   const { setUserParcel, userRide, userParcel } = useContext(RideContext)
+  const { userLocation } = useContext(LocationContext)
   const { addToast } = useToast()
 
   const [loading, setLoading] = useState(false)
@@ -40,6 +50,7 @@ const ParcelWizard = () => {
   const [fareInfo, setFareInfo] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const fareTimer = useRef(null)
+  const minSchedule = new Date(Date.now() + 15 * 60 * 1000)
 
   const [form, setForm] = useState({
     pickup: '',
@@ -57,18 +68,19 @@ const ParcelWizard = () => {
     },
     recipient: { name: '', phone: '' },
     paymentMethod: 'cash',
+    scheduledAt: scheduleMode ? toLocalInputValue(minSchedule) : '',
   })
 
   useEffect(() => {
-    if (userRide) {
+    if (!scheduleMode && userRide) {
       addToast('Finalize a corrida atual antes de pedir uma encomenda.', 'info')
       navigate('/home', { replace: true })
       return
     }
-    if (userParcel) {
+    if (!scheduleMode && userParcel) {
       navigate('/encomenda/ativa', { state: { parcel: userParcel }, replace: true })
     }
-  }, [userRide, userParcel, navigate, addToast])
+  }, [userRide, userParcel, navigate, addToast, scheduleMode])
 
   const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }))
   const setNested = (key, sub, value) =>
@@ -95,7 +107,11 @@ const ParcelWizard = () => {
       })
       setFareInfo(data)
       if (data.blocked) {
-        addToast('Este item não cabe na moto — escolha carro.', 'error')
+        const msg = data.warnings?.[0]
+          || (form.vehicleType === 'moto'
+            ? 'Este item não cabe na moto — escolha carro.'
+            : 'Este item não cabe no carro — escolha outro veículo ou reduza o item.')
+        addToast(msg, 'error')
       }
     } catch (err) {
       setFareInfo(null)
@@ -132,8 +148,19 @@ const ParcelWizard = () => {
     if (form.recipient.name.trim().length < 2 || form.recipient.phone.trim().length < 8) {
       return 'Complete os dados de quem recebe'
     }
-    if (fareInfo?.blocked) return 'Troque para carro para continuar com este item'
+    if (fareInfo?.blocked) {
+      return form.vehicleType === 'moto'
+        ? 'Este item não cabe na moto — escolha carro ou reduza peso/tamanho.'
+        : 'Este item não cabe no carro — reduza peso/tamanho ou altere o veículo.';
+    }
     if (!fareInfo?.fare) return 'Aguarde o cálculo do preço'
+    if (scheduleMode) {
+      if (!form.scheduledAt) return 'Escolha data e horário'
+      const at = new Date(form.scheduledAt)
+      if (Number.isNaN(at.getTime()) || at.getTime() < Date.now() + 14 * 60 * 1000) {
+        return 'Agende com pelo menos 15 minutos de antecedência'
+      }
+    }
     return null
   }
 
@@ -143,7 +170,7 @@ const ParcelWizard = () => {
 
     setLoading(true)
     try {
-      const parcel = await createParcel({
+      const payload = {
         pickup: form.pickup.trim(),
         destination: form.destination.trim(),
         vehicleType: form.vehicleType,
@@ -162,7 +189,16 @@ const ParcelWizard = () => {
           phone: form.recipient.phone.trim(),
         },
         paymentMethod: form.paymentMethod,
-      })
+      }
+      if (scheduleMode && form.scheduledAt) {
+        payload.scheduledAt = new Date(form.scheduledAt).toISOString()
+      }
+      const parcel = await createParcel(payload)
+      if (scheduleMode || parcel.status === 'scheduled') {
+        addToast('Encomenda agendada!', 'success')
+        navigate('/scheduled')
+        return
+      }
       setUserParcel(parcel)
       addToast('Encomenda solicitada!', 'success')
       navigate('/encomenda/ativa', { state: { parcel } })
@@ -178,44 +214,42 @@ const ParcelWizard = () => {
 
   return (
     <div className="min-h-screen bg-surface-alt flex flex-col">
-      <PageHeader title="Nova encomenda" onBack={() => navigate('/home')} />
+      <PageHeader
+        title={scheduleMode ? 'Agendar encomenda' : 'Nova encomenda'}
+        onBack={() => navigate(scheduleMode ? '/agendar' : '/home')}
+      />
 
       <main className="flex-1 w-full max-w-xl mx-auto px-4 pt-4 pb-36 space-y-4">
         <p className="text-sm text-ink-400 px-0.5">
-          Informe coleta, entrega e o que precisa enviar. O preço aparece ao preencher a rota.
+          {scheduleMode
+            ? 'Informe rota, item e o horário. Começamos a buscar motorista cerca de 10 minutos antes do horário.'
+            : 'Informe coleta, entrega e o que precisa enviar. O preço aparece ao preencher a rota.'}
         </p>
 
         {/* Rota */}
         <Card shadow="raised" className="space-y-4">
           <h2 className="text-base font-semibold text-ink-900">Rota</h2>
-          <div>
-            <label htmlFor="parcel-pickup" className={labelClass}>Coleta</label>
-            <div className="relative">
-              <i className="ri-map-pin-user-fill absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-500" aria-hidden="true" />
-              <input
-                id="parcel-pickup"
-                className={`${fieldClass} pl-10`}
-                placeholder="Ex.: avenida Antônio Florêncio Alvim, 754"
-                value={form.pickup}
-                onChange={(e) => setField('pickup', e.target.value)}
-                autoComplete="street-address"
-              />
-            </div>
-          </div>
-          <div>
-            <label htmlFor="parcel-destination" className={labelClass}>Entrega</label>
-            <div className="relative">
-              <i className="ri-map-pin-2-fill absolute left-3.5 top-1/2 -translate-y-1/2 text-danger-500" aria-hidden="true" />
-              <input
-                id="parcel-destination"
-                className={`${fieldClass} pl-10`}
-                placeholder="Ex.: travessa João Caetano, 99"
-                value={form.destination}
-                onChange={(e) => setField('destination', e.target.value)}
-                autoComplete="street-address"
-              />
-            </div>
-          </div>
+          <AddressAutocomplete
+            id="parcel-pickup"
+            label="Coleta"
+            value={form.pickup}
+            onChange={(v) => setField('pickup', v)}
+            placeholder="Ex.: avenida Antônio Florêncio Alvim, 754"
+            biasLocation={userLocation}
+            icon="ri-map-pin-user-fill"
+            inputClassName={`${fieldClass} pl-10 pr-10`}
+          />
+          <AddressAutocomplete
+            id="parcel-destination"
+            label="Entrega"
+            value={form.destination}
+            onChange={(v) => setField('destination', v)}
+            placeholder="Ex.: travessa João Caetano, 99"
+            biasLocation={userLocation}
+            icon="ri-map-pin-2-fill"
+            iconClassName="text-danger-500"
+            inputClassName={`${fieldClass} pl-10 pr-10`}
+          />
         </Card>
 
         {/* Veículo */}
@@ -405,6 +439,22 @@ const ParcelWizard = () => {
           </div>
         </Card>
 
+        {scheduleMode && (
+          <Card shadow="raised" className="space-y-2">
+            <h2 className="text-base font-semibold text-ink-900">Data e horário</h2>
+            <input
+              type="datetime-local"
+              className={fieldClass}
+              min={toLocalInputValue(minSchedule)}
+              value={form.scheduledAt}
+              onChange={(e) => setField('scheduledAt', e.target.value)}
+            />
+            <p className="text-xs text-ink-400">
+              Mínimo 15 minutos · máximo 7 dias. Busca inicia ~10 min antes.
+            </p>
+          </Card>
+        )}
+
         <Card shadow="raised" className="space-y-3">
           <h2 className="text-base font-semibold text-ink-900">Pagamento ao prestador</h2>
           <p className="text-sm text-ink-500">Você paga diretamente no momento da entrega.</p>
@@ -483,7 +533,7 @@ const ParcelWizard = () => {
             disabled={loading || fareLoading || fareInfo?.blocked}
             onClick={confirm}
           >
-            Solicitar entrega
+            {scheduleMode ? 'Confirmar agendamento' : 'Solicitar entrega'}
             {fareInfo?.fare != null && !fareLoading ? (
               <span className="opacity-90 font-medium">
                 · R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}

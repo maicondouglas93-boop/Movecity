@@ -955,20 +955,44 @@ module.exports.getPayouts = async (page = 1, limit = 10, filters = {}) => {
             query.createdAt = { $gte: startDate };
         }
     }
-    
-    // Simplification for search: we'd ideally use aggregation to search inside populated captain.
-    // We'll leave search out of the mongoose query here and let frontend filter if complex, or just use exact ID.
+
+    const search = String(filters.search || '').trim();
+    if (search) {
+        if (mongoose.Types.ObjectId.isValid(search) && String(new mongoose.Types.ObjectId(search)) === search) {
+            query._id = search;
+        } else {
+            const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            const captains = await captainModel.find({
+                $or: [
+                    { 'fullname.firstname': rx },
+                    { 'fullname.lastname': rx },
+                    { email: rx },
+                    { phone: rx },
+                    { pixKey: rx },
+                ],
+            }).select('_id').limit(100);
+            const captainIds = captains.map((c) => c._id);
+            query.$or = [
+                { captainId: { $in: captainIds } },
+                { 'bankDetailsSnapshot.pixKey': rx },
+            ];
+        }
+    }
 
     const payouts = await payoutModel.find(query)
         .populate('captainId', 'fullname email phone pixKey status isBlocked approvalStatus earnings')
         .skip(skip).limit(limit).sort({ createdAt: -1 });
-        
+
     const total = await payoutModel.countDocuments(query);
-    
-    // Aggregations for summary
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
+
+    // Aggregations for summary (repasses)
     const [pendingSum] = await payoutModel.aggregate([{ $match: { status: { $in: ['requested', 'in_analysis', 'approved', 'processing'] } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
-    const [paidTodaySum] = await payoutModel.aggregate([{ $match: { status: 'paid', paidAt: { $gte: new Date(new Date().setHours(0,0,0,0)) } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
-    const [paidMonthSum] = await payoutModel.aggregate([{ $match: { status: 'paid', paidAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
+    const [paidTodaySum] = await payoutModel.aggregate([{ $match: { status: 'paid', paidAt: { $gte: startOfToday } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
+    const [paidMonthSum] = await payoutModel.aggregate([{ $match: { status: 'paid', paidAt: { $gte: startOfMonth } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
     const rejectedCount = await payoutModel.countDocuments({ status: 'rejected' });
 
     // Bloco H (2026-08-02): payoutDeadlineDays era salvo em globalSetting e nunca lido
@@ -983,18 +1007,101 @@ module.exports.getPayouts = async (page = 1, limit = 10, filters = {}) => {
         createdAt: { $lt: deadlineDate }
     });
 
+    // Saldo da plataforma = comissões já liquidadas na carteira dos motoristas
+    // (lançamentos type:commission). Antes ficava null hardcoded ("Não disponível").
+    const [commissionAll] = await transactionModel.aggregate([
+        { $match: { type: 'commission', status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    const [commissionTodayAgg] = await transactionModel.aggregate([
+        { $match: { type: 'commission', status: 'completed', createdAt: { $gte: startOfToday } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    const [commissionMonthAgg] = await transactionModel.aggregate([
+        { $match: { type: 'commission', status: 'completed', createdAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+
+    // Série dos últimos 7 dias: comissões recebidas + saques pagos (gráfico real).
+    const chartStart = new Date(startOfToday);
+    chartStart.setDate(chartStart.getDate() - 6);
+    const [commissionByDay, payoutsByDay] = await Promise.all([
+        transactionModel.aggregate([
+            {
+                $match: {
+                    type: 'commission',
+                    status: 'completed',
+                    createdAt: { $gte: chartStart },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'America/Sao_Paulo' },
+                    },
+                    total: { $sum: '$amount' },
+                },
+            },
+        ]),
+        payoutModel.aggregate([
+            {
+                $match: {
+                    status: 'paid',
+                    paidAt: { $gte: chartStart },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: '%Y-%m-%d', date: '$paidAt', timezone: 'America/Sao_Paulo' },
+                    },
+                    total: { $sum: '$amount' },
+                },
+            },
+        ]),
+    ]);
+
+    const commissionMap = Object.fromEntries(commissionByDay.map((d) => [d._id, d.total]));
+    const payoutMap = Object.fromEntries(payoutsByDay.map((d) => [d._id, d.total]));
+    const weekdayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const chartSeries = [];
+    const keyFmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+    for (let i = 0; i < 7; i += 1) {
+        const day = new Date(chartStart);
+        day.setDate(chartStart.getDate() + i);
+        const key = keyFmt.format(day);
+        chartSeries.push({
+            name: weekdayLabels[day.getDay()],
+            date: key,
+            commission: Math.round((commissionMap[key] || 0) * 100) / 100,
+            payouts: Math.round((payoutMap[key] || 0) * 100) / 100,
+            // valor principal do gráfico = comissão do dia (receita da plataforma)
+            valor: Math.round((commissionMap[key] || 0) * 100) / 100,
+        });
+    }
+
+    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
     return {
         payouts,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / limit) || 1,
+        chartSeries,
         summary: {
-            pendingAmount: pendingSum?.total || 0,
-            paidToday: paidTodaySum?.total || 0,
-            paidMonth: paidMonthSum?.total || 0,
+            pendingAmount: round2(pendingSum?.total),
+            paidToday: round2(paidTodaySum?.total),
+            paidMonth: round2(paidMonthSum?.total),
             rejectedCount,
             overdueCount,
             payoutDeadlineDays: deadlineDays,
-            platformBalance: null // Not available yet
+            platformBalance: round2(commissionAll?.total),
+            commissionToday: round2(commissionTodayAgg?.total),
+            commissionMonth: round2(commissionMonthAgg?.total),
         }
     };
 };
@@ -1209,11 +1316,28 @@ module.exports.getCaptainFinancialHistory = async (captainId) => {
 const tariffSettingModel = require('../models/tariffSetting.model');
 const vehicleCategoryModel = require('../models/vehicleCategory.model');
 const globalSettingModel = require('../models/globalSetting.model');
+const {
+    ensurePlatformCommissions,
+    normalizePlatformCommissionsPatch,
+} = require('../utils/platformCommission');
 
 // Campos de globalSetting expostos junto com tariffSetting na aba "Globais" do painel.
 // Antes o simulador de tarifas usava um platformCommission=15 fixo no front porque o
 // admin não tinha como ver/editar o valor real (20%) usado no cálculo.
-const GLOBAL_SETTING_FIELDS = ['platformCommission', 'cardFeePercent', 'cardFeeFixed'];
+const GLOBAL_SETTING_FIELDS = ['platformCommission', 'platformCommissions', 'cardFeePercent', 'cardFeeFixed'];
+
+function mergeGlobalFieldsIntoTariff(merged, globalSetting) {
+    if (!globalSetting) return;
+    GLOBAL_SETTING_FIELDS.forEach((field) => {
+        if (field === 'platformCommissions') {
+            merged.platformCommissions = globalSetting.platformCommissions?.toObject?.()
+                || globalSetting.platformCommissions
+                || { ride: globalSetting.platformCommission, presential: globalSetting.platformCommission, parcel: globalSetting.platformCommission };
+        } else {
+            merged[field] = globalSetting[field];
+        }
+    });
+}
 
 module.exports.getTariffs = async () => {
     let tariff = await tariffSettingModel.findOne();
@@ -1223,13 +1347,16 @@ module.exports.getTariffs = async () => {
 
     let globalSetting = await globalSettingModel.findOne();
     if (!globalSetting) {
-        globalSetting = await globalSettingModel.create({});
+        globalSetting = await globalSettingModel.create({
+            platformCommission: 20,
+            platformCommissions: { ride: 20, presential: 20, parcel: 20 },
+        });
+    } else {
+        globalSetting = await ensurePlatformCommissions(globalSetting);
     }
 
     const merged = tariff.toObject();
-    GLOBAL_SETTING_FIELDS.forEach(field => {
-        merged[field] = globalSetting[field];
-    });
+    mergeGlobalFieldsIntoTariff(merged, globalSetting);
     // Bloco E (2026-08-02, achado C1): o painel mescla dois documentos num só objeto
     // pra tela de "Tarifas Globais" — o admin precisa devolver a versão de CADA um
     // separadamente no PUT, porque updateGlobalSettings vai checar os dois.
@@ -1273,20 +1400,48 @@ module.exports.updateGlobalSettings = async (data) => {
     }
 
     let globalSetting = await globalSettingModel.findOne();
-    if (Object.keys(globalFields).length > 0) {
+    const hasCommissionPatch = globalFields.platformCommissions !== undefined
+        || globalFields.platformCommission !== undefined;
+    const hasOtherGlobal = globalFields.cardFeePercent !== undefined
+        || globalFields.cardFeeFixed !== undefined;
+
+    if (hasCommissionPatch || hasOtherGlobal) {
         if (globalSetting) {
             assertVersionMatches(__globalSettingVersion, globalSetting.__v, 'As configurações financeiras globais foram alteradas por outro administrador enquanto você editava.');
-            Object.assign(globalSetting, globalFields);
+            globalSetting = await ensurePlatformCommissions(globalSetting);
+
+            if (hasCommissionPatch) {
+                const nextCommissions = normalizePlatformCommissionsPatch(globalFields, globalSetting);
+                globalSetting.platformCommissions = nextCommissions;
+                globalSetting.platformCommission = nextCommissions.ride;
+                globalSetting.markModified('platformCommissions');
+            }
+            if (globalFields.cardFeePercent !== undefined) {
+                globalSetting.cardFeePercent = Number(globalFields.cardFeePercent);
+            }
+            if (globalFields.cardFeeFixed !== undefined) {
+                globalSetting.cardFeeFixed = Number(globalFields.cardFeeFixed);
+            }
             await globalSetting.save();
         } else {
-            globalSetting = await globalSettingModel.create(globalFields);
+            const nextCommissions = normalizePlatformCommissionsPatch(globalFields, {
+                platformCommission: 20,
+            });
+            globalSetting = await globalSettingModel.create({
+                platformCommissions: nextCommissions,
+                platformCommission: nextCommissions.ride,
+                cardFeePercent: globalFields.cardFeePercent ?? 0,
+                cardFeeFixed: globalFields.cardFeeFixed ?? 0,
+            });
         }
     }
 
+    if (globalSetting) {
+        globalSetting = await ensurePlatformCommissions(globalSetting);
+    }
+
     const merged = tariff.toObject();
-    GLOBAL_SETTING_FIELDS.forEach(field => {
-        merged[field] = globalSetting ? globalSetting[field] : undefined;
-    });
+    mergeGlobalFieldsIntoTariff(merged, globalSetting);
     merged.__tariffVersion = tariff.__v;
     merged.__globalSettingVersion = globalSetting ? globalSetting.__v : undefined;
     return merged;

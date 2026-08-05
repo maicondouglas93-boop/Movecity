@@ -135,7 +135,9 @@ export default function Tariffs() {
                 category={categories.find(c => c._id === activeTab)}
                 queryClient={queryClient}
                 testMode={testMode}
-                platformCommission={globalSettings?.platformCommission}
+                platformCommission={
+                  globalSettings?.platformCommissions?.ride ?? globalSettings?.platformCommission
+                }
               />
             </div>
           ) : (
@@ -149,6 +151,12 @@ export default function Tariffs() {
 
 function GlobalSettingsCard({ settings, queryClient, testMode }) {
   const toast = useToast();
+  const legacyCommission = settings.platformCommission ?? 20;
+  const commissions = settings.platformCommissions || {
+    ride: legacyCommission,
+    presential: legacyCommission,
+    parcel: legacyCommission,
+  };
   const { register, handleSubmit, reset, formState: { isDirty } } = useForm({
     defaultValues: {
       cancellationFee: settings.cancellationFee,
@@ -158,7 +166,11 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       currentMultiplier: settings.currentMultiplier,
       manualRainFee: settings.manualRainFee,
       showAsEstimate: settings.showAsEstimate,
-      platformCommission: settings.platformCommission,
+      platformCommissions: {
+        ride: commissions.ride ?? legacyCommission,
+        presential: commissions.presential ?? legacyCommission,
+        parcel: commissions.parcel ?? legacyCommission,
+      },
       cardFeePercent: settings.cardFeePercent,
       cardFeeFixed: settings.cardFeeFixed
     }
@@ -166,7 +178,17 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
 
   const updateMutation = useMutation({
     mutationFn: async (data) => {
-      const res = await api.put('/admin/settings/tariffs', data);
+      const payload = {
+        ...data,
+        platformCommissions: {
+          ride: Number(data.platformCommissions?.ride),
+          presential: Number(data.platformCommissions?.presential),
+          parcel: Number(data.platformCommissions?.parcel),
+        },
+        // Legado sincronizado com corrida app.
+        platformCommission: Number(data.platformCommissions?.ride),
+      };
+      const res = await api.put('/admin/settings/tariffs', payload);
       return res.data;
     },
     onSuccess: () => {
@@ -220,9 +242,27 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
           <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador Global</label>
           <input type="number" step="0.1" min="1" {...register('currentMultiplier')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Comissão da Plataforma (%)</label>
-          <input type="number" step="0.1" min="0" max="100" {...register('platformCommission')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        <div className="md:col-span-2 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-text">Comissão da Plataforma (%)</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Percentuais independentes por tipo de serviço. O simulador de categoria usa a % de corrida (app).
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Corrida (app)</label>
+              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.ride', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Corrida presencial</label>
+              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.presential', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Encomendas</label>
+              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.parcel', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cartão (%)</label>

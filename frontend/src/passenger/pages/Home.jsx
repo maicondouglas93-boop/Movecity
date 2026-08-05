@@ -19,7 +19,6 @@ import LiveTracking from '@/shared/components/LiveTracking'
 import { LocationContext } from '@/shared/contexts/LocationContext';
 import { useToast } from '@/shared/contexts/ToastContext';
 import Header from '@/passenger/components/Header';
-import ScheduleRidePanel from '@/passenger/components/ScheduleRidePanel';
 import { requestFCMToken, onForegroundMessage } from '@/shared/services/fcm';
 import { reverseGeocode } from '@/shared/services/mapsApi';
 import { getFriendlyErrorMessage } from '@/shared/services/errorMessages';
@@ -35,7 +34,6 @@ const Home = () => {
     const [ pickup, setPickup ] = useState('')
     const [ destination, setDestination ] = useState('')
     const [ panelOpen, setPanelOpen ] = useState(false)
-    const [ schedulePanelOpen, setSchedulePanelOpen ] = useState(false)
     const vehiclePanelRef = useRef(null)
     const confirmRidePanelRef = useRef(null)
     const vehicleFoundRef = useRef(null)
@@ -788,7 +786,7 @@ const Home = () => {
             </div>
             
             <div className={`absolute w-full pointer-events-none z-20 transition-all duration-300 ${panelOpen ? 'top-0 bottom-0 flex flex-col' : 'bottom-0'}`}>
-                <div className={`p-6 bg-white relative pointer-events-auto transition-transform duration-300 shadow-2xl ${panelOpen ? 'flex-shrink-0 pb-2' : 'h-auto rounded-t-3xl flex-shrink-0 pb-8'} ${(isSelectingOnMap || vehiclePanel || confirmRidePanel || vehicleFound || waitingForDriver || schedulePanelOpen) ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
+                <div className={`p-6 bg-white relative pointer-events-auto transition-transform duration-300 shadow-2xl ${panelOpen ? 'flex-shrink-0 pb-2' : 'h-auto rounded-t-3xl flex-shrink-0 pb-8'} ${(isSelectingOnMap || vehiclePanel || confirmRidePanel || vehicleFound || waitingForDriver) ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}`}>
                     
                     {!panelOpen ? (
                         <>
@@ -841,9 +839,20 @@ const Home = () => {
                                 </span>
                                 <i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true"></i>
                             </button>
-                            {/* Botão de agendamento escondido até existir backend real (A8 na
-                                auditoria) — ScheduleRidePanel continua implementado, só não
-                                tem mais gatilho aqui. */}
+                            <div className="mt-3 flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/agendar')}
+                                    className="flex-1 bg-surface-alt border border-line px-4 py-3.5 rounded-panel flex items-center gap-3 active:scale-[0.98] transition-transform"
+                                    aria-label="Agendar corrida ou encomenda"
+                                >
+                                    <i className="ri-calendar-event-line text-xl text-brand-500" aria-hidden="true" />
+                                    <span className="flex-1 text-left text-ink-900 font-semibold text-sm">
+                                        Agendar
+                                    </span>
+                                    <i className="ri-arrow-right-s-line text-xl text-ink-400" aria-hidden="true" />
+                                </button>
+                            </div>
 
                             {showNotificationPrompt && (
                                 <div className="mt-4 bg-surface-alt border border-line rounded-panel p-4 flex gap-3">
@@ -1056,11 +1065,9 @@ const Home = () => {
             </div>
 
             {/* Bottom Navigation */}
-            {!(panelOpen || vehiclePanel || confirmRidePanel || optionalsPanel || paymentPanel || vehicleFound || waitingForDriver || isSelectingOnMap || schedulePanelOpen) && (
+            {!(panelOpen || vehiclePanel || confirmRidePanel || optionalsPanel || paymentPanel || vehicleFound || waitingForDriver || isSelectingOnMap) && (
                 <Header />
             )}
-
-            <ScheduleRidePanel schedulePanelOpen={schedulePanelOpen} setSchedulePanelOpen={setSchedulePanelOpen} />
         </div>
     )
 }

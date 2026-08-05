@@ -23,6 +23,7 @@ const VALID_ORIGINS_BY_TARGET = {
     finished: ['arrived_destination'],
     // Passageiro: só até chegou na retirada (antes da coleta).
     cancelled: [
+        'scheduled',
         'awaiting_provider',
         'provider_accepted',
         'going_to_pickup',
@@ -32,6 +33,7 @@ const VALID_ORIGINS_BY_TARGET = {
 
 // Admin/system: pode cancelar em qualquer estado não-terminal (inclui legado delivered).
 const CANCEL_ORIGINS_FORCE = [
+    'scheduled',
     'awaiting_provider',
     'provider_accepted',
     'going_to_pickup',
@@ -76,9 +78,19 @@ function parcelExpirationCutoff() {
 
 /** Cancela awaiting_provider expirados (lazy, espelha ride getCurrent). */
 async function expireStaleAwaitingParcels({ userId } = {}) {
+    const cutoff = parcelExpirationCutoff();
+    // SCH-C2: pós-ativação usa activatedAt; imediata (sem activatedAt) usa createdAt.
     const filter = {
         status: 'awaiting_provider',
-        createdAt: { $lt: parcelExpirationCutoff() },
+        $or: [
+            { activatedAt: { $type: 'date', $lt: cutoff } },
+            {
+                $and: [
+                    { $or: [{ activatedAt: null }, { activatedAt: { $exists: false } }] },
+                    { createdAt: { $lt: cutoff } },
+                ],
+            },
+        ],
     };
     if (userId) filter.user = userId;
 
@@ -91,13 +103,173 @@ async function expireStaleAwaitingParcels({ userId } = {}) {
     return cancelled;
 }
 
+const DEFAULT_VEHICLE_PRICING = {
+    moto: {
+        baseFare: 6,
+        perKm: 1.8,
+        perMinute: 0.35,
+        minimumFare: 8,
+        maxWeightKg: 10,
+        maxPackageSize: 'medium',
+        requireDeliveryPin: true,
+        blockIncompatibleVehicle: true,
+    },
+    car: {
+        baseFare: 10,
+        perKm: 1.8,
+        perMinute: 0.35,
+        minimumFare: 12,
+        maxWeightKg: 50,
+        maxPackageSize: 'large',
+        requireDeliveryPin: true,
+        blockIncompatibleVehicle: true,
+    },
+};
+
+function pricingToPlain(p) {
+    if (!p) return null;
+    const o = typeof p.toObject === 'function' ? p.toObject() : { ...p };
+    return {
+        baseFare: Number(o.baseFare),
+        perKm: Number(o.perKm),
+        perMinute: Number(o.perMinute),
+        minimumFare: Number(o.minimumFare),
+        maxWeightKg: Number(o.maxWeightKg),
+        maxPackageSize: o.maxPackageSize || 'medium',
+        requireDeliveryPin: o.requireDeliveryPin !== false,
+        blockIncompatibleVehicle: o.blockIncompatibleVehicle !== false,
+    };
+}
+
+/** Migra doc legado (tarifa global + surcharge) → deliveryPricing.moto/car. */
+function buildPricingFromLegacy(settings) {
+    const base = Number(settings.baseFare ?? DEFAULT_VEHICLE_PRICING.moto.baseFare);
+    const perKm = Number(settings.perKm ?? DEFAULT_VEHICLE_PRICING.moto.perKm);
+    const perMinute = Number(settings.perMinute ?? DEFAULT_VEHICLE_PRICING.moto.perMinute);
+    const minimumFare = Number(settings.minimumFare ?? DEFAULT_VEHICLE_PRICING.moto.minimumFare);
+    const surchargeMoto = Number(settings.vehicleSurcharge?.moto ?? 0);
+    const surchargeCar = Number(settings.vehicleSurcharge?.car ?? 4);
+    const pin = settings.requireDeliveryPin !== false;
+
+    return {
+        moto: {
+            baseFare: base + surchargeMoto,
+            perKm,
+            perMinute,
+            minimumFare,
+            maxWeightKg: Number(settings.motoMaxWeightKg ?? 10),
+            maxPackageSize: settings.motoMaxSize || 'medium',
+            requireDeliveryPin: pin,
+            blockIncompatibleVehicle: settings.blockIncompatibleMoto !== false,
+        },
+        car: {
+            baseFare: base + surchargeCar,
+            perKm,
+            perMinute,
+            minimumFare: Math.max(minimumFare, base + surchargeCar),
+            maxWeightKg: DEFAULT_VEHICLE_PRICING.car.maxWeightKg,
+            maxPackageSize: DEFAULT_VEHICLE_PRICING.car.maxPackageSize,
+            requireDeliveryPin: pin,
+            blockIncompatibleVehicle: true,
+        },
+    };
+}
+
+function hasUsableVehiclePricing(block) {
+    const p = pricingToPlain(block);
+    return p && Number.isFinite(p.baseFare) && Number.isFinite(p.perKm);
+}
+
+/**
+ * Garante deliveryPricing.moto/car (migração lazy).
+ *
+ * - pricingVersion >= 2: usa nested como fonte de verdade.
+ * - pricingVersion < 2 com nested já alinhado ao top-level: promove sem rebuild
+ *   (preserva carro com perKm/minutos próprios já salvos pelo admin).
+ * - nested só com defaults do schema enquanto top-level diverge: rebuild do legado.
+ */
+async function ensureDeliveryPricing(settings) {
+    const version = Number(settings.pricingVersion) || 1;
+    const raw = settings.deliveryPricing?.toObject?.() || settings.deliveryPricing || {};
+    const motoOk = hasUsableVehiclePricing(raw.moto);
+    const carOk = hasUsableVehiclePricing(raw.car);
+
+    if (version >= 2 && motoOk && carOk) return settings;
+
+    const nestedMoto = motoOk ? pricingToPlain(raw.moto) : null;
+    const nestedCar = carOk ? pricingToPlain(raw.car) : null;
+    const topBase = Number(settings.baseFare);
+    const topKm = Number(settings.perKm);
+
+    const nestedLooksLikeSchemaDefaults = nestedMoto
+        && nestedMoto.baseFare === DEFAULT_VEHICLE_PRICING.moto.baseFare
+        && nestedMoto.perKm === DEFAULT_VEHICLE_PRICING.moto.perKm
+        && Number.isFinite(topBase)
+        && topBase !== nestedMoto.baseFare;
+
+    const nestedAlignedWithTop = nestedMoto
+        && (!Number.isFinite(topBase) || topBase === nestedMoto.baseFare)
+        && (!Number.isFinite(topKm) || topKm === nestedMoto.perKm);
+
+    if (motoOk && carOk && nestedAlignedWithTop && !nestedLooksLikeSchemaDefaults) {
+        settings.deliveryPricing = { moto: nestedMoto, car: nestedCar };
+        settings.pricingVersion = 2;
+        settings.markModified('deliveryPricing');
+        await settings.save();
+        return settings;
+    }
+
+    const migrated = buildPricingFromLegacy(settings);
+    settings.deliveryPricing = {
+        moto: version >= 2 && motoOk ? nestedMoto : migrated.moto,
+        car: version >= 2 && carOk ? nestedCar : migrated.car,
+    };
+
+    const moto = pricingToPlain(settings.deliveryPricing.moto);
+    settings.baseFare = moto.baseFare;
+    settings.perKm = moto.perKm;
+    settings.perMinute = moto.perMinute;
+    settings.minimumFare = moto.minimumFare;
+    settings.requireDeliveryPin = moto.requireDeliveryPin;
+    settings.motoMaxWeightKg = moto.maxWeightKg;
+    settings.motoMaxSize = moto.maxPackageSize;
+    settings.blockIncompatibleMoto = moto.blockIncompatibleVehicle;
+    settings.pricingVersion = 2;
+    settings.markModified('deliveryPricing');
+    await settings.save();
+    return settings;
+}
+
+function resolveVehiclePricing(settings, vehicleType) {
+    const key = vehicleType === 'car' ? 'car' : 'moto';
+    const block = settings.deliveryPricing?.[key];
+    if (hasUsableVehiclePricing(block)) {
+        return pricingToPlain(block);
+    }
+    // Fallback extremo (não deveria ocorrer após ensureDeliveryPricing)
+    const legacy = buildPricingFromLegacy(settings);
+    return legacy[key];
+}
+
 async function getSettings() {
     let settings = await parcelSettingModel.findOne().sort({ updatedAt: -1 });
     if (!settings) {
-        settings = await parcelSettingModel.create({});
+        settings = await parcelSettingModel.create({
+            deliveryPricing: DEFAULT_VEHICLE_PRICING,
+            pricingVersion: 2,
+            baseFare: DEFAULT_VEHICLE_PRICING.moto.baseFare,
+            perKm: DEFAULT_VEHICLE_PRICING.moto.perKm,
+            perMinute: DEFAULT_VEHICLE_PRICING.moto.perMinute,
+            minimumFare: DEFAULT_VEHICLE_PRICING.moto.minimumFare,
+        });
+    } else {
+        settings = await ensureDeliveryPricing(settings);
     }
     return settings;
 }
+
+module.exports.resolveVehiclePricing = resolveVehiclePricing;
+module.exports.DEFAULT_VEHICLE_PRICING = DEFAULT_VEHICLE_PRICING;
 
 function generateDeliveryPin() {
     return String(crypto.randomInt(0, 10000)).padStart(4, '0');
@@ -110,19 +282,26 @@ function pushHistory(parcel, status, by = 'system') {
 
 module.exports.validateVehicleCompatibility = async ({ vehicleType, size, weightKg }) => {
     const settings = await getSettings();
-    const warnings = [];
-    if (vehicleType === 'moto') {
-        const maxRank = SIZE_RANK[settings.motoMaxSize] || 2;
-        const sizeRank = SIZE_RANK[size] || 1;
-        if (sizeRank > maxRank) {
-            warnings.push('Item grande demais para moto — recomendamos carro.');
-        }
-        if (Number(weightKg) > settings.motoMaxWeightKg) {
-            warnings.push(`Peso acima de ${settings.motoMaxWeightKg} kg — recomendamos carro.`);
-        }
+    if (!['moto', 'car'].includes(vehicleType)) {
+        return { warnings: ['Tipo de veículo inválido'], blocked: true, settings };
     }
-    const blocked = settings.blockIncompatibleMoto && warnings.length > 0 && vehicleType === 'moto';
-    return { warnings, blocked, settings };
+
+    const pricing = resolveVehiclePricing(settings, vehicleType);
+    const warnings = [];
+    const label = vehicleType === 'moto' ? 'moto' : 'carro';
+    const alt = vehicleType === 'moto' ? 'carro' : 'moto';
+
+    const maxRank = SIZE_RANK[pricing.maxPackageSize] || 2;
+    const sizeRank = SIZE_RANK[size] || 1;
+    if (sizeRank > maxRank) {
+        warnings.push(`Item grande demais para ${label} — recomendamos ${alt}.`);
+    }
+    if (Number(weightKg) > Number(pricing.maxWeightKg)) {
+        warnings.push(`Peso acima de ${pricing.maxWeightKg} kg para ${label} — recomendamos ${alt}.`);
+    }
+
+    const blocked = Boolean(pricing.blockIncompatibleVehicle) && warnings.length > 0;
+    return { warnings, blocked, settings, pricing };
 };
 
 module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
@@ -134,29 +313,42 @@ module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
     }
 
     const settings = await getSettings();
+    const pricing = resolveVehiclePricing(settings, vehicleType);
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
     const distanceM = distanceTime.distance.value;
     const durationS = distanceTime.duration.value;
     const km = distanceM / 1000;
     const minutes = durationS / 60;
 
-    const surcharge = settings.vehicleSurcharge?.[vehicleType] || 0;
-    let fare = settings.baseFare + (km * settings.perKm) + (minutes * settings.perMinute) + surcharge;
-    fare = Math.max(fare, settings.minimumFare);
+    // Fonte de verdade: deliveryPricing[vehicleType] — sem surcharge legado.
+    let fare = pricing.baseFare + (km * pricing.perKm) + (minutes * pricing.perMinute);
+    fare = Math.max(fare, pricing.minimumFare);
     fare = Math.round(fare * 100) / 100;
 
-    const globalSetting = await globalSettingModel.findOne().lean()
-        || { platformCommission: 20 };
-    const commissionPercent = Number(globalSetting.platformCommission) || 20;
+    const {
+        resolvePlatformCommission,
+        ensurePlatformCommissions,
+    } = require('../utils/platformCommission');
+    let globalSettingDoc = await globalSettingModel.findOne();
+    if (globalSettingDoc) {
+        globalSettingDoc = await ensurePlatformCommissions(globalSettingDoc);
+    }
+    const globalSetting = globalSettingDoc
+        ? (globalSettingDoc.toObject?.() || globalSettingDoc)
+        : { platformCommission: 20, platformCommissions: { ride: 20, presential: 20, parcel: 20 } };
+    const commissionPercent = resolvePlatformCommission(globalSetting, 'parcel');
     const commissionAmount = Math.round(fare * (commissionPercent / 100) * 100) / 100;
 
     const pricingSnapshot = {
-        baseFare: settings.baseFare,
-        perKm: settings.perKm,
-        perMinute: settings.perMinute,
-        minimumFare: settings.minimumFare,
-        vehicleSurcharge: surcharge,
         vehicleType,
+        baseFare: pricing.baseFare,
+        perKm: pricing.perKm,
+        perMinute: pricing.perMinute,
+        minimumFare: pricing.minimumFare,
+        maxWeightKg: pricing.maxWeightKg,
+        maxPackageSize: pricing.maxPackageSize,
+        requireDeliveryPin: pricing.requireDeliveryPin,
+        blockIncompatibleVehicle: pricing.blockIncompatibleVehicle,
         platformCommission: commissionPercent,
     };
 
@@ -167,13 +359,14 @@ module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
         commissionPercent,
         commissionAmount,
         fareBreakdown: {
-            baseFare: settings.baseFare,
-            distanceComponent: Math.round(km * settings.perKm * 100) / 100,
-            timeComponent: Math.round(minutes * settings.perMinute * 100) / 100,
-            vehicleSurcharge: surcharge,
-            minimumApplied: fare === settings.minimumFare,
+            baseFare: pricing.baseFare,
+            distanceComponent: Math.round(km * pricing.perKm * 100) / 100,
+            timeComponent: Math.round(minutes * pricing.perMinute * 100) / 100,
+            vehicleSurcharge: 0,
+            minimumApplied: fare === pricing.minimumFare,
             platformCommission: commissionAmount,
             commissionPercent,
+            vehicleType,
         },
         pricingSnapshot,
     };
@@ -205,6 +398,7 @@ module.exports.createParcel = async (payload) => {
         description = '',
         notes = '',
         paymentMethod = 'cash',
+        scheduledAt = null,
     } = payload;
 
     if (!user || !pickup || !destination || !vehicleType || !sender || !recipient) {
@@ -217,25 +411,34 @@ module.exports.createParcel = async (payload) => {
         throw err;
     }
 
-    const existingParcel = await parcelModel.findOne({
-        user,
-        status: { $in: USER_ACTIVE_PARCEL_STATUSES },
-    }).select('_id status');
-    if (existingParcel) {
-        const err = new Error('USER_HAS_ACTIVE_PARCEL');
-        err.code = 'USER_HAS_ACTIVE_PARCEL';
-        throw err;
+    let parsedSchedule = null;
+    if (scheduledAt) {
+        const scheduleService = require('./schedule.service');
+        parsedSchedule = scheduleService.assertValidScheduledAt(scheduledAt);
     }
 
-    const rideModel = require('../models/ride.model');
-    const existingRide = await rideModel.findOne({
-        user,
-        status: { $in: dispatchService.ACTIVE_RIDE_STATUSES },
-    }).select('_id');
-    if (existingRide) {
-        const err = new Error('USER_HAS_ACTIVE_RIDE');
-        err.code = 'USER_HAS_ACTIVE_RIDE';
-        throw err;
+    // Agendamento futuro não conflita com corrida/encomenda ativa imediata.
+    if (!parsedSchedule) {
+        const existingParcel = await parcelModel.findOne({
+            user,
+            status: { $in: USER_ACTIVE_PARCEL_STATUSES },
+        }).select('_id status');
+        if (existingParcel) {
+            const err = new Error('USER_HAS_ACTIVE_PARCEL');
+            err.code = 'USER_HAS_ACTIVE_PARCEL';
+            throw err;
+        }
+
+        const rideModel = require('../models/ride.model');
+        const existingRide = await rideModel.findOne({
+            user,
+            status: { $in: dispatchService.ACTIVE_RIDE_STATUSES },
+        }).select('_id');
+        if (existingRide) {
+            const err = new Error('USER_HAS_ACTIVE_RIDE');
+            err.code = 'USER_HAS_ACTIVE_RIDE';
+            throw err;
+        }
     }
 
     const compatibility = await module.exports.validateVehicleCompatibility({
@@ -251,11 +454,21 @@ module.exports.createParcel = async (payload) => {
 
     const fareData = await module.exports.getParcelFare({ pickup, destination, vehicleType });
     let destinationCoordinates;
+    let pickupCoordinates;
     try {
         const dest = await mapService.getAddressCoordinate(destination);
         destinationCoordinates = { lat: dest.ltd, lng: dest.lng };
     } catch {
         destinationCoordinates = undefined;
+    }
+    // Agendadas: coords de coleta cedo para upcoming por raio (SCH-C3).
+    if (parsedSchedule) {
+        try {
+            const pick = await mapService.getAddressCoordinate(pickup);
+            pickupCoordinates = { lat: pick.ltd, lng: pick.lng };
+        } catch {
+            pickupCoordinates = undefined;
+        }
     }
 
     const deliveryPin = generateDeliveryPin();
@@ -266,6 +479,7 @@ module.exports.createParcel = async (payload) => {
             vehicleType,
             pickup,
             destination,
+            pickupCoordinates,
             destinationCoordinates,
             sender,
             recipient,
@@ -275,7 +489,10 @@ module.exports.createParcel = async (payload) => {
             size,
             description,
             notes,
-            schedule: { mode: 'now', at: null },
+            schedule: parsedSchedule
+                ? { mode: 'later', at: parsedSchedule }
+                : { mode: 'now', at: null },
+            scheduledAt: parsedSchedule,
             fare: fareData.fare,
             estimatedDistance: fareData.estimatedDistance,
             estimatedTime: fareData.estimatedTime,
@@ -284,8 +501,12 @@ module.exports.createParcel = async (payload) => {
             commissionPercent: fareData.commissionPercent,
             commissionAmount: fareData.commissionAmount,
             deliveryPin,
-            status: 'awaiting_provider',
-            statusHistory: [{ status: 'awaiting_provider', at: new Date(), by: 'user' }],
+            status: parsedSchedule ? 'scheduled' : 'awaiting_provider',
+            statusHistory: [{
+                status: parsedSchedule ? 'scheduled' : 'awaiting_provider',
+                at: new Date(),
+                by: 'user',
+            }],
             photos: { pickupUrl: null, deliveryUrl: null },
             paymentMethod,
             paymentStatus: 'pending',
@@ -431,7 +652,8 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
         throw new Error('INVALID_STATUS_FOR_DELIVERY');
     }
 
-    if (settings.requireDeliveryPin) {
+    const vehiclePricing = resolveVehiclePricing(settings, parcel.vehicleType || 'moto');
+    if (vehiclePricing.requireDeliveryPin) {
         if (!pin || String(pin) !== String(parcel.deliveryPin)) {
             throw new Error('INVALID_PIN');
         }
@@ -720,6 +942,55 @@ module.exports.getCurrentParcelForCaptain = async (captainId) => {
     return reviewed ? null : finished;
 };
 
+/**
+ * Lista para a tela Encomendas do motorista:
+ * - ofertas ainda sem aceite (mesmo critério do despacho);
+ * - encomenda ativa do motorista;
+ * - histórico finished/cancelled do motorista (paginado).
+ */
+module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 }) => {
+    if (!captain) throw new Error('Captain is required');
+
+    const captainId = captain._id || captain;
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (safePage - 1) * safeLimit;
+
+    const activeParcel = await module.exports.getCurrentParcelForCaptain(captainId);
+
+    let pendingOffers = [];
+    try {
+        pendingOffers = await module.exports.getPendingParcelsForCaptain({ captain });
+    } catch {
+        pendingOffers = [];
+    }
+
+    const historyQuery = {
+        captain: captainId,
+        status: { $in: ['finished', 'cancelled'] },
+    };
+
+    const [total, parcels] = await Promise.all([
+        parcelModel.countDocuments(historyQuery),
+        parcelModel.find(historyQuery)
+            .populate('user', 'fullname phone email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(safeLimit)
+            .select('-deliveryPin'),
+    ]);
+
+    return {
+        activeParcel: activeParcel || null,
+        pendingOffers,
+        parcels,
+        page: safePage,
+        limit: safeLimit,
+        total,
+        hasNext: (skip + safeLimit) < total,
+    };
+};
+
 module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
     if (!captain) throw new Error('Captain is required');
 
@@ -745,10 +1016,15 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
 
     await expireStaleAwaitingParcels();
 
+    const cutoff = parcelExpirationCutoff();
+    // SCH-C2: agendada ativada → activatedAt; imediata (activatedAt null) → createdAt.
     const candidates = await parcelModel.find({
         status: 'awaiting_provider',
         vehicleType,
-        createdAt: { $gte: parcelExpirationCutoff() },
+        $or: [
+            { activatedAt: { $gte: cutoff } },
+            { activatedAt: null, createdAt: { $gte: cutoff } },
+        ],
         'pickupCoordinates.lat': { $exists: true },
     }).sort({ createdAt: -1 }).limit(20);
 
@@ -796,22 +1072,85 @@ module.exports.toParcelCaptainDTO = (parcel) => {
     return raw;
 };
 
-module.exports.updateSettings = async (patch) => {
+function mergeVehiclePricing(current, patch) {
+    const base = pricingToPlain(current) || { ...DEFAULT_VEHICLE_PRICING.moto };
+    if (!patch || typeof patch !== 'object') return base;
+    const next = { ...base };
+    for (const key of Object.keys(DEFAULT_VEHICLE_PRICING.moto)) {
+        if (patch[key] !== undefined && patch[key] !== null && patch[key] !== '') {
+            if (typeof base[key] === 'boolean') {
+                next[key] = Boolean(patch[key]);
+            } else if (key === 'maxPackageSize') {
+                next[key] = ['small', 'medium', 'large'].includes(patch[key]) ? patch[key] : base[key];
+            } else {
+                const n = Number(patch[key]);
+                if (Number.isFinite(n)) next[key] = n;
+            }
+        }
+    }
+    return next;
+}
+
+module.exports.updateSettings = async (patch = {}) => {
     const settings = await getSettings();
-    const allowed = [
-        'baseFare', 'perKm', 'perMinute', 'minimumFare',
-        'requireDeliveryPin', 'motoMaxSize', 'motoMaxWeightKg', 'blockIncompatibleMoto',
-    ];
-    for (const key of allowed) {
-        if (patch[key] !== undefined) settings[key] = patch[key];
+
+    // Preferência: deliveryPricing por veículo (fonte de verdade).
+    if (patch.deliveryPricing && typeof patch.deliveryPricing === 'object') {
+        const current = settings.deliveryPricing?.toObject?.() || settings.deliveryPricing || {};
+        const moto = mergeVehiclePricing(current.moto, patch.deliveryPricing.moto);
+        const car = mergeVehiclePricing(current.car, patch.deliveryPricing.car);
+        settings.deliveryPricing = { moto, car };
+        settings.markModified('deliveryPricing');
     }
-    if (patch.vehicleSurcharge && typeof patch.vehicleSurcharge === 'object') {
-        const current = settings.vehicleSurcharge?.toObject?.() || settings.vehicleSurcharge || {};
-        settings.vehicleSurcharge = {
-            moto: patch.vehicleSurcharge.moto !== undefined ? patch.vehicleSurcharge.moto : current.moto,
-            car: patch.vehicleSurcharge.car !== undefined ? patch.vehicleSurcharge.car : current.car,
+
+    // Compat: patch legado top-level atualiza moto (e opcionalmente car via surcharge).
+    const legacyKeys = ['baseFare', 'perKm', 'perMinute', 'minimumFare', 'requireDeliveryPin', 'motoMaxSize', 'motoMaxWeightKg', 'blockIncompatibleMoto'];
+    const hasLegacy = legacyKeys.some((k) => patch[k] !== undefined);
+    if (hasLegacy && !patch.deliveryPricing) {
+        const current = settings.deliveryPricing?.toObject?.() || settings.deliveryPricing || {};
+        const motoPatch = {
+            baseFare: patch.baseFare,
+            perKm: patch.perKm,
+            perMinute: patch.perMinute,
+            minimumFare: patch.minimumFare,
+            requireDeliveryPin: patch.requireDeliveryPin,
+            maxPackageSize: patch.motoMaxSize,
+            maxWeightKg: patch.motoMaxWeightKg,
+            blockIncompatibleVehicle: patch.blockIncompatibleMoto,
         };
+        const moto = mergeVehiclePricing(current.moto, motoPatch);
+        let car = pricingToPlain(current.car) || { ...DEFAULT_VEHICLE_PRICING.car };
+        if (patch.vehicleSurcharge?.car !== undefined || patch.baseFare !== undefined) {
+            const surcharge = Number(
+                patch.vehicleSurcharge?.car ?? settings.vehicleSurcharge?.car ?? 4
+            );
+            car = {
+                ...car,
+                baseFare: Number(moto.baseFare) + surcharge,
+                perKm: moto.perKm,
+                perMinute: moto.perMinute,
+            };
+        }
+        settings.deliveryPricing = { moto, car };
+        settings.markModified('deliveryPricing');
     }
+
+    // Sync campos legados ← moto (compatibilidade)
+    const moto = resolveVehiclePricing(settings, 'moto');
+    settings.baseFare = moto.baseFare;
+    settings.perKm = moto.perKm;
+    settings.perMinute = moto.perMinute;
+    settings.minimumFare = moto.minimumFare;
+    settings.requireDeliveryPin = moto.requireDeliveryPin;
+    settings.motoMaxWeightKg = moto.maxWeightKg;
+    settings.motoMaxSize = moto.maxPackageSize;
+    settings.blockIncompatibleMoto = moto.blockIncompatibleVehicle;
+    settings.vehicleSurcharge = {
+        moto: 0,
+        car: Math.max(0, resolveVehiclePricing(settings, 'car').baseFare - moto.baseFare),
+    };
+    settings.pricingVersion = 2;
+
     await settings.save();
     return settings;
 };

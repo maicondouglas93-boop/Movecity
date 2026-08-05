@@ -13,6 +13,7 @@ const captainRoutes = require('./routes/captain.routes');
 const mapsRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 const parcelRoutes = require('./routes/parcel.routes');
+const scheduleRoutes = require('./routes/schedule.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const chatRoutes = require('./routes/chat.routes');
@@ -21,6 +22,7 @@ const vehicleCategoryRoutes = require('./routes/vehicleCategory.routes');
 const supportRoutes = require('./routes/support.routes');
 require('./services/tariffScheduler.service'); // registra o cron que aplica tarifas agendadas
 require('./services/captainDeadline.service'); // registra o cron do prazo de documentação do motorista
+require('./services/schedule.service'); // registra o cron que ativa corridas/encomendas agendadas
 
 const adminRoutes = require('./routes/admin.routes');
 
@@ -146,6 +148,7 @@ app.use('/captains', captainRoutes);
 app.use('/maps', mapsRoutes);
 app.use('/rides', rideRoutes);
 app.use('/parcels', parcelRoutes);
+app.use('/schedules', scheduleRoutes);
 app.use('/uploads', uploadRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/chat', chatRoutes);

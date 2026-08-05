@@ -75,7 +75,7 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { userId, pickup, destination, vehicleType, paymentMethod, optionals, observation, useWalletBalance, requestFemaleDriver, promoCode } = req.body;
+    const { userId, pickup, destination, vehicleType, paymentMethod, optionals, observation, useWalletBalance, requestFemaleDriver, promoCode, scheduledAt } = req.body;
 
     try {
         if (!req.user || !req.user._id) {
@@ -94,13 +94,24 @@ module.exports.createRide = async (req, res) => {
             observation,
             useWalletBalance,
             requestFemaleDriver,
-            promoCode
+            promoCode,
+            scheduledAt,
         });
 
         const TRACE_ID = `Ride:${ride._id}`;
         console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
-        await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+        // Agendada: sem despacho agora — o cron ativa perto do horário.
+        if (ride.status === 'scheduled') {
+            notificationService.sendScheduleCreated(req.user._id, {
+                kind: 'ride',
+                id: ride._id.toString(),
+                rideId: ride._id.toString(),
+                scheduledAt: ride.scheduledAt,
+            });
+        } else {
+            await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+        }
 
         // Invalidate dashboard and user history cache
         deleteCache('dashboard:today');
@@ -112,6 +123,15 @@ module.exports.createRide = async (req, res) => {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
+        }
+        if (err.code === 'SCHEDULE_TOO_SOON') {
+            return res.status(400).json({ message: 'Agende com pelo menos 15 minutos de antecedência.' });
+        }
+        if (err.code === 'SCHEDULE_TOO_FAR') {
+            return res.status(400).json({ message: 'Agendamento máximo de 7 dias.' });
+        }
+        if (err.code === 'INVALID_SCHEDULED_AT') {
+            return res.status(400).json({ message: 'Data/hora de agendamento inválida.' });
         }
         return res.status(500).json({ message: err.message });
     }

@@ -1,3 +1,6 @@
+/* eslint-disable no-undef */
+// SW_VERSION: 2026-08-05-no-ride-actions — bump força update do worker em clientes
+// que ainda tinham Aceitar/Recusar em cache.
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
@@ -80,11 +83,12 @@ messaging.onBackgroundMessage((payload) => {
         badge: '/movecity-icon.jpg',
         data,
         timestamp: Date.now(),
+        // Explicitamente sem ações — SW antigo em cache ainda mostrava Aceitar/Recusar.
+        actions: [],
     };
 
     if (data.type === 'NEW_RIDE' || data.type === 'NEW_PARCEL') {
-        // Sem Aceitar/Recusar (2026-08-04): o motorista vê valor, origem, destino e
-        // distância no body e toca na notificação para abrir a oferta no app.
+        // Só body rico; toque na notificação abre a oferta no app.
         notificationOptions.requireInteraction = true;
         notificationOptions.renotify = true;
         notificationOptions.silent = false;
@@ -98,6 +102,15 @@ messaging.onBackgroundMessage((payload) => {
     }
 
     return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+self.addEventListener('install', (event) => {
+    self.skipWaiting();
+    event.waitUntil(Promise.resolve());
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(self.clients.claim());
 });
 
 const toAbsoluteUrl = (url) => {
@@ -165,6 +178,7 @@ const resolveDeepLink = (data) => {
 self.addEventListener('notificationclick', (event) => {
     const notification = event.notification;
     const data = notification.data || {};
+    // Ignora ações legadas (accept/reject) de SWs antigos — sempre só abre o app.
     const targetUrl = resolveDeepLink(data);
 
     event.waitUntil((async () => {

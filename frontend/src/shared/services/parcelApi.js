@@ -27,6 +27,13 @@ export async function getPendingParcels() {
     return data
 }
 
+export async function getCaptainParcelHistory({ page = 1, limit = 20 } = {}) {
+    const { data } = await api.get('/parcels/captain-history', {
+        params: { page, limit },
+    })
+    return data
+}
+
 export async function getCaptainCurrentParcel() {
     const { data } = await api.get('/parcels/captain-current')
     return data

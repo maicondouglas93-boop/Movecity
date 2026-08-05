@@ -55,6 +55,7 @@ async function seed() {
         if (gsCount === 0) {
             await GlobalSetting.create({
                 platformCommission: 20,
+                platformCommissions: { ride: 20, presential: 20, parcel: 20 },
                 cardFeePercent: 1.99,
                 cardFeeFixed: 0.50
             });

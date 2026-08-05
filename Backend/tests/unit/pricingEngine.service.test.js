@@ -155,4 +155,65 @@ describe('Pricing Engine', () => {
         expect(result.finalFare).toBe(25);
         expect(result.fareBreakdown.appliedRules).toEqual([]);
     });
+
+    it('usa comissão distinta para ride vs presential', async () => {
+        await GlobalSetting.updateOne({}, {
+            platformCommission: 15,
+            platformCommissions: { ride: 15, presential: 5, parcel: 25 },
+        });
+
+        const ride = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'ride',
+        });
+        const presential = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'presential',
+        });
+
+        expect(ride.finalFare).toBe(25);
+        expect(presential.finalFare).toBe(25);
+        expect(ride.commissionPercent).toBe(15);
+        expect(presential.commissionPercent).toBe(5);
+        expect(ride.commissionAmount).toBe(3.75); // 15% of 25
+        expect(presential.commissionAmount).toBe(1.25); // 5% of 25
+        expect(ride.fareBreakdown.serviceKind).toBe('ride');
+        expect(presential.fareBreakdown.serviceKind).toBe('presential');
+    });
+
+    it('congela serviceKind no snapshot de buildConfigSnapshot', async () => {
+        await GlobalSetting.updateOne({}, {
+            platformCommissions: { ride: 20, presential: 8, parcel: 20 },
+            platformCommission: 20,
+        });
+
+        const snapshot = await PricingEngine.buildConfigSnapshot({
+            vehicleType: 'car',
+            serviceKind: 'presential',
+        });
+        expect(snapshot.serviceKind).toBe('presential');
+        expect(snapshot.commissionPercent).toBe(8);
+
+        // Mudança posterior no banco não altera cálculo com snapshot.
+        await GlobalSetting.updateOne({}, {
+            platformCommissions: { ride: 20, presential: 50, parcel: 20 },
+        });
+
+        const priced = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            configSnapshot: snapshot,
+            serviceKind: 'ride', // ignorado — snapshot manda
+        });
+        expect(priced.commissionPercent).toBe(8);
+        expect(priced.commissionAmount).toBe(2); // 8% of 25
+    });
 });

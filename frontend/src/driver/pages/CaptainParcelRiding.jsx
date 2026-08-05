@@ -14,6 +14,7 @@ import {
 import { submitCaptainReview } from '@/shared/services/reviewApi'
 import { useToast } from '@/shared/contexts/ToastContext'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
+import { openWhatsApp } from '@/shared/utils/whatsapp'
 
 const NEXT_STATUS = {
   provider_accepted: 'going_to_pickup',
@@ -283,7 +284,34 @@ const CaptainParcelRiding = () => {
             <p className="font-semibold text-ink-900">{parcel.itemName}</p>
             <p className="text-xs text-ink-400">Retirada: {parcel.pickup}</p>
             <p className="text-xs text-ink-400">Entrega: {parcel.destination}</p>
-            <p className="text-sm text-ink-600">Destinatário: {parcel.recipient?.name} · {parcel.recipient?.phone}</p>
+
+            {parcel.recipient?.name && (
+              <div className="rounded-panel border border-line bg-surface-alt px-3 py-2.5 space-y-2">
+                <div>
+                  <p className="text-[11px] text-ink-400 uppercase tracking-wide">Destinatário</p>
+                  <p className="text-sm font-medium text-ink-900">{parcel.recipient.name}</p>
+                  {parcel.recipient.phone && (
+                    <p className="text-xs text-ink-500">{parcel.recipient.phone}</p>
+                  )}
+                </div>
+                {parcel.recipient.phone && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ok = openWhatsApp(
+                        parcel.recipient.phone,
+                        `Olá${parcel.recipient.name ? `, ${parcel.recipient.name}` : ''}! Sou o motorista da sua encomenda (${parcel.itemName || 'entrega'}) pela MoveCity.`,
+                      )
+                      if (!ok) addToast('Telefone do destinatário inválido', 'error')
+                    }}
+                    className="w-full min-h-[44px] rounded-panel bg-[#25D366] text-white font-semibold flex items-center justify-center gap-2 active:scale-[0.99]"
+                  >
+                    <i className="ri-whatsapp-fill text-xl" aria-hidden="true" />
+                    WhatsApp do destinatário
+                  </button>
+                )}
+              </div>
+            )}
 
             {parcel.status === 'arrived_destination' ? (
               <div className="space-y-2">

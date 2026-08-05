@@ -14,6 +14,8 @@ describe('sessionKindForUrl', () => {
         expect(sessionKindForUrl('/rides/pending')).toBe('captain')
         expect(sessionKindForUrl('/rides/abc123/accept')).toBe('captain')
         expect(sessionKindForUrl('https://api.exemplo.com/rides/abc123/accept')).toBe('captain')
+        expect(sessionKindForUrl('/parcels/captain-history')).toBe('captain')
+        expect(sessionKindForUrl('/parcels/pending')).toBe('captain')
         expect(sessionKindForUrl('/captains/profile')).toBe('captain')
         expect(sessionKindForUrl('/uploads/captain-profile')).toBe('captain')
         expect(sessionKindForUrl('/uploads/document')).toBe('captain')

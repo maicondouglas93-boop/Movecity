@@ -19,7 +19,7 @@ const PARCEL_ACTIVE = [
  * - subject / ride: documento com `_id` e `status` (ride mantido por compat)
  * - subjectType: 'ride' | 'parcel' (default 'ride')
  */
-const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, currentUserType }) => {
+const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, currentUserType, deliveryPin }) => {
     const { socket } = useContext(SocketContext);
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
@@ -52,7 +52,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         ? ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '📦 Objeto coletado.', '👍 Ok.']
         : ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '🚗 Estou a caminho.', '👍 Ok.', '❌ Não encontrei você.'];
     const quickMessagesUser = type === 'parcel'
-        ? ['📍 Estou no local.', '📦 Pronto para retirar.', '👍 Ok.', '🔑 PIN enviado.']
+        ? ['📍 Estou no local.', '📦 Pronto para retirar.', '👍 Ok.']
         : ['📍 Estou no local.', '⏳ Já estou descendo.', '👍 Ok.', '❌ Não encontrei você.'];
 
     const quickMessages = currentUserType === 'captain' ? quickMessagesCaptain : quickMessagesUser;
@@ -181,6 +181,10 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
 
     const activeStatuses = type === 'parcel' ? PARCEL_ACTIVE : RIDE_ACTIVE;
     const isActive = doc && activeStatuses.includes(doc.status);
+    const canSendPin = type === 'parcel'
+        && currentUserType === 'user'
+        && Boolean(deliveryPin)
+        && isActive;
 
     if (!isOpen) return null;
 
@@ -241,9 +245,19 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
 
             {isActive && (
                 <div className="bg-white border-t p-2 flex gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
+                    {canSendPin && (
+                        <button
+                            type="button"
+                            onClick={() => sendMessage(`PIN da entrega: ${deliveryPin}`)}
+                            className="bg-brand-50 hover:bg-brand-100 border border-brand-200 text-brand-700 text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0"
+                        >
+                            🔑 Enviar PIN
+                        </button>
+                    )}
                     {quickMessages.map((msg, idx) => (
                         <button
                             key={idx}
+                            type="button"
                             onClick={() => sendMessage(msg)}
                             className="bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs px-3 py-1.5 rounded-full flex-shrink-0"
                         >

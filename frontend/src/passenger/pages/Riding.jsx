@@ -330,7 +330,7 @@ const Riding = () => {
                 <LiveTracking ride={ride} clearTrip={isFinished} />
             </div>
 
-            <div className='flex-shrink-0 max-h-[35dvh] px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] overflow-y-auto overscroll-y-contain rounded-t-3xl -mt-3 relative z-10 bg-surface shadow-floating border-t border-line'>
+            <div className='flex-shrink-0 px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl -mt-3 relative z-10 bg-surface shadow-floating border-t border-line'>
                 <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
 
                 <DriverIdentityCard

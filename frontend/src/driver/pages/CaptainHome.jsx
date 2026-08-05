@@ -860,7 +860,7 @@ const CaptainHome = () => {
                     </div>
                 </>
             )}
-            <BottomSheet expandable open={ridePopupPanel} onClose={() => setRidePopupPanel(false)}>
+            <BottomSheet open={ridePopupPanel} onClose={() => setRidePopupPanel(false)}>
                 <RidePopUp
                     ride={ride}
                     open={ridePopupPanel}
@@ -869,7 +869,7 @@ const CaptainHome = () => {
                     confirmRide={confirmRide}
                 />
             </BottomSheet>
-            <BottomSheet expandable open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
+            <BottomSheet open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
                 <ConfirmRidePopUp
                     ride={ride}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />

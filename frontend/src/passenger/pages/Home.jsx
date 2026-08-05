@@ -1046,7 +1046,7 @@ const Home = () => {
                     walletBalance={user?.walletBalance}
                 />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[38dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl'>
                 <LookingForDriver
                     createRide={createRide}
                     pickup={pickup}
@@ -1056,8 +1056,8 @@ const Home = () => {
                     paymentMethod={paymentMethod}
                     cancelRide={cancelRide} />
             </div>
-            {/* Painel compacto: deixa o mapa livre pra acompanhar o motorista. */}
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[35dvh] overflow-y-auto overscroll-y-contain'>
+            {/* Painel sempre aberto: altura pelo conteúdo — sem scroll nem expansão. */}
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}

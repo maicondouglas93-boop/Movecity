@@ -192,7 +192,6 @@ const ParcelActive = () => {
   const [rated, setRated] = useState(false)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [cancelling, setCancelling] = useState(false)
-  const [routeOpen, setRouteOpen] = useState(false)
   const [sendingPin, setSendingPin] = useState(false)
 
   useEffect(() => {
@@ -402,11 +401,11 @@ const ParcelActive = () => {
         )}
       </div>
 
-      {/* Painel — ~35% da tela; mapa dominante */}
-      <div className="flex-shrink-0 w-full md:max-w-md md:h-full md:border-l bg-surface border-t md:border-t-0 border-line rounded-t-3xl md:rounded-none shadow-floating md:shadow-none -mt-3 md:mt-0 relative z-10 flex flex-col max-h-[38dvh] md:max-h-none">
+      {/* Painel sempre aberto — altura pelo conteúdo, sem scroll/expansão */}
+      <div className="flex-shrink-0 w-full md:max-w-md md:h-full md:overflow-y-auto md:border-l bg-surface border-t md:border-t-0 border-line rounded-t-3xl md:rounded-none shadow-floating md:shadow-none -mt-3 md:mt-0 relative z-10 flex flex-col">
         <div className="mx-auto mt-2 mb-0.5 h-1 w-10 rounded-full bg-line flex-shrink-0" aria-hidden="true" />
 
-        <div className="flex-1 overflow-y-auto px-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
+        <div className="px-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
           {/* Status */}
           <div className="pt-0.5">
             <div className="flex items-start gap-2.5">
@@ -490,42 +489,33 @@ const ParcelActive = () => {
             </div>
           )}
 
-          {/* Destinatário + rota colapsável */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setRouteOpen((v) => !v)}
-              className="w-full flex items-center justify-between min-h-[36px] text-xs font-medium text-ink-400"
-              aria-expanded={routeOpen}
-            >
-              <span className="truncate">
-                {parcel.recipient?.name
-                  ? `${parcel.recipient.name}${parcel.itemName ? ` · ${parcel.itemName}` : ''}`
-                  : parcel.itemName}
-                {parcel.vehicleType ? ` · ${parcel.vehicleType === 'moto' ? 'Moto' : 'Carro'}` : ''}
-              </span>
-              <span className="flex items-center gap-1 flex-shrink-0 ml-2">
-                {routeOpen ? 'Ocultar' : 'Detalhes'}
-                <i className={`ri-arrow-${routeOpen ? 'up' : 'down'}-s-line`} aria-hidden="true" />
-              </span>
-            </button>
-            {routeOpen && (
-              <div className="space-y-1.5 pb-0.5">
-                <p className="text-xs text-ink-600 flex items-start gap-2">
-                  <i className="ri-map-pin-user-fill text-brand-500 mt-0.5" aria-hidden="true" />
-                  <span>{parcel.pickup}</span>
-                </p>
-                <p className="text-xs text-ink-600 flex items-start gap-2">
-                  <i className="ri-map-pin-2-fill text-danger-500 mt-0.5" aria-hidden="true" />
-                  <span>{parcel.destination}</span>
-                </p>
-                {parcel.recipient?.phone && (
-                  <p className="text-xs text-ink-600 flex items-start gap-2">
-                    <i className="ri-phone-line text-ink-400 mt-0.5" aria-hidden="true" />
-                    <span>{parcel.recipient.phone}</span>
-                  </p>
-                )}
-              </div>
+          {/* Destinatário + rota sempre visíveis */}
+          <div className="space-y-1.5">
+            {(parcel.recipient?.name || parcel.itemName) && (
+              <p className="text-xs text-ink-600 flex items-center gap-2 min-w-0">
+                <i className="ri-user-received-line text-ink-400 flex-shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {parcel.recipient?.name || parcel.itemName}
+                  {parcel.recipient?.name && parcel.itemName ? ` · ${parcel.itemName}` : ''}
+                  {parcel.vehicleType ? ` · ${parcel.vehicleType === 'moto' ? 'Moto' : 'Carro'}` : ''}
+                </span>
+              </p>
+            )}
+            <div className="flex gap-3 text-xs text-ink-600">
+              <p className="flex items-center gap-1.5 min-w-0 flex-1">
+                <i className="ri-map-pin-user-fill text-brand-500 flex-shrink-0" aria-hidden="true" />
+                <span className="truncate">{shortAddress(parcel.pickup)}</span>
+              </p>
+              <p className="flex items-center gap-1.5 min-w-0 flex-1">
+                <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
+                <span className="truncate">{shortAddress(parcel.destination)}</span>
+              </p>
+            </div>
+            {parcel.recipient?.phone && (
+              <p className="text-xs text-ink-500 flex items-center gap-1.5">
+                <i className="ri-phone-line text-ink-400" aria-hidden="true" />
+                {parcel.recipient.phone}
+              </p>
             )}
           </div>
 

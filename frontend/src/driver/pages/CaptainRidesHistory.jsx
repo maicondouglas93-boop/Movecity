@@ -33,7 +33,7 @@ function formatDateTime(value) {
 }
 
 function formatFare(ride) {
-    const value = ride?.finalPrice ?? ride?.fare;
+    const value = ride?.driverAmount ?? ride?.finalPrice ?? ride?.fare;
     if (value == null || Number.isNaN(Number(value))) return '—';
     return `R$ ${Number(value).toFixed(2)}`;
 }

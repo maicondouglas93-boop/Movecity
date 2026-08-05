@@ -44,7 +44,7 @@ function formatDateTime(value) {
 }
 
 function formatFare(parcel) {
-    const value = parcel?.fare
+    const value = parcel?.driverAmount ?? parcel?.fare
     if (value == null || Number.isNaN(Number(value))) return '—'
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }

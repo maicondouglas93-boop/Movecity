@@ -81,7 +81,7 @@ const CaptainEarnings = () => {
                         {isLoading ? '...' : `R$ ${data?.totalEarnings?.toFixed(2) || '0.00'}`}
                     </h2>
                     <p className="text-xs text-ink-600 mt-1">
-                        {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'} • R$ ${data?.totalCommission?.toFixed(2) || '0.00'} em comissão`}
+                        {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'}`}
                     </p>
                 </Card>
 
@@ -124,8 +124,8 @@ const CaptainEarnings = () => {
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center text-xs border-t border-line pt-2 mt-1">
-                                    <span className="text-ink-600">Bruto R$ {ride.grossFare?.toFixed(2)} · Comissão R$ {ride.commission?.toFixed(2)}</span>
-                                    <span className="font-bold text-brand-600">R$ {ride.netEarnings?.toFixed(2)}</span>
+                                    <span className="text-ink-600">Você recebeu</span>
+                                    <span className="font-bold text-brand-600">R$ {(ride.driverAmount ?? ride.netEarnings)?.toFixed?.(2) ?? '0.00'}</span>
                                 </div>
                             </Card>
                         ))}

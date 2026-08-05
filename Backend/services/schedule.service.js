@@ -416,31 +416,41 @@ module.exports.listCaptainUpcoming = async (captainId) => {
         return mapService.haversineKm(pos.ltd, pos.lng, lat, lng) <= radiusKm;
     };
 
+    const { computeDriverAmount } = require('../utils/financePrivacy');
     const items = [
-        ...rides.filter((r) => withinRadius(r.pickupCoordinates)).map((r) => ({
-            kind: 'ride',
-            _id: r._id,
-            pickup: shortAddress(r.pickup),
-            destination: shortAddress(r.destination),
-            fare: r.finalPrice || r.fare,
-            vehicleType: r.vehicleType,
-            scheduledAt: r.scheduledAt,
-            estimatedDistance: r.estimatedDistance,
-            estimatedTime: r.estimatedTime,
-        })),
-        ...parcels.filter((p) => withinRadius(p.pickupCoordinates)).map((p) => ({
-            kind: 'parcel',
-            _id: p._id,
-            pickup: shortAddress(p.pickup),
-            destination: shortAddress(p.destination),
-            fare: p.fare,
-            vehicleType: p.vehicleType,
-            itemName: p.itemName,
-            size: p.size,
-            scheduledAt: p.scheduledAt || p.schedule?.at,
-            estimatedDistance: p.estimatedDistance,
-            estimatedTime: p.estimatedTime,
-        })),
+        ...rides.filter((r) => withinRadius(r.pickupCoordinates)).map((r) => {
+            const driverAmount = computeDriverAmount(r);
+            return {
+                kind: 'ride',
+                _id: r._id,
+                pickup: shortAddress(r.pickup),
+                destination: shortAddress(r.destination),
+                // Motorista: só líquido (sem bruto/comissão).
+                fare: driverAmount,
+                driverAmount,
+                vehicleType: r.vehicleType,
+                scheduledAt: r.scheduledAt,
+                estimatedDistance: r.estimatedDistance,
+                estimatedTime: r.estimatedTime,
+            };
+        }),
+        ...parcels.filter((p) => withinRadius(p.pickupCoordinates)).map((p) => {
+            const driverAmount = computeDriverAmount(p);
+            return {
+                kind: 'parcel',
+                _id: p._id,
+                pickup: shortAddress(p.pickup),
+                destination: shortAddress(p.destination),
+                fare: driverAmount,
+                driverAmount,
+                vehicleType: p.vehicleType,
+                itemName: p.itemName,
+                size: p.size,
+                scheduledAt: p.scheduledAt || p.schedule?.at,
+                estimatedDistance: p.estimatedDistance,
+                estimatedTime: p.estimatedTime,
+            };
+        }),
     ]
         .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))
         .slice(0, UPCOMING_LIMIT);

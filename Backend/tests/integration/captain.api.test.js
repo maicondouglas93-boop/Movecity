@@ -115,6 +115,10 @@ describe('Captain API Integration Tests', () => {
             expect(res.body.totalEarnings).toBe(40); // 50 - 10
             expect(res.body.rides).toHaveLength(1);
             expect(res.body.rides[0].netEarnings).toBe(40);
+            expect(res.body.rides[0].driverAmount).toBe(40);
+            expect(res.body.rides[0].grossFare).toBeUndefined();
+            expect(res.body.rides[0].commission).toBeUndefined();
+            expect(res.body.totalCommission).toBeUndefined();
         });
 
         it('recorte "week" inclui corridas de até 7 dias atrás, mas não de 8', async () => {

@@ -981,9 +981,9 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     ]);
 
     return {
-        activeParcel: activeParcel || null,
+        activeParcel: activeParcel ? module.exports.toParcelCaptainDTO(activeParcel) : null,
         pendingOffers,
-        parcels,
+        parcels: (parcels || []).map((p) => module.exports.toParcelCaptainDTO(p)),
         page: safePage,
         limit: safeLimit,
         total,
@@ -1044,6 +1044,8 @@ module.exports.getSettings = getSettings;
 
 module.exports.toParcelOfferDTO = (parcel) => {
     const raw = typeof parcel.toObject === 'function' ? parcel.toObject() : { ...parcel };
+    const { computeDriverAmount } = require('../utils/financePrivacy');
+    const driverAmount = computeDriverAmount(raw);
     return {
         _id: raw._id,
         vehicleType: raw.vehicleType,
@@ -1057,17 +1059,21 @@ module.exports.toParcelOfferDTO = (parcel) => {
         size: raw.size,
         description: raw.description,
         notes: raw.notes,
-        fare: raw.fare,
+        // Oferta: só o líquido do motorista (sem bruto/comissão).
+        fare: driverAmount,
+        driverAmount,
         estimatedDistance: raw.estimatedDistance,
         estimatedTime: raw.estimatedTime,
         status: raw.status,
         createdAt: raw.createdAt,
+        paymentMethod: raw.paymentMethod,
         // Sem telefones / nomes completos na oferta pré-aceite.
     };
 };
 
 module.exports.toParcelCaptainDTO = (parcel) => {
-    const raw = typeof parcel.toObject === 'function' ? parcel.toObject({ virtuals: true }) : { ...parcel };
+    const { sanitizeCaptainFinance } = require('../utils/financePrivacy');
+    const raw = sanitizeCaptainFinance(parcel);
     delete raw.deliveryPin;
     return raw;
 };

@@ -6,16 +6,65 @@ const cron = require('node-cron');
 const tokenRegistry = require('./tokenRegistry.service');
 const pushTransport = require('./pushTransport.service');
 const queue = require('./queue.service');
+const { resolveMeta, toInboxDTO } = require('./notificationMeta');
 
 // Extraído de services/notification.service.js (Fase 4 da correção do sistema de push,
 // 2026-08-02). Responsabilidade: decidir quem recebe o quê, gravar o histórico
 // (Notification/NotificationCampaign) e delegar o envio de fato ao pushTransport.
 
+/** Emite `notification-created` pro socket do destinatário (central in-app em tempo real). */
+async function emitInboxRealtime(notification) {
+    try {
+        const { sendMessageToSocketId } = require('../socket');
+        let socketId = null;
+        if (notification.userId) {
+            const user = await userModel.findById(notification.userId).select('socketId').lean();
+            socketId = user?.socketId;
+        } else if (notification.captainId) {
+            const captain = await captainModel.findById(notification.captainId).select('socketId').lean();
+            socketId = captain?.socketId;
+        }
+        if (!socketId) return;
+        sendMessageToSocketId(socketId, {
+            event: 'notification-created',
+            data: toInboxDTO(notification),
+        });
+    } catch (err) {
+        console.warn('[Notification] Falha ao emitir notification-created:', err.message);
+    }
+}
+
+function enrichInboxFields(notificationData, payloadData = {}) {
+    const meta = resolveMeta({
+        type: notificationData.type,
+        category: notificationData.category,
+        priority: notificationData.priority,
+        icon: notificationData.icon,
+        action: notificationData.action,
+        data: { ...payloadData, deepLink: payloadData.deepLink || notificationData.action },
+    });
+    const recipientType = notificationData.recipientType
+        || (notificationData.userId ? 'passenger' : notificationData.captainId ? 'driver' : null);
+    return {
+        ...notificationData,
+        recipientType,
+        category: meta.category,
+        priority: meta.priority,
+        icon: meta.icon,
+        action: meta.action,
+        referenceId: notificationData.referenceId || meta.referenceId,
+        referenceType: notificationData.referenceType || meta.referenceType,
+        origin: notificationData.origin || 'system',
+    };
+}
+
 // M4 da auditoria de push (2026-08-02): antes gravava status:'sent' incondicionalmente,
 // antes mesmo de tentar enviar — o histórico afirmava uma entrega que podia nunca ter
 // acontecido. Agora grava 'sending', tenta enviar, e só então grava o resultado real.
+// Central de notificações: também preenche category/icon/action e emite socket in-app.
 const recordAndSend = async (notificationData, tokens, payload, traceId = '[AUDIT]') => {
-    const notification = await Notification.create({ ...notificationData, status: 'sending', sentAt: new Date() });
+    const enriched = enrichInboxFields(notificationData, payload?.data || {});
+    const notification = await Notification.create({ ...enriched, status: 'sending', sentAt: new Date() });
     const result = await pushTransport.sendPush(tokens, payload, traceId);
 
     notification.status = (tokens.length === 0 || result.successCount > 0) ? 'sent' : 'failed';
@@ -23,6 +72,11 @@ const recordAndSend = async (notificationData, tokens, payload, traceId = '[AUDI
 
     if (result.invalidTokens.length > 0) {
         await tokenRegistry.removeInvalidTokens(result.invalidTokens);
+    }
+
+    // Inbox em tempo real (app aberto) — FCM cobre app fechado/background.
+    if (notification.userId || notification.captainId) {
+        emitInboxRealtime(notification).catch(() => {});
     }
 
     return result;
@@ -326,6 +380,62 @@ module.exports.sendRechargeApproved = async (captainId, data) => {
 
 module.exports.sendAdminNotification = async (target, title, message, data = {}) => {
     try {
+        const inboxService = require('./inbox.service');
+        const meta = resolveMeta({
+            type: data.type || 'ADMIN',
+            category: data.category,
+            priority: data.priority,
+            icon: data.icon,
+            action: data.action || data.deepLink,
+            data,
+        });
+
+        // Inbox por destinatário (central in-app) + push multicast.
+        const recipients = [];
+        if (target === 'passengers' || target === 'all') {
+            const users = await userModel.find({ isBlocked: { $ne: true } }).select('_id').lean();
+            users.forEach((u) => recipients.push({ userId: u._id }));
+        }
+        if (target === 'drivers' || target === 'all') {
+            const captains = await captainModel.find({ isBlocked: { $ne: true } }).select('_id').lean();
+            captains.forEach((c) => recipients.push({ captainId: c._id }));
+        }
+        // Usuários específicos: data.userIds / data.captainIds
+        if (Array.isArray(data.userIds)) {
+            data.userIds.forEach((id) => recipients.push({ userId: id }));
+        }
+        if (Array.isArray(data.captainIds)) {
+            data.captainIds.forEach((id) => recipients.push({ captainId: id }));
+        }
+
+        if (recipients.length > 0) {
+            const created = await inboxService.createInboxNotifications({
+                recipients,
+                title,
+                message,
+                type: data.type || 'ADMIN',
+                category: meta.category,
+                priority: meta.priority,
+                icon: meta.icon,
+                action: meta.action,
+                referenceId: data.referenceId,
+                referenceType: data.referenceType,
+                origin: 'admin',
+            });
+            // Tempo real para quem está online
+            for (const dto of created) {
+                const fakeDoc = {
+                    ...dto,
+                    _id: dto.id,
+                    userId: dto.userId,
+                    captainId: dto.captainId,
+                    message: dto.message,
+                    read: false,
+                };
+                emitInboxRealtime(fakeDoc).catch(() => {});
+            }
+        }
+
         let tokens = [];
         if (target === 'passengers' || target === 'all') {
             tokens.push(...await tokenRegistry.getAllPassengerTokens());
@@ -333,11 +443,26 @@ module.exports.sendAdminNotification = async (target, title, message, data = {})
         if (target === 'drivers' || target === 'all') {
             tokens.push(...await tokenRegistry.getAllDriverTokens());
         }
+        if (Array.isArray(data.userIds)) {
+            for (const uid of data.userIds) {
+                tokens.push(...await tokenRegistry.getTokensForUser(uid));
+            }
+        }
+        if (Array.isArray(data.captainIds)) {
+            for (const cid of data.captainIds) {
+                tokens.push(...await tokenRegistry.getTokensForCaptain(cid));
+            }
+        }
         // Dedupe defensivo: mesmo com a segmentação corrigida (C4), nenhum dispositivo
         // deve receber a mesma notificação duas vezes.
         const uniqueTokens = [...new Set(tokens)];
-
-        await recordAndSend({ title, message, type: 'ADMIN', targetAudience: target }, uniqueTokens, { title, message, data });
+        if (uniqueTokens.length > 0) {
+            await pushTransport.sendPush(
+                uniqueTokens,
+                { title, message, data: { ...data, type: data.type || 'ADMIN', deepLink: meta.action } },
+                '[ADMIN]'
+            );
+        }
     } catch (error) {
         console.error('[Notification] Erro ao enviar notificação administrativa:', error);
     }

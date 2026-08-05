@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { usePwaUpdate } from '@/shared/contexts/PwaUpdateContext';
 import { useToast } from '@/shared/contexts/ToastContext';
 import InstallAppButton from '@/shared/components/ui/InstallAppButton';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 const Header = () => {
     const location = useLocation();
@@ -38,14 +39,17 @@ const Header = () => {
                     </Link>
                     <InstallAppButton />
                 </div>
-                <button
-                    type="button"
-                    onClick={() => setMenuOpen(true)}
-                    aria-label="Abrir menu"
-                    className="text-ink-600 active:text-brand-600 p-1 text-2xl transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
-                >
-                    <i className="ri-menu-line" aria-hidden="true"></i>
-                </button>
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                    <NotificationBell to="/notifications" />
+                    <button
+                        type="button"
+                        onClick={() => setMenuOpen(true)}
+                        aria-label="Abrir menu"
+                        className="text-ink-600 active:text-brand-600 p-1 text-2xl transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+                    >
+                        <i className="ri-menu-line" aria-hidden="true"></i>
+                    </button>
+                </div>
             </div>
 
             {menuOpen && (

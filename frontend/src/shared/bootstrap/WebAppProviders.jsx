@@ -5,6 +5,7 @@ import CaptainContext from '@/driver/contexts/CaptainContext'
 import SocketProvider from '@/shared/contexts/SocketContext'
 import { LocationProvider } from '@/shared/contexts/LocationContext'
 import { ToastProvider } from '@/shared/contexts/ToastContext'
+import { NotificationInboxProvider } from '@/shared/contexts/NotificationInboxContext'
 import RideProvider from '@/shared/contexts/RideContext'
 import { queryClient } from '@/shared/services/queryClient'
 
@@ -15,16 +16,18 @@ const WebAppProviders = ({ children }) => (
             <UserContext>
                 <ToastProvider>
                     <SocketProvider>
-                        <LocationProvider>
-                            {/* RideProvider precisa do BrowserRouter (usa useNavigate/useLocation
-                  pra restaurar a tela certa de uma corrida ativa) e do SocketProvider
-                  (re-sincroniza a corrida no 'connect'). */}
-                            <BrowserRouter>
-                                <RideProvider>
-                                    {children}
-                                </RideProvider>
-                            </BrowserRouter>
-                        </LocationProvider>
+                        <NotificationInboxProvider>
+                            <LocationProvider>
+                                {/* RideProvider precisa do BrowserRouter (usa useNavigate/useLocation
+                      pra restaurar a tela certa de uma corrida ativa) e do SocketProvider
+                      (re-sincroniza a corrida no 'connect'). */}
+                                <BrowserRouter>
+                                    <RideProvider>
+                                        {children}
+                                    </RideProvider>
+                                </BrowserRouter>
+                            </LocationProvider>
+                        </NotificationInboxProvider>
                     </SocketProvider>
                 </ToastProvider>
             </UserContext>

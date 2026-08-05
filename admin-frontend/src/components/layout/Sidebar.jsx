@@ -21,7 +21,7 @@ const navItems = [
   { icon: Receipt, label: 'Tarifas', path: '/tariffs' },
   { icon: Tag, label: 'Cupons', path: '/promotions', roles: ['super_admin', 'operador'] },
   { icon: BarChart3, label: 'Relatórios & BI', path: '/reports', roles: ['super_admin'] },
-  { icon: Bell, label: 'Notificações', path: '/notifications', roles: ['super_admin', 'operador'] },
+  { icon: Bell, label: 'Comunicação', path: '/notifications', roles: ['super_admin', 'operador'] },
   { icon: ClipboardList, label: 'Logs & Auditoria', path: '/logs', roles: ['super_admin'] },
 ];
 

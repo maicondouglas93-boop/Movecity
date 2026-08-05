@@ -30,6 +30,17 @@ router.delete('/notifications/token', authAdmin, notificationController.unregist
 
 // Marketing / Campaigns
 router.post('/notifications', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.sendNotification); // Legacy (maybe used elsewhere)
+// Central in-app: cria registro por destinatário + push (ver notification.controller.adminSend)
+router.post('/notifications/inbox', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), require('../controllers/notification.controller').adminSend);
+router.get('/notifications/inbox-stats', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing', 'financeiro'), async (req, res) => {
+    try {
+        const { inboxStats } = require('../notification/inboxStats.service');
+        const data = await inboxStats({ limit: req.query.limit });
+        res.status(200).json(data);
+    } catch (err) {
+        res.status(500).json({ message: err.message || 'Erro ao carregar métricas' });
+    }
+});
 router.get('/campaigns', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.getCampaigns);
 router.post('/campaigns', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.createCampaign);
 router.post('/campaigns/estimate', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.estimateAudience);

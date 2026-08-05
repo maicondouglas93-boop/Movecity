@@ -56,6 +56,13 @@ beforeAll(async () => {
     if (mongoose.modelNames().includes('captain')) {
         await mongoose.model('captain').syncIndexes();
     }
+
+    // Índice parcial rideId/parcelId+$type:objectId — sem syncIndexes, bases (e o
+    // memory server se um teste criou o índice legado) mantêm o filtro antigo que
+    // indexava rideId:null e gerava E11000 na 2ª comissão de encomenda.
+    if (mongoose.modelNames().includes('transaction')) {
+        await mongoose.model('transaction').syncIndexes();
+    }
 });
 
 afterEach(async () => {

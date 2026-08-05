@@ -76,10 +76,10 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
     const balanceAfter = wallet[ledgerField];
     const balanceBefore = balanceAfter - (incFields[ledgerField] || 0);
 
-    const [transaction] = await transactionModel.create([{
+    // Nunca gravar rideId/parcelId como null: o índice único parcial indexaria null
+    // e a próxima comissão sem vínculo (encomenda, ajuste, etc.) colidiria com E11000.
+    const payload = {
         captainId,
-        rideId,
-        parcelId,
         type,
         paymentMethod,
         amount,
@@ -89,7 +89,11 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
         adminId,
         reason,
         status: 'completed'
-    }], { session });
+    };
+    if (rideId) payload.rideId = rideId;
+    if (parcelId) payload.parcelId = parcelId;
+
+    const [transaction] = await transactionModel.create([payload], { session });
 
     // Regra de bloqueio de motorista — parte da mesma unidade atômica da movimentação
     // que a disparou (saldo negativo pode ser resultado direto desta transação).

@@ -69,6 +69,16 @@ const rideSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    // Lease curta do worker: impede duas instâncias/ticks de redispatcharem o mesmo
+    // agendamento simultaneamente. Expira sozinha para permitir a próxima rodada.
+    dispatchLeaseUntil: {
+        type: Date,
+        default: null,
+    },
+    dispatchLastAttemptAt: {
+        type: Date,
+        default: null,
+    },
     dispatchLastError: {
         type: String,
         default: null,

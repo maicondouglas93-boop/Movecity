@@ -64,10 +64,29 @@ function enrichInboxFields(notificationData, payloadData = {}) {
 // Central de notificações: também preenche category/icon/action e emite socket in-app.
 const recordAndSend = async (notificationData, tokens, payload, traceId = '[AUDIT]') => {
     const enriched = enrichInboxFields(notificationData, payload?.data || {});
-    const notification = await Notification.create({ ...enriched, status: 'sending', sentAt: new Date() });
+    const isOffer = enriched.type === 'NEW_RIDE' || enriched.type === 'NEW_PARCEL';
+    const dedupeKey = isOffer && enriched.captainId && enriched.referenceId
+        ? `offer:${enriched.type}:${enriched.captainId}:${enriched.referenceId}`
+        : null;
+
+    let notification;
+    try {
+        notification = await Notification.create({
+            ...enriched,
+            dedupeKey,
+            status: 'sending',
+            sentAt: new Date(),
+        });
+    } catch (error) {
+        if (dedupeKey && error?.code === 11000) {
+            console.log(`${traceId} Push de oferta já enviado; duplicata ignorada (${dedupeKey}).`);
+            return { successCount: 0, failureCount: 0, invalidTokens: [], deduplicated: true };
+        }
+        throw error;
+    }
     const result = await pushTransport.sendPush(tokens, payload, traceId);
 
-    notification.status = (tokens.length === 0 || result.successCount > 0) ? 'sent' : 'failed';
+    notification.status = (tokens.length > 0 && result.successCount > 0) ? 'sent' : 'failed';
     await notification.save();
 
     if (result.invalidTokens.length > 0) {
@@ -139,13 +158,17 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
         ? String(data.vehicleType)
         : null;
 
-    const title = fareLabel ? `Nova corrida · ${fareLabel}` : 'Nova corrida disponível';
-    const message = [
-        routeLabel,
-        [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
-        passengerLabel ? `Passageiro: ${passengerLabel}` : null,
-        vehicleLabel,
-    ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta';
+    const title = data.isScheduled
+        ? 'Novo agendamento disponível'
+        : (fareLabel ? `Nova corrida · ${fareLabel}` : 'Nova corrida disponível');
+    const message = data.isScheduled
+        ? 'Uma nova corrida agendada está disponível para aceite.'
+        : ([
+            routeLabel,
+            [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
+            passengerLabel ? `Passageiro: ${passengerLabel}` : null,
+            vehicleLabel,
+        ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta');
 
     const deepLinkPath = `${DEEP_LINK.captainHome}?rideOffer=${encodeURIComponent(data.rideId)}`;
     const frontendOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
@@ -189,14 +212,18 @@ module.exports.sendNewParcel = async (captainId, data, traceId = '[AUDIT]') => {
         ? `${Math.max(1, Math.round(data.estimatedTime / 60))} min`
         : null;
 
-    const title = fareLabel ? `Nova encomenda · ${fareLabel}` : 'Nova encomenda disponível';
-    const message = [
-        routeLabel,
-        [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
-        data.itemName ? `Item: ${data.itemName}` : null,
-        data.vehicleType,
-        data.size ? `Tamanho: ${data.size}` : null,
-    ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta';
+    const title = data.isScheduled
+        ? 'Novo agendamento disponível'
+        : (fareLabel ? `Nova encomenda · ${fareLabel}` : 'Nova encomenda disponível');
+    const message = data.isScheduled
+        ? 'Uma nova encomenda agendada está disponível para aceite.'
+        : ([
+            routeLabel,
+            [distanceKm, durationMin].filter(Boolean).join(' · ') || null,
+            data.itemName ? `Item: ${data.itemName}` : null,
+            data.vehicleType,
+            data.size ? `Tamanho: ${data.size}` : null,
+        ].filter(Boolean).join('\n') || 'Abra o app para ver a oferta');
 
     const deepLinkPath = `${DEEP_LINK.captainHome}?parcelOffer=${encodeURIComponent(data.parcelId)}`;
     const frontendOrigin = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
@@ -347,14 +374,14 @@ module.exports.sendChatMessageToCaptain = async (captainId, preview, data) => {
     const deepLink = data?.subjectType === 'parcel'
         ? '/captain-parcel'
         : DEEP_LINK.captainRiding;
-    queue.enqueue(() => sendToCaptain(captainId, 'Nova mensagem do passageiro', preview, 'CHAT', { ...data, deepLink }));
+    return queue.enqueue(() => sendToCaptain(captainId, 'Nova mensagem do passageiro', preview, 'CHAT', { ...data, deepLink }));
 };
 
 module.exports.sendChatMessageToUser = async (userId, preview, data) => {
     const deepLink = data?.subjectType === 'parcel'
         ? '/encomenda/ativa'
         : DEEP_LINK.riding;
-    queue.enqueue(() => sendToUser(userId, 'Nova mensagem do motorista', preview, 'CHAT', { ...data, deepLink }));
+    return queue.enqueue(() => sendToUser(userId, 'Nova mensagem do motorista', preview, 'CHAT', { ...data, deepLink }));
 };
 
 // Pagamento/carteira (Fase 5 da correção do sistema de push, 2026-08-02): antes só

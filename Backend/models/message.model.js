@@ -31,6 +31,23 @@ const messageSchema = new mongoose.Schema({
         enum: ['user', 'captain'],
         required: true
     },
+    recipientId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+        refPath: 'recipientType'
+    },
+    recipientType: {
+        type: String,
+        enum: ['user', 'captain'],
+        required: true
+    },
+    // Mensagens operacionais continuam no mesmo histórico, mas são identificadas para
+    // auditoria e não dependem de inferir a palavra "PIN" no texto.
+    operationalType: {
+        type: String,
+        enum: ['delivery_pin'],
+        default: null
+    },
     type: {
         type: String,
         enum: ['text', 'image', 'location', 'audio'],

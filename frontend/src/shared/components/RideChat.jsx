@@ -91,7 +91,9 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         socket.emit('join-chat', socketPayload());
 
         const handleReceiveMessage = (message) => {
-            setMessages(prev => [...prev, message]);
+            setMessages(prev => (
+                prev.some((item) => item._id === message._id) ? prev : [...prev, message]
+            ));
             socket.emit('message-read', { ...socketPayload(), messageId: message._id });
 
             if (chatContainerRef.current) {
@@ -145,7 +147,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         }, 1500);
     };
 
-    const sendMessage = async (textToSend = inputText) => {
+    const sendMessage = async (textToSend = inputText, operationalType = undefined) => {
         if (!textToSend.trim()) return;
 
         const tempId = Date.now().toString();
@@ -165,13 +167,13 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
             const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
                 ...restSubjectBody(),
                 message: textToSend,
-                type: 'text'
+                type: 'text',
+                ...(operationalType ? { operationalType } : {}),
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
             setMessages(prev => prev.map(msg => msg._id === tempId ? response.data : msg));
-            socket.emit('send-message', { ...socketPayload(), message: response.data });
 
         } catch (err) {
             console.error('Error sending message', err);
@@ -248,7 +250,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
                     {canSendPin && (
                         <button
                             type="button"
-                            onClick={() => sendMessage(`PIN da entrega: ${deliveryPin}`)}
+                            onClick={() => sendMessage(`PIN da entrega: ${deliveryPin}`, 'delivery_pin')}
                             className="bg-brand-50 hover:bg-brand-100 border border-brand-200 text-brand-700 text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0"
                         >
                             🔑 Enviar PIN

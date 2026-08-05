@@ -4,24 +4,11 @@ const chatController = require('../controllers/chat.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
 const { body, param } = require('express-validator');
 
-const checkAuth = async (req, res, next) => {
-    const token = req.cookies?.token || req.headers.authorization?.split(' ')[ 1 ];
-    if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-    try {
-        await authMiddleware.authUser(req, res, () => {
-            next();
-        });
-    } catch (userErr) {
-        try {
-            await authMiddleware.authCaptain(req, res, () => {
-                next();
-            });
-        } catch (capErr) {
-            return res.status(401).json({ message: 'Unauthorized' });
-        }
-    }
-};
+// Chat é compartilhado por passageiro e motorista. `authUser` responde 401 quando o
+// token pertence a um captain (não lança), portanto o antigo fallback via try/catch
+// nunca chegava a `authCaptain`. `authBoth` resolve uma única vez o JWT e autentica
+// explicitamente um dos dois perfis.
+const checkAuth = authMiddleware.authBoth;
 
 // Novo: /chat/parcel/:subjectId e /chat/ride/:subjectId
 router.get('/:subjectType/:subjectId',
@@ -48,6 +35,7 @@ router.post('/send', [
     body('subjectType').optional().isIn(['ride', 'parcel']),
     body('subjectId').optional().isMongoId(),
     body('rideId').optional().isMongoId(),
+    body('operationalType').optional().isIn(['delivery_pin']),
     body().custom((value) => {
         if (!value.subjectId && !value.rideId) {
             throw new Error('subjectId or rideId is required');

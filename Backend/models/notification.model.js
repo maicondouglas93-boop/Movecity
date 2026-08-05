@@ -121,6 +121,12 @@ const notificationSchema = new mongoose.Schema({
     sentAt: {
         type: Date
     },
+    // Idempotência de ofertas: uma chave por motorista + serviço impede que cron,
+    // redispatch ou múltiplas instâncias enviem o mesmo push mais de uma vez.
+    dedupeKey: {
+        type: String,
+        default: null,
+    },
     // Campanha/admin que originou o envio (métricas entregue/lida)
     campaignId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -133,5 +139,12 @@ notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ captainId: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ captainId: 1, read: 1, createdAt: -1 });
+notificationSchema.index(
+    { dedupeKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { dedupeKey: { $type: 'string' } },
+    }
+);
 
 module.exports = mongoose.model('notification', notificationSchema);

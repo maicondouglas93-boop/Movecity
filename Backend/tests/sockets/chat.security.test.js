@@ -1,6 +1,6 @@
 const { createServer } = require('http');
 const Client = require('socket.io-client');
-const { initializeSocket } = require('../../socket');
+const { initializeSocket, publishPersistedChatMessage } = require('../../socket');
 const { generateAuthToken } = require('../setup/authHelper');
 const { createUser } = require('../factories/user.factory');
 const { createCaptain } = require('../factories/captain.factory');
@@ -75,7 +75,16 @@ describe('Segurança do chat via Socket.IO (A10)', () => {
         });
 
         // O passageiro manda uma mensagem pra sala.
-        passengerSocket.emit('send-message', { rideId: ride._id.toString(), message: { _id: 'm1', message: 'oi' } });
+        await publishPersistedChatMessage({
+            subject: {
+                subjectType: 'ride',
+                subjectId: ride._id,
+                userId: passenger._id,
+                captainId: captain._id,
+            },
+            senderType: 'user',
+            message: { _id: 'm1', message: 'oi' },
+        });
 
         const strangerGotIt = await strangerReceivedMessage;
         expect(strangerGotIt).toBe(false);
@@ -103,7 +112,16 @@ describe('Segurança do chat via Socket.IO (A10)', () => {
             captainSocket.on('receive-message', resolve);
         });
 
-        passengerSocket.emit('send-message', { rideId: ride._id.toString(), message: { _id: 'm2', message: 'chegando' } });
+        await publishPersistedChatMessage({
+            subject: {
+                subjectType: 'ride',
+                subjectId: ride._id,
+                userId: passenger._id,
+                captainId: captain._id,
+            },
+            senderType: 'user',
+            message: { _id: 'm2', message: 'chegando' },
+        });
 
         const received = await captainReceived;
         expect(received).toEqual({ _id: 'm2', message: 'chegando' });
@@ -172,7 +190,16 @@ describe('Push de chat quando o destinatário não está presente (Fase 5, A7)',
         await new Promise((resolve) => setTimeout(resolve, 150));
 
         // O passageiro nunca entrou na sala — chat fechado/app em segundo plano.
-        captainSocket.emit('send-message', { rideId: ride._id.toString(), message: { _id: 'm3', message: 'Estou chegando' } });
+        await publishPersistedChatMessage({
+            subject: {
+                subjectType: 'ride',
+                subjectId: ride._id,
+                userId: passenger._id,
+                captainId: captain._id,
+            },
+            senderType: 'captain',
+            message: { _id: 'm3', message: 'Estou chegando' },
+        });
 
         const notification = await waitFor(() => Notification.findOne({ userId: passenger._id, type: 'CHAT' }));
         expect(notification).toBeTruthy();
@@ -203,7 +230,16 @@ describe('Push de chat quando o destinatário não está presente (Fase 5, A7)',
         passengerSocket.emit('leave-chat', { rideId: ride._id.toString() });
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        captainSocket.emit('send-message', { rideId: ride._id.toString(), message: { _id: 'm4', message: 'Cheguei no local' } });
+        await publishPersistedChatMessage({
+            subject: {
+                subjectType: 'ride',
+                subjectId: ride._id,
+                userId: passenger._id,
+                captainId: captain._id,
+            },
+            senderType: 'captain',
+            message: { _id: 'm4', message: 'Cheguei no local' },
+        });
 
         const notification = await waitFor(() => Notification.findOne({ userId: passenger._id, type: 'CHAT' }));
         expect(notification).toBeTruthy();

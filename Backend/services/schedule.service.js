@@ -13,6 +13,7 @@ const CAPTAIN_HORIZON_MS = 24 * 60 * 60 * 1000;
 const UPCOMING_LIMIT = 20;
 /** SCH-A2 Fase 2: rodadas de despacho com 0 captains antes de cancelar (cron ~1/min). */
 const MAX_DISPATCH_ROUNDS = 6;
+const DISPATCH_LEASE_MS = 45 * 1000;
 
 function assertValidScheduledAt(scheduledAt) {
     const at = new Date(scheduledAt);
@@ -167,6 +168,7 @@ async function rollbackRideDispatch(rideId, err) {
             $set: {
                 status: 'scheduled',
                 activatedAt: null,
+                dispatchLeaseUntil: null,
                 dispatchLastError: errMsg,
             },
             $inc: { dispatchAttempts: 1 },
@@ -197,6 +199,7 @@ async function rollbackParcelDispatch(parcelId, err) {
             $set: {
                 status: 'scheduled',
                 activatedAt: null,
+                dispatchLeaseUntil: null,
                 dispatchLastError: errMsg,
             },
             $inc: { dispatchAttempts: 1 },
@@ -471,7 +474,14 @@ async function activateDueRides() {
         const now = new Date();
         const claimed = await rideModel.findOneAndUpdate(
             { _id: ride._id, status: 'scheduled' },
-            { $set: { status: 'requested', activatedAt: now } },
+            {
+                $set: {
+                    status: 'requested',
+                    activatedAt: now,
+                    dispatchLastAttemptAt: now,
+                    dispatchLeaseUntil: new Date(now.getTime() + DISPATCH_LEASE_MS),
+                },
+            },
             { new: true }
         );
         if (!claimed) continue;
@@ -522,7 +532,12 @@ async function activateDueParcels() {
         const claimed = await parcelModel.findOneAndUpdate(
             { _id: parcel._id, status: 'scheduled' },
             {
-                $set: { status: 'awaiting_provider', activatedAt: now },
+                $set: {
+                    status: 'awaiting_provider',
+                    activatedAt: now,
+                    dispatchLastAttemptAt: now,
+                    dispatchLeaseUntil: new Date(now.getTime() + DISPATCH_LEASE_MS),
+                },
                 $push: {
                     statusHistory: { status: 'awaiting_provider', at: now, by: 'system' },
                 },
@@ -570,26 +585,49 @@ async function redispatchOpenScheduledRides() {
     const rideController = require('../controllers/ride.controller');
     let retried = 0;
     for (const ride of open) {
+        const claimTime = new Date();
+        const claimed = await rideModel.findOneAndUpdate(
+            {
+                _id: ride._id,
+                status: 'requested',
+                $or: [{ captain: null }, { captain: { $exists: false } }],
+                $and: [{
+                    $or: [
+                        { dispatchLeaseUntil: null },
+                        { dispatchLeaseUntil: { $exists: false } },
+                        { dispatchLeaseUntil: { $lte: claimTime } },
+                    ],
+                }],
+            },
+            {
+                $set: {
+                    dispatchLastAttemptAt: claimTime,
+                    dispatchLeaseUntil: new Date(claimTime.getTime() + DISPATCH_LEASE_MS),
+                },
+            },
+            { new: true }
+        );
+        if (!claimed) continue;
         try {
             const rideService = require('./ride.service');
-            await rideService.settleScheduledRideFinance(ride._id);
+            await rideService.settleScheduledRideFinance(claimed._id);
         } catch (financeErr) {
-            console.error(`[SCHEDULE] finance settle retry ride ${ride._id}:`, financeErr.message);
+            console.error(`[SCHEDULE] finance settle retry ride ${claimed._id}:`, financeErr.message);
         }
         try {
-            const TRACE_ID = `RideRetry:${ride._id}`;
-            const offered = await rideController.dispatchRideToCaptains(ride, {
-                pickup: ride.pickup,
-                vehicleType: ride.vehicleType,
+            const TRACE_ID = `RideRetry:${claimed._id}`;
+            const offered = await rideController.dispatchRideToCaptains(claimed, {
+                pickup: claimed.pickup,
+                vehicleType: claimed.vehicleType,
                 TRACE_ID,
             });
             if (offered === 0) {
-                await handleZeroCaptainsRide(ride._id);
+                await handleZeroCaptainsRide(claimed._id);
             }
             retried += 1;
         } catch (err) {
-            console.error(`[SCHEDULE] Redispatch ride ${ride._id}:`, err.message);
-            await rollbackRideDispatch(ride._id, err);
+            console.error(`[SCHEDULE] Redispatch ride ${claimed._id}:`, err.message);
+            await rollbackRideDispatch(claimed._id, err);
         }
     }
     return retried;
@@ -610,20 +648,43 @@ async function redispatchOpenScheduledParcels() {
     const parcelController = require('../controllers/parcel.controller');
     let retried = 0;
     for (const parcel of open) {
+        const claimTime = new Date();
+        const claimed = await parcelModel.findOneAndUpdate(
+            {
+                _id: parcel._id,
+                status: 'awaiting_provider',
+                $or: [{ captain: null }, { captain: { $exists: false } }],
+                $and: [{
+                    $or: [
+                        { dispatchLeaseUntil: null },
+                        { dispatchLeaseUntil: { $exists: false } },
+                        { dispatchLeaseUntil: { $lte: claimTime } },
+                    ],
+                }],
+            },
+            {
+                $set: {
+                    dispatchLastAttemptAt: claimTime,
+                    dispatchLeaseUntil: new Date(claimTime.getTime() + DISPATCH_LEASE_MS),
+                },
+            },
+            { new: true }
+        );
+        if (!claimed) continue;
         try {
-            const TRACE_ID = `ParcelRetry:${parcel._id}`;
-            const offered = await parcelController.dispatchParcelToCaptains(parcel, {
-                pickup: parcel.pickup,
-                vehicleType: parcel.vehicleType,
+            const TRACE_ID = `ParcelRetry:${claimed._id}`;
+            const offered = await parcelController.dispatchParcelToCaptains(claimed, {
+                pickup: claimed.pickup,
+                vehicleType: claimed.vehicleType,
                 TRACE_ID,
             });
             if (offered === 0) {
-                await handleZeroCaptainsParcel(parcel._id);
+                await handleZeroCaptainsParcel(claimed._id);
             }
             retried += 1;
         } catch (err) {
-            console.error(`[SCHEDULE] Redispatch parcel ${parcel._id}:`, err.message);
-            await rollbackParcelDispatch(parcel._id, err);
+            console.error(`[SCHEDULE] Redispatch parcel ${claimed._id}:`, err.message);
+            await rollbackParcelDispatch(claimed._id, err);
         }
     }
     return retried;

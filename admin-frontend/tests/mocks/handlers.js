@@ -5,8 +5,9 @@ export const handlers = [
     const body = await request.json();
     
     if (body.email === 'test@test.com' && body.password === 'correct123') {
-      return HttpResponse.json({ 
+      return HttpResponse.json({
         token: 'fake-jwt-token-123',
+        refreshToken: 'fake-refresh-token-123',
         admin: { _id: '1', name: 'Admin Test', role: 'super_admin' }
       });
     }

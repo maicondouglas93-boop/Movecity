@@ -22,6 +22,12 @@ const DOCUMENT_FIELDS = [
     { key: 'selfie', label: 'Selfie com a CNH' },
 ]
 
+// Fase 2 da auditoria de production readiness (H6, 2026-08-05): mesmo limite já
+// aplicado na foto de perfil (CaptainProfile/PersonalData/CaptainSignup) — documentos
+// eram a única tela de upload sem validação nenhuma no cliente: aceitava PDF de 40MB
+// e deixava o erro estourar só no backend, depois do upload inteiro.
+const MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024
+
 const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
     const [ uploading, setUploading ] = useState(false)
     const { addToast } = useToast()
@@ -29,6 +35,16 @@ const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
     const handleFileChange = async (e) => {
         const file = e.target.files[0]
         if (!file) return
+        if (!file.type.startsWith('image/')) {
+            addToast('Selecione uma imagem válida (foto do documento).', 'error')
+            e.target.value = ''
+            return
+        }
+        if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+            addToast('A foto deve ter no máximo 5 MB.', 'error')
+            e.target.value = ''
+            return
+        }
         setUploading(true)
         try {
             const formData = new FormData()

@@ -22,15 +22,23 @@ const SocketProvider = ({ children }) => {
     const { addToast } = useToast()
 
     useEffect(() => {
-        socket.on('connect', () => {
+        // Fase 2 da auditoria de production readiness (H8, 2026-08-05): handlers
+        // nomeados para poderem sair no cleanup. O socket é um singleton de módulo —
+        // sem o off, cada remount do provider (StrictMode em dev, futura mudança de
+        // árvore) empilhava mais um par de listeners, duplicando sync da fila offline
+        // e spam de captureMessage a cada disconnect.
+        const handleConnect = () => {
             console.log('Connected to server');
             syncOfflineQueue();
-        });
+        };
 
-        socket.on('disconnect', (reason) => {
+        const handleDisconnect = (reason) => {
             console.log('Disconnected from server', reason);
             Sentry.captureMessage(`Socket disconnected: ${reason}`, 'warning');
-        });
+        };
+
+        socket.on('connect', handleConnect);
+        socket.on('disconnect', handleDisconnect);
 
         // Reexecuta a fila de ações offline via HTTP (P1.2 da auditoria de concorrência,
         // 2026-08-02) — só sai da fila com uma resposta real do servidor. Antes disso, as
@@ -65,6 +73,8 @@ const SocketProvider = ({ children }) => {
 
         return () => {
             window.removeEventListener('online', syncOfflineQueue);
+            socket.off('connect', handleConnect);
+            socket.off('disconnect', handleDisconnect);
         };
     }, [addToast]);
     return (

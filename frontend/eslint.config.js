@@ -5,7 +5,10 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist'] },
+  // Fase 2 (H4, 2026-08-05): 'dist-driver' (saída do build:driver) e artefatos de
+  // teste não são código-fonte — sem estes ignores, rodar o lint depois de um build
+  // somava centenas de erros de bundle minificado ao resultado.
+  { ignores: ['dist', 'dist-driver', 'dev-dist', 'playwright-report', 'test-results', 'coverage'] },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {

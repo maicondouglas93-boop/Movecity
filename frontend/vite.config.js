@@ -140,6 +140,11 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       setupFiles: './vitest.setup.js',
       css: true,
+      // Fase 2 da auditoria de production readiness (H4, 2026-08-05): o Vitest
+      // varria e2e/ e tentava executar specs do Playwright (test.describe explode
+      // fora do runner dele) — a suíte unitária nunca ficava verde. E2E roda por
+      // `npm run test:e2e`, não aqui.
+      exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
     },
   }
 })

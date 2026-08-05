@@ -6,4 +6,10 @@ services:
     rootDir: Backend
     buildCommand: npm install
     startCommand: node server.js
-
+    # Fase 2 da auditoria de production readiness (H5, 2026-08-05): sem health check,
+    # o Render considerava o deploy "vivo" só porque o processo subiu — um backend
+    # travado no boot (Mongo fora, env faltando) ficava no ar recebendo tráfego.
+    # /api/health é público e responde 200 sem tocar em auth (Backend/app.js).
+    # Nota: o plano free hiberna após inatividade — o primeiro request paga o cold
+    # start. Health de frontend fica com a Vercel (deploy checks do próprio painel).
+    healthCheckPath: /api/health

@@ -21,14 +21,22 @@ const renderWithProviders = (ui) => {
   );
 };
 
+// Fase 2 (H4, 2026-08-05): o teste estava quebrado há tempo — procurava placeholders
+// (/Email/i, /Senha/i), botão ("Entrar no Painel") e chave de storage ('token') que a
+// tela e o AuthContext não usam mais. Atualizado para o contrato atual: placeholders
+// reais, botão "Entrar no Sistema" e 'adminToken' no localStorage.
 describe('Testes de Integração da Tela de Login', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('Deve mostrar erro de credenciais inválidas', async () => {
     renderWithProviders(<Login />);
-    
-    fireEvent.change(screen.getByPlaceholderText(/Email/i), { target: { value: 'errado@test.com' } });
-    fireEvent.change(screen.getByPlaceholderText(/Senha/i), { target: { value: 'senhaerrada' } });
-    
-    fireEvent.click(screen.getByRole('button', { name: /Entrar no Painel/i }));
+
+    fireEvent.change(screen.getByPlaceholderText('admin@movecity.com'), { target: { value: 'errado@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'senhaerrada' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/Credenciais inválidas/i)).toBeInTheDocument();
@@ -37,14 +45,14 @@ describe('Testes de Integração da Tela de Login', () => {
 
   it('Deve fazer login com sucesso e armazenar token', async () => {
     renderWithProviders(<Login />);
-    
-    fireEvent.change(screen.getByPlaceholderText(/Email/i), { target: { value: 'test@test.com' } });
-    fireEvent.change(screen.getByPlaceholderText(/Senha/i), { target: { value: 'correct123' } });
-    
-    fireEvent.click(screen.getByRole('button', { name: /Entrar no Painel/i }));
+
+    fireEvent.change(screen.getByPlaceholderText('admin@movecity.com'), { target: { value: 'test@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'correct123' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/i }));
 
     await waitFor(() => {
-      expect(localStorage.getItem('token')).toBe('fake-jwt-token-123');
+      expect(localStorage.getItem('adminToken')).toBe('fake-jwt-token-123');
     });
   });
 });

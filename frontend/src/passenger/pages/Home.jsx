@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import api from '@/shared/services/axios';
+import { devLog, devError } from '@/shared/utils/devLog';
 import 'remixicon/fonts/remixicon.css'
 import LocationSearchPanel from '@/passenger/components/LocationSearchPanel';
 import VehiclePanel from '@/passenger/components/VehiclePanel';
@@ -604,7 +605,7 @@ const Home = () => {
         const pickupStr = typeof pickup === 'object' ? `${pickup.address} (${pickup.lat}, ${pickup.lng})` : pickup;
         const destStr = typeof destination === 'object' ? `${destination.address} (${destination.lat}, ${destination.lng})` : destination;
 
-        console.log(`[AUDIT] Passageiro iniciando request para criar corrida. Pickup: ${pickupStr}, Dest: ${destStr}, Vehicle: ${vehicleType}`);
+        devLog(`[AUDIT] Passageiro iniciando request para criar corrida. Pickup: ${pickupStr}, Dest: ${destStr}, Vehicle: ${vehicleType}`);
 
         try {
             const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
@@ -624,7 +625,7 @@ const Home = () => {
             });
 
             const TRACE_ID = `Ride:${response.data._id}`;
-            console.log(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
+            devLog(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
 
             // Bloco H (2026-08-02): cupom inválido não impede a corrida (ela já foi
             // criada normalmente, sem desconto) — só avisa o motivo. Cupom aplicado com
@@ -638,7 +639,7 @@ const Home = () => {
 
             setRide(response.data);
         } catch (err) {
-            console.error(`[AUDIT] Falha na criação da corrida pelo passageiro:`, err);
+            devError(`[AUDIT] Falha na criação da corrida pelo passageiro:`, err);
             // Antes disso, uma falha aqui deixava o passageiro preso na tela "Buscando
             // motorista" pra sempre — nenhuma corrida existia, e o botão de cancelar
             // não fazia nada (cancelRide não acha corrida nenhuma pra cancelar). Voltar

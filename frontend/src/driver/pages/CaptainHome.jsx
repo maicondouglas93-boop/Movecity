@@ -13,6 +13,7 @@ import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import api from '@/shared/services/axios'
+import { devLog, devWarn, devError } from '@/shared/utils/devLog'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/shared/contexts/ToastContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
@@ -268,7 +269,7 @@ const CaptainHome = () => {
 
         const handleNewRide = (data) => {
             const TRACE_ID = `Ride:${data._id}`;
-            console.log(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
+            devLog(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
 
             if (captainParcelRef.current || parcelOfferRef.current) return
 
@@ -280,22 +281,22 @@ const CaptainHome = () => {
                 const rest = prev.filter(r => r._id !== data._id)
                 return [ data, ...rest ]
             })
-            console.log(`[AUDIT][${TRACE_ID}] Modal RidePopUp ativado.`);
+            devLog(`[AUDIT][${TRACE_ID}] Modal RidePopUp ativado.`);
 
             try {
                 const audio = new Audio('/sounds/new-ride.wav');
                 audio.play().then(() => {
-                    console.log(`[AUDIT][${TRACE_ID}] Som de notificação tocado com sucesso.`);
+                    devLog(`[AUDIT][${TRACE_ID}] Som de notificação tocado com sucesso.`);
                 }).catch(e => {
-                    console.warn(`[AUDIT][${TRACE_ID}] Falha ao tocar som (Autoplay bloqueado?):`, e);
+                    devWarn(`[AUDIT][${TRACE_ID}] Falha ao tocar som (Autoplay bloqueado?):`, e);
                 });
                 
                 if (navigator.vibrate) {
                     navigator.vibrate([500, 200, 500]);
-                    console.log(`[AUDIT][${TRACE_ID}] Vibração acionada.`);
+                    devLog(`[AUDIT][${TRACE_ID}] Vibração acionada.`);
                 }
             } catch (err) {
-                console.error(`[AUDIT][${TRACE_ID}] Erro nas APIs de mídia:`, err);
+                devError(`[AUDIT][${TRACE_ID}] Erro nas APIs de mídia:`, err);
             }
 
             addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
@@ -305,9 +306,9 @@ const CaptainHome = () => {
                     'Nova Solicitação de Corrida! 🚗',
                     `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`
                 )
-                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
+                devLog(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
             } else {
-                console.log(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
+                devLog(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
             }
         }
 
@@ -380,7 +381,7 @@ const CaptainHome = () => {
                     'Nova encomenda disponível 📦',
                     `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
                 )
-                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
+                devLog(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
             }
         }
 

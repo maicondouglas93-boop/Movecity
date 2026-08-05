@@ -6,6 +6,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import {
   confirmParcelDelivery,
+  confirmParcelPayment,
   getCaptainCurrentParcel,
   skipCaptainParcelReview,
   updateParcelStatus,
@@ -49,9 +50,16 @@ const CaptainParcelRiding = () => {
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
-  const [step, setStep] = useState('active') // active | rating
+  const [step, setStep] = useState('active') // active | payment | rating
   const [ratingValue, setRatingValue] = useState(0)
   const [submittingRating, setSubmittingRating] = useState(false)
+
+  const resolveStep = (p) => {
+    if (!p) return 'active'
+    if (p.status === 'finished' && p.paymentStatus !== 'paid') return 'payment'
+    if (p.status === 'finished') return 'rating'
+    return 'active'
+  }
 
   useEffect(() => {
     let alive = true
@@ -62,12 +70,14 @@ const CaptainParcelRiding = () => {
         if (current) {
           setParcel(current)
           setCaptainParcel(current)
-          if (current.status === 'finished') setStep('rating')
+          setStep(resolveStep(current))
           return
         }
-        if (state?.parcel?.status === 'finished' || state?.step === 'rating') {
+        if (state?.parcel?.status === 'finished') {
           setParcel(state.parcel)
-          setStep('rating')
+          setStep(state?.step === 'rating' && state.parcel.paymentStatus === 'paid'
+            ? 'rating'
+            : resolveStep(state.parcel))
         }
       } catch {
         /* ignore */
@@ -125,15 +135,36 @@ const CaptainParcelRiding = () => {
       const updated = await confirmParcelDelivery(parcel._id, pin)
       setParcel(updated)
       setCaptainParcel(updated)
-      addToast('Entrega confirmada!', 'success')
-      setStep('rating')
-      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'rating' } })
+      addToast('Entrega confirmada! Confirme o pagamento recebido.', 'success')
+      setStep('payment')
+      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'payment' } })
     } catch (err) {
       addToast(err.response?.data?.message || 'PIN inválido', 'error')
     } finally {
       setLoading(false)
     }
   }
+
+  const confirmPayment = async () => {
+    setLoading(true)
+    try {
+      const updated = await confirmParcelPayment(parcel._id)
+      setParcel(updated)
+      setCaptainParcel(updated)
+      addToast('Pagamento confirmado. Comissão debitada dos créditos.', 'success')
+      setStep('rating')
+      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'rating' } })
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Falha ao confirmar pagamento', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fare = Number(parcel?.fare || 0)
+  const commissionAmount = Number(parcel?.commissionAmount || 0)
+  const driverKeeps = Math.max(0, fare - commissionAmount)
+  const payLabel = parcel?.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'
 
   const submitRating = async () => {
     if (!ratingValue) return
@@ -177,7 +208,40 @@ const CaptainParcelRiding = () => {
         )}
       </div>
       <div className="p-4 border-t border-line space-y-3 max-h-[48dvh] overflow-y-auto">
-        {step === 'rating' ? (
+        {step === 'payment' ? (
+          <div className="space-y-3">
+            <p className="font-semibold text-ink-900">Confirmar pagamento</p>
+            <p className="text-sm text-ink-500">
+              Cliente paga por <strong>{payLabel}</strong> direto a você. A plataforma só debita a comissão nos créditos.
+            </p>
+            <div className="rounded-panel border border-line bg-surface-alt p-3 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-ink-600">Valor da entrega</span>
+                <span className="font-semibold text-ink-900">R$ {fare.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-600">Comissão ({parcel.commissionPercent ?? '—'}%)</span>
+                <span className="font-semibold text-danger-500">- R$ {commissionAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-line">
+                <span className="font-semibold text-ink-900">Você fica com</span>
+                <span className="font-bold text-brand-600">R$ {driverKeeps.toFixed(2)}</span>
+              </div>
+            </div>
+            <p className="text-xs text-ink-500">
+              A comissão de R$ {commissionAmount.toFixed(2)} será descontada dos seus créditos na carteira.
+            </p>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={confirmPayment}
+              className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <i className="ri-hand-coin-fill text-xl" aria-hidden="true" />
+              Pagamento recebido
+            </button>
+          </div>
+        ) : step === 'rating' ? (
           <div className="space-y-3">
             <p className="font-semibold text-ink-900">Avalie o cliente</p>
             <div className="flex justify-center gap-2">

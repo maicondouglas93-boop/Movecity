@@ -1,22 +1,74 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const parcelModel = require('../models/parcel.model');
 const parcelSettingModel = require('../models/parcelSetting.model');
+const globalSettingModel = require('../models/globalSetting.model');
 const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
 
+const ALLOWED_PAYMENT_METHODS = ['cash', 'pix'];
+
 const SIZE_RANK = { small: 1, medium: 2, large: 3 };
 
+// Máquina de estados atômica (auditoria concorrência encomendas, 2026-08-04).
+// finished/cancelled nunca são origem — terminais sob corrida.
 const VALID_ORIGINS_BY_TARGET = {
     going_to_pickup: ['provider_accepted'],
     arrived_pickup: ['going_to_pickup'],
     collected: ['arrived_pickup'],
     in_transit: ['collected'],
     arrived_destination: ['in_transit'],
+    finished: ['arrived_destination'],
+    // Passageiro: só até chegou na retirada (antes da coleta).
+    cancelled: [
+        'awaiting_provider',
+        'provider_accepted',
+        'going_to_pickup',
+        'arrived_pickup',
+    ],
 };
 
+// Admin/system: pode cancelar em qualquer estado não-terminal (inclui legado delivered).
+const CANCEL_ORIGINS_FORCE = [
+    'awaiting_provider',
+    'provider_accepted',
+    'going_to_pickup',
+    'arrived_pickup',
+    'collected',
+    'in_transit',
+    'arrived_destination',
+    'delivered',
+];
+
 const PARCEL_EXPIRATION_MINUTES = 10;
+
+/**
+ * Transição atômica de status. Retorna null se perdeu a corrida (origem inválida /
+ * filtro extra). Espelha transitionRide do ride.service.
+ */
+async function transitionParcel(
+    parcelId,
+    toStatus,
+    extraFilter = {},
+    extraSet = {},
+    by = 'system',
+    { originsOverride } = {}
+) {
+    const origins = originsOverride || VALID_ORIGINS_BY_TARGET[toStatus];
+    if (!origins) {
+        throw new Error('INVALID_STATUS_TRANSITION');
+    }
+    return parcelModel.findOneAndUpdate(
+        { _id: parcelId, status: { $in: origins }, ...extraFilter },
+        {
+            $set: { status: toStatus, ...extraSet },
+            $push: { statusHistory: { status: toStatus, at: new Date(), by } },
+        },
+        { new: true }
+    );
+}
 
 function parcelExpirationCutoff() {
     return new Date(Date.now() - PARCEL_EXPIRATION_MINUTES * 60 * 1000);
@@ -93,6 +145,11 @@ module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
     fare = Math.max(fare, settings.minimumFare);
     fare = Math.round(fare * 100) / 100;
 
+    const globalSetting = await globalSettingModel.findOne().lean()
+        || { platformCommission: 20 };
+    const commissionPercent = Number(globalSetting.platformCommission) || 20;
+    const commissionAmount = Math.round(fare * (commissionPercent / 100) * 100) / 100;
+
     const pricingSnapshot = {
         baseFare: settings.baseFare,
         perKm: settings.perKm,
@@ -100,18 +157,23 @@ module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
         minimumFare: settings.minimumFare,
         vehicleSurcharge: surcharge,
         vehicleType,
+        platformCommission: commissionPercent,
     };
 
     return {
         fare,
         estimatedDistance: distanceM,
         estimatedTime: durationS,
+        commissionPercent,
+        commissionAmount,
         fareBreakdown: {
             baseFare: settings.baseFare,
             distanceComponent: Math.round(km * settings.perKm * 100) / 100,
             timeComponent: Math.round(minutes * settings.perMinute * 100) / 100,
             vehicleSurcharge: surcharge,
             minimumApplied: fare === settings.minimumFare,
+            platformCommission: commissionAmount,
+            commissionPercent,
         },
         pricingSnapshot,
     };
@@ -149,8 +211,11 @@ module.exports.createParcel = async (payload) => {
         throw new Error('Campos obrigatórios ausentes');
     }
 
-    const allowedPay = ['cash', 'card', 'pix', 'carteira'];
-    const safePayment = allowedPay.includes(paymentMethod) ? paymentMethod : 'cash';
+    if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+        const err = new Error('INVALID_PAYMENT_METHOD');
+        err.code = 'INVALID_PAYMENT_METHOD';
+        throw err;
+    }
 
     const existingParcel = await parcelModel.findOne({
         user,
@@ -216,11 +281,14 @@ module.exports.createParcel = async (payload) => {
             estimatedTime: fareData.estimatedTime,
             fareBreakdown: fareData.fareBreakdown,
             pricingSnapshot: fareData.pricingSnapshot,
+            commissionPercent: fareData.commissionPercent,
+            commissionAmount: fareData.commissionAmount,
             deliveryPin,
             status: 'awaiting_provider',
             statusHistory: [{ status: 'awaiting_provider', at: new Date(), by: 'user' }],
             photos: { pickupUrl: null, deliveryUrl: null },
-            paymentMethod: safePayment,
+            paymentMethod,
+            paymentStatus: 'pending',
         });
     } catch (err) {
         if (err.code === 11000) {
@@ -333,20 +401,23 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
 };
 
 module.exports.updateParcelStatus = async ({ parcelId, captain, status }) => {
-    const allowedOrigins = VALID_ORIGINS_BY_TARGET[status];
-    if (!allowedOrigins) {
+    if (!VALID_ORIGINS_BY_TARGET[status] || status === 'cancelled' || status === 'finished') {
         throw new Error('INVALID_STATUS_TRANSITION');
     }
 
-    const parcel = await parcelModel.findOne({ _id: parcelId, captain: captain._id });
-    if (!parcel) throw new Error('PARCEL_NOT_FOUND');
-    if (!allowedOrigins.includes(parcel.status)) {
+    const updated = await transitionParcel(
+        parcelId,
+        status,
+        { captain: captain._id },
+        {},
+        'captain'
+    );
+    if (!updated) {
+        const exists = await parcelModel.exists({ _id: parcelId, captain: captain._id });
+        if (!exists) throw new Error('PARCEL_NOT_FOUND');
         throw new Error('INVALID_STATUS_TRANSITION');
     }
 
-    parcel.status = status;
-    pushHistory(parcel, status, 'captain');
-    await parcel.save();
     return parcelModel.findById(parcelId)
         .populate('user', USER_IDENTITY_FIELDS)
         .populate('captain', CAPTAIN_IDENTITY_FIELDS);
@@ -367,10 +438,12 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
     }
 
     const now = new Date();
+    // Mantém histórico delivered+finished; filtro atômico evita corrida com cancel.
+    // paymentStatus fica pending — liquidação da comissão é confirmParcelPayment.
     const updated = await parcelModel.findOneAndUpdate(
         { _id: parcelId, captain: captain._id, status: 'arrived_destination' },
         {
-            $set: { status: 'finished' },
+            $set: { status: 'finished', paymentStatus: 'pending' },
             $push: {
                 statusHistory: {
                     $each: [
@@ -385,8 +458,103 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
 
     if (!updated) throw new Error('INVALID_STATUS_FOR_DELIVERY');
 
-    await dispatchService.releaseCaptainBusyLock(captain._id);
+    await dispatchService.releaseCaptainBusyLockIfIdle(captain._id);
     return updated;
+};
+
+/**
+ * Liquidação cash/pix da encomenda (espelha confirmPaymentReceived das corridas):
+ * passageiro pagou o motorista fora do app; plataforma debita só a comissão na wallet.
+ * Idempotente via claim atômico de paymentStatus + índice único em transaction.
+ */
+module.exports.confirmParcelPayment = async ({ parcelId, captain }) => {
+    if (!parcelId) throw new Error('PARCEL_ID_REQUIRED');
+    if (!captain?._id) throw new Error('CAPTAIN_REQUIRED');
+
+    const walletService = require('./wallet.service');
+    const captainModel = require('../models/captain.model');
+
+    const session = await mongoose.startSession();
+    let sideEffectCallbacks = [];
+
+    try {
+        await session.withTransaction(async () => {
+            sideEffectCallbacks = [];
+
+            const existing = await parcelModel.findOne({
+                _id: parcelId,
+                captain: captain._id,
+            }).session(session);
+
+            if (!existing) throw new Error('PARCEL_NOT_FOUND');
+            if (existing.status !== 'finished') throw new Error('PARCEL_NOT_FINISHED');
+            if (existing.paymentStatus === 'paid') throw new Error('PAYMENT_ALREADY_CONFIRMED');
+            if (!ALLOWED_PAYMENT_METHODS.includes(existing.paymentMethod)) {
+                throw new Error('INVALID_PAYMENT_METHOD');
+            }
+
+            const claimed = await parcelModel.findOneAndUpdate(
+                {
+                    _id: parcelId,
+                    captain: captain._id,
+                    status: 'finished',
+                    paymentStatus: { $ne: 'paid' },
+                },
+                { $set: { paymentStatus: 'paid' } },
+                { new: true, session }
+            );
+            if (!claimed) throw new Error('PAYMENT_ALREADY_CONFIRMED');
+
+            const fare = claimed.fare || 0;
+            const commissionAmount = claimed.commissionAmount || 0;
+            const commissionPercent = claimed.commissionPercent || 0;
+            const shortId = claimed._id.toString().slice(-6);
+
+            const paymentResult = await walletService.createTransaction({
+                captainId: captain._id,
+                parcelId: claimed._id,
+                type: 'parcel_payment',
+                paymentMethod: claimed.paymentMethod,
+                amount: fare,
+                description: `Encomenda #${shortId} (${claimed.paymentMethod})`,
+                session,
+            });
+            sideEffectCallbacks.push(paymentResult.applySideEffects);
+
+            if (commissionAmount > 0) {
+                const commissionResult = await walletService.createTransaction({
+                    captainId: captain._id,
+                    parcelId: claimed._id,
+                    type: 'commission',
+                    paymentMethod: 'wallet',
+                    amount: commissionAmount,
+                    description: `Comissão encomenda #${shortId} (${commissionPercent}%)`,
+                    session,
+                });
+                sideEffectCallbacks.push(commissionResult.applySideEffects);
+            }
+
+            await captainModel.findByIdAndUpdate(captain._id, {
+                $inc: { earnings: fare },
+            }, { session });
+
+            if (existing.user) {
+                await userModel.findByIdAndUpdate(existing.user, {
+                    $inc: { totalSpent: fare },
+                }, { session });
+            }
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    for (const applySideEffects of sideEffectCallbacks) {
+        await applySideEffects();
+    }
+
+    return parcelModel.findById(parcelId)
+        .populate('user', USER_IDENTITY_FIELDS)
+        .populate('captain', CAPTAIN_IDENTITY_FIELDS);
 };
 
 /** Recupera docs legados presos em `delivered` (pré-fix atômico). */
@@ -403,54 +571,63 @@ module.exports.finalizeStuckDelivered = async (parcelId) => {
         { new: true }
     ).populate('user').populate('captain');
     if (updated?.captain) {
-        await dispatchService.releaseCaptainBusyLock(updated.captain._id || updated.captain);
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain._id || updated.captain);
     }
     return updated;
 };
 
 module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' }) => {
-    const parcel = await parcelModel.findOne({ _id: parcelId, user });
-    if (!parcel) throw new Error('PARCEL_NOT_FOUND');
-
-    // MVP: cancel só até chegada na retirada (antes da coleta).
-    const cancellable = [
-        'awaiting_provider',
-        'provider_accepted',
-        'going_to_pickup',
-        'arrived_pickup',
-    ];
-    if (!cancellable.includes(parcel.status)) {
+    const historyBy = by === 'passenger' ? 'user' : by;
+    const updated = await transitionParcel(
+        parcelId,
+        'cancelled',
+        { user },
+        {
+            cancelledBy: by,
+            cancellationReason: reason || '',
+            cancelledAt: new Date(),
+        },
+        historyBy
+    );
+    if (!updated) {
+        const exists = await parcelModel.exists({ _id: parcelId, user });
+        if (!exists) throw new Error('PARCEL_NOT_FOUND');
         throw new Error('PARCEL_NOT_CANCELLABLE');
     }
 
-    const captainId = parcel.captain;
-    parcel.status = 'cancelled';
-    parcel.cancelledBy = by;
-    parcel.cancellationReason = reason || '';
-    parcel.cancelledAt = new Date();
-    pushHistory(parcel, 'cancelled', by === 'passenger' ? 'user' : by);
-    await parcel.save();
-    if (captainId) {
-        await dispatchService.releaseCaptainBusyLock(captainId);
+    // Só libera lock se a transição venceu e o motorista ficou ocioso.
+    if (updated.captain) {
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
+
     return parcelModel.findById(parcelId).populate('user').populate('captain');
 };
 
 /** Cancelamento interno (ex.: falha de despacho após create). */
 module.exports.cancelParcelSystem = async (parcelId, reason = 'dispatch_failed') => {
-    const parcel = await parcelModel.findById(parcelId);
-    if (!parcel) return null;
-    if (['finished', 'cancelled'].includes(parcel.status)) return parcel;
+    const existing = await parcelModel.findById(parcelId).select('status captain');
+    if (!existing) return null;
+    if (['finished', 'cancelled'].includes(existing.status)) return existing;
 
-    const captainId = parcel.captain;
-    parcel.status = 'cancelled';
-    parcel.cancelledBy = 'system';
-    parcel.cancellationReason = reason;
-    parcel.cancelledAt = new Date();
-    pushHistory(parcel, 'cancelled', 'system');
-    await parcel.save();
-    if (captainId) {
-        await dispatchService.releaseCaptainBusyLock(captainId);
+    const updated = await transitionParcel(
+        parcelId,
+        'cancelled',
+        {},
+        {
+            cancelledBy: 'system',
+            cancellationReason: reason,
+            cancelledAt: new Date(),
+        },
+        'system',
+        { originsOverride: CANCEL_ORIGINS_FORCE }
+    );
+    if (!updated) {
+        // Outra operação venceu (ex.: accept/finish) — não mexer no lock.
+        return parcelModel.findById(parcelId).populate('user').populate('captain');
+    }
+
+    if (updated.captain) {
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
     return parcelModel.findById(parcelId).populate('user').populate('captain');
 };
@@ -513,10 +690,19 @@ module.exports.getCurrentParcelForCaptain = async (captainId) => {
     }).populate('user', USER_IDENTITY_FIELDS).sort({ createdAt: -1 });
     if (active) return active;
 
+    // Cobrança pendente tem prioridade sobre avaliação (não some do current sem liquidar).
+    const unpaid = await parcelModel.findOne({
+        captain: captainId,
+        status: 'finished',
+        paymentStatus: { $ne: 'paid' },
+    }).populate('user', USER_IDENTITY_FIELDS).sort({ createdAt: -1 });
+    if (unpaid) return unpaid;
+
     // Rating pós-entrega: finished sem avaliação do motorista (sobrevive refresh).
     const finished = await parcelModel.findOne({
         captain: captainId,
         status: 'finished',
+        paymentStatus: 'paid',
         $or: [
             { captainReviewSkippedAt: null },
             { captainReviewSkippedAt: { $exists: false } },
@@ -641,6 +827,7 @@ module.exports.skipPassengerReview = async ({ parcelId, user }) => {
 module.exports.skipCaptainReview = async ({ parcelId, captain }) => {
     const parcel = await parcelModel.findOne({ _id: parcelId, captain, status: 'finished' });
     if (!parcel) throw new Error('PARCEL_NOT_FOUND');
+    if (parcel.paymentStatus !== 'paid') throw new Error('PAYMENT_NOT_CONFIRMED');
     parcel.captainReviewSkippedAt = new Date();
     await parcel.save();
     return parcel;
@@ -658,21 +845,27 @@ module.exports.listParcelsAdmin = async ({ status, limit = 50, skip = 0 } = {}) 
 };
 
 module.exports.adminCancelParcel = async ({ parcelId, reason }) => {
-    const parcel = await parcelModel.findById(parcelId);
-    if (!parcel) throw new Error('PARCEL_NOT_FOUND');
-    // delivered legado também é cancelável pelo admin (safety net).
-    if (['finished', 'cancelled'].includes(parcel.status)) {
+    const exists = await parcelModel.exists({ _id: parcelId });
+    if (!exists) throw new Error('PARCEL_NOT_FOUND');
+
+    const updated = await transitionParcel(
+        parcelId,
+        'cancelled',
+        {},
+        {
+            cancelledBy: 'admin',
+            cancellationReason: reason || 'Cancelado pelo admin',
+            cancelledAt: new Date(),
+        },
+        'admin',
+        { originsOverride: CANCEL_ORIGINS_FORCE }
+    );
+    if (!updated) {
         throw new Error('PARCEL_NOT_CANCELLABLE');
     }
-    const captainId = parcel.captain;
-    parcel.status = 'cancelled';
-    parcel.cancelledBy = 'admin';
-    parcel.cancellationReason = reason || 'Cancelado pelo admin';
-    parcel.cancelledAt = new Date();
-    pushHistory(parcel, 'cancelled', 'admin');
-    await parcel.save();
-    if (captainId) {
-        await dispatchService.releaseCaptainBusyLock(captainId);
+
+    if (updated.captain) {
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
     return parcelModel.findById(parcelId).populate('user').populate('captain');
 };
@@ -756,5 +949,7 @@ module.exports.submitCaptainReview = async ({ parcelId, captain, rating, comment
 };
 
 module.exports.VALID_ORIGINS_BY_TARGET = VALID_ORIGINS_BY_TARGET;
+module.exports.transitionParcel = transitionParcel;
+module.exports.CANCEL_ORIGINS_FORCE = CANCEL_ORIGINS_FORCE;
 module.exports.PARCEL_EXPIRATION_MINUTES = PARCEL_EXPIRATION_MINUTES;
 module.exports.expireStaleAwaitingParcels = expireStaleAwaitingParcels;

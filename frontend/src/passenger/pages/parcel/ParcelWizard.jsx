@@ -56,6 +56,7 @@ const ParcelWizard = () => {
       phone: user?.phone || user?.mobile || '',
     },
     recipient: { name: '', phone: '' },
+    paymentMethod: 'cash',
   })
 
   useEffect(() => {
@@ -160,7 +161,7 @@ const ParcelWizard = () => {
           name: form.recipient.name.trim(),
           phone: form.recipient.phone.trim(),
         },
-        paymentMethod: 'cash',
+        paymentMethod: form.paymentMethod,
       })
       setUserParcel(parcel)
       addToast('Encomenda solicitada!', 'success')
@@ -194,7 +195,7 @@ const ParcelWizard = () => {
               <input
                 id="parcel-pickup"
                 className={`${fieldClass} pl-10`}
-                placeholder="Digite o local de coleta"
+                placeholder="Ex.: avenida Antônio Florêncio Alvim, 754"
                 value={form.pickup}
                 onChange={(e) => setField('pickup', e.target.value)}
                 autoComplete="street-address"
@@ -208,7 +209,7 @@ const ParcelWizard = () => {
               <input
                 id="parcel-destination"
                 className={`${fieldClass} pl-10`}
-                placeholder="Para onde devemos entregar?"
+                placeholder="Ex.: travessa João Caetano, 99"
                 value={form.destination}
                 onChange={(e) => setField('destination', e.target.value)}
                 autoComplete="street-address"
@@ -401,6 +402,27 @@ const ParcelWizard = () => {
                 inputMode="tel"
               />
             </div>
+          </div>
+        </Card>
+
+        <Card shadow="raised" className="space-y-3">
+          <h2 className="text-base font-semibold text-ink-900">Pagamento ao prestador</h2>
+          <p className="text-sm text-ink-500">Você paga diretamente no momento da entrega.</p>
+          <div className="space-y-2">
+            <SelectableOptionCard
+              selected={form.paymentMethod === 'cash'}
+              onClick={() => setField('paymentMethod', 'cash')}
+              title="Dinheiro"
+              subtitle="Em espécie na entrega"
+              icon={<i className="ri-money-dollar-circle-line text-2xl text-ink-900" aria-hidden="true" />}
+            />
+            <SelectableOptionCard
+              selected={form.paymentMethod === 'pix'}
+              onClick={() => setField('paymentMethod', 'pix')}
+              title="Pix"
+              subtitle="Direto ao prestador"
+              icon={<i className="ri-qr-code-line text-2xl text-ink-900" aria-hidden="true" />}
+            />
           </div>
         </Card>
 

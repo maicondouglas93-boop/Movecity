@@ -87,9 +87,16 @@ const parcelSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['cash', 'card', 'pix', 'carteira'],
+        enum: ['cash', 'pix'],
         default: 'cash',
     },
+    paymentStatus: {
+        type: String,
+        enum: ['pending', 'paid'],
+        default: 'pending',
+    },
+    commissionPercent: { type: Number, default: 0 },
+    commissionAmount: { type: Number, default: 0 },
     cancelledBy: {
         type: String,
         enum: ['passenger', 'captain', 'system', 'admin'],

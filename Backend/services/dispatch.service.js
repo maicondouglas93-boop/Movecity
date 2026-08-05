@@ -77,6 +77,15 @@ async function releaseCaptainBusyLock(captainId) {
     await captainModel.findByIdAndUpdate(captainId, { $set: { busyLock: false } });
 }
 
+/** Só libera busyLock se o motorista não tem ride nem parcel ativos. */
+async function releaseCaptainBusyLockIfIdle(captainId) {
+    if (!captainId) return false;
+    if (await captainHasActiveRide(captainId)) return false;
+    if (await captainHasActiveParcel(captainId)) return false;
+    await releaseCaptainBusyLock(captainId);
+    return true;
+}
+
 /**
  * Remove captains que já têm trabalho ativo (ride ou parcel), conforme flags.
  * Exclusão mútua: quem tem corrida ativa não recebe encomenda e vice-versa.
@@ -132,5 +141,6 @@ module.exports = {
     captainHasActiveParcel,
     acquireCaptainBusyLock,
     releaseCaptainBusyLock,
+    releaseCaptainBusyLockIfIdle,
     findCaptainsNearPickup,
 };

@@ -28,6 +28,7 @@ router.post('/create',
     body('size').isIn(['small', 'medium', 'large']),
     body('description').optional().isString(),
     body('notes').optional().isString(),
+    body('paymentMethod').optional().isIn(['cash', 'pix']),
     parcelController.createParcel
 );
 
@@ -104,6 +105,12 @@ router.post('/:id/confirm-delivery',
     param('id').isMongoId(),
     body('pin').optional().isString(),
     parcelController.confirmDelivery
+);
+
+router.post('/:id/confirm-payment',
+    authMiddleware.authCaptain,
+    param('id').isMongoId(),
+    parcelController.confirmPayment
 );
 
 router.post('/:id/cancel',

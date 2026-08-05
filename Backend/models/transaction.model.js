@@ -10,10 +10,14 @@ const transactionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'ride'
     },
+    parcelId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'parcel'
+    },
     type: {
         type: String,
         required: true,
-        enum: ['commission', 'recharge', 'withdraw', 'payout', 'bonus', 'adjustment', 'ride_payment']
+        enum: ['commission', 'recharge', 'withdraw', 'payout', 'bonus', 'adjustment', 'ride_payment', 'parcel_payment']
     },
     paymentMethod: {
         type: String,
@@ -48,14 +52,29 @@ const transactionSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Rede de segurança contra pagamento duplicado: no máximo um lançamento 'ride_payment'
-// e um 'commission' por corrida. A guarda de verdade é o findOneAndUpdate condicional
-// em confirmPaymentReceived (ride.service.js); este índice existe para o caso de uma
-// regressão futura reintroduzir um caminho que tente gravar duas vezes — o Mongo recusa
-// a segunda escrita em vez de deixar a inconsistência silenciosa.
+// Rede de segurança contra pagamento duplicado: no máximo um lançamento de pagamento
+// e um de comissão por corrida/encomenda. A guarda de verdade é o findOneAndUpdate
+// condicional em confirmPayment*; estes índices cobrem regressões futuras.
+// Partial com rideId/parcelId existentes evita colisão entre docs com campo ausente.
 transactionSchema.index(
     { rideId: 1, type: 1 },
-    { unique: true, partialFilterExpression: { type: { $in: ['ride_payment', 'commission'] } } }
+    {
+        unique: true,
+        partialFilterExpression: {
+            rideId: { $exists: true },
+            type: { $in: ['ride_payment', 'commission'] },
+        },
+    }
+);
+transactionSchema.index(
+    { parcelId: 1, type: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            parcelId: { $exists: true },
+            type: { $in: ['parcel_payment', 'commission'] },
+        },
+    }
 );
 
 module.exports = mongoose.model('transaction', transactionSchema);

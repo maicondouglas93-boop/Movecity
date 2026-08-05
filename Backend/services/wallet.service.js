@@ -37,6 +37,7 @@ function buildIncFields(type, paymentMethod, amount) {
             inc.totalCommissionPaid = amount;
             break;
         case 'ride_payment':
+        case 'parcel_payment':
             inc.totalEarned = amount;
             if (paymentMethod === 'card') {
                 inc.pendingBalance = amount;
@@ -62,7 +63,7 @@ function buildIncFields(type, paymentMethod, amount) {
 // ter sido efetivado, se a transação abortar. Sem `session` (uso direto, como em
 // admin.service.js e webhook.controller.js), o comportamento é o de sempre: os efeitos
 // colaterais acontecem imediatamente, antes de retornar.
-const createTransaction = async ({ captainId, rideId, type, paymentMethod, amount, description, adminId, reason, session }) => {
+const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMethod, amount, description, adminId, reason, session }) => {
     const incFields = buildIncFields(type, paymentMethod, amount);
     const ledgerField = resolveLedgerField(type, paymentMethod);
 
@@ -78,6 +79,7 @@ const createTransaction = async ({ captainId, rideId, type, paymentMethod, amoun
     const [transaction] = await transactionModel.create([{
         captainId,
         rideId,
+        parcelId,
         type,
         paymentMethod,
         amount,

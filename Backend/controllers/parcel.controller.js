@@ -121,6 +121,9 @@ module.exports.createParcel = async (req, res) => {
         if (err.code === 'USER_HAS_ACTIVE_RIDE' || err.message === 'USER_HAS_ACTIVE_RIDE') {
             return res.status(409).json({ message: 'Você já possui uma corrida em andamento.' });
         }
+        if (err.code === 'INVALID_PAYMENT_METHOD' || err.message === 'INVALID_PAYMENT_METHOD') {
+            return res.status(400).json({ message: 'Forma de pagamento inválida. Use dinheiro ou Pix.' });
+        }
         console.error('[PARCEL] create error:', err);
         return res.status(500).json({ message: err.message });
     }
@@ -286,6 +289,30 @@ module.exports.confirmDelivery = async (req, res) => {
     }
 };
 
+module.exports.confirmPayment = async (req, res) => {
+    try {
+        const parcel = await parcelService.confirmParcelPayment({
+            parcelId: req.params.id,
+            captain: req.captain,
+        });
+        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
+    } catch (err) {
+        if (err.message === 'PARCEL_NOT_FOUND') {
+            return res.status(404).json({ message: 'Encomenda não encontrada' });
+        }
+        if (err.message === 'PARCEL_NOT_FINISHED') {
+            return res.status(400).json({ message: 'Finalize a entrega antes de confirmar o pagamento' });
+        }
+        if (err.message === 'PAYMENT_ALREADY_CONFIRMED') {
+            return res.status(409).json({ message: 'Pagamento já confirmado' });
+        }
+        if (err.message === 'INVALID_PAYMENT_METHOD') {
+            return res.status(400).json({ message: 'Forma de pagamento inválida para liquidação' });
+        }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports.cancelParcel = async (req, res) => {
     try {
         const parcel = await parcelService.cancelParcel({
@@ -294,10 +321,18 @@ module.exports.cancelParcel = async (req, res) => {
             reason: req.body.reason,
         });
 
-        sendMessageToRoom(`parcel_${parcel._id}`, {
+        const cancelPayload = {
             event: 'parcel-cancelled',
             data: { parcelId: parcel._id.toString() },
-        });
+        };
+
+        // Sala: fecha popup dos candidatos do despacho.
+        sendMessageToRoom(`parcel_${parcel._id}`, cancelPayload);
+
+        // Direto ao motorista designado (socketId muda a cada reconnect — sala sozinha falha).
+        if (parcel.captain?.socketId) {
+            sendMessageToSocketId(parcel.captain.socketId, cancelPayload);
+        }
 
         if (parcel.captain) {
             const captainId = parcel.captain._id || parcel.captain;

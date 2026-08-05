@@ -210,4 +210,161 @@ describe('parcel.service', () => {
         expect(still.status).toBe('awaiting_provider');
         expect(still.captain).toBeFalsy();
     });
+
+    async function advanceTo(parcelId, captain, statuses) {
+        for (const status of statuses) {
+            await parcelService.updateParcelStatus({ parcelId, captain, status });
+        }
+    }
+
+    it('concorrência: cancelar × avançar em arrived_pickup → exatamente 1 vence', async () => {
+        const user = await createUser({ email: `race_u_${Date.now()}@test.com` });
+        const { parcel } = await parcelService.createParcel(basePayload({ user: user._id }));
+        const captain = await onlineMotoCaptain(`race_c_${Date.now()}@test.com`, 'RAC1111');
+        await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
+        await advanceTo(parcel._id, captain, ['going_to_pickup', 'arrived_pickup']);
+
+        const results = await Promise.allSettled([
+            parcelService.cancelParcel({ parcelId: parcel._id, user: user._id, reason: 'desistiu' }),
+            parcelService.updateParcelStatus({
+                parcelId: parcel._id,
+                captain,
+                status: 'collected',
+            }),
+        ]);
+
+        const wins = results.filter((r) => r.status === 'fulfilled');
+        const losses = results.filter((r) => r.status === 'rejected');
+        expect(wins).toHaveLength(1);
+        expect(losses).toHaveLength(1);
+
+        const after = await parcelModel.findById(parcel._id);
+        expect(['cancelled', 'collected']).toContain(after.status);
+        if (after.status === 'collected') {
+            expect(after.cancelledBy).toBeFalsy();
+        } else {
+            expect(after.cancelledBy).toBe('passenger');
+            expect(after.statusHistory.filter((h) => h.status === 'collected')).toHaveLength(0);
+        }
+
+        const cap = await captainModel.findById(captain._id);
+        if (after.status === 'cancelled') {
+            expect(cap.busyLock).toBe(false);
+        } else {
+            // Ainda em collected — motorista continua ocupado
+            expect(cap.busyLock).toBe(true);
+        }
+    });
+
+    it('concorrência: dois avanços idênticos → 1 vence', async () => {
+        const { parcel } = await parcelService.createParcel(basePayload());
+        const captain = await onlineMotoCaptain(`dup_c_${Date.now()}@test.com`, 'DUP1111');
+        await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
+
+        const results = await Promise.allSettled([
+            parcelService.updateParcelStatus({
+                parcelId: parcel._id,
+                captain,
+                status: 'going_to_pickup',
+            }),
+            parcelService.updateParcelStatus({
+                parcelId: parcel._id,
+                captain,
+                status: 'going_to_pickup',
+            }),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+        const after = await parcelModel.findById(parcel._id);
+        expect(after.status).toBe('going_to_pickup');
+        expect(after.statusHistory.filter((h) => h.status === 'going_to_pickup')).toHaveLength(1);
+    });
+
+    it('concorrência: cancelar × aceitar → 1 vence', async () => {
+        const user = await createUser({ email: `cxa_u_${Date.now()}@test.com` });
+        const { parcel } = await parcelService.createParcel(basePayload({ user: user._id }));
+        const captain = await onlineMotoCaptain(`cxa_c_${Date.now()}@test.com`, 'CXA1111');
+
+        const results = await Promise.allSettled([
+            parcelService.cancelParcel({ parcelId: parcel._id, user: user._id }),
+            parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain }),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+        const after = await parcelModel.findById(parcel._id);
+        expect(['cancelled', 'provider_accepted']).toContain(after.status);
+
+        const cap = await captainModel.findById(captain._id);
+        if (after.status === 'cancelled') {
+            expect(cap.busyLock).toBe(false);
+        }
+    });
+
+    it('cancelParcel após collected continua rejeitado', async () => {
+        const user = await createUser({ email: `postc_u_${Date.now()}@test.com` });
+        const { parcel } = await parcelService.createParcel(basePayload({ user: user._id }));
+        const captain = await onlineMotoCaptain(`postc_c_${Date.now()}@test.com`, 'POC1111');
+        await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
+        await advanceTo(parcel._id, captain, ['going_to_pickup', 'arrived_pickup', 'collected']);
+
+        await expect(
+            parcelService.cancelParcel({ parcelId: parcel._id, user: user._id })
+        ).rejects.toThrow('PARCEL_NOT_CANCELLABLE');
+
+        const after = await parcelModel.findById(parcel._id);
+        expect(after.status).toBe('collected');
+        expect(after.cancelledBy).toBeFalsy();
+    });
+
+    it('estado terminal finished não aceita transição posterior', async () => {
+        const { parcel } = await parcelService.createParcel(basePayload());
+        const captain = await onlineMotoCaptain(`term_c_${Date.now()}@test.com`, 'TRM1111');
+        await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
+        await advanceTo(parcel._id, captain, [
+            'going_to_pickup',
+            'arrived_pickup',
+            'collected',
+            'in_transit',
+            'arrived_destination',
+        ]);
+        const withPin = await parcelModel.findById(parcel._id).select('+deliveryPin');
+        await parcelService.confirmDelivery({
+            parcelId: parcel._id,
+            captain,
+            pin: withPin.deliveryPin,
+        });
+
+        await expect(
+            parcelService.updateParcelStatus({
+                parcelId: parcel._id,
+                captain,
+                status: 'in_transit',
+            })
+        ).rejects.toThrow('INVALID_STATUS_TRANSITION');
+
+        await expect(
+            parcelService.cancelParcel({
+                parcelId: parcel._id,
+                user: parcel.user,
+            })
+        ).rejects.toThrow('PARCEL_NOT_CANCELLABLE');
+    });
+
+    it('busyLock liberado apenas quando encomenda saiu do ar (cancel venceu)', async () => {
+        const user = await createUser({ email: `lock_u_${Date.now()}@test.com` });
+        const { parcel } = await parcelService.createParcel(basePayload({ user: user._id }));
+        const captain = await onlineMotoCaptain(`lock_c_${Date.now()}@test.com`, 'LCK1111');
+        await parcelService.acceptParcelAtomic({ parcelId: parcel._id, captain });
+
+        let mid = await captainModel.findById(captain._id);
+        expect(mid.busyLock).toBe(true);
+
+        await parcelService.cancelParcel({ parcelId: parcel._id, user: user._id });
+        mid = await captainModel.findById(captain._id);
+        expect(mid.busyLock).toBe(false);
+    });
 });

@@ -373,7 +373,9 @@ const ParcelActive = () => {
                 <p className="text-base font-bold text-ink-900">
                   R$ {Number(parcel.fare || 0).toFixed(2).replace('.', ',')}
                 </p>
-                <p className="text-[11px] text-ink-400">Dinheiro</p>
+                <p className="text-[11px] text-ink-400">
+                  {parcel.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'}
+                </p>
               </div>
             </div>
           </div>

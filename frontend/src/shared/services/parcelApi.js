@@ -52,6 +52,11 @@ export async function confirmParcelDelivery(id, pin) {
     return data
 }
 
+export async function confirmParcelPayment(id) {
+    const { data } = await api.post(`/parcels/${id}/confirm-payment`)
+    return data
+}
+
 export async function skipParcelReview(id) {
     const { data } = await api.post(`/parcels/${id}/skip-review`)
     return data

@@ -10,7 +10,7 @@ import {
   Search, MapPin, Navigation, MoreVertical, X, Clock, CreditCard, User, Car, Download,
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, RotateCcw, AlertTriangle, ShieldAlert
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -21,6 +21,49 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
+
+const DRIVER_STALE_MS = 15 * 60 * 1000; // alinhado ao TTL de disponibilidade do backend
+const DEFAULT_MAP_CENTER = [-23.55052, -46.633308];
+
+function driverMarkerIcon(status) {
+  const color = status === 'in_ride' ? '#f59e0b' : '#22c55e';
+  return L.divIcon({
+    className: 'admin-live-driver-marker',
+    html: `<div style="width:18px;height:18px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 0 2px ${color}55;"></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -10],
+  });
+}
+
+function FitDriversBounds({ drivers }) {
+  const map = useMap();
+  // Só reajusta o viewport quando a frota muda (entra/sai), não a cada ping GPS.
+  const fleetKey = useMemo(
+    () => drivers.map((d) => d.captainId).sort().join('|'),
+    [drivers]
+  );
+
+  useEffect(() => {
+    if (!drivers.length) return;
+    if (drivers.length === 1) {
+      map.setView([drivers[0].ltd, drivers[0].lng], 14, { animate: true });
+      return;
+    }
+    const bounds = L.latLngBounds(drivers.map((d) => [d.ltd, d.lng]));
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, fleetKey]);
+
+  return null;
+}
+
+const fetchLiveMap = async () => {
+  const { data } = await api.get('/admin/captains/live-map');
+  return data;
+};
 
 // Relative time helper
 function timeAgo(date) {
@@ -78,6 +121,7 @@ export default function Rides() {
   const [searchInput, setSearchInput] = useState('');
   const [selectedRides, setSelectedRides] = useState([]);
   const [liveDrivers, setLiveDrivers] = useState({});
+  const [mapBootstrapped, setMapBootstrapped] = useState(false);
   const [activeRideDrawer, setActiveRideDrawer] = useState(null);
   const [showMap, setShowMap] = useState(true); // Split view toggle
 
@@ -89,18 +133,94 @@ export default function Rides() {
     refetchInterval: 60000 // 60s
   });
 
-  // Socket
+  // Snapshot inicial: motoristas já online antes de abrir a página
   useEffect(() => {
-    if (socket) {
-      socket.on('admin-captain-location-updated', (data) => {
-        setLiveDrivers(prev => ({ ...prev, [data.captainId]: data }));
+    let cancelled = false;
+    (async () => {
+      try {
+        const snapshot = await fetchLiveMap();
+        if (cancelled) return;
+        const next = {};
+        for (const driver of snapshot.drivers || []) {
+          if (driver?.captainId == null || !Number.isFinite(driver.ltd) || !Number.isFinite(driver.lng)) continue;
+          next[driver.captainId] = driver;
+        }
+        setLiveDrivers((prev) => ({ ...next, ...prev })); // socket wins on overlap
+        setMapBootstrapped(true);
+      } catch {
+        if (!cancelled) setMapBootstrapped(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Socket: posição em tempo real + remoção no toggle offline
+  useEffect(() => {
+    if (!socket) return;
+
+    const onLocation = (payload) => {
+      if (!payload?.captainId || !Number.isFinite(payload.ltd) || !Number.isFinite(payload.lng)) return;
+      setLiveDrivers((prev) => ({
+        ...prev,
+        [payload.captainId]: {
+          ...prev[payload.captainId],
+          ...payload,
+          lastSeenAt: payload.lastSeenAt || new Date().toISOString(),
+        },
+      }));
+    };
+
+    const onOffline = (payload) => {
+      if (!payload?.captainId) return;
+      setLiveDrivers((prev) => {
+        if (!prev[payload.captainId]) return prev;
+        const next = { ...prev };
+        delete next[payload.captainId];
+        return next;
       });
-      // Future: listen for ride status changes to invalidate queries or update local state
-    }
+    };
+
+    socket.on('admin-captain-location-updated', onLocation);
+    socket.on('admin-captain-offline', onOffline);
     return () => {
-      if (socket) socket.off('admin-captain-location-updated');
+      socket.off('admin-captain-location-updated', onLocation);
+      socket.off('admin-captain-offline', onOffline);
     };
   }, [socket]);
+
+  // Remove motoristas sem heartbeat recente (TTL alinhado ao backend)
+  useEffect(() => {
+    const id = setInterval(() => {
+      const cutoff = Date.now() - DRIVER_STALE_MS;
+      setLiveDrivers((prev) => {
+        let changed = false;
+        const next = {};
+        for (const [key, driver] of Object.entries(prev)) {
+          const seen = driver.lastSeenAt ? new Date(driver.lastSeenAt).getTime() : 0;
+          if (seen && seen < cutoff) {
+            changed = true;
+            continue;
+          }
+          next[key] = driver;
+        }
+        return changed ? next : prev;
+      });
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const liveDriversList = useMemo(
+    () => Object.values(liveDrivers).filter((d) => Number.isFinite(d.ltd) && Number.isFinite(d.lng)),
+    [liveDrivers]
+  );
+  const availableCount = useMemo(
+    () => liveDriversList.filter((d) => d.status !== 'in_ride').length,
+    [liveDriversList]
+  );
+  const inRideCount = useMemo(
+    () => liveDriversList.filter((d) => d.status === 'in_ride').length,
+    [liveDriversList]
+  );
 
   // Actions
   const cancelMutation = useMutation({
@@ -327,27 +447,67 @@ export default function Rides() {
         )}
       </div>
 
-      {/* MAP VIEW (RIGHT) */}
+      {/* MAP VIEW (RIGHT) — motoristas online em tempo real */}
       {showMap && (
         <div className="hidden lg:flex w-1/3 flex-col bg-surface relative z-0 border-l border-border">
-          <div className="absolute top-4 right-4 bg-background/90 backdrop-blur border border-border p-3 rounded-lg shadow-xl z-[1000]">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              {Object.keys(liveDrivers).length} Motoristas Ativos
+          <div className="absolute top-4 left-4 right-4 flex flex-col gap-2 z-[1000] pointer-events-none">
+            <div className="bg-background/90 backdrop-blur border border-border p-3 rounded-lg shadow-xl pointer-events-auto">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  {liveDriversList.length} online
+                </div>
+                <div className="flex items-center gap-3 text-xs text-text-muted">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500" /> {availableCount} livres
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" /> {inRideCount} em corrida
+                  </span>
+                </div>
+              </div>
+              {!mapBootstrapped && (
+                <p className="text-xs text-text-muted mt-2">Carregando frota...</p>
+              )}
+              {mapBootstrapped && liveDriversList.length === 0 && (
+                <p className="text-xs text-text-muted mt-2">Nenhum motorista online com GPS no momento.</p>
+              )}
             </div>
           </div>
-          <MapContainer 
-            center={[-23.55052, -46.633308]} // SP 
-            zoom={12} 
+          <MapContainer
+            center={DEFAULT_MAP_CENTER}
+            zoom={12}
             style={{ height: '100%', width: '100%', backgroundColor: '#18181b' }}
           >
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
-            {Object.values(liveDrivers).map((driver) => (
-              <Marker key={driver.captainId} position={[driver.ltd, driver.lng]}>
-                <Popup className="custom-popup">Motorista Online</Popup>
+            <FitDriversBounds drivers={liveDriversList} />
+            {liveDriversList.map((driver) => (
+              <Marker
+                key={driver.captainId}
+                position={[driver.ltd, driver.lng]}
+                icon={driverMarkerIcon(driver.status)}
+              >
+                <Popup>
+                  <div className="text-sm space-y-1 min-w-[140px]">
+                    <p className="font-semibold">{driver.name || 'Motorista'}</p>
+                    <p className="text-xs">
+                      {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
+                    </p>
+                    {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
+                      <p className="text-xs opacity-80">
+                        {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    )}
+                    {driver.lastSeenAt && (
+                      <p className="text-[11px] opacity-60">GPS {timeAgo(driver.lastSeenAt)}</p>
+                    )}
+                  </div>
+                </Popup>
               </Marker>
             ))}
           </MapContainer>

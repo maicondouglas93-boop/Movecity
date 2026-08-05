@@ -5,7 +5,32 @@ const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMap
 const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
+const {
+    sanitizeCaptainFinance,
+    sanitizeCaptainFinanceList,
+    computeDriverAmount,
+} = require('../utils/financePrivacy');
 
+/** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
+function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
+    if (!ride) return ride;
+    const sanitized = sanitizeCaptainFinance(ride);
+    const isPresential = sanitized.source === 'driver_initiated';
+    if (!(keepPresentialOtp && isPresential)) {
+        delete sanitized.otp;
+    }
+    return sanitized;
+}
+
+function sanitizeCaptainRideHistoryPayload(data) {
+    if (!data) return data;
+    return {
+        ...data,
+        activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide, { keepPresentialOtp: true }) : null,
+        pendingOffers: sanitizeCaptainFinanceList(data.pendingOffers || []),
+        rides: sanitizeCaptainFinanceList(data.rides || []),
+    };
+}
 
 // Busca motoristas compatíveis no raio de despacho e emite 'new-ride' para cada um.
 // Extraído de createRide (auditoria de UX do motorista, 2026-08-02) para ser reaproveitado
@@ -43,17 +68,18 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         console.log(`[AUDIT][${TRACE_ID}] Emitindo 'new-ride' para socketId ${captain.socketId} (Captain: ${captain._id})`);
         sendMessageToSocketId(captain.socketId, {
             event: 'new-ride',
-            data: rideWithUser
+            data: toCaptainRideResponse(rideWithUser)
         });
         // C5 da auditoria de push (2026-08-02): disparado sem await de propósito (não
         // atrasar o despacho da corrida), mas sem .catch() uma falha aqui virava unhandled
         // rejection capaz de derrubar o processo — o service já tem try/catch interno
         // desde a mesma auditoria, isto é defesa em profundidade.
-        // Payload rico pro body da push (2026-08-04): fare, rota, distância, tempo,
-        // passageiro e categoria — sem botões Aceitar/Recusar na notificação.
+        // Payload rico pro body da push (2026-08-04): valor do passageiro, rota, distância,
+        // tempo, passageiro e categoria — sem botões Aceitar/Recusar na notificação.
+        // Sem comissão/% no payload (sanitização financeira).
         notificationService.sendNewRide(captain._id, {
             rideId: rideWithUser._id.toString(),
-            fare: rideWithUser.fare,
+            fare: rideWithUser.finalPrice ?? rideWithUser.fare,
             pickup: rideWithUser.pickup,
             destination: rideWithUser.destination,
             estimatedDistance: rideWithUser.estimatedDistance,
@@ -200,9 +226,9 @@ async function performAcceptRide(rideId, captain, res) {
         // próximo update de localização (~10s), aparecendo como "livre" sem estar.
         emitDriverMapUpdate(captain._id, { busy: true });
 
-        // Delete otp from response sent to captain for security
-        const rideForCaptain = ride.toObject();
-        delete rideForCaptain.otp;
+        // Privacidade financeira + OTP: motorista não recebe comissão/bruto nem PIN
+        // (exceto presencial, tratado em getCurrentRideForCaptain).
+        const rideForCaptain = toCaptainRideResponse(ride);
 
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
@@ -281,7 +307,7 @@ module.exports.createPresentialRide = async (req, res) => {
         }
 
         // NUNCA despacha — source=driver_initiated já vinculada ao motorista.
-        return res.status(201).json(ride);
+        return res.status(201).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
         if (err.code === 'CAPTAIN_NOT_ALLOWED') {
             return res.status(403).json({ message: 'Motorista não autorizado a iniciar corrida presencial.' });
@@ -321,7 +347,18 @@ module.exports.estimatePresentialFare = async (req, res) => {
             clientLat: lat != null ? Number(lat) : null,
             clientLng: lng != null ? Number(lng) : null,
         });
-        return res.status(200).json(estimate);
+        // Motorista vê o valor a cobrar do passageiro; sem fareBreakdown/comissão.
+        const driverAmount = computeDriverAmount({
+            fare: estimate.fare,
+            commissionAmount: estimate.fareBreakdown?.platformCommission,
+        });
+        return res.status(200).json({
+            pickupCoordinates: estimate.pickupCoordinates,
+            estimatedDistance: estimate.estimatedDistance,
+            estimatedTime: estimate.estimatedTime,
+            fare: estimate.fare,
+            driverAmount,
+        });
     } catch (err) {
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
@@ -357,7 +394,7 @@ module.exports.startRide = async (req, res) => {
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
@@ -398,7 +435,7 @@ module.exports.updateRideStatus = async (req, res) => {
         // Invalidate dashboard cache
         deleteCache('dashboard:today');
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
         if (err.message === 'Invalid status') {
             return res.status(400).json({ message: 'Status inválido para esta ação.' });
@@ -458,7 +495,7 @@ module.exports.endRide = async (req, res) => {
             deleteByPrefix(`history:${ride.user._id}`);
         }
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
@@ -505,7 +542,7 @@ module.exports.payRide = async (req, res) => {
         if (ride.captain?.socketId) {
             sendMessageToSocketId(ride.captain.socketId, {
                 event: 'payment-completed',
-                data: ride
+                data: toCaptainRideResponse(ride)
             });
         }
         // Fase 5 da auditoria de push (2026-08-02): antes só socket — motorista sem o
@@ -552,7 +589,7 @@ module.exports.confirmPaymentReceived = async (req, res) => {
             deleteByPrefix(`history:${ride.user._id}`);
         }
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
         // Pagamento já confirmado é o desfecho esperado de uma corrida (duplo clique,
         // retry de rede) — 409, não 500, igual ao acceptRide para RIDE_ALREADY_ACCEPTED.
@@ -650,7 +687,7 @@ module.exports.getCurrentRideForCaptain = async (req, res) => {
         if (!ride) {
             return res.status(404).json({ message: 'No active ride found' });
         }
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -667,7 +704,7 @@ module.exports.getCaptainRideHistory = async (req, res) => {
             page,
             limit,
         });
-        return res.status(200).json(data);
+        return res.status(200).json(sanitizeCaptainRideHistoryPayload(data));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -680,7 +717,7 @@ module.exports.getCaptainRideHistory = async (req, res) => {
 module.exports.getPendingRides = async (req, res) => {
     try {
         const rides = await rideService.getPendingRidesForCaptain({ captain: req.captain });
-        return res.status(200).json(rides);
+        return res.status(200).json(sanitizeCaptainFinanceList(rides));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -737,7 +774,7 @@ module.exports.captainCancelRide = async (req, res) => {
 
         deleteCache('dashboard:today');
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });

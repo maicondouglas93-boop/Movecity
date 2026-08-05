@@ -34,12 +34,14 @@ const FinishRide = (props) => {
     const { setCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
 
-    // Antes de finalizar, mostra a estimativa (ainda não existe valor final). Depois de
-    // finalizar, usa a corrida real devolvida pelo servidor.
+    // Valor que o passageiro deve pagar (bruto operacional).
+    // driverAmount (líquido) fica para ganhos — não misturar na cobrança em espécie.
     const chargeRide = endedRide || props.ride
-    const finalAmount = endedRide?.finalPrice ?? props.ride?.fare ?? 0
-    const commissionAmount = chargeRide?.commissionAmount || 0
-    const driverKeeps = finalAmount - commissionAmount
+    const passengerAmount = Number(
+        chargeRide?.finalPrice
+        ?? chargeRide?.fare
+        ?? 0
+    ) || 0
 
     const queryClient = useQueryClient();
 
@@ -206,7 +208,7 @@ const FinishRide = (props) => {
                             <span className="font-semibold text-ink-900">
                                 {props.ride?.destinationPending
                                     ? 'Preço ao finalizar'
-                                    : `R$ ${props.ride?.fare ?? '—'}`}
+                                    : `R$ ${props.ride?.finalPrice ?? props.ride?.fare ?? '—'}`}
                             </span>
                             <span className="text-ink-500">
                                 · {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
@@ -256,41 +258,34 @@ const FinishRide = (props) => {
                     </div>
                     {pendingSync ? (
                         <>
-                            <h3 className='text-xl font-bold text-amber-700'>Pagamento registrado</h3>
-                            <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar. Comissão prevista de R$ {commissionAmount.toFixed(2)}.</p>
+                            <h3 className='text-xl font-bold text-amber-700'>Serviço concluído</h3>
+                            <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar.</p>
+                            <p className='text-2xl font-bold text-ink-900 mt-2'>Valor do passageiro</p>
+                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
                             <p className='text-ink-600 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>
-                            <h3 className='text-xl font-bold text-brand-700'>Pagamento Confirmado!</h3>
-                            <p className='text-ink-600 text-center'>Comissão de R$ {commissionAmount.toFixed(2)} descontada dos créditos.</p>
+                            <h3 className='text-xl font-bold text-brand-700'>Serviço concluído</h3>
+                            <p className='text-ink-600 text-center'>Pagamento confirmado</p>
+                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
                         </>
                     )}
                 </div>
             ) : (
                 <>
                     <h3 className='text-2xl font-semibold mb-3 text-ink-900'>Confirmar Pagamento</h3>
-                    <p className='text-ink-600 mb-5'>Receba o dinheiro do passageiro e confirme abaixo.</p>
+                    <p className='text-ink-600 mb-5'>Receba o pagamento do passageiro e confirme abaixo.</p>
 
-                    {/* Payment Summary */}
-                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5'>
-                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-line'>
-                            <span className='text-ink-600'>Valor final da corrida</span>
-                            <span className='text-xl font-bold text-ink-900'>R$ {finalAmount.toFixed(2)}</span>
-                        </div>
-                        <div className='flex justify-between items-center mb-3 pb-3 border-b border-line'>
-                            <span className='text-ink-600'>Comissão ({props.ride?.commissionPercent ?? '—'}%)</span>
-                            <span className='text-danger-500 font-semibold'>- R$ {commissionAmount.toFixed(2)}</span>
-                        </div>
-                        <div className='flex justify-between items-center'>
-                            <span className='text-ink-900 font-semibold'>Você fica com (dinheiro)</span>
-                            <span className='text-brand-600 text-xl font-bold'>R$ {driverKeeps.toFixed(2)}</span>
-                        </div>
+                    {/* Valor que o passageiro deve pagar (sem comissão/%). */}
+                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
+                        <p className='text-ink-600 text-sm mb-1'>Cliente deve pagar</p>
+                        <p className='text-brand-600 text-3xl font-black'>R$ {passengerAmount.toFixed(2)}</p>
                     </div>
 
                     <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>
                         <i className="ri-information-line text-ink-400 mt-0.5"></i>
-                        <p className='text-sm text-ink-600'>A comissão de <strong>R$ {commissionAmount.toFixed(2)}</strong> será descontada dos seus créditos na carteira.</p>
+                        <p className='text-sm text-ink-600'>Cliente paga direto a você. Confirme quando o pagamento for recebido.</p>
                     </div>
 
                     <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending}>

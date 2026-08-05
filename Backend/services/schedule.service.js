@@ -416,24 +416,31 @@ module.exports.listCaptainUpcoming = async (captainId) => {
         return mapService.haversineKm(pos.ltd, pos.lng, lat, lng) <= radiusKm;
     };
 
+    const { computeDriverAmount } = require('../utils/financePrivacy');
     const items = [
-        ...rides.filter((r) => withinRadius(r.pickupCoordinates)).map((r) => ({
-            kind: 'ride',
-            _id: r._id,
-            pickup: shortAddress(r.pickup),
-            destination: shortAddress(r.destination),
-            fare: r.finalPrice || r.fare,
-            vehicleType: r.vehicleType,
-            scheduledAt: r.scheduledAt,
-            estimatedDistance: r.estimatedDistance,
-            estimatedTime: r.estimatedTime,
-        })),
+        ...rides.filter((r) => withinRadius(r.pickupCoordinates)).map((r) => {
+            const fare = r.finalPrice || r.fare;
+            return {
+                kind: 'ride',
+                _id: r._id,
+                pickup: shortAddress(r.pickup),
+                destination: shortAddress(r.destination),
+                // Valor do passageiro; sem comissão/%.
+                fare,
+                driverAmount: computeDriverAmount(r),
+                vehicleType: r.vehicleType,
+                scheduledAt: r.scheduledAt,
+                estimatedDistance: r.estimatedDistance,
+                estimatedTime: r.estimatedTime,
+            };
+        }),
         ...parcels.filter((p) => withinRadius(p.pickupCoordinates)).map((p) => ({
             kind: 'parcel',
             _id: p._id,
             pickup: shortAddress(p.pickup),
             destination: shortAddress(p.destination),
             fare: p.fare,
+            driverAmount: computeDriverAmount(p),
             vehicleType: p.vehicleType,
             itemName: p.itemName,
             size: p.size,

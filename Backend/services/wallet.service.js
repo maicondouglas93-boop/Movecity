@@ -110,10 +110,47 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
 
         const captain = await captainModel.findById(captainId);
         if (captain && captain.socketId) {
-            sendMessageToSocketId(captain.socketId, {
-                event: 'wallet-updated',
-                data: { wallet, transaction }
-            });
+            const { sanitizeCaptainWallet, sanitizeCaptainTransactions } = require('../utils/financePrivacy');
+            const safeWallet = sanitizeCaptainWallet(wallet);
+
+            // Cash/pix: pagamento e comissão são emitidos em sockets separados.
+            // Para o crédito do serviço, busca a comissão no ride/parcel e normaliza o amount.
+            const hints = { commissionByRide: {}, commissionByParcel: {} };
+            const rawTx = transaction.toObject ? transaction.toObject() : transaction;
+            if (
+                (rawTx.type === 'ride_payment' || rawTx.type === 'parcel_payment') &&
+                rawTx.paymentMethod !== 'card'
+            ) {
+                if (rawTx.rideId) {
+                    const rideModel = require('../models/ride.model');
+                    const ride = await rideModel.findById(rawTx.rideId).select('commissionAmount').lean();
+                    if (ride?.commissionAmount != null) {
+                        hints.commissionByRide[String(rawTx.rideId)] = Number(ride.commissionAmount) || 0;
+                    }
+                }
+                if (rawTx.parcelId) {
+                    const parcelModel = require('../models/parcel.model');
+                    const parcel = await parcelModel.findById(rawTx.parcelId).select('commissionAmount').lean();
+                    if (parcel?.commissionAmount != null) {
+                        hints.commissionByParcel[String(rawTx.parcelId)] = Number(parcel.commissionAmount) || 0;
+                    }
+                }
+            }
+
+            const sanitizedList = sanitizeCaptainTransactions([transaction], hints);
+            const safeTx = sanitizedList[0] || null;
+            // Lançamentos type=commission não são enviados ao app do motorista.
+            if (rawTx.type === 'commission') {
+                sendMessageToSocketId(captain.socketId, {
+                    event: 'wallet-updated',
+                    data: { wallet: safeWallet, transaction: null }
+                });
+            } else {
+                sendMessageToSocketId(captain.socketId, {
+                    event: 'wallet-updated',
+                    data: { wallet: safeWallet, transaction: safeTx }
+                });
+            }
             sendMessageToSocketId(captain.socketId, {
                 event: 'summary-updated',
                 data: { timestamp: Date.now() }

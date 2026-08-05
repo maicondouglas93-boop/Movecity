@@ -166,7 +166,7 @@ module.exports.getCurrent = async (req, res) => {
 module.exports.getCurrentForCaptain = async (req, res) => {
     try {
         const parcel = await parcelService.getCurrentParcelForCaptain(req.captain._id);
-        return res.status(200).json(parcel);
+        return res.status(200).json(parcel ? parcelService.toParcelCaptainDTO(parcel) : null);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

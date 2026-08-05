@@ -194,9 +194,8 @@ const CaptainWallet = () => {
                             let bgColor = 'bg-surface-alt';
                             let iconColor = 'text-ink-600';
 
-                            if (tx.type === 'commission') { icon = 'ri-arrow-down-line'; title = 'Comissão Plataforma'; bgColor = 'bg-danger-50'; iconColor = 'text-danger-600'; }
                             if (tx.type === 'recharge') { icon = 'ri-add-line'; title = 'Recarga Pix'; bgColor = 'bg-brand-50'; iconColor = 'text-brand-600'; }
-                            if (tx.type === 'ride_payment') { icon = 'ri-car-line'; title = 'Ganho de Corrida'; bgColor = 'bg-blue-100'; iconColor = 'text-blue-600'; }
+                            if (tx.type === 'ride_payment' || tx.type === 'parcel_payment') { icon = 'ri-car-line'; title = 'Ganho de serviço'; bgColor = 'bg-blue-100'; iconColor = 'text-blue-600'; }
                             if (tx.type === 'payout') { icon = 'ri-bank-line'; title = 'Repasse Bancário'; bgColor = 'bg-purple-100'; iconColor = 'text-purple-600'; }
                             if (tx.type === 'adjustment') { icon = 'ri-tools-line'; title = 'Ajuste Admin'; bgColor = 'bg-orange-100'; iconColor = 'text-orange-600'; }
 

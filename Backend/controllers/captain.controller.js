@@ -240,16 +240,17 @@ module.exports.logoutCaptain = async (req, res, next) => {
 
 module.exports.getWallet = async (req, res, next) => {
     try {
+        const { sanitizeCaptainWallet } = require('../utils/financePrivacy');
         const cacheKey = `wallet:${req.captain._id}`;
         const cached = getCache(cacheKey);
-        if (cached) return res.status(200).json({ wallet: cached });
+        if (cached) return res.status(200).json({ wallet: sanitizeCaptainWallet(cached) });
 
         const walletService = require('../services/wallet.service');
         const wallet = await walletService.getWallet(req.captain._id);
 
         setCache(cacheKey, wallet, 300); // 5 minutes
 
-        res.status(200).json({ wallet });
+        res.status(200).json({ wallet: sanitizeCaptainWallet(wallet) });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -268,17 +269,52 @@ module.exports.requestPayout = async (req, res, next) => {
 
 module.exports.getTransactions = async (req, res, next) => {
     try {
+        const { sanitizeCaptainTransactions } = require('../utils/financePrivacy');
+        const transactionModel = require('../models/transaction.model');
         const limit = parseInt(req.query.limit) || 50;
         const cacheKey = `transactions:${req.captain._id}:${limit}`;
         const cached = getCache(cacheKey);
-        if (cached) return res.status(200).json({ transactions: cached });
+
+        const withHints = async (transactions) => {
+            const rideIds = [];
+            const parcelIds = [];
+            for (const tx of transactions || []) {
+                const t = tx.toObject ? tx.toObject() : tx;
+                if (
+                    (t.type === 'ride_payment' || t.type === 'parcel_payment') &&
+                    t.paymentMethod !== 'card'
+                ) {
+                    if (t.rideId) rideIds.push(t.rideId);
+                    if (t.parcelId) parcelIds.push(t.parcelId);
+                }
+            }
+            const hints = { commissionByRide: {}, commissionByParcel: {} };
+            if (rideIds.length || parcelIds.length) {
+                const or = [];
+                if (rideIds.length) or.push({ rideId: { $in: rideIds } });
+                if (parcelIds.length) or.push({ parcelId: { $in: parcelIds } });
+                const commissions = await transactionModel
+                    .find({ type: 'commission', $or: or })
+                    .select('rideId parcelId amount')
+                    .lean();
+                for (const c of commissions) {
+                    if (c.rideId) hints.commissionByRide[String(c.rideId)] = Number(c.amount) || 0;
+                    if (c.parcelId) hints.commissionByParcel[String(c.parcelId)] = Number(c.amount) || 0;
+                }
+            }
+            return sanitizeCaptainTransactions(transactions, hints);
+        };
+
+        if (cached) {
+            return res.status(200).json({ transactions: await withHints(cached) });
+        }
 
         const walletService = require('../services/wallet.service');
         const transactions = await walletService.getTransactions(req.captain._id, limit);
 
         setCache(cacheKey, transactions, 300); // 5 minutes
 
-        res.status(200).json({ transactions });
+        res.status(200).json({ transactions: await withHints(transactions) });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -390,20 +426,17 @@ module.exports.getSummary = async (req, res, next) => {
         });
 
         let earnings = 0;
-        let commissions = 0;
 
         todaysRides.forEach(ride => {
             const fare = ride.fare || 0;
             const comm = ride.commissionAmount || 0;
             const finalPrice = ride.finalPrice || fare;
             earnings += (finalPrice - comm);
-            commissions += comm;
         });
 
         const summary = {
             ridesToday: todaysRides.length,
             earnings: parseFloat(earnings.toFixed(2)),
-            commissions: parseFloat(commissions.toFixed(2)),
             walletBalance: wallet.creditBalance,
             walletBlocked: wallet.pendingBalance || 0,
             onlineTimeSeconds: todayOnlineSeconds, // tempo online real de hoje, calculado a partir de onlineSince
@@ -424,10 +457,11 @@ module.exports.getSummary = async (req, res, next) => {
 // detalhe por corrida — a tela de Ganhos só tinha o total vitalício até aqui.
 module.exports.getEarnings = async (req, res, next) => {
     try {
+        const { sanitizeEarningsBreakdown } = require('../utils/financePrivacy');
         const range = ['day', 'week', 'month'].includes(req.query.range) ? req.query.range : 'day';
         const captainService = require('../services/captain.service');
         const breakdown = await captainService.getEarningsBreakdown(req.captain._id, range);
-        res.status(200).json(breakdown);
+        res.status(200).json(sanitizeEarningsBreakdown(breakdown));
     } catch (err) {
         res.status(500).json({ message: err.message });
     }

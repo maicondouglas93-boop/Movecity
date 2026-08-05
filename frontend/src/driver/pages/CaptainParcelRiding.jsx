@@ -152,7 +152,7 @@ const CaptainParcelRiding = () => {
       const updated = await confirmParcelPayment(parcel._id)
       setParcel(updated)
       setCaptainParcel(updated)
-      addToast('Pagamento confirmado. Comissão debitada dos créditos.', 'success')
+      addToast('Pagamento confirmado.', 'success')
       setStep('rating')
       navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'rating' } })
     } catch (err) {
@@ -162,9 +162,7 @@ const CaptainParcelRiding = () => {
     }
   }
 
-  const fare = Number(parcel?.fare || 0)
-  const commissionAmount = Number(parcel?.commissionAmount || 0)
-  const driverKeeps = Math.max(0, fare - commissionAmount)
+  const passengerAmount = Number(parcel?.fare ?? 0) || 0
   const payLabel = parcel?.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'
 
   const submitRating = async () => {
@@ -214,21 +212,11 @@ const CaptainParcelRiding = () => {
           <div className="space-y-2.5">
             <p className="text-base font-semibold text-ink-900">Confirmar pagamento</p>
             <p className="text-xs text-ink-500">
-              Cliente paga por <strong>{payLabel}</strong> direto a você. Comissão debitada nos créditos.
+              Cliente paga por <strong>{payLabel}</strong> direto a você.
             </p>
-            <div className="rounded-panel border border-line bg-surface-alt px-3 py-2 space-y-1.5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-ink-600">Entrega</span>
-                <span className="font-semibold text-ink-900">R$ {fare.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-ink-600">Comissão ({parcel.commissionPercent ?? '—'}%)</span>
-                <span className="font-semibold text-danger-500">- R$ {commissionAmount.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between pt-1 border-t border-line">
-                <span className="font-semibold text-ink-900">Você fica com</span>
-                <span className="font-bold text-brand-600">R$ {driverKeeps.toFixed(2)}</span>
-              </div>
+            <div className="rounded-panel border border-line bg-surface-alt px-3 py-3 text-center">
+              <p className="text-xs text-ink-600 mb-0.5">Cliente deve pagar</p>
+              <p className="text-2xl font-black text-brand-600">R$ {passengerAmount.toFixed(2)}</p>
             </div>
             <button
               type="button"
@@ -283,7 +271,7 @@ const CaptainParcelRiding = () => {
                 compact
                 trailing={
                   <div className="text-right">
-                    <p className="text-sm font-bold text-ink-900">R$ {fare.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-ink-900">R$ {passengerAmount.toFixed(2)}</p>
                     <p className="text-[10px] text-ink-400">{payLabel}</p>
                   </div>
                 }

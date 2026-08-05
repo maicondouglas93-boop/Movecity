@@ -32,6 +32,7 @@ const Cards = lazy(() => import('@/passenger/pages/account/Cards'))
 const Scheduled = lazy(() => import('@/passenger/pages/account/Scheduled'))
 const Favorites = lazy(() => import('@/passenger/pages/account/Favorites'))
 const Help = lazy(() => import('@/passenger/pages/account/Help'))
+const Notifications = lazy(() => import('@/passenger/pages/Notifications'))
 
 // Rotas do fluxo de passageiro.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.
@@ -71,6 +72,11 @@ const passengerRoutes = [
   <Route key='home' path='/home' element={
     <UserProtectWrapper>
       <Home />
+    </UserProtectWrapper>
+  } />,
+  <Route key='notifications' path='/notifications' element={
+    <UserProtectWrapper>
+      <Notifications />
     </UserProtectWrapper>
   } />,
   <Route key='user-logout' path='/user/logout' element={

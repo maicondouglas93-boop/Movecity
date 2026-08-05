@@ -35,6 +35,85 @@ const TEMPLATES = [
   { id: 3, name: '💰 Cashback', title: 'Seu Cashback Expirando!', message: 'Você tem R$ 10,00 na sua carteira que vão expirar amanhã. Use agora!', type: 'marketing', deepLink: 'wallet' },
 ];
 
+
+function InboxQuickSend({ onSent }) {
+  const toast = useToast();
+  const [form, setForm] = useState({
+    target: 'passengers',
+    title: '',
+    message: '',
+    category: 'admin',
+    priority: 'normal',
+    action: '/home',
+    userIds: '',
+    captainIds: '',
+  });
+  const [sending, setSending] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSending(true);
+    try {
+      const payload = {
+        target: form.target,
+        title: form.title,
+        message: form.message,
+        category: form.category,
+        priority: form.priority,
+        action: form.action,
+      };
+      if (form.target === 'specific') {
+        payload.userIds = form.userIds.split(',').map((s) => s.trim()).filter(Boolean);
+        payload.captainIds = form.captainIds.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      await api.post('/admin/notifications/inbox', payload);
+      toast.success('Notificação enviada para a central dos usuários');
+      onSent?.();
+      setForm((f) => ({ ...f, title: '', message: '' }));
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Falha ao enviar');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="bg-surface border border-border rounded-xl p-6 space-y-4 max-w-2xl">
+      <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2"><Bell className="w-4 h-4" /> Envio para Central In-App</h2>
+      <p className="text-sm text-text-muted">Cria o card na central do app (sino) e dispara push FCM quando houver token.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {['all', 'passengers', 'drivers', 'specific'].map((t) => (
+          <button type="button" key={t} onClick={() => setForm((f) => ({ ...f, target: t }))}
+            className={`p-3 rounded-lg border text-sm font-medium ${form.target === t ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}>
+            {t === 'all' ? 'Todos' : t === 'passengers' ? 'Passageiros' : t === 'drivers' ? 'Motoristas' : 'IDs específicos'}
+          </button>
+        ))}
+      </div>
+      {form.target === 'specific' && (
+        <div className="space-y-2">
+          <input className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="userIds separados por vírgula" value={form.userIds} onChange={(e) => setForm((f) => ({ ...f, userIds: e.target.value }))} />
+          <input className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="captainIds separados por vírgula" value={form.captainIds} onChange={(e) => setForm((f) => ({ ...f, captainIds: e.target.value }))} />
+        </div>
+      )}
+      <input required maxLength={120} className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="Título" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
+      <textarea required maxLength={500} rows={3} className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="Descrição" value={form.message} onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))} />
+      <div className="grid grid-cols-3 gap-3">
+        <select className="border border-border rounded-lg px-3 py-2 text-sm bg-background" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}>
+          {['admin','promotion','coupon','system','alert','payment','ride','parcel','schedule'].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="border border-border rounded-lg px-3 py-2 text-sm bg-background" value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}>
+          {['low','normal','high','urgent'].map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <input className="border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="Ação (ex: /coupons)" value={form.action} onChange={(e) => setForm((f) => ({ ...f, action: e.target.value }))} />
+      </div>
+      <button disabled={sending} type="submit" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-50">
+        <Send className="w-4 h-4" /> {sending ? 'Enviando…' : 'Enviar agora'}
+      </button>
+    </form>
+  );
+}
+
+
 export default function Notifications() {
   const [activeTab, setActiveTab] = useState('new');
   const [previewTab, setPreviewTab] = useState('ios');
@@ -59,6 +138,15 @@ export default function Notifications() {
     queryKey: ['campaigns'],
     queryFn: async () => {
       const res = await api.get('/admin/campaigns');
+      return res.data;
+    },
+    enabled: activeTab === 'history'
+  });
+
+  const { data: inboxStatsData } = useQuery({
+    queryKey: ['inbox-stats'],
+    queryFn: async () => {
+      const res = await api.get('/admin/notifications/inbox-stats');
       return res.data;
     },
     enabled: activeTab === 'history'
@@ -140,6 +228,7 @@ export default function Notifications() {
 
       <div className="flex border-b border-border">
         <button onClick={() => setActiveTab('new')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'new' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Nova Campanha</button>
+        <button onClick={() => setActiveTab('inbox')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'inbox' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Envio Inbox</button>
         <button onClick={() => setActiveTab('history')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'history' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Histórico & Métricas</button>
       </div>
 
@@ -342,6 +431,10 @@ export default function Notifications() {
         </div>
       )}
 
+      {activeTab === 'inbox' && (
+        <InboxQuickSend onSent={() => { queryClient.invalidateQueries({ queryKey: ['inbox-stats'] }); setActiveTab('history'); }} />
+      )}
+
       {activeTab === 'history' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -362,6 +455,37 @@ export default function Notifications() {
               <div><p className="text-xs text-text-muted">Agendadas</p><p className="text-lg font-bold">{historyData?.campaigns?.filter(c => c.status === 'scheduled').length || 0}</p></div>
             </div>
           </div>
+
+          {(inboxStatsData?.items?.length > 0) && (
+            <div className="bg-surface border border-border rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-border font-semibold text-sm">Inbox in-app — entregues / lidas</div>
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-background/50 border-b border-border text-text-muted">
+                  <tr>
+                    <th className="p-4 font-medium">Título</th>
+                    <th className="p-4 font-medium">Categoria</th>
+                    <th className="p-4 font-medium">Entregues</th>
+                    <th className="p-4 font-medium">Lidas</th>
+                    <th className="p-4 font-medium">Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inboxStatsData.items.map((row, idx) => (
+                    <tr key={idx} className="border-b border-border/60">
+                      <td className="p-4">
+                        <div className="font-medium">{row.title}</div>
+                        <div className="text-xs text-text-muted truncate max-w-xs">{row.message}</div>
+                      </td>
+                      <td className="p-4">{row.category}</td>
+                      <td className="p-4">{row.delivered}</td>
+                      <td className="p-4">{row.read}</td>
+                      <td className="p-4">{row.day}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="bg-surface border border-border rounded-xl overflow-hidden">
             <table className="w-full text-left text-sm whitespace-nowrap">

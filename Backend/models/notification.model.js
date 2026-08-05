@@ -4,12 +4,20 @@ const notificationSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
-        required: false
+        required: false,
+        index: true,
     },
     captainId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'captain',
-        required: false
+        required: false,
+        index: true,
+    },
+    // passenger | driver | admin — destinatário lógico da central in-app
+    recipientType: {
+        type: String,
+        enum: ['passenger', 'driver', 'admin', null],
+        default: null,
     },
     title: {
         type: String,
@@ -32,13 +40,52 @@ const notificationSchema = new mongoose.Schema({
         // NEW_PARCEL: oferta de encomenda ao motorista (mesmo canal FCM de NEW_RIDE).
         // Sem este valor no enum, Notification.create rejeitava e o push nunca saía.
         // SCHEDULE_*: agendamento (Fase 3) — tipos próprios para analytics (não reusar RIDE_CANCELLED).
+        // COUPON / SYSTEM / ALERT: tipos da central de notificações in-app.
         enum: [
             'NEW_RIDE', 'NEW_PARCEL', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED',
             'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN',
             'RECHARGE', 'DOCUMENT',
             'SCHEDULE_CREATED', 'SCHEDULE_ACTIVATED', 'SCHEDULE_NO_DRIVER', 'SCHEDULE_REMINDER',
+            'COUPON', 'SYSTEM', 'ALERT',
         ],
         default: 'NEW_RIDE'
+    },
+    // Categorias da central (filtro UX): ride, parcel, schedule, promotion, coupon,
+    // admin, payment, system, alert
+    category: {
+        type: String,
+        enum: ['ride', 'parcel', 'schedule', 'promotion', 'coupon', 'admin', 'payment', 'system', 'alert'],
+        default: 'system',
+        index: true,
+    },
+    priority: {
+        type: String,
+        enum: ['low', 'normal', 'high', 'urgent'],
+        default: 'normal',
+    },
+    icon: {
+        type: String,
+        default: '🔔',
+    },
+    // Rota relativa ou deep link ao clicar (ex.: /riding, /captain-wallet)
+    action: {
+        type: String,
+        default: null,
+    },
+    referenceId: {
+        type: String,
+        default: null,
+        index: true,
+    },
+    referenceType: {
+        type: String,
+        enum: ['ride', 'parcel', 'transaction', 'coupon', 'campaign', 'schedule', null],
+        default: null,
+    },
+    origin: {
+        type: String,
+        enum: ['system', 'admin', 'campaign', 'payment', 'chat', 'schedule'],
+        default: 'system',
     },
     targetAudience: {
         // 'admins' adicionado na Fase 7 (canal de push para o painel administrativo).
@@ -57,11 +104,34 @@ const notificationSchema = new mongoose.Schema({
     },
     read: {
         type: Boolean,
-        default: false
+        default: false,
+        index: true,
+    },
+    readAt: {
+        type: Date,
+        default: null,
+    },
+    // Quando o usuário abre a central, o badge zera sem marcar tudo como lido.
+    // Guardamos a última vez que o contador foi "visto" por recipient — opcionalmente
+    // via endpoint dedicado; por padrão o contador usa só `read:false`.
+    badgeSeenAt: {
+        type: Date,
+        default: null,
     },
     sentAt: {
         type: Date
-    }
+    },
+    // Campanha/admin que originou o envio (métricas entregue/lida)
+    campaignId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'notificationCampaign',
+        default: null,
+    },
 }, { timestamps: true });
+
+notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ captainId: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
+notificationSchema.index({ captainId: 1, read: 1, createdAt: -1 });
 
 module.exports = mongoose.model('notification', notificationSchema);

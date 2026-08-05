@@ -31,6 +31,12 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
     const chatContainerRef = useRef(null);
     const typingTimeoutRef = useRef(null);
 
+    // Fase 3 (M1, 2026-08-05): sem isto, fechar o chat com o timeout de digitação
+    // pendente disparava setIsTyping/socket.emit depois do unmount.
+    useEffect(() => () => {
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    }, []);
+
     const doc = subject || ride;
     const type = subjectType === 'parcel' ? 'parcel' : 'ride';
     const subjectId = doc?._id;

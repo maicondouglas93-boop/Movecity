@@ -92,8 +92,8 @@ if (messaging) messaging.onBackgroundMessage((payload) => {
 
     const notificationOptions = {
         body,
-        icon: '/movecity-icon.jpg',
-        badge: '/movecity-icon.jpg',
+        icon: '/pwa-icon-192.png',
+        badge: '/pwa-icon-192.png',
         data,
         timestamp: Date.now(),
         // Explicitamente sem ações — SW antigo em cache ainda mostrava Aceitar/Recusar.

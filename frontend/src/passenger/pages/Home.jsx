@@ -87,6 +87,13 @@ const Home = () => {
     const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
 
+    // Fase 3 da auditoria de production readiness (M1, 2026-08-05): o debounce da
+    // busca de endereço vivia só nos handlers — desmontar a Home com uma busca
+    // pendente deixava o setTimeout disparar depois, com setState em componente morto.
+    useEffect(() => () => {
+        if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    }, [])
+
     useEffect(() => {
         // Pós-corrida (2026-08-04): limpa origem/destino/rota residual ao voltar da
         // tela de Riding — sem isto o LiveTracking redesenhava o trajeto fantasma.

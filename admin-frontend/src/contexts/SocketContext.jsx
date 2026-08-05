@@ -29,8 +29,11 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     // Only connect if user is logged in
     if (user) {
+      // Fase 3 (2026-08-05, item 13 da auditoria): só 'websocket' derrubava o painel
+      // em redes corporativas/proxies que bloqueiam WS — mesmo padrão do app do
+      // passageiro/motorista: conecta por polling e faz upgrade pra WebSocket sozinho.
       const newSocket = io(resolveSocketUrl(), {
-        transports: ['websocket'],
+        transports: ['polling', 'websocket'],
       });
 
       newSocket.on('connect', () => {

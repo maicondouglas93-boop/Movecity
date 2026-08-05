@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react'
+import React, { useState, useContext, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
@@ -33,6 +33,17 @@ const FinishRide = (props) => {
     const navigate = useNavigate()
     const { setCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
+
+    // Fase 3 (M1, 2026-08-05): os setTimeout de navegação/avaliação pós-corrida eram
+    // órfãos — desmontar este painel (ex.: corrida cancelada no meio) deixava um
+    // navigate/setState pendente disparar em componente morto.
+    const timersRef = useRef([])
+    const scheduleTimer = (fn, ms) => {
+        timersRef.current.push(setTimeout(fn, ms))
+    }
+    useEffect(() => () => {
+        timersRef.current.forEach(clearTimeout)
+    }, [])
 
     // Valor que o passageiro deve pagar (bruto operacional).
     // driverAmount (líquido) fica para ganhos — não misturar na cobrança em espécie.
@@ -114,9 +125,9 @@ const FinishRide = (props) => {
             // confirmado de verdade (não no caminho offline/pendingSync abaixo).
             // Presencial sem passageiro vinculado: pula avaliação.
             if (props.ride?.user) {
-                setTimeout(() => setShowRating(true), 1200)
+                scheduleTimer(() => setShowRating(true), 1200)
             } else {
-                setTimeout(() => {
+                scheduleTimer(() => {
                     setCaptainRide(null)
                     navigate('/captain-home')
                 }, 1500)
@@ -133,7 +144,7 @@ const FinishRide = (props) => {
                 setPaymentConfirmed(true)
                 setPendingSync(true)
                 setCaptainRide(null)
-                setTimeout(() => navigate('/captain-home'), 2500) // Optimistic
+                scheduleTimer(() => navigate('/captain-home'), 2500) // Optimistic
             } else {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }

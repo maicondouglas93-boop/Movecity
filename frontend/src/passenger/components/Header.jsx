@@ -22,6 +22,10 @@ const Header = () => {
             addToast('Atualizando o app...', 'info');
             await updateServiceWorker(true);
             // Fallback se o plugin não recarregar (rede lenta / SW travado em waiting).
+            // Fase 3 (M1, 2026-08-05): deliberadamente SEM cleanup no unmount — o reload
+            // é uma ação global da página (aplicar o SW novo), não setState de
+            // componente; cancelá-lo ao navegar dentro da janela de 2s deixaria o app
+            // rodando a versão antiga que o usuário acabou de pedir pra atualizar.
             setTimeout(() => {
                 window.location.reload();
             }, 2000);

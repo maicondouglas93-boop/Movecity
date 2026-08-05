@@ -34,6 +34,8 @@ const CaptainHeader = () => {
         if (found) {
             addToast('Atualizando o app...', 'info');
             await updateServiceWorker(true);
+            // Fase 3 (M1, 2026-08-05): sem cleanup de propósito — ver comentário
+            // equivalente em Header.jsx (reload é ação global de aplicar o SW novo).
             setTimeout(() => {
                 window.location.reload();
             }, 2000);

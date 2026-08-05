@@ -19,6 +19,7 @@ vi.mock('@/shared/services/session', () => ({
 
 describe('RideChat — PIN operacional', () => {
     it('persiste o PIN pelo HTTP e não depende de send-message no cliente', async () => {
+        Element.prototype.scrollIntoView = vi.fn();
         const socket = {
             emit: vi.fn(),
             on: vi.fn(),
@@ -49,6 +50,7 @@ describe('RideChat — PIN operacional', () => {
             </SocketContext.Provider>
         );
 
+        await waitFor(() => expect(axios.patch).toHaveBeenCalled());
         fireEvent.click(screen.getByRole('button', { name: /enviar pin/i }));
 
         await waitFor(() => expect(axios.post).toHaveBeenCalled());

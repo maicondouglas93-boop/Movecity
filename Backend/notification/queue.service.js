@@ -16,7 +16,7 @@
 // histórico. Trocar por uma fila persistente (BullMQ/Redis) é uma troca deste arquivo,
 // não um redesenho, se o crescimento pedir isso no futuro.
 module.exports.enqueue = (job, traceId = '[AUDIT]') => {
-    Promise.resolve()
+    return Promise.resolve()
         .then(job)
         .catch((error) => {
             console.error(`${traceId} Job de notificação falhou:`, error.message);

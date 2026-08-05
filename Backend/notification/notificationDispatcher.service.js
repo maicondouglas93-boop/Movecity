@@ -374,14 +374,14 @@ module.exports.sendChatMessageToCaptain = async (captainId, preview, data) => {
     const deepLink = data?.subjectType === 'parcel'
         ? '/captain-parcel'
         : DEEP_LINK.captainRiding;
-    queue.enqueue(() => sendToCaptain(captainId, 'Nova mensagem do passageiro', preview, 'CHAT', { ...data, deepLink }));
+    return queue.enqueue(() => sendToCaptain(captainId, 'Nova mensagem do passageiro', preview, 'CHAT', { ...data, deepLink }));
 };
 
 module.exports.sendChatMessageToUser = async (userId, preview, data) => {
     const deepLink = data?.subjectType === 'parcel'
         ? '/encomenda/ativa'
         : DEEP_LINK.riding;
-    queue.enqueue(() => sendToUser(userId, 'Nova mensagem do motorista', preview, 'CHAT', { ...data, deepLink }));
+    return queue.enqueue(() => sendToUser(userId, 'Nova mensagem do motorista', preview, 'CHAT', { ...data, deepLink }));
 };
 
 // Pagamento/carteira (Fase 5 da correção do sistema de push, 2026-08-02): antes só

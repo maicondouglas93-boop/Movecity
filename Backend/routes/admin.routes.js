@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const notificationController = require('../controllers/notification.controller');
+const monitoringController = require('../controllers/monitoring.controller');
 const { authAdmin, authorizeRoles } = require('../middlewares/adminAuth.middleware');
 const { loginLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
 const { body } = require('express-validator');
@@ -15,6 +16,15 @@ router.post('/logout', authAdmin, adminController.logout);
 // Dashboard Route
 router.get('/dashboard', authAdmin, adminController.getDashboard);
 router.get('/health', authAdmin, adminController.getHealthStatus);
+
+// Monitoramento de serviços externos (somente super_admin)
+router.get('/monitoring/services', authAdmin, authorizeRoles('super_admin'), monitoringController.getServicesDashboard);
+router.get('/monitoring/status', authAdmin, authorizeRoles('super_admin'), monitoringController.getServicesStatus);
+router.post('/monitoring/refresh', authAdmin, authorizeRoles('super_admin'), monitoringController.refreshServices);
+router.get('/monitoring/services/:service', authAdmin, authorizeRoles('super_admin'), monitoringController.getServiceDetail);
+router.get('/monitoring/alerts', authAdmin, authorizeRoles('super_admin'), monitoringController.getMonitorAlerts);
+router.post('/monitoring/alerts/:id/ack', authAdmin, authorizeRoles('super_admin'), monitoringController.acknowledgeMonitorAlert);
+router.get('/monitoring/audit', authAdmin, authorizeRoles('super_admin'), monitoringController.getMonitorAudit);
 
 // Fase 7 da correção do sistema de push (2026-08-02): canal de push para o próprio
 // painel administrativo (novo motorista pra aprovar, denúncia, problema de pagamento).

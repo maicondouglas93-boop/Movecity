@@ -2,8 +2,21 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { getCache, setCache } = require('../../cache/cache');
 const { haversineKm } = require('./geo.util');
+const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 const apiKey = () => process.env.GOOGLE_MAPS_API;
+
+function trackMaps(sku, started, err = null) {
+    const latencyMs = Date.now() - started;
+    const statusCode = err?.response?.status || null;
+    trackUsageSafe({
+        service: 'google_maps',
+        sku,
+        latencyMs,
+        ok: !err,
+        statusCode,
+    });
+}
 
 // Mesma extração de coordenadas embutidas usada pelo osm.provider.js — o formato
 // "Endereço (lat, lng)" é uma convenção do MoveCity, independente de provider.
@@ -22,16 +35,21 @@ module.exports.getAddressCoordinate = async (address) => {
     if (cached) return cached;
 
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey()}`;
+    const started = Date.now();
     try {
         const response = await axios.get(url, { timeout: 3000 });
         if (response.data.status === 'OK') {
+            trackMaps('geocoding', started);
             const location = response.data.results[0].geometry.location;
             const result = { ltd: location.lat, lng: location.lng };
             setCache(cacheKey, result, 86400); // 24h
             return result;
         }
-        throw new Error(`Geocoding retornou status "${response.data.status}"`);
+        const err = new Error(`Geocoding retornou status "${response.data.status}"`);
+        trackMaps('geocoding', started, { response: { status: response.data.status === 'OVER_QUERY_LIMIT' ? 429 : 400 } });
+        throw err;
     } catch (error) {
+        if (!error._tracked) trackMaps('geocoding', started, error);
         console.warn('[google.provider] Geocoding falhou. Retornando coordenadas aproximadas.', error.message);
         return {
             ltd: -23.5505 + (address.length % 10) * 0.001,
@@ -49,15 +67,23 @@ module.exports.getReverseGeocode = async (lat, lng) => {
     if (cached) return cached;
 
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey()}`;
+    const started = Date.now();
     try {
         const response = await axios.get(url, { timeout: 3000 });
         if (response.data.status === 'OK' && response.data.results.length > 0) {
+            trackMaps('reverse_geocoding', started);
             const result = { address: response.data.results[0].formatted_address };
             setCache(cacheKey, result, 3600); // 1h — posição pode repetir em raio pequeno
             return result;
         }
+        trackMaps('reverse_geocoding', started, { response: { status: 400 } });
         throw new Error(`Reverse geocoding retornou status "${response.data.status}"`);
     } catch (error) {
+        if (!error.response && error.message?.includes('retornou')) {
+            /* já tracked */
+        } else {
+            trackMaps('reverse_geocoding', started, error);
+        }
         console.warn('[google.provider] Reverse geocoding falhou.', error.message);
         return { address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
     }
@@ -91,6 +117,7 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken
     }
 
     try {
+        const started = Date.now();
         const response = await axios.post(
             'https://places.googleapis.com/v1/places:autocomplete',
             body,
@@ -102,6 +129,7 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken
                 timeout: 4000
             }
         );
+        trackMaps('places_autocomplete', started);
 
         const predictions = response.data.suggestions || [];
         const suggestions = predictions
@@ -116,6 +144,7 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken
 
         return { suggestions, sessionToken: token };
     } catch (err) {
+        trackMaps('places_autocomplete', Date.now(), err);
         console.warn('[google.provider] Places Autocomplete falhou. Retornando lista vazia.', err.response?.data?.error?.message || err.message);
         return { suggestions: [], sessionToken: token };
     }
@@ -134,6 +163,7 @@ module.exports.getPlaceDetails = async (placeId, sessionToken) => {
 
     try {
         const params = sessionToken ? { sessionToken } : {};
+        const started = Date.now();
         const response = await axios.get(
             `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`,
             {
@@ -145,6 +175,7 @@ module.exports.getPlaceDetails = async (placeId, sessionToken) => {
                 timeout: 3000
             }
         );
+        trackMaps('place_details', started);
 
         const result = {
             ltd: response.data.location?.latitude,
@@ -154,6 +185,7 @@ module.exports.getPlaceDetails = async (placeId, sessionToken) => {
         setCache(cacheKey, result, 86400); // 24h — place_id é estável
         return result;
     } catch (err) {
+        trackMaps('place_details', Date.now(), err);
         console.error('[google.provider] Place Details falhou:', err.response?.data?.error?.message || err.message);
         throw new Error('Unable to fetch place details');
     }
@@ -179,6 +211,7 @@ module.exports.getDistanceTime = async (origin, destination) => {
     }
 
     try {
+        const started = Date.now();
         const response = await axios.post(
             'https://routes.googleapis.com/directions/v2:computeRoutes',
             {
@@ -197,6 +230,7 @@ module.exports.getDistanceTime = async (origin, destination) => {
                 timeout: 8000
             }
         );
+        trackMaps('routes', started);
 
         const route = response.data.routes?.[0];
         if (!route) throw new Error('Invalid Routes API response');
@@ -217,6 +251,7 @@ module.exports.getDistanceTime = async (origin, destination) => {
         setCache(cacheKey, result, 86400); // 24h
         return result;
     } catch (err) {
+        trackMaps('routes', Date.now(), err);
         console.warn('[google.provider] Routes API falhou. Retornando fallback aproximado.', err.response?.data?.error?.message || err.message);
         return {
             distance: { text: '15.2 km', value: 15200 },
@@ -264,7 +299,10 @@ module.exports.getRouteWithSteps = async (origin, destination) => {
     const originCoords = await module.exports.getAddressCoordinate(origin);
     const destCoords = await module.exports.getAddressCoordinate(destination);
 
-    const response = await axios.post(
+    const started = Date.now();
+    let response;
+    try {
+        response = await axios.post(
         'https://routes.googleapis.com/directions/v2:computeRoutes',
         {
             origin: { location: { latLng: { latitude: originCoords.ltd, longitude: originCoords.lng } } },
@@ -290,7 +328,12 @@ module.exports.getRouteWithSteps = async (origin, destination) => {
             },
             timeout: 8000,
         }
-    );
+        );
+        trackMaps('routes', started);
+    } catch (err) {
+        trackMaps('routes', started, err);
+        throw err;
+    }
 
     const route = response.data.routes?.[0];
     if (!route) throw new Error('Invalid Routes API response');

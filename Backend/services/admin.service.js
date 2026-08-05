@@ -547,6 +547,56 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
     };
 };
 
+// Snapshot inicial do mapa do painel /rides (2026-08-05): o socket só emite posição
+// DEPOIS que a página abre, então sem isto o mapa começa vazio até o próximo ping GPS
+// de cada motorista. Usa a mesma base de disponibilidade do dashboard (TTL de
+// lastSeenAt), incluindo quem está em corrida (canReceiveRides:false), e só devolve
+// quem já tem coordenada gravada.
+module.exports.formatLiveMapDriver = (captain) => {
+    const first = captain.fullname?.firstname || '';
+    const last = captain.fullname?.lastname || '';
+    const inRide = captain.canReceiveRides === false || captain.busyLock === true;
+    return {
+        captainId: captain._id.toString(),
+        name: `${first} ${last}`.trim() || 'Motorista',
+        ltd: captain.location?.ltd,
+        lng: captain.location?.lng,
+        status: inRide ? 'in_ride' : 'available',
+        vehicle: {
+            plate: captain.vehicle?.plate || '',
+            vehicleType: captain.vehicle?.vehicleType || '',
+            color: captain.vehicle?.color || '',
+            modelo: captain.vehicle?.modelo || '',
+        },
+        lastSeenAt: captain.lastSeenAt || null,
+    };
+};
+
+module.exports.getLiveMapCaptains = async () => {
+    const captainService = require('./captain.service');
+    const { canReceiveRides: _ignored, ...availabilityBase } = captainService.availabilityFilter();
+
+    const captains = await captainModel.find({
+        ...availabilityBase,
+        'location.ltd': { $type: 'number' },
+        'location.lng': { $type: 'number' },
+    }).select('fullname vehicle location isOnline canReceiveRides busyLock lastSeenAt');
+
+    const drivers = captains
+        .map((c) => module.exports.formatLiveMapDriver(c))
+        .filter((d) => Number.isFinite(d.ltd) && Number.isFinite(d.lng));
+
+    return {
+        drivers,
+        counts: {
+            total: drivers.length,
+            available: drivers.filter((d) => d.status === 'available').length,
+            inRide: drivers.filter((d) => d.status === 'in_ride').length,
+        },
+        updatedAt: new Date().toISOString(),
+    };
+};
+
 module.exports.updateCaptainApproval = async (captainId, approvalStatus, reason, admin, ip) => {
     const captain = await captainModel.findByIdAndUpdate(captainId, { approvalStatus }, { new: true, runValidators: true });
 

@@ -356,10 +356,25 @@ function initializeSocket(server) {
                 socket.emit('captain-location-updated', locPayload);
             }
 
+            // Painel /rides (2026-08-05): além da coordenada, manda nome/status/veículo
+            // para o marcador do mapa admin não ficar genérico ("Motorista Online") e
+            // para o bootstrap HTTP + socket falarem o mesmo formato.
+            const adminInRide = !!(ride || parcel || captainDoc?.busyLock || captainDoc?.canReceiveRides === false);
+            const adminFirst = captainDoc?.fullname?.firstname || '';
+            const adminLast = captainDoc?.fullname?.lastname || '';
             io.to('admin_room').emit('admin-captain-location-updated', {
                 captainId: userId,
                 ltd: location.ltd,
                 lng: location.lng,
+                name: `${adminFirst} ${adminLast}`.trim() || 'Motorista',
+                status: adminInRide ? 'in_ride' : 'available',
+                vehicle: captainDoc?.vehicle ? {
+                    plate: captainDoc.vehicle.plate || '',
+                    vehicleType: captainDoc.vehicle.vehicleType || '',
+                    color: captainDoc.vehicle.color || '',
+                    modelo: captainDoc.vehicle.modelo || '',
+                } : null,
+                lastSeenAt: new Date().toISOString(),
             });
 
             // Fase C da experiência de corrida ativa (2026-08-03): mapa do passageiro.

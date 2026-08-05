@@ -78,6 +78,7 @@ router.post('/users/:id/observations', authAdmin, authorizeRoles('super_admin', 
 
 // Captains
 router.get('/captains', authAdmin, adminController.getCaptains);
+router.get('/captains/live-map', authAdmin, adminController.getLiveMapCaptains);
 router.put('/captains/:id/approval', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainApproval);
 router.put('/captains/:id/block', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.toggleCaptainBlock);
 router.get('/captains/:id/documents', authAdmin, adminController.getCaptainDocuments);

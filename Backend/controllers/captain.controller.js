@@ -387,11 +387,36 @@ module.exports.toggleOnline = async (req, res, next) => {
                 event: 'driver-offline',
                 data: { driverId: captain._id.toString() }
             });
+            // Painel admin /rides: remove o marcador na hora do toggle offline.
+            sendMessageToRoom('admin_room', {
+                event: 'admin-captain-offline',
+                data: { captainId: captain._id.toString() }
+            });
         } else if (captain.location && captain.location.ltd != null && captain.location.lng != null) {
             emitDriverMapUpdate(captain._id, {
                 busy: false,
                 vehicleType: captain.vehicle?.vehicleType || 'car',
                 location: { ltd: captain.location.ltd, lng: captain.location.lng }
+            });
+            // Painel admin: aparece no mapa assim que fica online (sem esperar o próximo GPS).
+            const first = captain.fullname?.firstname || '';
+            const last = captain.fullname?.lastname || '';
+            sendMessageToRoom('admin_room', {
+                event: 'admin-captain-location-updated',
+                data: {
+                    captainId: captain._id.toString(),
+                    ltd: captain.location.ltd,
+                    lng: captain.location.lng,
+                    name: `${first} ${last}`.trim() || 'Motorista',
+                    status: (captain.canReceiveRides === false || captain.busyLock) ? 'in_ride' : 'available',
+                    vehicle: {
+                        plate: captain.vehicle?.plate || '',
+                        vehicleType: captain.vehicle?.vehicleType || '',
+                        color: captain.vehicle?.color || '',
+                        modelo: captain.vehicle?.modelo || '',
+                    },
+                    lastSeenAt: new Date().toISOString(),
+                }
             });
         }
 

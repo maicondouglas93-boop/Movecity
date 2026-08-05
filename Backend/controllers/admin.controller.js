@@ -501,6 +501,15 @@ module.exports.getCaptains = async (req, res, next) => {
     }
 };
 
+module.exports.getLiveMapCaptains = async (req, res, next) => {
+    try {
+        const result = await adminService.getLiveMapCaptains();
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports.updateCaptainApproval = async (req, res, next) => {
     try {
         const { id } = req.params;

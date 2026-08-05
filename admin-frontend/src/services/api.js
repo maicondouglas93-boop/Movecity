@@ -2,6 +2,10 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
+  // Fase 2 da auditoria de production readiness (H1, 2026-08-05): sem timeout, uma
+  // request pendurada (backend hibernando no Render, rede ruim) travava o painel
+  // indefinidamente — mesmo valor do app do passageiro/motorista.
+  timeout: 10000,
   withCredentials: true, // Importante para enviar cookies de refresh token (se aplicável)
 });
 

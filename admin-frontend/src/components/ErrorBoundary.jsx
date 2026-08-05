@@ -1,4 +1,5 @@
 import React from 'react';
+import * as Sentry from '@sentry/react';
 import { AlertTriangle } from 'lucide-react';
 
 // Auditoria do painel administrativo (2026-08-02, Bloco F, §14): não existia
@@ -16,6 +17,15 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error('[ErrorBoundary] Erro não tratado no painel:', error, info);
+    // Fase 2 (H3, 2026-08-05): antes o crash morria no console de quem olhava.
+    // captureException é no-op seguro quando initMonitoring() não rodou (sem DSN).
+    try {
+      Sentry.captureException(error, {
+        contexts: { react: { componentStack: info?.componentStack } },
+      });
+    } catch {
+      // Monitoramento nunca pode impedir o fallback de aparecer.
+    }
   }
 
   render() {

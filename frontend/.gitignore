@@ -1,2 +1,5 @@
 .vercel
 .env*
+# Fase 2 da auditoria de production readiness (H2, 2026-08-05): o template de env
+# precisa ser versionado — `.env*` sozinho escondia o .env.example de todo clone novo.
+!.env.example

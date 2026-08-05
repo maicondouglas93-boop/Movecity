@@ -6,7 +6,10 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { ToastProvider } from './contexts/ToastContext'
 import { ConfirmProvider } from './contexts/ConfirmContext'
 import { PromptProvider } from './contexts/PromptContext'
+import { initMonitoring } from './services/monitoring'
 import './index.css'
+
+initMonitoring()
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,0 +1,23 @@
+{
+  "name": "MoveCity",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "cd Backend && npm run dev"
+    },
+    {
+      "name": "frontend",
+      "command": "cd frontend && npm run dev -- --host --port 5173"
+    },
+    {
+      "name": "admin-frontend",
+      "command": "cd admin-frontend && npm run dev -- --host --port 5174"
+    }
+  ],
+  "ports": [
+    { "name": "backend-api", "port": 3000 },
+    { "name": "frontend", "port": 5173 },
+    { "name": "admin-frontend", "port": 5174 }
+  ]
+}

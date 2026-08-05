@@ -298,9 +298,9 @@ const Riding = () => {
     const captainName = personName(ride?.captain) || null
 
     return (
-        <div className='h-screen relative'>
+        <div className='h-[100dvh] relative flex flex-col bg-surface overflow-hidden'>
             <ConnectionBanner />
-            <div className='fixed right-3 top-3 z-10 flex flex-col gap-2'>
+            <div className='absolute right-3 top-3 z-10 flex flex-col gap-2'>
                 <button
                     type="button"
                     onClick={goHomeClean}
@@ -326,48 +326,46 @@ const Riding = () => {
                 )}
             </div>
 
-            <div className='h-1/2'>
+            <div className='flex-1 min-h-0 relative'>
                 <LiveTracking ride={ride} clearTrip={isFinished} />
             </div>
 
-            <div className='h-1/2 p-4 overflow-y-auto overscroll-y-contain'>
+            <div className='flex-shrink-0 max-h-[35dvh] px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] overflow-y-auto overscroll-y-contain rounded-t-3xl -mt-3 relative z-10 bg-surface shadow-floating border-t border-line'>
+                <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+
                 <DriverIdentityCard
                     captain={ride?.captain}
                     vehicleTypeFallback={ride?.vehicleType}
+                    fareLabel={formatMoney(rideAmount)}
+                    compact
                 />
 
-                <Card padding='p-1' className='divide-y divide-line mt-5'>
-                    <DetailRow
-                        icon="ri-map-pin-2-fill"
-                        iconColor="text-danger-500"
-                        title={shortAddress(ride?.destination)}
-                        subtitle={ride?.destination}
-                        className='px-3'
-                    />
-                    <DetailRow
-                        icon="ri-currency-line"
-                        title={formatMoney(rideAmount)}
-                        subtitle={isFinished ? 'Valor final' : 'Valor estimado'}
-                        className='px-3'
-                    />
-                </Card>
+                <div className='mt-2.5 flex items-center gap-3 text-xs text-ink-600'>
+                    <span className='inline-flex items-center gap-1 min-w-0 flex-1 truncate'>
+                        <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
+                        <span className='truncate font-medium text-ink-900'>{shortAddress(ride?.destination)}</span>
+                    </span>
+                    {(distanceLabel || durationLabel) && (
+                        <span className='flex-shrink-0 tabular-nums text-ink-500'>
+                            {[distanceLabel, durationLabel].filter(Boolean).join(' · ')}
+                        </span>
+                    )}
+                </div>
 
                 {isFinished ? (
                     <Button
                         onClick={() => { setModalStep('summary'); setShowPayModal(true) }}
-                        className='mt-4'
+                        className='mt-3 !min-h-[44px] !text-sm'
                     >
                         Ver resumo da corrida
                     </Button>
                 ) : ride?.paymentMethod === 'carteira' ? (
-                    <div className='flex flex-col gap-2 mt-4'>
-                        <div className='w-full bg-brand-50 border border-brand-200 text-brand-700 font-semibold p-3 rounded-panel text-center flex items-center justify-center gap-2'>
-                            <i className="ri-checkbox-circle-fill" aria-hidden="true"></i> Já pago pela carteira
-                        </div>
+                    <div className='mt-3 w-full bg-brand-50 border border-brand-200 text-brand-700 font-semibold py-2 px-3 rounded-panel text-center text-sm flex items-center justify-center gap-2'>
+                        <i className="ri-checkbox-circle-fill" aria-hidden="true"></i> Pago pela carteira
                     </div>
                 ) : (
-                    <p className='text-sm text-ink-400 mt-4 text-center'>
-                        Ao finalizar, o motorista encerrará a corrida e você verá o resumo.
+                    <p className='text-xs text-ink-400 mt-3 text-center'>
+                        Ao finalizar, você verá o resumo da corrida.
                     </p>
                 )}
             </div>

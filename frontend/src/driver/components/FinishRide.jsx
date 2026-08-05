@@ -168,74 +168,59 @@ const FinishRide = (props) => {
         <div>
             {!ended ? (
                 <>
-                    <h3 className='text-2xl font-semibold mb-5 text-ink-900'>Finalizar esta Corrida</h3>
-                    <div className='mt-4'>
-                        {props.ride?.user ? (
-                            <PassengerIdentityCard
-                                user={props.ride.user}
-                                showPhoto
-                                trailing={
-                                    <h5 className='text-lg font-bold text-ink-900'>
-                                        {props.ride?.estimatedDistance
-                                            ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} KM`
-                                            : '—'}
-                                    </h5>
-                                }
-                            />
-                        ) : props.ride?.source === 'driver_initiated' ? (
-                            <div className='rounded-panel border border-line bg-surface-alt p-3'>
-                                <p className='text-sm font-semibold text-brand-700'>Corrida presencial</p>
-                                <p className='text-xs text-ink-600 mt-0.5'>Passageiro sem conta vinculada</p>
-                            </div>
-                        ) : null}
-                    </div>
-                    <div className='flex gap-2 justify-between flex-col items-center'>
-                        <div className='w-full mt-5'>
-                            <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                                <i className="ri-map-pin-user-fill text-brand-500"></i>
-                                <div>
-                                    <h3 className='text-lg font-medium text-ink-900'>{props.ride?.pickup?.split(',')[0]}</h3>
-                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.pickup}</p>
-                                </div>
-                            </div>
-                            <div className='flex items-center gap-5 p-3 border-b-2 border-line'>
-                                <i className="text-lg ri-map-pin-2-fill text-danger-500"></i>
-                                <div>
-                                    <h3 className='text-lg font-medium text-ink-900'>
-                                        {props.ride?.destinationPending
-                                            ? 'Será definido ao finalizar'
-                                            : (props.ride?.destination?.split(',')[0] || 'Destino')}
-                                    </h3>
-                                    <p className='text-sm -mt-1 text-ink-600'>
-                                        {props.ride?.destinationPending
-                                            ? 'GPS do fim da corrida define o destino e o preço'
-                                            : (props.ride?.destination || '')}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className='flex items-center gap-5 p-3'>
-                                <i className="ri-currency-line text-brand-500"></i>
-                                <div>
-                                    <h3 className='text-lg font-medium text-ink-900'>
-                                        {props.ride?.destinationPending
-                                            ? 'Preço ao finalizar'
-                                            : `R$ ${props.ride?.fare ?? '—'}`}
-                                    </h3>
-                                    <p className='text-sm -mt-1 text-ink-600'>{props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}</p>
-                                </div>
-                            </div>
+                    <h3 className='text-base font-semibold mb-2.5 text-ink-900'>Finalizar corrida</h3>
+                    {props.ride?.user ? (
+                        <PassengerIdentityCard
+                            user={props.ride.user}
+                            showPhoto
+                            compact
+                            trailing={
+                                <p className='text-sm font-bold text-ink-900'>
+                                    {props.ride?.estimatedDistance
+                                        ? `${(props.ride.estimatedDistance / 1000).toFixed(1)} km`
+                                        : '—'}
+                                </p>
+                            }
+                        />
+                    ) : props.ride?.source === 'driver_initiated' ? (
+                        <div className='rounded-panel border border-line bg-surface-alt px-3 py-2'>
+                            <p className='text-sm font-semibold text-brand-700'>Corrida presencial</p>
+                            <p className='text-xs text-ink-600 mt-0.5'>Passageiro sem conta vinculada</p>
                         </div>
+                    ) : null}
+                    <div className='mt-2.5 space-y-1.5'>
+                        <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                            <i className="ri-map-pin-user-fill text-brand-500 flex-shrink-0" aria-hidden="true" />
+                            <span className="truncate font-medium">{props.ride?.pickup?.split(',')[0]}</span>
+                        </p>
+                        <p className='text-xs text-ink-700 flex items-center gap-2 min-w-0'>
+                            <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
+                            <span className="truncate font-medium">
+                                {props.ride?.destinationPending
+                                    ? 'Será definido ao finalizar'
+                                    : (props.ride?.destination?.split(',')[0] || 'Destino')}
+                            </span>
+                        </p>
+                        <p className='text-xs text-ink-700 flex items-center gap-2'>
+                            <i className="ri-currency-line text-brand-500 flex-shrink-0" aria-hidden="true" />
+                            <span className="font-semibold text-ink-900">
+                                {props.ride?.destinationPending
+                                    ? 'Preço ao finalizar'
+                                    : `R$ ${props.ride?.fare ?? '—'}`}
+                            </span>
+                            <span className="text-ink-500">
+                                · {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
+                            </span>
+                        </p>
+                    </div>
 
-                        <div className='mt-6 w-full'>
-                            <Button
-                                onClick={endRide}
-                                loading={endRideMutation.isPending}
-                                className="mt-5"
-                            >
-                                Finalizar Corrida
-                            </Button>
-                        </div>
-                    </div>
+                    <Button
+                        onClick={endRide}
+                        loading={endRideMutation.isPending}
+                        className="mt-3 !min-h-[44px] !text-sm"
+                    >
+                        Finalizar corrida
+                    </Button>
                 </>
             ) : showRating ? (
                 <div className='flex flex-col items-center justify-center py-8 gap-4'>

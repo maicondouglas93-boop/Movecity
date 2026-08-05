@@ -208,16 +208,17 @@ const CaptainParcelRiding = () => {
           </button>
         )}
       </div>
-      <div className="p-4 border-t border-line space-y-3 max-h-[48dvh] overflow-y-auto">
+      <div className="px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 max-h-[35dvh] overflow-y-auto overscroll-y-contain rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating">
+        <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
         {step === 'payment' ? (
-          <div className="space-y-3">
-            <p className="font-semibold text-ink-900">Confirmar pagamento</p>
-            <p className="text-sm text-ink-500">
-              Cliente paga por <strong>{payLabel}</strong> direto a você. A plataforma só debita a comissão nos créditos.
+          <div className="space-y-2.5">
+            <p className="text-base font-semibold text-ink-900">Confirmar pagamento</p>
+            <p className="text-xs text-ink-500">
+              Cliente paga por <strong>{payLabel}</strong> direto a você. Comissão debitada nos créditos.
             </p>
-            <div className="rounded-panel border border-line bg-surface-alt p-3 space-y-2 text-sm">
+            <div className="rounded-panel border border-line bg-surface-alt px-3 py-2 space-y-1.5 text-sm">
               <div className="flex justify-between">
-                <span className="text-ink-600">Valor da entrega</span>
+                <span className="text-ink-600">Entrega</span>
                 <span className="font-semibold text-ink-900">R$ {fare.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
@@ -229,26 +230,23 @@ const CaptainParcelRiding = () => {
                 <span className="font-bold text-brand-600">R$ {driverKeeps.toFixed(2)}</span>
               </div>
             </div>
-            <p className="text-xs text-ink-500">
-              A comissão de R$ {commissionAmount.toFixed(2)} será descontada dos seus créditos na carteira.
-            </p>
             <button
               type="button"
               disabled={loading}
               onClick={confirmPayment}
-              className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
             >
-              <i className="ri-hand-coin-fill text-xl" aria-hidden="true" />
+              <i className="ri-hand-coin-fill text-lg" aria-hidden="true" />
               Pagamento recebido
             </button>
           </div>
         ) : step === 'rating' ? (
-          <div className="space-y-3">
-            <p className="font-semibold text-ink-900">Avalie o cliente</p>
+          <div className="space-y-2.5">
+            <p className="text-base font-semibold text-ink-900">Avalie o cliente</p>
             <div className="flex justify-center gap-2">
               {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => setRatingValue(n)}>
-                  <i className={`text-4xl ${n <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-ink-400'}`} />
+                <button key={n} type="button" onClick={() => setRatingValue(n)} className="min-w-[40px] min-h-[40px]">
+                  <i className={`text-3xl ${n <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-ink-400'}`} />
                 </button>
               ))}
             </div>
@@ -256,13 +254,13 @@ const CaptainParcelRiding = () => {
               type="button"
               disabled={!ratingValue || submittingRating}
               onClick={submitRating}
-              className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50"
+              className="w-full min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 text-sm"
             >
               Enviar e voltar
             </button>
             <button
               type="button"
-              className="w-full min-h-[44px] rounded-panel border border-line text-ink-700 font-medium"
+              className="w-full min-h-[40px] rounded-panel border border-line text-ink-700 font-medium text-sm"
               onClick={async () => {
                 try {
                   await skipCaptainParcelReview(parcel._id)
@@ -279,20 +277,41 @@ const CaptainParcelRiding = () => {
         ) : (
           <>
             {parcel.user && (
-              <PassengerIdentityCard user={parcel.user} showPhoto className="mb-1" />
+              <PassengerIdentityCard
+                user={parcel.user}
+                showPhoto
+                compact
+                trailing={
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-ink-900">R$ {fare.toFixed(2)}</p>
+                    <p className="text-[10px] text-ink-400">{payLabel}</p>
+                  </div>
+                }
+              />
             )}
-            <p className="font-semibold text-ink-900">{parcel.itemName}</p>
-            <p className="text-xs text-ink-400">Retirada: {parcel.pickup}</p>
-            <p className="text-xs text-ink-400">Entrega: {parcel.destination}</p>
+            <div className="flex items-center gap-2 text-xs text-ink-600 min-w-0">
+              <i className="ri-box-3-line text-brand-500 flex-shrink-0" aria-hidden="true" />
+              <p className="font-semibold text-ink-900 truncate flex-1">{parcel.itemName}</p>
+            </div>
+            <div className="flex gap-3 text-[11px] text-ink-500">
+              <span className="inline-flex items-center gap-1 min-w-0 flex-1 truncate">
+                <i className="ri-map-pin-user-fill text-brand-500" aria-hidden="true" />
+                <span className="truncate">{parcel.pickup?.split(',')[0]}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 min-w-0 flex-1 truncate">
+                <i className="ri-map-pin-2-fill text-danger-500" aria-hidden="true" />
+                <span className="truncate">{parcel.destination?.split(',')[0]}</span>
+              </span>
+            </div>
 
             {parcel.recipient?.name && (
-              <div className="rounded-panel border border-line bg-surface-alt px-3 py-2.5 space-y-2">
-                <div>
-                  <p className="text-[11px] text-ink-400 uppercase tracking-wide">Destinatário</p>
-                  <p className="text-sm font-medium text-ink-900">{parcel.recipient.name}</p>
-                  {parcel.recipient.phone && (
-                    <p className="text-xs text-ink-500">{parcel.recipient.phone}</p>
-                  )}
+              <div className="rounded-panel border border-line bg-surface-alt px-2.5 py-2 flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-ink-400 uppercase tracking-wide">Destinatário</p>
+                  <p className="text-sm font-medium text-ink-900 truncate">
+                    {parcel.recipient.name}
+                    {parcel.recipient.phone ? ` · ${parcel.recipient.phone}` : ''}
+                  </p>
                 </div>
                 {parcel.recipient.phone && (
                   <button
@@ -304,10 +323,10 @@ const CaptainParcelRiding = () => {
                       )
                       if (!ok) addToast('Telefone do destinatário inválido', 'error')
                     }}
-                    className="w-full min-h-[44px] rounded-panel bg-[#25D366] text-white font-semibold flex items-center justify-center gap-2 active:scale-[0.99]"
+                    className="flex-shrink-0 min-h-[40px] min-w-[40px] rounded-panel bg-[#25D366] text-white flex items-center justify-center active:scale-[0.99]"
+                    aria-label="WhatsApp do destinatário"
                   >
                     <i className="ri-whatsapp-fill text-xl" aria-hidden="true" />
-                    WhatsApp do destinatário
                   </button>
                 )}
               </div>
@@ -315,20 +334,20 @@ const CaptainParcelRiding = () => {
 
             {parcel.status === 'arrived_destination' ? (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-ink-700">Digite o PIN do destinatário</p>
+                <p className="text-xs font-medium text-ink-700">PIN do destinatário</p>
                 <input
                   inputMode="numeric"
                   maxLength={4}
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="w-full text-center text-2xl tracking-widest border border-line rounded-panel py-3"
+                  className="w-full text-center text-xl tracking-widest border border-line rounded-panel py-2.5"
                   placeholder="••••"
                 />
                 <button
                   type="button"
                   disabled={loading || pin.length < 4}
                   onClick={confirmPin}
-                  className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50"
+                  className="w-full min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 text-sm"
                 >
                   Confirmar entrega
                 </button>
@@ -338,7 +357,7 @@ const CaptainParcelRiding = () => {
                 type="button"
                 disabled={loading}
                 onClick={advance}
-                className="w-full min-h-[48px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50"
+                className="w-full min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 text-sm"
               >
                 {NEXT_LABEL[parcel.status]}
               </button>

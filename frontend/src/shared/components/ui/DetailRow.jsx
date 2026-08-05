@@ -12,6 +12,7 @@ const DetailRow = ({
     subtitle,
     trailing,
     onClick,
+    compact = false,
     className = '',
     ...rest
 }) => {
@@ -21,15 +22,24 @@ const DetailRow = ({
         <Tag
             type={onClick ? 'button' : undefined}
             onClick={onClick}
-            className={`w-full flex items-center gap-4 py-3 text-left ${onClick ? 'active:bg-surface-alt transition-colors cursor-pointer' : ''} ${className}`}
+            className={`w-full flex items-center text-left ${
+                compact ? 'gap-2.5 py-1.5' : 'gap-4 py-3'
+            } ${onClick ? 'active:bg-surface-alt transition-colors cursor-pointer' : ''} ${className}`}
             {...rest}
         >
             {icon && (
-                <i className={`${icon} ${iconColor} text-xl flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center`} aria-hidden="true" />
+                <i
+                    className={`${icon} ${iconColor} ${
+                        compact ? 'text-lg min-w-[36px] min-h-[36px]' : 'text-xl min-w-[44px] min-h-[44px]'
+                    } flex-shrink-0 flex items-center justify-center`}
+                    aria-hidden="true"
+                />
             )}
             <div className="flex-1 min-w-0">
-                <p className="font-semibold text-ink-900 text-[15px] truncate">{title}</p>
-                {subtitle && <p className="text-sm text-ink-400 truncate">{subtitle}</p>}
+                <p className={`font-semibold text-ink-900 truncate ${compact ? 'text-sm' : 'text-[15px]'}`}>{title}</p>
+                {subtitle && (
+                    <p className={`text-ink-400 truncate ${compact ? 'text-xs' : 'text-sm'}`}>{subtitle}</p>
+                )}
             </div>
             {trailing && <div className="flex-shrink-0">{trailing}</div>}
         </Tag>

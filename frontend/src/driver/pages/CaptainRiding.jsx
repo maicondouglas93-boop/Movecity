@@ -377,7 +377,7 @@ const CaptainRiding = () => {
                         <div className='h-1.5 w-12 bg-line rounded-full'></div>
                     </button>
 
-                    <div className='px-5 pb-5 flex items-center justify-between gap-3'>
+                    <div className='px-4 pb-4 flex items-center justify-between gap-3'>
                         <div className='min-w-0'>
                             {isPresential ? (
                                 <>
@@ -436,17 +436,17 @@ const CaptainRiding = () => {
                     </div>
 
                     {hudExpanded && (
-                        <div className='px-5 pb-6 pt-1 border-t border-line space-y-3'>
+                        <div className='px-4 pb-4 pt-1 border-t border-line space-y-2'>
                             {rideData?.user ? (
-                                <PassengerIdentityCard user={rideData.user} showPhoto />
+                                <PassengerIdentityCard user={rideData.user} showPhoto compact />
                             ) : isPresential ? (
                                 <p className='text-sm text-ink-600'>Passageiro presencial (sem conta vinculada)</p>
                             ) : null}
-                            <div className='flex items-center gap-3 min-w-0'>
+                            <div className='flex items-center gap-2.5 min-w-0'>
                                 <img
                                     src={vehicleImg}
                                     alt={vehicleLabel}
-                                    className='h-12 w-16 object-contain flex-shrink-0'
+                                    className='h-10 w-14 object-contain flex-shrink-0'
                                     width="1024"
                                     height="1024"
                                     loading="lazy"
@@ -470,7 +470,7 @@ const CaptainRiding = () => {
                 </div>
             </div>
 
-            <BottomSheet open={finishRidePanel} onClose={() => setFinishRidePanel(false)} className="pb-6">
+            <BottomSheet expandable open={finishRidePanel} onClose={() => setFinishRidePanel(false)}>
                 <FinishRide
                     ride={rideData}
                     setFinishRidePanel={setFinishRidePanel}

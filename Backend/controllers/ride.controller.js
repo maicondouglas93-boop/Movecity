@@ -95,8 +95,6 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
 }
 
 module.exports.createRide = async (req, res) => {
-    console.log(`[AUDIT] /rides/create HIT. Body:`, req.body);
-
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         console.log(`[AUDIT] /rides/create Validation Errors:`, errors.array());

@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { body } = require("express-validator")
 const authMiddleware = require('../middlewares/auth.middleware');
+const { loginLimiter } = require('../middlewares/rateLimiter');
 
 // Placa: cobre formato antigo (ABC1234) e Mercosul (ABC1D23) — o sistema nunca teve
 // validação de formato além de minlength:3, então esta é a primeira, não uma
@@ -48,7 +49,7 @@ router.patch('/document-info', [
 )
 
 
-router.post('/login', [
+router.post('/login', loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long')
 ],

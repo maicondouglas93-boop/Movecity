@@ -92,5 +92,61 @@ describe('Ride Service — cancellation & wait-time fees', () => {
 
             expect(result.finalPrice).toBe(25); // 20 (fare, sem recálculo por distância) + 5 de espera
         });
+
+        it('should keep frozen optionals in the final price after endRide', async () => {
+            const user = await createUser();
+            const captain = await createCaptain();
+            const ride = await createRide({
+                user: user._id, captain: captain._id, status: 'started',
+                fare: 20, waitTimeFeeCharged: 0, actualDistance: 0,
+                optionals: [
+                    { type: 'aceita_animais', price: 3 },
+                    { type: 'disposicao_passageiro', price: 15 },
+                ],
+            });
+
+            const result = await rideService.endRide({ rideId: ride._id, captain });
+
+            expect(result.finalPrice).toBe(38); // 20 + 3 + 15
+        });
+    });
+
+    describe('pricingSnapshot preference', () => {
+        it('should charge cancellation fee from the ride snapshot, not live tariff', async () => {
+            const user = await createUser();
+            const captain = await createCaptain();
+            const ride = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'accepted',
+                pricingSnapshot: {
+                    tariffSetting: { cancellationFee: 12.5, maxFreeWaitTime: 300, perMinuteWaitFee: 1 },
+                },
+            });
+
+            // Live tariff (beforeEach) tem cancellationFee 7.5 — snapshot manda.
+            const result = await rideService.cancelRide({ rideId: ride._id, user: user._id });
+            expect(result.cancellationFeeCharged).toBe(12.5);
+        });
+
+        it('should charge wait fee from the ride snapshot, not live tariff', async () => {
+            const user = await createUser();
+            const captain = await createCaptain();
+            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+            const ride = await createRide({
+                user: user._id,
+                captain: captain._id,
+                status: 'arrived',
+                arrivedAt: tenMinutesAgo,
+                otp: '1234',
+                pricingSnapshot: {
+                    // 10 min grátis → 0 de taxa apesar do live (5 min / R$1)
+                    tariffSetting: { maxFreeWaitTime: 600, perMinuteWaitFee: 9, cancellationFee: 0 },
+                },
+            });
+
+            const result = await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+            expect(result.waitTimeFeeCharged).toBe(0);
+        });
     });
 });

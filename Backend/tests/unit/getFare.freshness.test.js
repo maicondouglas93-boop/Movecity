@@ -19,6 +19,9 @@ describe('getFare — frescor da tarifa', () => {
             duration: { value: 600 },
             polyline: 'fake',
         });
+        // ETA consulta motoristas próximos — irrelevante pra frescor de tarifa.
+        vi.spyOn(mapService, 'getAddressCoordinate').mockResolvedValue({ ltd: -23.55, lng: -46.63 });
+        vi.spyOn(mapService, 'getCaptainsInTheRadius').mockResolvedValue([]);
 
         await TariffSetting.create({
             minDistanceIncluded: 0,

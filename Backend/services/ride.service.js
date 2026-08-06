@@ -7,6 +7,8 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
+const { DEFAULT_OPTIONAL_PRICES } = require('../models/tariffSetting.model');
+const { haversineKm } = require('./maps/geo.util');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -60,6 +62,58 @@ async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {},
         update,
         { new: true }
     );
+}
+
+// Preferir a tarifa congelada na corrida; só cai no live p/ corridas antigas
+// sem pricingSnapshot (mesmo padrão do endRide).
+async function resolveTariffSetting(ride) {
+    const fromSnapshot = ride?.pricingSnapshot?.tariffSetting;
+    if (fromSnapshot && typeof fromSnapshot === 'object') {
+        return fromSnapshot.toObject?.() || fromSnapshot;
+    }
+    const TariffSetting = require('../models/tariffSetting.model');
+    const live = await TariffSetting.findOne();
+    return live ? (live.toObject?.() || live) : {};
+}
+
+function resolveOptionalPrices(tariffSetting) {
+    const raw = tariffSetting?.optionalPrices;
+    const plain = raw?.toObject?.() || raw || {};
+    return { ...DEFAULT_OPTIONAL_PRICES, ...plain };
+}
+
+function sumRideOptionals(ride) {
+    if (!Array.isArray(ride?.optionals)) return 0;
+    return ride.optionals.reduce((s, o) => s + (Number(o.price) || 0), 0);
+}
+
+// ETA do motorista até o pickup: vizinho online mais próximo por categoria.
+// Sem inventar minutos (antes: Math.random). Sem motorista → chave omitida.
+async function estimateEtaByVehicleType(pickup, categoryNames) {
+    const eta = {};
+    try {
+        const pickupCoord = await mapService.getAddressCoordinate(pickup);
+        const captains = await mapService.getCaptainsInTheRadius(
+            pickupCoord.ltd, pickupCoord.lng, 15, '[ETA]'
+        );
+        for (const name of categoryNames) {
+            const nearest = captains.find(
+                (c) => (c.vehicle?.vehicleType || c.vehicleType) === name
+                    && c.location?.ltd != null && c.location?.lng != null
+            );
+            if (!nearest) continue;
+            const km = haversineKm(
+                nearest.location.ltd, nearest.location.lng,
+                pickupCoord.ltd, pickupCoord.lng
+            );
+            if (!Number.isFinite(km)) continue;
+            // ~25 km/h urbano médio; mínimo 1 min quando há motorista no raio.
+            eta[name] = Math.max(1, Math.round((km / 25) * 60));
+        }
+    } catch (err) {
+        console.warn('[getFare] ETA indisponível:', err.message);
+    }
+    return eta;
 }
 
 // Auditoria de integração (2026-08-06): esta cotação era cacheada inteira por 30
@@ -131,6 +185,7 @@ async function getFare(pickup, destination) {
     // então o toggle nunca teve efeito nenhum, ligado ou desligado.
     const TariffSetting = require('../models/tariffSetting.model');
     const tariffSetting = await TariffSetting.findOne();
+    const eta = await estimateEtaByVehicleType(pickup, categories.map((c) => c.name));
 
     const result = {
         fare,
@@ -142,11 +197,7 @@ async function getFare(pickup, destination) {
         polyline: distanceTime.polyline,
         breakdown: fareBreakdownData,
         showAsEstimate: tariffSetting?.showAsEstimate ?? true,
-        eta: {
-            car: Math.floor(Math.random() * 5) + 2, // 2 to 6 mins
-            moto: Math.floor(Math.random() * 3) + 1, // 1 to 3 mins
-            auto: Math.floor(Math.random() * 4) + 2  // 2 to 5 mins
-        }
+        eta,
     };
 
     return result;
@@ -220,21 +271,16 @@ module.exports.createRide = async ({
         serviceKind: 'ride',
     });
 
-    // Calcular opcionais
-    const optionalPrices = {
-        'porta_malas': 0,
-        'aceita_animais': 3,
-        'aceita_encomendas': 5,
-        'adaptado_cadeirante': 0,
-        'disposicao_passageiro': 15
-    };
-    
+    // Opcionais: preço vem do snapshot (tariffSetting.optionalPrices), não de mapa
+    // local hardcoded — o admin edita na aba Tarifas Globais.
+    const optionalPrices = resolveOptionalPrices(pricingSnapshot?.tariffSetting);
     let optionalsTotal = 0;
     const processedOptionals = [];
     if (Array.isArray(optionals)) {
         optionals.forEach(opt => {
             const type = typeof opt === 'string' ? opt : opt.type;
-            const price = optionalPrices[type] || 0;
+            if (!type || !(type in optionalPrices)) return;
+            const price = Number(optionalPrices[type]) || 0;
             optionalsTotal += price;
             processedOptionals.push({ type, price });
         });
@@ -942,14 +988,12 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Invalid OTP');
     }
 
-    // Taxa de espera: se o motorista já tinha marcado "cheguei" (arrivedAt) e o
-    // passageiro demorou além do tempo grátis configurado, soma a taxa por minuto
-    // excedente — acertada com o motorista junto do resto da corrida, igual a taxa
-    // normal (o app não processa pagamento, só calcula e informa).
+    // Taxa de espera: usa a tarifa CONGELADA no pricingSnapshot da corrida — mudar
+    // perMinuteWaitFee no painel no meio da espera não altera o contrato. Corridas
+    // antigas sem snapshot caem no TariffSetting live (resolveTariffSetting).
     let waitTimeFeeCharged = 0;
     if (ride.arrivedAt) {
-        const TariffSetting = require('../models/tariffSetting.model');
-        const tariffSetting = await TariffSetting.findOne();
+        const tariffSetting = await resolveTariffSetting(ride);
         const maxFreeWaitTime = tariffSetting?.maxFreeWaitTime || 0;
         const perMinuteWaitFee = tariffSetting?.perMinuteWaitFee || 0;
         const waitSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
@@ -1162,6 +1206,10 @@ module.exports.endRide = async ({ rideId, captain }) => {
         err.code = 'PRICING_FAILED';
         throw err;
     }
+
+    // Opcionais congelados em createRide — o recalculateFare só cobre base/km/min;
+    // sem isto o finalPrice perdia porta-malas/animais/etc. ao fechar a corrida.
+    finalPrice += sumRideOptionals(ride);
 
     // Taxa de espera calculada no startRide (motorista esperou além do tempo grátis) —
     // soma ao valor final, acertado direto com o motorista igual ao resto da tarifa.
@@ -1724,13 +1772,12 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
 
     // Taxa de cancelamento: só se aplica quando já existe um motorista comprometido
     // com a corrida (aceitou e está a caminho/esperando) — cancelar antes de qualquer
-    // motorista aceitar não gera taxa. Igual à taxa de espera, é informativa: acertada
-    // diretamente com o motorista, o app não processa nenhuma cobrança.
+    // motorista aceitar não gera taxa. Valor vem do pricingSnapshot (contrato),
+    // não da config live do painel.
     const capturedByDriver = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status);
     let cancellationFeeCharged = 0;
     if (capturedByDriver && ride.captain) {
-        const TariffSetting = require('../models/tariffSetting.model');
-        const tariffSetting = await TariffSetting.findOne();
+        const tariffSetting = await resolveTariffSetting(ride);
         cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
     }
 

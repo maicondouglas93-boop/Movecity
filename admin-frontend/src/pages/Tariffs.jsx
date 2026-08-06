@@ -157,6 +157,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
     presential: legacyCommission,
     parcel: legacyCommission,
   };
+  const optionalPrices = settings.optionalPrices || {};
   const { register, handleSubmit, reset, formState: { isDirty } } = useForm({
     defaultValues: {
       cancellationFee: settings.cancellationFee,
@@ -166,6 +167,13 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
       currentMultiplier: settings.currentMultiplier,
       manualRainFee: settings.manualRainFee,
       showAsEstimate: settings.showAsEstimate,
+      optionalPrices: {
+        porta_malas: optionalPrices.porta_malas ?? 0,
+        aceita_animais: optionalPrices.aceita_animais ?? 3,
+        aceita_encomendas: optionalPrices.aceita_encomendas ?? 5,
+        adaptado_cadeirante: optionalPrices.adaptado_cadeirante ?? 0,
+        disposicao_passageiro: optionalPrices.disposicao_passageiro ?? 15,
+      },
       platformCommissions: {
         ride: commissions.ride ?? legacyCommission,
         presential: commissions.presential ?? legacyCommission,
@@ -227,6 +235,36 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
         <div>
           <label className="block text-sm font-medium text-text-muted mb-1">Taxa Extra de Espera (R$/min)</label>
           <input type="number" step="0.01" min="0" {...register('perMinuteWaitFee')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+        </div>
+        <div className="md:col-span-2 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-text">Preços dos opcionais (R$)</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Congelados no pedido da corrida. Alterar aqui não muda corridas já criadas.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Porta-malas grande</label>
+              <input type="number" step="0.01" min="0" {...register('optionalPrices.porta_malas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Aceita animais</label>
+              <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_animais', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Aceita encomendas</label>
+              <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_encomendas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Adaptado cadeirante</label>
+              <input type="number" step="0.01" min="0" {...register('optionalPrices.adaptado_cadeirante', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">À disposição do passageiro</label>
+              <input type="number" step="0.01" min="0" {...register('optionalPrices.disposicao_passageiro', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-text-muted mb-1">Status Dinâmico Global</label>

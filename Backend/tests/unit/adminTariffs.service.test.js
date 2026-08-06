@@ -28,6 +28,26 @@ describe('Admin Service — getTariffs / updateGlobalSettings merge', () => {
         expect(result.cardFeeFixed).toBe(1.5);
     });
 
+    it('should persist optionalPrices on tariffSetting', async () => {
+        await tariffSettingModel.create({ cancellationFee: 5 });
+        await globalSettingModel.create({ platformCommission: 20 });
+
+        const result = await adminService.updateGlobalSettings({
+            optionalPrices: {
+                porta_malas: 2,
+                aceita_animais: 4,
+                aceita_encomendas: 6,
+                adaptado_cadeirante: 0,
+                disposicao_passageiro: 20,
+            },
+        });
+
+        expect(result.optionalPrices.aceita_animais).toBe(4);
+        expect(result.optionalPrices.disposicao_passageiro).toBe(20);
+        const tariff = await tariffSettingModel.findOne();
+        expect(tariff.optionalPrices.aceita_encomendas).toBe(6);
+    });
+
     it('should persist platformCommission to globalSetting, not tariffSetting', async () => {
         await tariffSettingModel.create({ cancellationFee: 5 });
         await globalSettingModel.create({ platformCommission: 20 });

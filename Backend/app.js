@@ -42,12 +42,6 @@ const limiter = rateLimit({
     message: "Muitas requisições deste IP, tente novamente mais tarde."
 });
 
-const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5, // max 5 tentativas
-    message: { message: "Muitas tentativas de login. Tente novamente em 15 minutos." }
-});
-
 app.use(limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -88,47 +82,8 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
-app.get('/db-test', async (req, res) => {
-    const rawUri = process.env.DB_CONNECT || '';
-    let maskedUri = 'undefined';
-    if (rawUri) {
-        maskedUri = rawUri.replace(/:([^:@\/\?]+)@/, ':******@');
-    }
-
-    const state = mongoose.connection.readyState;
-    const states = {
-        0: 'disconnected',
-        1: 'connected',
-        2: 'connecting',
-        3: 'disconnecting'
-    };
-
-    try {
-        if (state === 1) {
-            await mongoose.connection.db.admin().ping();
-            return res.json({
-                status: 'OK',
-                connectionState: states[state],
-                uri: maskedUri,
-                ping: 'success'
-            });
-        } else {
-            return res.json({
-                status: 'ERROR',
-                connectionState: states[state],
-                uri: maskedUri,
-                message: 'Mongoose is not connected. Check Render environment variables.'
-            });
-        }
-    } catch (err) {
-        res.status(500).json({
-            status: 'ERROR',
-            connectionState: states[state],
-            uri: maskedUri,
-            error: err.message
-        });
-    }
-});
+// /db-test removido (auditoria 2026-08-06): era público e vazava host/user da
+// connection string. Use GET /api/health (databaseState sem URI).
 
 app.use('/users', userRoutes);
 app.use('/captains', captainRoutes);

@@ -27,6 +27,7 @@ import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/of
 import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
+import { presentNativeRideOffer } from '@/shared/platform/nativeRideOffer.service'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import * as Sentry from '@sentry/react'
 
@@ -344,7 +345,19 @@ const CaptainHome = () => {
 
             addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
 
-            if ('Notification' in window && Notification.permission === 'granted') {
+            // APK: tela cheia nativa na hora (FSI vira só heads-up com tela desbloqueada).
+            presentNativeRideOffer({
+                type: 'NEW_RIDE',
+                rideId: data._id,
+                title: 'Nova Solicitação de Corrida!',
+                message: `${data.pickup?.split(',')[0] || 'Origem'} → ${data.destination?.split(',')[0] || 'Destino'} • R$${data.fare}`,
+                fare: data.fare,
+                pickup: data.pickup,
+                destination: data.destination,
+                deepLink: `/captain-home?rideOffer=${data._id}`,
+            })
+
+            if (!isNativePlatform() && 'Notification' in window && Notification.permission === 'granted') {
                 showBrowserNotification(
                     'Nova Solicitação de Corrida! 🚗',
                     `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`
@@ -426,7 +439,17 @@ const CaptainHome = () => {
                 `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · R$ ${Number(data.fare || 0).toFixed(2)}`,
                 'ride',
             )
-            if ('Notification' in window && Notification.permission === 'granted') {
+            presentNativeRideOffer({
+                type: 'NEW_PARCEL',
+                parcelId: data._id,
+                title: 'Nova encomenda disponível',
+                message: `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
+                fare: data.fare,
+                pickup: data.pickup,
+                destination: data.destination,
+                deepLink: `/captain-home?parcelOffer=${data._id}`,
+            })
+            if (!isNativePlatform() && 'Notification' in window && Notification.permission === 'granted') {
                 showBrowserNotification(
                     'Nova encomenda disponível 📦',
                     `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,

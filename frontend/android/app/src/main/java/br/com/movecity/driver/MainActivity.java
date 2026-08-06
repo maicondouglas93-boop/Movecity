@@ -11,7 +11,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeSessionPlugin.class);
         registerPlugin(NativeDriverPermissionsPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(NativeRideOfferPlugin.class);
         super.onCreate(savedInstanceState);
+        CurrentActivityHolder.install(getApplication());
         RideOfferNotifier.ensureChannel(this);
         DriverAlertNotifier.ensureChannel(this);
         NativeDeepLinkStore.fromIntentExtras(this, getIntent());

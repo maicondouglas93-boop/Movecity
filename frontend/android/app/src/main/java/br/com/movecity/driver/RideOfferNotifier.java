@@ -1,5 +1,6 @@
 package br.com.movecity.driver;
 
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.NotificationChannel;
@@ -10,6 +11,8 @@ import android.content.Intent;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 
@@ -19,20 +22,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Notificação high-priority + fullScreenIntent + AlarmClock (bypass MIUI BAL)
+ * Notificação high-priority + fullScreenIntent + AlarmClock/Broadcast (bypass BAL)
  * → RideOfferActivity. Ações Aceitar/Recusar na bandeja como fallback.
- * Suporta NEW_RIDE e NEW_PARCEL. ID de notificação por oferta (não sobrescreve).
+ *
+ * Com a tela DESBLOQUEADA o Android degradou FSI a heads-up — por isso também
+ * abrimos a Activity via Activity em foreground, retries e LaunchReceiver.
  */
 public final class RideOfferNotifier {
-    // v3: som de ringtone no canal (canais Android não atualizam sound depois de criados).
     public static final String CHANNEL_ID = "ride_offers_v3";
-    /** ID legado (pré-fila) — cancelado junto para limpar ofertas antigas. */
     private static final int LEGACY_NOTIFICATION_ID = 22001;
     private static final String TAG = "RideOfferNotifier";
 
     private RideOfferNotifier() {}
 
-    /** Notification ID estável e positivo por oferta. */
     public static int notificationIdFor(String offerId) {
         if (offerId == null || offerId.isEmpty()) return LEGACY_NOTIFICATION_ID;
         return 0x71000000 | (offerId.hashCode() & 0x00FFFFFF);
@@ -70,6 +72,9 @@ public final class RideOfferNotifier {
     }
 
     public static boolean isAppInForeground(Context context) {
+        Activity resumed = CurrentActivityHolder.get();
+        if (resumed != null && !resumed.isFinishing()) return true;
+
         ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         if (am == null) return false;
         List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
@@ -91,7 +96,7 @@ public final class RideOfferNotifier {
         if (Build.VERSION.SDK_INT >= 34) {
             NotificationManager nmCheck = context.getSystemService(NotificationManager.class);
             if (nmCheck != null && !nmCheck.canUseFullScreenIntent()) {
-                Log.w(TAG, "USE_FULL_SCREEN_INTENT negada — oferta fica na bandeja + AlarmClock");
+                Log.w(TAG, "USE_FULL_SCREEN_INTENT negada — Activity via holder/alarme");
             }
         }
 
@@ -144,12 +149,8 @@ public final class RideOfferNotifier {
                 + " kind=" + kind + " offerId=" + offerId);
         }
 
-        scheduleLaunchAlarm(context, fullScreen, offerId);
-        try {
-            context.startActivity(fullScreen);
-        } catch (Exception e) {
-            Log.w(TAG, "startActivity bloqueado (esperado no MIUI); AlarmClock/FSI cobrem", e);
-        }
+        // Não esperar o toque: abre a Activity por todos os caminhos possíveis.
+        launchOfferActivityNow(context, fullScreen, offerId);
     }
 
     public static void openOfferActivity(Context context, Intent source) {
@@ -161,12 +162,44 @@ public final class RideOfferNotifier {
             fullScreen.putExtras(source.getExtras());
         }
         String offerId = source != null ? source.getStringExtra(RideOfferActivity.EXTRA_RIDE_ID) : null;
-        scheduleLaunchAlarm(context, fullScreen, offerId);
-        try {
-            context.startActivity(fullScreen);
-        } catch (Exception e) {
-            Log.w(TAG, "openOfferActivity bloqueado", e);
+        launchOfferActivityNow(context, fullScreen, offerId);
+    }
+
+    /**
+     * 1) Activity em foreground (melhor — BAL ok)
+     * 2) startActivity com retries no main looper
+     * 3) AlarmClock → RideOfferLaunchReceiver (isenção BAL)
+     * 4) setExactAndAllowWhileIdle backup
+     */
+    public static void launchOfferActivityNow(Context context, Intent fullScreen, String offerId) {
+        wakeScreen(context);
+
+        Activity resumed = CurrentActivityHolder.get();
+        if (resumed != null && !resumed.isFinishing()) {
+            try {
+                Intent fromUi = new Intent(fullScreen);
+                resumed.startActivity(fromUi);
+                Log.i(TAG, "RideOfferActivity aberta via Activity em foreground");
+                return;
+            } catch (Exception e) {
+                Log.w(TAG, "startActivity via Activity falhou", e);
+            }
         }
+
+        Handler main = new Handler(Looper.getMainLooper());
+        Runnable tryStart = () -> {
+            try {
+                context.startActivity(fullScreen);
+                Log.i(TAG, "RideOfferActivity via context.startActivity");
+            } catch (Exception e) {
+                Log.w(TAG, "startActivity bloqueado (BAL/OEM)", e);
+            }
+        };
+        main.post(tryStart);
+        main.postDelayed(tryStart, 200);
+        main.postDelayed(tryStart, 700);
+
+        scheduleLaunchAlarm(context, fullScreen, offerId);
     }
 
     public static void cancelNotification(Context context) {
@@ -189,24 +222,45 @@ public final class RideOfferNotifier {
     public static void cancelLaunchAlarm(Context context, String offerId) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
-        PendingIntent pi = activityPi(
+        PendingIntent pi = launchReceiverPi(context, alarmRequestCodeFor(offerId),
+            new Intent(context, RideOfferLaunchReceiver.class));
+        am.cancel(pi);
+        // Legado: cancelar PendingIntent de Activity antigo
+        PendingIntent legacy = activityPi(
             context,
             alarmRequestCodeFor(offerId),
             new Intent(context, RideOfferActivity.class)
         );
-        am.cancel(pi);
+        am.cancel(legacy);
     }
 
     private static void scheduleLaunchAlarm(Context context, Intent fullScreen, String offerId) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
-        PendingIntent pi = activityPi(context, alarmRequestCodeFor(offerId), fullScreen);
-        long when = System.currentTimeMillis() + 300L;
+
+        Intent launch = new Intent(context, RideOfferLaunchReceiver.class);
+        launch.setAction(RideOfferLaunchReceiver.ACTION_LAUNCH);
+        copyOfferExtras(fullScreen, launch);
+        PendingIntent pi = launchReceiverPi(context, alarmRequestCodeFor(offerId), launch);
+
+        long when = System.currentTimeMillis() + 350L;
         try {
             am.setAlarmClock(new AlarmManager.AlarmClockInfo(when, pi), pi);
-            Log.i(TAG, "AlarmClock agendado para abrir RideOfferActivity");
+            Log.i(TAG, "AlarmClock → LaunchReceiver agendado");
         } catch (Exception e) {
-            Log.e(TAG, "Falha ao agendar AlarmClock", e);
+            Log.e(TAG, "Falha AlarmClock", e);
+        }
+
+        // Backup se OEM limitar AlarmClock de apps de terceiros
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when + 400L, pi);
+                Log.i(TAG, "setExactAndAllowWhileIdle backup agendado");
+            }
+        } catch (SecurityException se) {
+            Log.w(TAG, "exact alarm sem permissão — só AlarmClock/FSI", se);
+        } catch (Exception e) {
+            Log.w(TAG, "backup exact alarm falhou", e);
         }
     }
 
@@ -263,6 +317,10 @@ public final class RideOfferNotifier {
         return PendingIntent.getBroadcast(context, requestCode, intent, flags);
     }
 
+    private static PendingIntent launchReceiverPi(Context context, int requestCode, Intent intent) {
+        return broadcastPi(context, requestCode, intent);
+    }
+
     private static void wakeScreen(Context context) {
         try {
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
@@ -274,7 +332,7 @@ public final class RideOfferNotifier {
                     | PowerManager.ON_AFTER_RELEASE,
                 "movecity:rideoffer"
             );
-            wl.acquire(3000L);
+            wl.acquire(4000L);
         } catch (Exception ignored) {}
     }
 

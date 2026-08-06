@@ -75,4 +75,22 @@ describe('getFare — frescor da tarifa', () => {
         const depois = await rideService.getFare('Origem A', 'Destino B');
         expect(depois.breakdown.car.commissionPercent).toBe(30);
     });
+
+    it('expõe optionalPrices vigentes e não devolve fareMax mockado', async () => {
+        await TariffSetting.updateOne({}, {
+            $set: {
+                optionalPrices: {
+                    porta_malas: 0,
+                    aceita_animais: 4,
+                    aceita_encomendas: 5,
+                    adaptado_cadeirante: 0,
+                    disposicao_passageiro: 15,
+                },
+            },
+        });
+        const result = await rideService.getFare('Origem A', 'Destino B');
+        expect(result.optionalPrices.aceita_animais).toBe(4);
+        expect(result.fareMax).toBeUndefined();
+        expect(result.fareCardMax).toBeUndefined();
+    });
 });

@@ -110,7 +110,12 @@ const RidePopUp = (props) => {
                     fullWidth={false}
                     className="flex-1 !min-h-[44px] !text-sm"
                     onClick={() => {
-                        props.setRidePopupPanel(false)
+                        // Espelha parcel: ACK de recusa no backend (nativo já fazia isso).
+                        if (typeof props.onDecline === 'function') {
+                            props.onDecline(props.ride)
+                        } else {
+                            props.setRidePopupPanel(false)
+                        }
                     }}
                 >Ignorar</Button>
             </div>

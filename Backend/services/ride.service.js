@@ -189,14 +189,14 @@ async function getFare(pickup, destination) {
 
     const result = {
         fare,
-        fareMax: fare, // Mocking max until dynamic range is implemented
         fareCard,
-        fareCardMax: fareCard, // Mocking max
         distance,
         time,
         polyline: distanceTime.polyline,
         breakdown: fareBreakdownData,
         showAsEstimate: tariffSetting?.showAsEstimate ?? true,
+        // Preços dos opcionais vigentes (mesmo mapa congelado em createRide).
+        optionalPrices: resolveOptionalPrices(tariffSetting),
         eta,
     };
 

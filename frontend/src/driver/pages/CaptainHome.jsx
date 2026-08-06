@@ -571,6 +571,19 @@ const CaptainHome = () => {
 
     // Emit GPS periódico: CaptainLocationBridge (online 10s / serviço 5s).
 
+    // ACK de recusa — espelha declineParcel e o fluxo nativo (RideOfferAcceptHelper).
+    async function declineRideOffer(rideToDecline) {
+        const targetRide = rideToDecline || rideRef.current
+        setRidePopupPanel(false)
+        if (!targetRide?._id) return
+        try {
+            await api.post(`/rides/${targetRide._id}/decline`, {})
+        } catch {
+            /* ACK only — fechar o popup já basta pro motorista */
+        }
+        removePendingRide(targetRide._id)
+    }
+
     // Fase B: aceita um parâmetro opcional pra permitir aceitar direto do card
     // "Corrida disponível" (sem passar pelo popup) — o default preserva o fluxo do
     // RidePopUp, que chama sem argumentos.
@@ -864,13 +877,14 @@ const CaptainHome = () => {
                     </div>
                 </>
             )}
-            <BottomSheet expandable open={ridePopupPanel} onClose={() => setRidePopupPanel(false)}>
+            <BottomSheet expandable open={ridePopupPanel} onClose={() => declineRideOffer(ride)}>
                 <RidePopUp
                     ride={ride}
                     open={ridePopupPanel}
                     setRidePopupPanel={setRidePopupPanel}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel}
                     confirmRide={confirmRide}
+                    onDecline={declineRideOffer}
                 />
             </BottomSheet>
             <BottomSheet expandable open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>

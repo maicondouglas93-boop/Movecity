@@ -17,7 +17,7 @@ const normalizePlate = (value) => typeof value === 'string' ? value.toUpperCase(
 // passam a ser coletados na etapa de documentação (ver PATCH /captains/document-info),
 // sem bloquear a criação da conta. capacity não é mais pedido ao motorista: vem da
 // categoria escolhida (vehicleCategory.capacity), evitando duplicar esse dado.
-router.post('/register', [
+router.post('/register', loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('fullname.firstname').isLength({ min: 3 }).withMessage('First name must be at least 3 characters long'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),

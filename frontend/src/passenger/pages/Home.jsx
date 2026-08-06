@@ -84,6 +84,8 @@ const Home = () => {
     // nenhuma pista de causa dentro do app.
     const [ notificationsDenied, setNotificationsDenied ] = useState(false)
     const debounceTimer = useRef(null)
+    // Cancela a busca anterior pra resposta antiga não sobrescrever a mais recente.
+    const suggestionsAbortRef = useRef(null)
     const hasFetchedInitialLocationRef = useRef(false)
     const location = useLocation()
 
@@ -92,6 +94,7 @@ const Home = () => {
     // pendente deixava o setTimeout disparar depois, com setState em componente morto.
     useEffect(() => () => {
         if (debounceTimer.current) clearTimeout(debounceTimer.current)
+        suggestionsAbortRef.current?.abort()
     }, [])
 
     useEffect(() => {
@@ -369,6 +372,9 @@ const Home = () => {
         if (val.length >= 3) {
             setIsSearching(true);
             debounceTimer.current = setTimeout(async () => {
+                suggestionsAbortRef.current?.abort();
+                const controller = new AbortController();
+                suggestionsAbortRef.current = controller;
                 try {
                     const params = { input: val };
                     if (userLocation) {
@@ -377,6 +383,7 @@ const Home = () => {
                     }
                     const response = await api.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
+                        signal: controller.signal,
                         headers: {
                             Authorization: `Bearer ${getAccessToken('user')}`
                         }
@@ -385,14 +392,17 @@ const Home = () => {
                     // sessionToken só existe quando o provider ativo é "google" (Places New).
                     // Sem efeito nenhum com o provider osm/nominatim (header ausente).
                     setSuggestionsSessionToken(response.headers['x-maps-session-token'] || null)
-                } catch {
+                } catch (err) {
+                    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
                     setPickupSuggestions([])
                 } finally {
-                    setIsSearching(false);
+                    if (!controller.signal.aborted) setIsSearching(false);
                 }
             }, 400); // 400ms debounce
         } else {
+            suggestionsAbortRef.current?.abort();
             setPickupSuggestions([]);
+            setIsSearching(false);
         }
     }
 
@@ -405,6 +415,9 @@ const Home = () => {
         if (val.length >= 3) {
             setIsSearching(true);
             debounceTimer.current = setTimeout(async () => {
+                suggestionsAbortRef.current?.abort();
+                const controller = new AbortController();
+                suggestionsAbortRef.current = controller;
                 try {
                     const params = { input: val };
                     if (userLocation) {
@@ -413,20 +426,24 @@ const Home = () => {
                     }
                     const response = await api.get(`${import.meta.env.VITE_BASE_URL}/maps/get-suggestions`, {
                         params,
+                        signal: controller.signal,
                         headers: {
                             Authorization: `Bearer ${getAccessToken('user')}`
                         }
                     })
                     setDestinationSuggestions(response.data)
                     setSuggestionsSessionToken(response.headers['x-maps-session-token'] || null)
-                } catch {
+                } catch (err) {
+                    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
                     setDestinationSuggestions([])
                 } finally {
-                    setIsSearching(false);
+                    if (!controller.signal.aborted) setIsSearching(false);
                 }
             }, 400); // 400ms debounce
         } else {
+            suggestionsAbortRef.current?.abort();
             setDestinationSuggestions([]);
+            setIsSearching(false);
         }
     }
 
@@ -1041,6 +1058,7 @@ const Home = () => {
                     setOptionals={setOptionals}
                     setObservation={setObservation}
                     setRequestFemaleDriver={setRequestFemaleDriver}
+                    optionalPrices={fare?.optionalPrices}
                 />
             </div>
             <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>

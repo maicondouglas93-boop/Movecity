@@ -2,8 +2,8 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Map, CreditCard,
-  Bell, LogOut, Receipt, FileText, ClipboardList, Tag,
-  BarChart3, Package, Activity
+  Bell, LogOut, Receipt, ClipboardList, Tag,
+  BarChart3, Package, Activity, Smartphone
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -24,6 +24,7 @@ const navItems = [
   { icon: BarChart3, label: 'Relatórios & BI', path: '/reports', roles: ['super_admin'] },
   { icon: Bell, label: 'Comunicação', path: '/notifications', roles: ['super_admin', 'operador'] },
   { icon: ClipboardList, label: 'Logs & Auditoria', path: '/logs', roles: ['super_admin'] },
+  { icon: Smartphone, label: 'Atualização Motorista', path: '/driver-app', roles: ['super_admin'] },
 ];
 
 export default function Sidebar() {

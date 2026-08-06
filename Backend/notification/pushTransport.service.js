@@ -94,7 +94,10 @@ const buildFcmMessage = (payload) => {
             }
         }),
         data,
-        ...(payload.webpush ? { webpush: payload.webpush } : {})
+        ...(payload.webpush ? { webpush: payload.webpush } : {}),
+        // Android nativo (APK): prioridade alta para acordar o processo e disparar
+        // full-screen intent da oferta de corrida. Web ignora este bloco.
+        ...(payload.android ? { android: payload.android } : {}),
     };
 };
 module.exports.buildFcmMessage = buildFcmMessage;

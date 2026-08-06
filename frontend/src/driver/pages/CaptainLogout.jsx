@@ -1,50 +1,30 @@
 import React, { useContext, useEffect } from 'react'
-import axios from 'axios'
+import api from '@/shared/services/axios'
 import { useNavigate } from 'react-router-dom'
-import { getAccessToken, getRefreshToken, clearSession } from '@/shared/services/session'
+import { getRefreshToken, clearSession } from '@/shared/services/session'
 import { clearTokenInSW } from '@/shared/services/swCommunication'
-import { getCurrentFcmToken } from '@/shared/services/fcm'
+import { unregisterPush } from '@/shared/platform/notification.service'
+import { stopForegroundTracking } from '@/shared/platform/location.service'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
 // Ver o comentário equivalente em UserLogout.jsx — os mesmos três problemas existiam
 // aqui (chamada fora de useEffect, sem catch, sem revogar o refresh token).
-// Fase 1 (C1, 2026-08-05): axios cru mantido de propósito (401 no logout não deve
-// disparar refresh); só o timeout da instância é espelhado nas chamadas.
 export const CaptainLogout = () => {
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
 
     useEffect(() => {
-        const token = getAccessToken('captain')
         const refreshToken = getRefreshToken('captain')
 
         // A3 da auditoria de push (2026-08-02): sem isto, o próximo motorista a usar o
         // mesmo aparelho continuaria recebendo ofertas de corrida de quem saiu.
-        const unregisterPushToken = async () => {
-            try {
-                const fcmToken = await getCurrentFcmToken()
-                if (fcmToken && token) {
-                    await axios.delete(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                        params: { token: fcmToken },
-                        withCredentials: true,
-                        timeout: 10000,
-                    })
-                }
-            } catch {
-                // Sair não pode depender disso funcionar.
-            }
-        }
-
         Promise.all([
-            unregisterPushToken(),
-            axios.get(`${import.meta.env.VITE_BASE_URL}/captains/logout`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            unregisterPush().catch(() => {}),
+            stopForegroundTracking().catch(() => {}),
+            api.get('/captains/logout', {
                 params: refreshToken ? { refreshToken } : {},
-                withCredentials: true,
-                timeout: 10000,
             }).catch(() => {
                 // Sair não pode depender do servidor responder.
             })

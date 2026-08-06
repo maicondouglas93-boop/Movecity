@@ -70,7 +70,7 @@ const ApprovalGate = ({ captain, onRefresh, refreshing }) => {
             <p className="text-sm text-ink-600 max-w-xs mb-8">{config.description}</p>
 
             <div className="w-full max-w-xs flex flex-col gap-3">
-                <Button variant="secondary" onClick={onRefresh} loading={refreshing}>
+                <Button variant="secondary" onClick={() => onRefresh?.()} loading={refreshing}>
                     Verificar novamente
                 </Button>
                 <Button variant="ghost" onClick={() => navigate('/captain/profile')}>

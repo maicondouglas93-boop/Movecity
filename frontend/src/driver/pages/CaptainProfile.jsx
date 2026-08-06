@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/shared/services/axios';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
@@ -11,6 +11,9 @@ import Button from '@/shared/components/ui/Button';
 import { useToast } from '@/shared/contexts/ToastContext';
 import { getAccessToken } from '@/shared/services/session';
 import { getFriendlyErrorMessage } from '@/shared/services/errorMessages';
+import { isNativePlatform } from '@/shared/platform/platform';
+import { getInstalledVersion } from '@/shared/platform/appUpdate.service';
+import { requestAppUpdateCheck } from '@/shared/components/AppUpdateGate';
 
 // Auditoria de UX do motorista (2026-08-02, §2.7): a tela antiga só sabia comparar
 // approvalStatus com 'approved' (inglês) — nunca batia com o enum real, em português,
@@ -159,8 +162,17 @@ const CaptainProfile = () => {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [photoUploading, setPhotoUploading] = useState(false);
+    const [appVersion, setAppVersion] = useState('');
     const approval = APPROVAL_LABELS[captain?.approvalStatus] || APPROVAL_LABELS.em_analise;
     const documents = captain?.documents || {};
+
+    useEffect(() => {
+        let cancelled = false;
+        getInstalledVersion().then((v) => {
+            if (!cancelled) setAppVersion(v.versionName || '');
+        });
+        return () => { cancelled = true; };
+    }, []);
 
     const handlePhotoChange = async (e) => {
         const file = e.target.files?.[0];
@@ -289,7 +301,7 @@ const CaptainProfile = () => {
                     )}
                 </Card>
 
-                <Card shadow="raised" padding="p-5">
+                <Card shadow="raised" padding="p-5" className="mb-6">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-semibold text-ink-900">Documentos</h3>
                         <button type="button" onClick={() => navigate('/captain/documents')} className="text-sm font-semibold text-brand-600">
@@ -331,6 +343,27 @@ const CaptainProfile = () => {
                             );
                         })}
                     </div>
+                </Card>
+
+                <Card shadow="raised" padding="p-5">
+                    <h3 className="font-semibold text-ink-900 mb-2">Sobre o MoveCity</h3>
+                    <p className="text-sm text-ink-600">MoveCity Motorista</p>
+                    <p className="text-sm text-ink-900 font-medium mt-1">
+                        Versão {appVersion || '—'}
+                    </p>
+                    {isNativePlatform() && (
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            className="mt-4 w-full"
+                            onClick={() => {
+                                addToast('Verificando...', 'info');
+                                requestAppUpdateCheck();
+                            }}
+                        >
+                            Verificar atualizações
+                        </Button>
+                    )}
                 </Card>
             </div>
 

@@ -3,17 +3,26 @@ import { useNavigate } from 'react-router-dom'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
+import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import api from '@/shared/services/axios'
-import { getAccessToken } from '@/shared/services/session'
+import {
+    requestLocationPermission,
+    syncTrackingLifecycle,
+} from '@/shared/platform/location.service'
+import { openDriverAppSettings } from '@/shared/platform/driverPermissions.service'
+import { hasActiveService, resolveServiceKind } from '@/shared/services/captainLocationSync'
+import { isNativePlatform } from '@/shared/platform/platform'
+import DriverOemPermissionsCard from '@/driver/components/DriverOemPermissionsCard'
 
 const PANEL_BG = 'bg-[#0B3D2E]'
 const ACCENT_GOLD = 'text-amber-300'
 
 const CaptainDetails = ({ children = null }) => {
-    const { captain } = useContext(CaptainDataContext)
+    const { captain, setCaptain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
     const { locationError } = useContext(LocationContext)
+    const { captainRide, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const navigate = useNavigate()
     const [summary, setSummary] = useState(null)
@@ -25,10 +34,7 @@ const CaptainDetails = ({ children = null }) => {
 
     const fetchSummary = async () => {
         try {
-            const token = getAccessToken('captain')
-            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/summary`, {
-                headers: { Authorization: `Bearer ${token}` },
-            })
+            const response = await api.get('/captains/summary')
             setSummary(response.data)
         } catch (err) {
             console.error('Error fetching captain summary:', err)
@@ -67,16 +73,45 @@ const CaptainDetails = ({ children = null }) => {
             return
         }
 
+        const nextOnline = !isOnline
+        // Pedir GPS ao ficar ONLINE (não no GO — GO é corrida presencial).
+        if (nextOnline) {
+            const perm = await requestLocationPermission()
+            if (!perm.granted) {
+                addToast(
+                    'Precisamos da localização para você ficar online e receber serviços.',
+                    'error'
+                )
+                if (isNativePlatform()) {
+                    addToast('Ative a localização nas configurações do app se o pedido não aparecer.', 'info')
+                }
+                return
+            }
+        }
+
         setLoadingToggle(true)
         try {
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/toggle-online`, {
-                isOnline: !isOnline,
-            }, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`,
-                },
+            const response = await api.post('/captains/toggle-online', {
+                isOnline: nextOnline,
             })
-            setIsOnline(response.data.captain.isOnline)
+            const updated = response.data.captain
+            setIsOnline(updated.isOnline)
+            setCaptain((prev) => (prev ? { ...prev, ...updated } : updated))
+            if (import.meta.env.DEV) {
+                console.log('[DriverStatus]', updated.isOnline ? 'ONLINE' : 'OFFLINE')
+            }
+            const active = hasActiveService({ captainRide, captainParcel })
+            await syncTrackingLifecycle({
+                isOnline: updated.isOnline,
+                hasActiveTrip: active,
+                serviceKind: resolveServiceKind({ captainRide, captainParcel }) || 'ride',
+            })
+            if (updated.isOnline && isNativePlatform()) {
+                addToast(
+                    'Para GPS com tela bloqueada, use “Permitir o tempo todo” nas configurações de localização.',
+                    'info'
+                )
+            }
         } catch (error) {
             console.error('Error toggling online status:', error)
             addToast(error.response?.data?.message || 'Erro ao alterar status online', 'error')
@@ -136,11 +171,24 @@ const CaptainDetails = ({ children = null }) => {
     return (
         <div className="flex flex-col gap-4">
             {isOnline && locationError && (
-                <div className="flex items-center gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
-                    <i className="ri-map-pin-off-line text-base" aria-hidden="true" />
-                    Sem sinal de GPS — você pode não estar recebendo corridas.
+                <div className="flex flex-col gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
+                    <div className="flex items-center gap-2">
+                        <i className="ri-map-pin-off-line text-base" aria-hidden="true" />
+                        Sem sinal de GPS — você pode não estar recebendo corridas.
+                    </div>
+                    {isNativePlatform() && (
+                        <button
+                            type="button"
+                            onClick={() => openDriverAppSettings()}
+                            className="self-start underline font-bold"
+                        >
+                            Abrir configurações do app
+                        </button>
+                    )}
                 </div>
             )}
+
+            {isNativePlatform() && <DriverOemPermissionsCard />}
 
             {/* Status online */}
             <div className={`${bannerClass} text-white rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 shadow-raised`}>

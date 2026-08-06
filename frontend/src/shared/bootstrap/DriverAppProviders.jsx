@@ -5,6 +5,8 @@ import SocketProvider from '@/shared/contexts/SocketContext'
 import { LocationProvider } from '@/shared/contexts/LocationContext'
 import { ToastProvider } from '@/shared/contexts/ToastContext'
 import RideProvider from '@/shared/contexts/RideContext'
+import CaptainLocationBridge from '@/driver/components/CaptainLocationBridge'
+import NativeDeepLinkBridge from '@/driver/components/NativeDeepLinkBridge'
 import { queryClient } from '@/shared/services/queryClient'
 
 // Mesma árvore do web, sem UserContext (não importar passenger aqui — grafo do driver).
@@ -19,6 +21,8 @@ const DriverAppProviders = ({ children }) => (
                   (re-sincroniza a corrida no 'connect'). */}
                         <BrowserRouter>
                             <RideProvider>
+                                <CaptainLocationBridge />
+                                <NativeDeepLinkBridge />
                                 {children}
                             </RideProvider>
                         </BrowserRouter>

@@ -13,14 +13,16 @@ import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import api from '@/shared/services/axios'
-import { devLog, devWarn, devError } from '@/shared/utils/devLog'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/shared/contexts/ToastContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
 import { requestFCMToken, onForegroundMessage } from '@/shared/services/fcm'
+import { registerPush, bindPushNavigation } from '@/shared/platform/notification.service'
+import { syncNativeCaptainSession } from '@/shared/platform/nativeSession.service'
+import { vibrate } from '@/shared/platform/haptics.service'
+import { isNativePlatform } from '@/shared/platform/platform'
 import { syncTokenWithSW } from '@/shared/services/swCommunication'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { db } from '@/shared/services/db'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
@@ -73,9 +75,7 @@ const CaptainHome = () => {
 
     const syncPendingRides = async () => {
         try {
-            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
-                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-            })
+            const response = await api.get('/rides/pending')
             setPendingRides(Array.isArray(response.data) ? response.data : [])
         } catch (err) {
             // Sem rede/token vencido: mantém a lista atual; a próxima sincronização
@@ -112,19 +112,37 @@ const CaptainHome = () => {
     // demanda (botão "Verificar novamente" do ApprovalGate) — o contexto só é
     // atualizado no login/refresh de página, então um motorista aprovado enquanto o
     // app estava aberto continuaria vendo a tela de bloqueio até fechar e reabrir.
-    const refreshApprovalStatus = async () => {
+    const refreshApprovalStatus = async ({ silent = false } = {}) => {
         setRefreshingApproval(true)
         try {
-            const response = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/profile`, {
-                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-            })
-            setCaptain(response.data.captain)
+            const response = await api.get('/captains/profile')
+            const next = response.data.captain
+            setCaptain(next)
+            if (!silent) {
+                if (next?.approvalStatus === 'aprovado' && !next?.isBlocked) {
+                    addToast('Cadastro aprovado! Você já pode ficar online.', 'success')
+                } else {
+                    addToast(`Status atual: ${next?.approvalStatus || 'desconhecido'}`, 'info')
+                }
+            }
         } catch (err) {
             console.error('Failed to refresh approval status:', err)
+            if (!silent) {
+                addToast(err.friendlyMessage || 'Não foi possível atualizar o status. Verifique a conexão.', 'error')
+            }
         } finally {
             setRefreshingApproval(false)
         }
     }
+
+    // Enquanto o gate estiver aberto, reconsulta o banco periodicamente (aprovação no admin).
+    useEffect(() => {
+        if (!captain || captain.isBlocked || captain.approvalStatus === 'aprovado') return undefined
+        const id = window.setInterval(() => {
+            refreshApprovalStatus({ silent: true })
+        }, 15000)
+        return () => window.clearInterval(id)
+    }, [captain?._id, captain?.approvalStatus, captain?.isBlocked])
 
     // Auditoria de UX do motorista (2026-08-02, §2.5): sem GPS, updateLocation() (efeito
     // abaixo) simplesmente retorna cedo e a posição do motorista para de ser atualizada
@@ -138,59 +156,87 @@ const CaptainHome = () => {
         }
     }, [locationError])
 
-    // C3 da auditoria de push (2026-08-02): antes só buscava o token FCM se a permissão
-    // JÁ estivesse concedida — nada no app do motorista jamais chamava
-    // Notification.requestPermission(), então um motorista novo nunca era convidado e
-    // nunca gerava token. Mesmo padrão do passageiro (Home.jsx): cartão de contexto antes
-    // do prompt nativo, pra não estourar o "Bloquear" que os navegadores nunca deixam
-    // perguntar de novo.
+    // Espelha JWT + API base no SharedPreferences (Aceitar com app morto / lock screen).
     useEffect(() => {
-        const setupFCM = async () => {
-            if (!('Notification' in window)) return;
-            if (Notification.permission === 'granted') {
-                await requestFCMToken();
-                // JWT no IndexedDB do SW de push — sem isto o Aceitar da notificação
-                // falha com "sessão expirada" mesmo com o motorista logado no app.
-                const jwt = getAccessToken('captain');
-                if (jwt) await syncTokenWithSW(jwt);
-            } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
-                setShowNotificationPrompt(true);
-            } else if (Notification.permission === 'denied') {
-                setNotificationsDenied(true);
-            }
-        };
-        setupFCM();
+        const token = getAccessToken('captain')
+        if (token) syncNativeCaptainSession({ token }).catch(() => {})
     }, [])
 
-    // A9 da auditoria de push (2026-08-02): com o app ABERTO, o Firebase não mostra
-    // notificação nativa sozinho — sem escutar aqui, uma notificação que chegasse por
-    // push enquanto o motorista está olhando a tela não aparecia em lugar nenhum.
+    // Push: Web = FCM/SW; Android nativo = Capacitor Push (notification.service).
     useEffect(() => {
-        const unsubscribe = onForegroundMessage((payload) => {
-            // Auditoria PWA (2026-08-03, M5): NEW_RIDE já tem um caminho próprio e mais
-            // rápido — handleNewRide, abaixo, via Socket.IO — com som, vibração,
-            // notificação nativa E toast. Deixar este listener genérico também mostrar
-            // toast pro mesmo evento gerava dois avisos descoordenados pra mesma
-            // corrida sempre que os dois canais entregassem quase juntos.
-            if (payload?.data?.type === 'NEW_RIDE' || payload?.data?.type === 'NEW_PARCEL') return;
-
-            const title = payload?.notification?.title || payload?.data?.title;
-            const body = payload?.notification?.body || payload?.data?.message;
-            if (title || body) {
-                addToast([title, body].filter(Boolean).join(' — '), 'info');
+        const setupPush = async () => {
+            if (isNativePlatform()) {
+                await registerPush()
+                return
             }
-        });
-        return () => unsubscribe();
-    }, [addToast]);
+            if (!('Notification' in window)) return
+            if (Notification.permission === 'granted') {
+                await requestFCMToken()
+                const jwt = getAccessToken('captain')
+                if (jwt) await syncTokenWithSW(jwt)
+            } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
+                setShowNotificationPrompt(true)
+            } else if (Notification.permission === 'denied') {
+                setNotificationsDenied(true)
+            }
+        }
+        setupPush()
+    }, [])
+
+    useEffect(() => {
+        let cleanup
+        ;(async () => {
+            cleanup = await bindPushNavigation(({ data, deepLink, fromTap }) => {
+                // Tap da notificação: sempre navega (rideOffer / parcelOffer / riding).
+                if (fromTap && deepLink) {
+                    try {
+                        const url = new URL(deepLink, window.location.origin)
+                        navigate(`${url.pathname}${url.search}`)
+                    } catch {
+                        navigate('/captain-home')
+                    }
+                    return
+                }
+                // Foreground push de oferta: socket/popup já cobrem — sem toast duplicado.
+                if (data?.type === 'NEW_RIDE' || data?.type === 'NEW_PARCEL') return
+                const title = data?.title
+                const body = data?.message || data?.body
+                if (title || body) {
+                    addToast([title, body].filter(Boolean).join(' — '), 'info')
+                }
+            })
+        })()
+
+        // Web foreground FCM (além do bind nativo)
+        const unsubWeb = isNativePlatform()
+            ? () => {}
+            : onForegroundMessage((payload) => {
+                if (payload?.data?.type === 'NEW_RIDE' || payload?.data?.type === 'NEW_PARCEL') return
+                const title = payload?.notification?.title || payload?.data?.title
+                const body = payload?.notification?.body || payload?.data?.message
+                if (title || body) {
+                    addToast([title, body].filter(Boolean).join(' — '), 'info')
+                }
+            })
+
+        return () => {
+            cleanup?.()
+            unsubWeb?.()
+        }
+    }, [addToast, navigate])
 
     const handleEnableNotifications = async () => {
         setShowNotificationPrompt(false)
         localStorage.setItem('notificationPromptSeenCaptain', '1')
+        if (isNativePlatform()) {
+            await registerPush()
+            return
+        }
         const permission = await Notification.requestPermission()
         if (permission === 'granted') {
-            await requestFCMToken();
-            const jwt = getAccessToken('captain');
-            if (jwt) await syncTokenWithSW(jwt);
+            await requestFCMToken()
+            const jwt = getAccessToken('captain')
+            if (jwt) await syncTokenWithSW(jwt)
         }
     }
 
@@ -203,6 +249,8 @@ const CaptainHome = () => {
     useEffect(() => {
         requestLock();
     }, [requestLock]);
+
+    // FGS + emit GPS: CaptainLocationBridge (DriverAppProviders) — não amarrar ao GO.
 
     // Ref para acessar o ride atual dentro de handlers sem precisar re-subscrever
     const rideRef = useRef(ride)
@@ -219,10 +267,7 @@ const CaptainHome = () => {
 
     const syncScheduledUpcoming = useCallback(async () => {
         try {
-            const { data } = await api.get(
-                `${import.meta.env.VITE_BASE_URL}/captains/scheduled-upcoming`,
-                { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } },
-            )
+            const { data } = await api.get('/captains/scheduled-upcoming')
             setScheduledUpcoming(data.upcoming || [])
         } catch {
             /* ignore */
@@ -269,7 +314,7 @@ const CaptainHome = () => {
 
         const handleNewRide = (data) => {
             const TRACE_ID = `Ride:${data._id}`;
-            devLog(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
+            console.log(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
 
             if (captainParcelRef.current || parcelOfferRef.current) return
 
@@ -281,22 +326,20 @@ const CaptainHome = () => {
                 const rest = prev.filter(r => r._id !== data._id)
                 return [ data, ...rest ]
             })
-            devLog(`[AUDIT][${TRACE_ID}] Modal RidePopUp ativado.`);
+            console.log(`[AUDIT][${TRACE_ID}] Modal RidePopUp ativado.`);
 
             try {
                 const audio = new Audio('/sounds/new-ride.wav');
                 audio.play().then(() => {
-                    devLog(`[AUDIT][${TRACE_ID}] Som de notificação tocado com sucesso.`);
+                    console.log(`[AUDIT][${TRACE_ID}] Som de notificação tocado com sucesso.`);
                 }).catch(e => {
-                    devWarn(`[AUDIT][${TRACE_ID}] Falha ao tocar som (Autoplay bloqueado?):`, e);
+                    console.warn(`[AUDIT][${TRACE_ID}] Falha ao tocar som (Autoplay bloqueado?):`, e);
                 });
                 
-                if (navigator.vibrate) {
-                    navigator.vibrate([500, 200, 500]);
-                    devLog(`[AUDIT][${TRACE_ID}] Vibração acionada.`);
-                }
+                vibrate([500, 200, 500])
+                console.log(`[AUDIT][${TRACE_ID}] Vibração acionada.`);
             } catch (err) {
-                devError(`[AUDIT][${TRACE_ID}] Erro nas APIs de mídia:`, err);
+                console.error(`[AUDIT][${TRACE_ID}] Erro nas APIs de mídia:`, err);
             }
 
             addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
@@ -306,9 +349,9 @@ const CaptainHome = () => {
                     'Nova Solicitação de Corrida! 🚗',
                     `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`
                 )
-                devLog(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
+                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
             } else {
-                devLog(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
+                console.log(`[AUDIT][${TRACE_ID}] Web Push não exibido (Sem permissão ou API inexistente). Permissão atual:`, Notification.permission);
             }
         }
 
@@ -369,9 +412,7 @@ const CaptainHome = () => {
                 const audio = new Audio('/sounds/new-ride.wav')
                 audio.play().catch(() => {})
             } catch { /* ignore */ }
-            if (navigator.vibrate) {
-                navigator.vibrate([500, 200, 500])
-            }
+            vibrate([500, 200, 500])
             addToast(
                 `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · R$ ${Number(data.fare || 0).toFixed(2)}`,
                 'ride',
@@ -381,7 +422,7 @@ const CaptainHome = () => {
                     'Nova encomenda disponível 📦',
                     `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
                 )
-                devLog(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
+                console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
             }
         }
 
@@ -462,9 +503,7 @@ const CaptainHome = () => {
         let cancelled = false
         ;(async () => {
             try {
-                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/pending`, {
-                    headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-                })
+                const response = await api.get('/rides/pending')
                 if (cancelled) return
                 const list = Array.isArray(response.data) ? response.data : []
                 setPendingRides(list)
@@ -530,39 +569,7 @@ const CaptainHome = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams.get('parcelOffer'), captain?._id, captainRide?._id, captainParcel?._id])
 
-    // --- Efeito 2: envio periódico da localização real (GPS) do motorista ---
-    const REAL_LOCATION_INTERVAL_MS = 10000
-
-    useEffect(() => {
-        if (!captain || !captain._id) return;
-
-        const updateLocation = () => {
-            const loc = locationRef.current;
-            if (!loc) return;
-
-            if (socket.connected) {
-                socket.emit('update-location-captain', {
-                    userId: captain._id,
-                    location: { ltd: loc.lat, lng: loc.lng }
-                });
-            } else {
-                db.driverLocations.add({
-                    userId: captain._id,
-                    lat: loc.lat,
-                    lng: loc.lng,
-                    timestamp: Date.now()
-                }).catch(e => console.error(e));
-            }
-        };
-
-        const locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
-        updateLocation()
-
-        return () => {
-            clearInterval(locationInterval);
-        }
-    }, [captain, socket])
-
+    // Emit GPS periódico: CaptainLocationBridge (online 10s / serviço 5s).
 
     // Fase B: aceita um parâmetro opcional pra permitir aceitar direto do card
     // "Corrida disponível" (sem passar pelo popup) — o default preserva o fluxo do
@@ -578,11 +585,7 @@ const CaptainHome = () => {
             // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
             // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
             // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/${targetRide._id}/accept`, {}, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
-                }
-            })
+            const response = await api.post(`/rides/${targetRide._id}/accept`, {})
 
             if (response.data) {
                 setRide(response.data)
@@ -861,7 +864,7 @@ const CaptainHome = () => {
                     </div>
                 </>
             )}
-            <BottomSheet open={ridePopupPanel} onClose={() => setRidePopupPanel(false)}>
+            <BottomSheet expandable open={ridePopupPanel} onClose={() => setRidePopupPanel(false)}>
                 <RidePopUp
                     ride={ride}
                     open={ridePopupPanel}
@@ -870,7 +873,7 @@ const CaptainHome = () => {
                     confirmRide={confirmRide}
                 />
             </BottomSheet>
-            <BottomSheet open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
+            <BottomSheet expandable open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
                 <ConfirmRidePopUp
                     ride={ride}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />

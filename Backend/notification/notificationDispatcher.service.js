@@ -116,11 +116,66 @@ const sendToUser = async (userId, title, message, type, data = {}) => {
 module.exports.sendToUser = sendToUser;
 
 const sendToCaptain = async (captainId, title, message, type, data = {}, options = {}, traceId = '[AUDIT]') => {
+    // Split web/android: APK precisa data-only + priority high para onMessageReceived
+    // (DriverAlertNotifier / RideOffer). Web mantém options do chamador (SW).
     try {
-        console.log(`${traceId} Buscando tokens FCM para Captain ${captainId}...`);
-        const tokens = await tokenRegistry.getTokensForCaptain(captainId);
-        console.log(`${traceId} Encontrados ${tokens.length} tokens no banco para Captain ${captainId}.`);
-        await recordAndSend({ captainId, title, message, type, targetAudience: 'specific' }, tokens, { title, message, data, ...options }, traceId);
+        const entries = await tokenRegistry.getTokenEntriesForCaptain(captainId);
+        const androidTokens = entries
+            .filter((e) => e.device === 'android')
+            .map((e) => e.token);
+        const webTokens = entries
+            .filter((e) => e.device !== 'android')
+            .map((e) => e.token);
+
+        console.log(`${traceId} ${type} tokens: android=${androidTokens.length} web=${webTokens.length}`);
+
+        const baseRecord = {
+            captainId,
+            title,
+            message,
+            type,
+            targetAudience: 'specific',
+        };
+        const payloadData = { ...data, type, title, message };
+
+        if (webTokens.length > 0) {
+            await recordAndSend(baseRecord, webTokens, {
+                title,
+                message,
+                data: payloadData,
+                ...options,
+            }, traceId);
+        }
+
+        if (androidTokens.length > 0) {
+            const androidPayload = {
+                title,
+                message,
+                data: payloadData,
+                dataOnly: true,
+                android: {
+                    priority: 'high',
+                    ttl: 120 * 1000,
+                },
+            };
+            if (webTokens.length === 0) {
+                await recordAndSend(baseRecord, androidTokens, androidPayload, traceId);
+            } else {
+                const result = await pushTransport.sendPush(androidTokens, androidPayload, traceId);
+                if (result.invalidTokens?.length) {
+                    await tokenRegistry.removeInvalidTokens(result.invalidTokens);
+                }
+            }
+        }
+
+        if (webTokens.length === 0 && androidTokens.length === 0) {
+            await recordAndSend(baseRecord, [], {
+                title,
+                message,
+                data: payloadData,
+                ...options,
+            }, traceId);
+        }
     } catch (error) {
         console.error(`${traceId} Erro ao notificar motorista:`, error);
     }
@@ -181,19 +236,107 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
         deepLinkAbsolute: deepLink,
     };
 
-    const options = {
-        dataOnly: true,
-        webpush: {
-            headers: {
-                Urgency: 'high',
-            },
-            fcmOptions: {
-                link: deepLink,
-            },
-        },
-    };
+    // Web: data-only + webpush (SW desenha). Android APK: data + priority high
+    // (MoveCityMessagingService abre RideOfferActivity full-screen).
+    queue.enqueue(
+        () => sendCaptainOfferPush({
+            captainId,
+            title,
+            message,
+            type: 'NEW_RIDE',
+            payloadData,
+            deepLinkAbsolute: deepLink,
+            traceId,
+        }),
+        traceId
+    );
+};
 
-    queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_RIDE', payloadData, options, traceId), traceId);
+/**
+ * Split web/android para ofertas (NEW_RIDE / NEW_PARCEL):
+ * Android data-only + priority high → MessagingService full-screen.
+ */
+const sendCaptainOfferPush = async ({
+    captainId,
+    title,
+    message,
+    type,
+    payloadData,
+    deepLinkAbsolute,
+    traceId = '[AUDIT]',
+}) => {
+    try {
+        const entries = await tokenRegistry.getTokenEntriesForCaptain(captainId);
+        const androidTokens = entries
+            .filter((e) => e.device === 'android')
+            .map((e) => e.token);
+        const webTokens = entries
+            .filter((e) => e.device !== 'android')
+            .map((e) => e.token);
+
+        console.log(`${traceId} ${type} tokens: android=${androidTokens.length} web=${webTokens.length}`);
+
+        const baseRecord = {
+            captainId,
+            title,
+            message,
+            type,
+            targetAudience: 'specific',
+        };
+
+        if (webTokens.length > 0) {
+            await recordAndSend(baseRecord, webTokens, {
+                title,
+                message,
+                data: payloadData,
+                dataOnly: true,
+                webpush: {
+                    headers: { Urgency: 'high' },
+                    fcmOptions: { link: deepLinkAbsolute },
+                },
+            }, traceId);
+        }
+
+        if (androidTokens.length > 0) {
+            if (webTokens.length === 0) {
+                await recordAndSend(baseRecord, androidTokens, {
+                    title,
+                    message,
+                    data: payloadData,
+                    dataOnly: true,
+                    android: {
+                        priority: 'high',
+                        ttl: 60 * 1000,
+                    },
+                }, traceId);
+            } else {
+                const result = await pushTransport.sendPush(androidTokens, {
+                    title,
+                    message,
+                    data: payloadData,
+                    dataOnly: true,
+                    android: {
+                        priority: 'high',
+                        ttl: 60 * 1000,
+                    },
+                }, traceId);
+                if (result.invalidTokens?.length) {
+                    await tokenRegistry.removeInvalidTokens(result.invalidTokens);
+                }
+            }
+        }
+
+        if (webTokens.length === 0 && androidTokens.length === 0) {
+            await recordAndSend(baseRecord, [], {
+                title,
+                message,
+                data: payloadData,
+                dataOnly: true,
+            }, traceId);
+        }
+    } catch (error) {
+        console.error(`${traceId} Erro ao notificar motorista (${type}):`, error);
+    }
 };
 
 module.exports.sendNewParcel = async (captainId, data, traceId = '[AUDIT]') => {
@@ -236,13 +379,18 @@ module.exports.sendNewParcel = async (captainId, data, traceId = '[AUDIT]') => {
         parcelId: data.parcelId,
     };
 
-    queue.enqueue(() => sendToCaptain(captainId, title, message, 'NEW_PARCEL', payloadData, {
-        dataOnly: true,
-        webpush: {
-            headers: { Urgency: 'high' },
-            fcmOptions: { link: deepLink },
-        },
-    }, traceId), traceId);
+    queue.enqueue(
+        () => sendCaptainOfferPush({
+            captainId,
+            title,
+            message,
+            type: 'NEW_PARCEL',
+            payloadData,
+            deepLinkAbsolute: deepLink,
+            traceId,
+        }),
+        traceId
+    );
 };
 
 // M7 da auditoria de push (2026-08-02), corrigido na auditoria final (Fase 8): o

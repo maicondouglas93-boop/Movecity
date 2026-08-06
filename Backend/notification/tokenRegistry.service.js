@@ -60,6 +60,15 @@ module.exports.getTokensForCaptain = async (captainId) => {
     return docs.map(d => d.token);
 };
 
+/** Tokens do motorista com device (para split Android APK vs Web/PWA). */
+module.exports.getTokenEntriesForCaptain = async (captainId) => {
+    const docs = await NotificationToken.find({ captainId }).select('token device').lean();
+    return docs.map((d) => ({
+        token: d.token,
+        device: String(d.device || 'web').toLowerCase(),
+    }));
+};
+
 module.exports.getTokensForUsers = async (userIds) => {
     const docs = await NotificationToken.find({ userId: { $in: userIds } });
     return docs.map(d => d.token);

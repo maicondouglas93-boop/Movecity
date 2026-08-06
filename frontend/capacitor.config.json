@@ -1,0 +1,21 @@
+{
+  "appId": "br.com.movecity.driver",
+  "appName": "MoveCity Motorista",
+  "webDir": "dist-driver",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#0B3D2E"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

@@ -90,4 +90,18 @@ describe('pushTransport — contrato do payload com o FCM', () => {
         });
         expect(msg.data.type).toBe('RIDE_ACCEPTED');
     });
+
+    it('buildFcmMessage propaga bloco android (prioridade alta no APK)', () => {
+        const msg = pushTransport.buildFcmMessage({
+            title: 'Nova corrida',
+            message: 'Oferta',
+            dataOnly: true,
+            data: { type: 'NEW_RIDE', rideId: 'r1' },
+            android: { priority: 'high', ttl: 60000 },
+        });
+
+        expect(msg.notification).toBeUndefined();
+        expect(msg.android).toEqual({ priority: 'high', ttl: 60000 });
+        expect(msg.data.type).toBe('NEW_RIDE');
+    });
 });

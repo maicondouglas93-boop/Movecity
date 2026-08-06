@@ -15,11 +15,25 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (error) => {
     console.error('[FATAL EVITADO] Uncaught Exception:', error);
+    // EADDRINUSE e erros de boot não podem deixar o processo "vivo" sem HTTP
+    // (Mongo/cron continuam e a porta fica bloqueada para o próximo npm run dev).
+    if (error && (error.code === 'EADDRINUSE' || error.syscall === 'listen')) {
+        process.exit(1);
+    }
 });
 
 const server = http.createServer(app);
 
 initializeSocket(server);
+
+server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+        console.error(`[BOOT] Porta ${port} já em uso. Encerre o processo anterior ou defina outra PORT.`);
+        process.exit(1);
+    }
+    console.error('[BOOT] Erro ao iniciar servidor HTTP:', error);
+    process.exit(1);
+});
 
 server.listen(port, () => {
     console.log(`Server is running on port ${port}`);

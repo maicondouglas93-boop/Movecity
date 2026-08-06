@@ -1,9 +1,9 @@
-# Fase 2 da auditoria de production readiness (H4, 2026-08-05): antes existiam DOIS
+﻿# Fase 2 da auditoria de production readiness (H4, 2026-08-05): antes existiam DOIS
 # workflows sobrepostos (ci.yml: backend + admin; test.yml: backend + frontend) e
-# NENHUM deles rodava `npm run build` — um erro que só aparece no build de produção
-# (import quebrado, env faltando no bundle, chunk inválido) passava direto e ia
-# estourar na Vercel. Este arquivo unifica tudo e faz o build dos três artefatos
-# (web, driver e admin) ser condição de merge. test.yml foi removido.
+# NENHUM deles rodava `npm run build` ÔÇö um erro que s├│ aparece no build de produ├º├úo
+# (import quebrado, env faltando no bundle, chunk inv├ílido) passava direto e ia
+# estourar na Vercel. Este arquivo unifica tudo e faz o build dos tr├¬s artefatos
+# (web, driver e admin) ser condi├º├úo de merge. test.yml foi removido.
 name: CI/CD Pipeline - MoveCity
 
 on:
@@ -42,10 +42,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './frontend/package-lock.json'
       - run: npm ci
-      - name: Lint (não bloqueante — dívida pré-existente de ~760 apontamentos)
+      - name: Lint (n├úo bloqueante ÔÇö d├¡vida pr├®-existente de ~760 apontamentos)
         run: npm run lint
         continue-on-error: true
-      - name: Testes unitários
+      - name: Testes unit├írios
         run: npx vitest run
       - name: Build web (gate)
         run: npm run build
@@ -67,7 +67,7 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
-      - name: Testes unitários e de integração
+      - name: Testes unit├írios e de integra├º├úo
         run: npx vitest run
       - name: Build admin (gate)
         run: npm run build

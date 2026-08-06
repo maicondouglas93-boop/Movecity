@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import api from '@/shared/services/axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { getAccessToken, onSessionChanged } from '@/shared/services/session'
-import api, { refreshAccessToken } from '@/shared/services/axios'
+import { onAppActive } from '@/shared/platform/appLifecycle.service'
 
 // Fase A da experiência de corrida ativa (2026-08-03) + restore de encomenda.
 //
@@ -41,25 +42,16 @@ const PARCEL_RESTORE_STATUSES = [
     'finished',
 ]
 
-async function fetchActive(kind, endpointMap, allowRetry = true) {
+async function fetchActive(kind, endpointMap) {
     const token = getAccessToken(kind)
     if (!token) return null
 
     try {
-        const response = await api.get(`${import.meta.env.VITE_BASE_URL}${endpointMap[kind]}`, {
-            headers: { Authorization: `Bearer ${token}` }
-        })
+        // Cliente centralizado: 401 → refresh automático; falha de refresh → forceLogout.
+        const response = await api.get(endpointMap[kind])
         return response.data || null
     } catch (err) {
         if (err.response?.status === 404) return null
-        if (err.response?.status === 401 && allowRetry) {
-            try {
-                await refreshAccessToken(kind)
-                return fetchActive(kind, endpointMap, false)
-            } catch {
-                return UNKNOWN
-            }
-        }
         return UNKNOWN
     }
 }
@@ -144,6 +136,8 @@ const RideProvider = ({ children }) => {
         window.addEventListener('pageshow', handlePageShow)
         window.addEventListener('online', syncAll)
         const offSessionChanged = onSessionChanged(handleSessionChanged)
+        // Capacitor: appStateChange → active (além de visibilitychange do WebView).
+        const offAppActive = onAppActive(syncAll)
 
         return () => {
             socket.off('connect', syncAll)
@@ -151,6 +145,7 @@ const RideProvider = ({ children }) => {
             window.removeEventListener('pageshow', handlePageShow)
             window.removeEventListener('online', syncAll)
             offSessionChanged()
+            offAppActive?.()
         }
     }, [socket, syncRide, syncParcel])
 

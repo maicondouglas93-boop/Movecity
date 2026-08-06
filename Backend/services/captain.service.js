@@ -1,5 +1,5 @@
 const captainModel = require('../models/captain.model');
-const { getCache, setCache } = require('../cache/cache');
+const { getCache, setCache, deleteCache } = require('../cache/cache');
 const mongoose = require('mongoose');
 
 // Separação disponibilidade x conexão (2026-08-03) — ver
@@ -79,12 +79,39 @@ module.exports.createCaptain = async ({
     return captain;
 }
 
-module.exports.getCaptainProfile = async (id) => {
+/**
+ * @param {string|object} id
+ * @param {{ skipCache?: boolean }} [opts] — skipCache: lê sempre do Mongo (perfil / "Verificar novamente").
+ *
+ * Cache é por processo (NodeCache). Admin em outra instância (ex.: Render) invalida
+ * só o cache dela; o Backend local do APK podia servir approvalStatus velho por 10 min.
+ * Em HIT, revalidamos flags de autorização no banco (query leve).
+ */
+module.exports.getCaptainProfile = async (id, { skipCache = false } = {}) => {
     const cacheKey = `profile:captain:${id}`;
-    const cachedCaptain = getCache(cacheKey);
 
-    if (cachedCaptain) {
-        return cachedCaptain;
+    if (skipCache) {
+        deleteCache(cacheKey);
+    } else {
+        const cachedCaptain = getCache(cacheKey);
+        if (cachedCaptain) {
+            const flags = await captainModel.findById(id)
+                .select('approvalStatus isBlocked canReceiveRides')
+                .lean();
+            if (!flags) return null;
+            if (typeof cachedCaptain.set === 'function') {
+                cachedCaptain.set('approvalStatus', flags.approvalStatus);
+                cachedCaptain.set('isBlocked', flags.isBlocked);
+                if (Object.prototype.hasOwnProperty.call(flags, 'canReceiveRides')) {
+                    cachedCaptain.set('canReceiveRides', flags.canReceiveRides);
+                }
+                return cachedCaptain;
+            }
+            return Object.assign(
+                typeof cachedCaptain.toObject === 'function' ? cachedCaptain.toObject() : { ...cachedCaptain },
+                flags
+            );
+        }
     }
 
     const captain = await captainModel.findById(id);

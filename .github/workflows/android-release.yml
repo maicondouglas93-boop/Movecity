@@ -1,0 +1,333 @@
+name: Android Release — MoveCity Motorista
+
+# Somente TAG vX.Y.Z publica APK de produção + GitHub Release.
+# Push comum NÃO dispara este workflow.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+  JAVA_VERSION: "17"
+  EXPECT_PACKAGE: br.com.movecity.driver
+
+jobs:
+  release:
+    name: Build signed APK + GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse tag / version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "FAIL: TAG inválida: $TAG (use vX.Y.Z)"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "TAG=$TAG VERSION=$VERSION"
+
+      - name: Fail if Release already exists for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "FAIL: Release ${{ steps.ver.outputs.tag }} já existe. Não republicar a mesma TAG."
+            exit 1
+          fi
+          echo "Nenhuma Release prévia para esta TAG — ok"
+
+      - name: Require production signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "FAIL: Secret $name não configurado"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "O projeto não possui keystore de produção nos GitHub Secrets."
+            echo "Crie a keystore UMA vez, guarde o backup offline e configure os Secrets."
+            echo "Documentação: docs/ANDROID_RELEASE.md"
+            exit 1
+          fi
+          echo "Secrets de assinatura presentes (valores não são exibidos)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npx vitest run
+
+      - name: Sync VERSION_NAME from TAG
+        working-directory: frontend
+        run: node scripts/ci/sync-version-from-tag.mjs "${{ steps.ver.outputs.tag }}"
+
+      - name: Read VERSION_CODE
+        id: code
+        working-directory: frontend
+        run: |
+          CODE="$(grep -E '^VERSION_CODE=' android/version.properties | cut -d= -f2 | tr -d '[:space:]')"
+          NAME="$(grep -E '^VERSION_NAME=' android/version.properties | cut -d= -f2 | tr -d '[:space:]')"
+          echo "versionCode=$CODE" >> "$GITHUB_OUTPUT"
+          echo "versionName=$NAME" >> "$GITHUB_OUTPUT"
+          if [ "$NAME" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "FAIL: VERSION_NAME ($NAME) != TAG version (${{ steps.ver.outputs.version }})"
+            exit 1
+          fi
+          echo "versionName=$NAME versionCode=$CODE"
+
+      - name: Ensure VERSION_CODE greater than published releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: frontend
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > /tmp/releases.json
+          node scripts/ci/check-version-code.mjs /tmp/releases.json
+
+      - name: Decode keystore (não logar conteúdo)
+        working-directory: frontend/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > movecity-driver-release.jks
+          test -s movecity-driver-release.jks
+          python3 <<'PY'
+          import os
+          lines = [
+              "storeFile=movecity-driver-release.jks",
+              f"storePassword={os.environ['ANDROID_KEYSTORE_PASSWORD']}",
+              f"keyAlias={os.environ['ANDROID_KEY_ALIAS']}",
+              f"keyPassword={os.environ['ANDROID_KEY_PASSWORD']}",
+          ]
+          with open("keystore.properties", "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          print("keystore.properties escrito (senhas omitidas nos logs)")
+          PY
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo -e "24333f8a63b6825ea9c5614f55414964abb4bc9\n" > "$ANDROID_HOME/licenses/android-sdk-license"
+          sdkmanager --install \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "platform-tools"
+
+      - name: Build driver web + Capacitor sync
+        working-directory: frontend
+        run: npm run cap:sync
+
+      - name: Assemble release APK (assinado)
+        working-directory: frontend/android
+        env:
+          CI_REQUIRE_RELEASE_SIGNING: "true"
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Locate, rename and hash APK
+        id: apk
+        working-directory: frontend
+        run: |
+          SRC="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$SRC" ]; then
+            echo "FAIL: APK release não gerado em $SRC"
+            find android/app/build/outputs -type f -name '*.apk' || true
+            exit 1
+          fi
+          VERSION="${{ steps.ver.outputs.version }}"
+          OUT_DIR="${{ github.workspace }}/release-assets"
+          mkdir -p "$OUT_DIR"
+          NAME="movecity-driver-${VERSION}.apk"
+          cp "$SRC" "$OUT_DIR/$NAME"
+          HASH="$(sha256sum "$OUT_DIR/$NAME" | awk '{print $1}')"
+          echo "${HASH}  ${NAME}" > "$OUT_DIR/SHA256SUMS.txt"
+          SIZE="$(stat -c%s "$OUT_DIR/$NAME")"
+          echo "path=$OUT_DIR/$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "SHA-256: $HASH"
+          echo "Size: $SIZE"
+
+      - name: Validate APK (package / version / signature)
+        run: |
+          chmod +x frontend/scripts/ci/validate-release-apk.sh
+          frontend/scripts/ci/validate-release-apk.sh \
+            "${{ steps.apk.outputs.path }}" \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ steps.code.outputs.versionCode }}" \
+            "${{ env.EXPECT_PACKAGE }}"
+
+      - name: Write release-metadata.json (para painel ADM)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION_CODE: ${{ steps.code.outputs.versionCode }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+          SIZE: ${{ steps.apk.outputs.size }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          OUT_DIR: ${{ steps.apk.outputs.dir }}
+          PACKAGE_ID: ${{ env.EXPECT_PACKAGE }}
+        run: |
+          python3 <<'PY'
+          import json, os
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          name = os.environ["APK_NAME"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          data = {
+              "version": version,
+              "versionCode": int(os.environ["VERSION_CODE"]),
+              "minimumVersion": version,
+              "minimumVersionCode": int(os.environ["VERSION_CODE"]),
+              "apkUrl": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+              "releaseUrl": f"https://github.com/{repo}/releases/tag/{tag}",
+              "sha256": os.environ["SHA256"],
+              "fileSize": int(os.environ["SIZE"]),
+              "packageId": os.environ["PACKAGE_ID"],
+              "mandatory": False,
+          }
+          out = os.path.join(os.environ["OUT_DIR"], "release-metadata.json")
+          with open(out, "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload workflow artifact (diagnóstico)
+        uses: actions/upload-artifact@v4
+        with:
+          name: movecity-driver-${{ steps.ver.outputs.version }}
+          path: |
+            ${{ steps.apk.outputs.dir }}/movecity-driver-${{ steps.ver.outputs.version }}.apk
+            ${{ steps.apk.outputs.dir }}/SHA256SUMS.txt
+            ${{ steps.apk.outputs.dir }}/release-metadata.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION_CODE: ${{ steps.code.outputs.versionCode }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+          OUT_DIR: ${{ steps.apk.outputs.dir }}
+          PACKAGE_ID: ${{ env.EXPECT_PACKAGE }}
+        run: |
+          PREV="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true)"
+          if [ -n "$PREV" ] && [ "$PREV" != "$TAG" ]; then
+            RANGE="${PREV}..${TAG}"
+          else
+            RANGE="$TAG"
+          fi
+          COMMITS="$(git log --pretty=format:'- %s' "$RANGE" 2>/dev/null | head -n 80 || true)"
+          if [ -z "$COMMITS" ]; then
+            COMMITS="- Release ${TAG}"
+          fi
+          export COMMITS
+          python3 <<'PY'
+          import os
+          version = os.environ["VERSION"]
+          tag = os.environ["TAG"]
+          code = os.environ["VERSION_CODE"]
+          sha = os.environ["SHA256"]
+          pkg = os.environ["PACKAGE_ID"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          commits = os.environ.get("COMMITS", f"- Release {tag}")
+          apk_url = f"https://github.com/{repo}/releases/download/{tag}/movecity-driver-{version}.apk"
+          notes = f"""## MoveCity Motorista v{version}
+
+          ### Alterações
+          {commits}
+
+          ### APK
+          - Package: {pkg}
+          - VersionName: {version}
+          - VersionCode: {code}
+          - SHA-256: {sha}
+          - Download: {apk_url}
+
+          ### Atualização no MoveCity
+          1. Use a URL do APK desta Release (ou o arquivo anexado).
+          2. No painel Admin → **Atualização Motorista**, cadastre version, versionCode, apkUrl e sha256.
+          3. Salve. Os motoristas recebem a atualização pelo app.
+          4. Este pipeline **não** altera o MongoDB automaticamente.
+
+          > Use sempre a mesma keystore de produção. Assinatura diferente impede update sobre o APK instalado.
+          """
+          # Remover indentação comum do bloco acima
+          lines = notes.splitlines()
+          cleaned = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          out = os.path.join(os.environ["OUT_DIR"], "RELEASE_NOTES.md")
+          with open(out, "w", encoding="utf-8") as f:
+              f.write(cleaned.strip() + "\n")
+          print(out)
+          PY
+          echo "file=${OUT_DIR}/RELEASE_NOTES.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MoveCity Motorista v${{ steps.ver.outputs.version }}" \
+            --notes-file "${{ steps.notes.outputs.file }}" \
+            "${{ steps.apk.outputs.dir }}/movecity-driver-${{ steps.ver.outputs.version }}.apk" \
+            "${{ steps.apk.outputs.dir }}/SHA256SUMS.txt" \
+            "${{ steps.apk.outputs.dir }}/release-metadata.json"
+
+      - name: Cleanup keystore from runner
+        if: always()
+        working-directory: frontend/android
+        run: |
+          rm -f movecity-driver-release.jks keystore.properties
+          echo "keystore removida do runner"

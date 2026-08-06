@@ -130,20 +130,31 @@ module.exports.loginCaptain = async (req, res, next) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password } = req.body;
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+
+    console.log('[captains/login]', {
+        email,
+        hasPassword: Boolean(password),
+        passwordLen: password.length,
+        origin: req.headers.origin || null,
+    });
 
     const captain = await captainModel.findOne({ email }).select('+password');
 
     if (!captain) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        console.log('[captains/login] 401 — email não encontrado:', email);
+        return res.status(401).json({ message: 'Email ou senha inválidos' });
     }
 
     const isMatch = await captain.comparePassword(password);
 
     if (!isMatch) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        console.log('[captains/login] 401 — senha incorreta:', email);
+        return res.status(401).json({ message: 'Email ou senha inválidos' });
     }
 
+    console.log('[captains/login] 200 — ok:', email);
     return await respondWithCaptainSession(res, { captain, ip: req.ip });
 }
 
@@ -178,7 +189,17 @@ module.exports.refreshCaptainSession = async (req, res) => {
 };
 
 module.exports.getCaptainProfile = async (req, res, next) => {
-    res.status(200).json({ captain: req.captain });
+    // Sempre fresco do Mongo — o APK / "Verificar novamente" não podem depender do
+    // cache in-memory (aprovação no painel admin em outra instância).
+    try {
+        const captain = await captainService.getCaptainProfile(req.captain._id, { skipCache: true });
+        if (!captain) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+        return res.status(200).json({ captain });
+    } catch (err) {
+        return res.status(500).json({ message: err.message || 'Erro ao carregar perfil' });
+    }
 }
 
 const DOCUMENT_TYPES = [ 'cnhFront', 'cnhBack', 'crlv', 'vehicleFront', 'selfie' ];

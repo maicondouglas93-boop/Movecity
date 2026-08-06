@@ -1,5 +1,5 @@
-// Role/plataforma do frontend — seams para build web vs build motorista (futuro Capacitor).
-// Sem dependência de @capacitor/*: detecção nativa só se o runtime injetar window.Capacitor.
+// Role/plataforma do frontend — seams para build web vs build motorista (Capacitor).
+// Preferir estes helpers a espalhar Capacitor.isNativePlatform() nas telas.
 
 export function getAppRole() {
     const role = import.meta.env.VITE_APP_ROLE
@@ -18,7 +18,12 @@ export function isWeb() {
     return !isNativePlatform()
 }
 
-/** PWA (SW, Install/Update prompts) só no app web completo — nunca no build driver. */
+/** PWA (SW, Install/Update prompts) só no app web completo — nunca no build driver/APK. */
 export function shouldEnablePwa() {
     return getAppRole() === 'web' && isWeb()
+}
+
+export function getPlatformLabel() {
+    if (isNativePlatform()) return 'android'
+    return 'web'
 }

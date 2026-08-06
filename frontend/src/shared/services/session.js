@@ -47,6 +47,15 @@ export function saveSession(kind, { token, refreshToken }) {
     // cookie httpOnly — nesse caso não sobrescreve o que já existe com undefined.
     if (refreshToken) localStorage.setItem(keys.refresh, refreshToken);
     notifySessionChanged();
+    // Espelha no nativo (APK) para Aceitar corrida com app morto / lock screen.
+    if (kind === 'captain') {
+        import('@/shared/platform/nativeSession.service')
+            .then(({ syncNativeCaptainSession }) => syncNativeCaptainSession({
+                token: token || getAccessToken('captain'),
+                refreshToken: refreshToken || getRefreshToken('captain'),
+            }))
+            .catch(() => {});
+    }
 }
 
 export function getAccessToken(kind) {
@@ -62,6 +71,11 @@ export function clearSession(kind) {
     localStorage.removeItem(keys.access);
     localStorage.removeItem(keys.refresh);
     notifySessionChanged();
+    if (kind === 'captain') {
+        import('@/shared/platform/nativeSession.service')
+            .then(({ clearNativeCaptainSession }) => clearNativeCaptainSession())
+            .catch(() => {});
+    }
 }
 
 export function clearAllSessions() {
@@ -70,6 +84,9 @@ export function clearAllSessions() {
         localStorage.removeItem(refresh);
     });
     notifySessionChanged();
+    import('@/shared/platform/nativeSession.service')
+        .then(({ clearNativeCaptainSession }) => clearNativeCaptainSession())
+        .catch(() => {});
 }
 
 // Qual sessão uma requisição usa é decidido pela rota — o mesmo navegador pode ter
@@ -98,6 +115,7 @@ export function sessionKindForUrl(url = '') {
     if (path.includes('/rides/pending')) return 'captain';
     if (path.includes('/rides/end-ride')) return 'captain';
     if (path.includes('/rides/confirm-payment')) return 'captain';
+    if (path.includes('/rides/captain-review')) return 'captain';
     if (/\/rides\/[^/]+\/accept(?:\/|$)/.test(path)) return 'captain';
 
     // Encomendas — motorista

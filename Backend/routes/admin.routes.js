@@ -123,4 +123,9 @@ router.put('/parcels/:id/cancel', authAdmin, authorizeRoles('super_admin', 'oper
 router.get('/parcel-settings', authAdmin, adminController.getParcelSettings);
 router.put('/parcel-settings', authAdmin, authorizeRoles('super_admin'), adminController.updateParcelSettings);
 
+// Atualização do APK MoveCity Motorista (distribuição fora da Play Store)
+const driverAppVersionController = require('../controllers/driverAppVersion.controller');
+router.get('/driver-app-version', authAdmin, authorizeRoles('super_admin'), driverAppVersionController.getAdminDriverAppVersion);
+router.put('/driver-app-version', authAdmin, authorizeRoles('super_admin'), driverAppVersionController.updateAdminDriverAppVersion);
+
 module.exports = router;

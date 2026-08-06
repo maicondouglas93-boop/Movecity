@@ -25,12 +25,19 @@ require('./services/captainDeadline.service'); // registra o cron do prazo de do
 require('./services/schedule.service'); // registra o cron que ativa corridas/encomendas agendadas
 
 const adminRoutes = require('./routes/admin.routes');
+const appVersionRoutes = require('./routes/appVersion.routes');
 
 const rawOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+  // Capacitor Android/iOS WebView (capacitor.config androidScheme: https)
+  "https://localhost",
+  "http://localhost",
+  "capacitor://localhost",
+  "ionic://localhost",
   process.env.FRONTEND_URL,
   process.env.ADMIN_FRONTEND_URL,
+  process.env.CAPACITOR_ORIGIN,
 ];
 
 // Remove barras no final (trailing slashes) e ignora valores vazios
@@ -73,6 +80,8 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 app.use('/api/admin', adminRoutes);
+// Versão do APK motorista (público, somente leitura)
+app.use('/api/app-version', appVersionRoutes);
 
 app.get('/', (req, res) => {
     res.send('Hello World');

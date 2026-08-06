@@ -115,6 +115,9 @@ export default defineConfig(({ mode }) => {
   const isDriver = mode === 'driver'
 
   return {
+    // Capacitor carrega assets via file/capacitor scheme — base absoluto "/" quebra
+    // o build do motorista. O app Web completo mantém "/" (deploy Vercel/PWA).
+    base: isDriver ? './' : '/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

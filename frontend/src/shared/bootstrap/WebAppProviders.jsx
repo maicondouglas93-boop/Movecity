@@ -7,6 +7,7 @@ import { LocationProvider } from '@/shared/contexts/LocationContext'
 import { ToastProvider } from '@/shared/contexts/ToastContext'
 import { NotificationInboxProvider } from '@/shared/contexts/NotificationInboxContext'
 import RideProvider from '@/shared/contexts/RideContext'
+import CaptainLocationBridge from '@/driver/components/CaptainLocationBridge'
 import { queryClient } from '@/shared/services/queryClient'
 
 // Extração mecânica da árvore de main.jsx (web). Ordem idêntica — não “melhorar”.
@@ -23,6 +24,7 @@ const WebAppProviders = ({ children }) => (
                       (re-sincroniza a corrida no 'connect'). */}
                                 <BrowserRouter>
                                     <RideProvider>
+                                        <CaptainLocationBridge />
                                         {children}
                                     </RideProvider>
                                 </BrowserRouter>

@@ -37,18 +37,18 @@ export default function Tariffs() {
     queryFn: fetchVehicleCategories
   });
 
-  if (loadingGlobal || loadingCategories) return <div className="text-text-muted">Carregando motor de precificação...</div>;
+  if (loadingGlobal || loadingCategories) return <div className="text-text-muted">Carregando motor de precificaÃ§Ã£o...</div>;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Motor de Precificação Unificado</h1>
-          <p className="text-text-muted mt-1">Gerencie a tarifa única para todos os serviços (Motos, Carros, Encomendas).</p>
+          <h1 className="text-2xl font-bold tracking-tight">Motor de PrecificaÃ§Ã£o Unificado</h1>
+          <p className="text-text-muted mt-1">Gerencie a tarifa Ãºnica para todos os serviÃ§os (Motos, Carros, Encomendas).</p>
         </div>
         
         {/* Test Mode Toggle */}
-        <label className={lex items-center gap-2 px-4 py-2 rounded-full cursor-pointer transition-colors border }>
+        <label className={`flex items-center gap-2 px-4 py-2 rounded-full cursor-pointer transition-colors border ${testMode ? 'bg-warning/20 border-warning text-warning' : 'bg-surface border-border text-text-muted hover:text-text'}`}>
           <Beaker className="w-4 h-4" />
           <span className="text-sm font-medium">Modo Teste</span>
           <input 
@@ -77,7 +77,7 @@ export default function Tariffs() {
       <div className="hidden md:flex border-b border-border overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveTab('general')}
-          className={px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 }
+          className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'general' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
         >
           Tarifa Unificada Global
         </button>
@@ -85,7 +85,7 @@ export default function Tariffs() {
           <button
             key={cat._id}
             onClick={() => setActiveTab(cat._id)}
-            className={px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 flex items-center gap-2 }
+            className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 flex items-center gap-2 ${activeTab === cat._id ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
           >
             {cat.displayName}
             {!cat.isActive && <span className="w-2 h-2 rounded-full bg-danger"></span>}
@@ -184,13 +184,13 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
-      toast.success('Configurações globais unificadas salvas com sucesso!');
+      toast.success('ConfiguraÃ§Ãµes globais unificadas salvas com sucesso!');
     },
     onError: (err) => {
       if (err.response?.status === 409) {
         queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
       }
-      toast.error(err.response?.data?.message || 'Erro ao salvar configurações');
+      toast.error(err.response?.data?.message || 'Erro ao salvar configuraÃ§Ãµes');
     }
   });
 
@@ -203,7 +203,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
         >
           <div className="bg-background/50 border-b border-border p-4">
             <h3 className="font-semibold text-lg">Tarifa Unificada Global</h3>
-            <p className="text-sm text-text-muted mt-1">Essa tabela se aplica a TODOS os serviços: Corridas de Moto, Carro, Presenciais e Encomendas.</p>
+            <p className="text-sm text-text-muted mt-1">Essa tabela se aplica a TODOS os serviÃ§os: Corridas de Moto, Carro, Presenciais e Encomendas.</p>
           </div>
           
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -221,13 +221,13 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
                 <input type="number" step="0.01" min="0" {...register('perMinute', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Mínima (R$)</label>
+                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa MÃ­nima (R$)</label>
                 <input type="number" step="0.01" min="0" {...register('minimumFare', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Comissão da Plataforma (%)</label>
+              <label className="block text-sm font-medium text-text-muted mb-1">ComissÃ£o da Plataforma (%)</label>
               <input type="number" step="0.1" min="0" max="100" {...register('platformCommission', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
             </div>
 
@@ -240,7 +240,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
               <h4 className="font-medium text-text mb-3">Regras de Espera</h4>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-text-muted mb-1">Minutos Grátis</label>
+                  <label className="block text-sm font-medium text-text-muted mb-1">Minutos GrÃ¡tis</label>
                   <input type="number" min="0" {...register('surcharges.waiting.freeMinutes', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
                 </div>
                 <div>
@@ -252,7 +252,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
 
             <div className="md:col-span-2 space-y-3 pt-4 border-t border-border">
               <div>
-                <p className="text-sm font-semibold text-text">Preços dos Opcionais (R$)</p>
+                <p className="text-sm font-semibold text-text">PreÃ§os dos Opcionais (R$)</p>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div>
@@ -274,7 +274,7 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
           <div className="bg-background/50 border-t border-border p-4 flex justify-end gap-3">
             <button type="submit" disabled={!isDirty || updateMutation.isPending || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
               <Save className="w-4 h-4" />
-              {updateMutation.isPending ? 'Salvando...' : 'Salvar Alterações'}
+              {updateMutation.isPending ? 'Salvando...' : 'Salvar AlteraÃ§Ãµes'}
             </button>
           </div>
         </form>
@@ -289,9 +289,8 @@ function GlobalSettingsCard({ settings, queryClient, testMode }) {
 
 function CategorySettingsCard({ category, queryClient, testMode }) {
   const toast = useToast();
-  const confirm = useConfirm();
 
-  const { register, handleSubmit, watch, getValues, formState: { isDirty } } = useForm({
+  const { register, handleSubmit, watch, formState: { isDirty } } = useForm({
     defaultValues: {
       displayName: category.displayName,
       description: category.description || '',
@@ -305,12 +304,12 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
 
   const updateMutation = useMutation({
     mutationFn: async (data) => {
-      const res = await api.put(/admin/vehicle-categories/ + category._id + /tariffs, data);
+      const res = await api.put(`/admin/vehicle-categories/${category._id}/tariffs`, data);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
-      toast.success(Categoria  + category.displayName +  atualizada!);
+      toast.success(`Categoria ${category.displayName} atualizada!`);
     },
     onError: (err) => {
       toast.error(err.response?.data?.message || 'Erro ao salvar categoria');
@@ -327,24 +326,24 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
           <label className="flex items-center gap-2 cursor-pointer bg-background border border-border px-3 py-1.5 rounded-full">
             <span className="text-sm font-medium">{isActive ? 'Ativo' : 'Inativo'}</span>
             <input type="checkbox" {...register('isActive')} className="hidden" />
-            <div className={w-8 h-4 rounded-full transition-colors relative }>
-              <div className={bsolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-surface transition-transform }></div>
+            <div className={`w-8 h-4 rounded-full transition-colors relative ${isActive ? 'bg-primary' : 'bg-border'}`}>
+              <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-surface transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`}></div>
             </div>
           </label>
         </div>
         
         <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 border-b border-border">
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição (passageiro vê este nome)</label>
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome de ExibiÃ§Ã£o (passageiro vÃª este nome)</label>
             <input type="text" {...register('displayName', { required: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Lotação (passageiros)</label>
+            <label className="block text-sm font-medium text-text-muted mb-1">LotaÃ§Ã£o (passageiros)</label>
             <input type="number" step="1" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-text-muted mb-1">Descrição (subtítulo exibido ao passageiro)</label>
-            <input type="text" {...register('description')} placeholder="Ex: Viagens diárias econômicas" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            <label className="block text-sm font-medium text-text-muted mb-1">DescriÃ§Ã£o (subtÃ­tulo exibido ao passageiro)</label>
+            <input type="text" {...register('description')} placeholder="Ex: Viagens diÃ¡rias econÃ´micas" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
           </div>
         </div>
         
@@ -379,7 +378,7 @@ function NewCategoryModal({ onClose, onCreated }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-surface rounded-xl shadow-xl w-full max-w-md overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex justify-between items-center">
-          <h2 className="text-lg font-bold">Nova Categoria de Veículo</h2>
+          <h2 className="text-lg font-bold">Nova Categoria de VeÃ­culo</h2>
           <button onClick={onClose} className="text-text-muted hover:text-text"><X className="w-5 h-5"/></button>
         </div>
         <form onSubmit={handleSubmit((data) => createMutation.mutate(data))} className="p-6 space-y-4">
@@ -388,7 +387,7 @@ function NewCategoryModal({ onClose, onCreated }) {
             <input type="text" {...register('name')} placeholder="Ex: suv" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text outline-none" required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição</label>
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome de ExibiÃ§Ã£o</label>
             <input type="text" {...register('displayName')} placeholder="Ex: SUV Premium" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text outline-none" required />
           </div>
           <div className="pt-2 flex justify-end gap-3">

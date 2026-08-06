@@ -887,15 +887,27 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
 module.exports.cancelRide = async (id, reason, admin, ip) => {
     const ride = await rideModel.findById(id);
     if (!ride) throw new Error('Corrida não encontrada');
-    if (['finished', 'cancelled'].includes(ride.status)) throw new Error('Corrida já finalizada ou cancelada');
 
+    const dispatchService = require('./dispatch.service');
+    if (['finished', 'cancelled'].includes(ride.status)) {
+        // Corrida já encerrada, mas o lock pode ter ficado preso de um cancel antigo.
+        if (ride.captain) {
+            await dispatchService.releaseCaptainBusyLockIfIdle(ride.captain);
+        }
+        throw new Error('Corrida já finalizada ou cancelada');
+    }
+
+    const captainId = ride.captain;
     ride.status = 'cancelled';
     if (reason) ride.observation = reason;
     await ride.save();
 
-    if (ride.captain) {
+    if (captainId) {
         const captainService = require('./captain.service');
-        captainService.recalculateCancellationStats(ride.captain).catch(console.error);
+        captainService.recalculateCancellationStats(captainId).catch(console.error);
+        // Sem isso o busyLock do motorista fica true e "Iniciar sem despacho"
+        // continua retornando CAPTAIN_BUSY mesmo com a corrida já cancelada.
+        dispatchService.releaseCaptainBusyLockIfIdle(captainId).catch(console.error);
     }
 
     await module.exports.logAction({
@@ -967,8 +979,10 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) 
         updatedCount = result.modifiedCount;
 
         const captainService = require('./captain.service');
+        const dispatchService = require('./dispatch.service');
         affectedCaptainIds.forEach(captainId => {
             captainService.recalculateCancellationStats(captainId).catch(console.error);
+            dispatchService.releaseCaptainBusyLockIfIdle(captainId).catch(console.error);
         });
 
         await module.exports.logAction({

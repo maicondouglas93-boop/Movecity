@@ -673,6 +673,10 @@ module.exports.createPresentialRide = async ({
         throw err;
     }
 
+    // Cancela via admin (e outros caminhos que esqueciam o unlock) deixavam busyLock
+    // true sem ride/parcel ativos — limpa o lock órfão antes de tentar adquirir.
+    await dispatchService.releaseCaptainBusyLockIfIdle(freshCaptain._id);
+
     const locked = await dispatchService.acquireCaptainBusyLock(freshCaptain._id);
     if (!locked) {
         const err = new Error('CAPTAIN_BUSY');

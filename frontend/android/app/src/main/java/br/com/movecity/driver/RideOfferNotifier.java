@@ -140,6 +140,8 @@ public final class RideOfferNotifier {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
             nm.notify(notificationId, builder.build());
+            Log.i(TAG, "notificação nativa criada id=" + notificationId
+                + " kind=" + kind + " offerId=" + offerId);
         }
 
         scheduleLaunchAlarm(context, fullScreen, offerId);

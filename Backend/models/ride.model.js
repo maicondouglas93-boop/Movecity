@@ -187,7 +187,7 @@ const rideSchema = new mongoose.Schema({
     // corrida não termina, volta pro despacho (ver captainCancellations abaixo).
     cancelledBy: {
         type: String,
-        enum: ['passenger', 'captain', 'system'],
+        enum: ['passenger', 'captain', 'system', 'admin'],
     },
     cancellationReason: {
         type: String,

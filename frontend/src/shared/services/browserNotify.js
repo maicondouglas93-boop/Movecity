@@ -1,8 +1,9 @@
 import { getFcmRegistration } from '@/shared/services/fcm'
+import { isNativePlatform } from '@/shared/platform/platform'
 
-// Notificação nativa disparada pelo próprio app (corrida iniciada, nova solicitação,
-// pagamento recebido) — diferente do push do FCM, que chega do servidor mesmo com o
-// app fechado.
+// Notificação do browser/SW (PWA). No APK Capacitor a apresentação é nativa
+// (RideOfferNotifier / DriverAlertNotifier via MoveCityMessagingService) — não
+// criar Notification web em paralelo (duplicata + sintoma de "só após o toque").
 //
 // Correção do crash de tela branca (2026-08-04): as três chamadas antigas usavam
 // `new Notification(title, {...})` direto. No Android esse construtor é proibido fora
@@ -14,6 +15,7 @@ import { getFcmRegistration } from '@/shared/services/fcm'
 // (getFcmRegistration, services/fcm.js) — nunca lança de forma síncrona, então é seguro
 // chamar de dentro de qualquer efeito/handler sem try/catch no chamador.
 export function showBrowserNotification(title, body) {
+    if (isNativePlatform()) return
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     if (!('serviceWorker' in navigator)) return
 
@@ -22,5 +24,5 @@ export function showBrowserNotification(title, body) {
             if (!registration) return
             return registration.showNotification(title, { body, icon: '/movecity-icon.jpg' })
         })
-        .catch((err) => console.error('Falha ao exibir notificação nativa:', err))
+        .catch((err) => console.error('Falha ao exibir notificação do browser:', err))
 }

@@ -7,6 +7,7 @@ import Button from '@/shared/components/ui/Button'
 import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
+import { SocketContext } from '@/shared/contexts/SocketContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { getAccessToken } from '@/shared/services/session'
 import {
@@ -36,6 +37,7 @@ const CaptainPresentialRide = () => {
   const navigate = useNavigate()
   const { userLocation, locationError } = useContext(LocationContext)
   const { setCaptainRide, captainRide, captainParcel } = useContext(RideContext)
+  const { socket } = useContext(SocketContext)
   const { addToast } = useToast()
 
   const [step, setStep] = useState(STEPS.CHOICE)
@@ -56,6 +58,25 @@ const CaptainPresentialRide = () => {
     if (userLocation.timestamp && (Date.now() - userLocation.timestamp) > GPS_MAX_AGE_MS) return false
     return true
   }
+
+  useEffect(() => {
+    if (!socket) return undefined
+    const handleRideCancelled = (data) => {
+      const activeId = ride?._id || captainRide?._id
+      if (activeId && data?.rideId && String(data.rideId) !== String(activeId)) return
+      setCaptainRide(null)
+      setRide(null)
+      addToast(
+        data?.cancelledBy === 'admin'
+          ? 'Corrida cancelada pelo administrador.'
+          : 'A corrida foi cancelada pelo passageiro.',
+        'info',
+      )
+      navigate('/captain-home', { replace: true })
+    }
+    socket.on('ride-cancelled', handleRideCancelled)
+    return () => socket.off('ride-cancelled', handleRideCancelled)
+  }, [socket, ride?._id, captainRide?._id, setCaptainRide, addToast, navigate])
 
   useEffect(() => {
     if (captainParcel) {

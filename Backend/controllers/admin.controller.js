@@ -619,6 +619,55 @@ module.exports.cancelRide = async (req, res, next) => {
         const { id } = req.params;
         const { reason } = req.body;
         const result = await adminService.cancelRide(id, reason, req.admin, req.ip);
+
+        // Espelha o cancel de encomenda: avisa motorista (e passageiro, se houver)
+        // por sala + socket direto + push ? senão o APK fica na tela da corrida.
+        try {
+            const { sendMessageToRoom, sendMessageToSocketId, emitDriverMapUpdate } = require('../socket');
+            const captainModel = require('../models/captain.model');
+            const userModel = require('../models/user.model');
+            const notificationService = require('../services/notification.service');
+
+            const payload = {
+                rideId: result._id.toString(),
+                cancelledBy: 'admin',
+                reason: reason || result.cancellationReason || 'Cancelada pelo administrador',
+            };
+
+            sendMessageToRoom(`ride_${result._id}`, {
+                event: 'ride-cancelled',
+                data: payload,
+            });
+
+            if (result.captain) {
+                const captainId = result.captain._id || result.captain;
+                emitDriverMapUpdate(captainId, { busy: false });
+                const captain = await captainModel.findById(captainId).select('socketId').lean();
+                if (captain?.socketId) {
+                    sendMessageToSocketId(captain.socketId, {
+                        event: 'ride-cancelled',
+                        data: payload,
+                    });
+                }
+                notificationService
+                    .sendRideCancelledToCaptain(captainId, { ...payload, cancelledBy: 'admin' })
+                    .catch(console.error);
+            }
+
+            if (result.user) {
+                const userId = result.user._id || result.user;
+                const user = await userModel.findById(userId).select('socketId').lean();
+                if (user?.socketId) {
+                    sendMessageToSocketId(user.socketId, {
+                        event: 'ride-cancelled',
+                        data: payload,
+                    });
+                }
+            }
+        } catch (socketErr) {
+            console.error('[ADMIN] Falha ao emitir cancel de corrida via socket:', socketErr.message);
+        }
+
         res.status(200).json(result);
     } catch (error) {
         next(error);

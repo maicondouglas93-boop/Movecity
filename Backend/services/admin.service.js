@@ -887,38 +887,40 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
 module.exports.cancelRide = async (id, reason, admin, ip) => {
     const ride = await rideModel.findById(id);
     if (!ride) throw new Error('Corrida não encontrada');
+    if (ride.status === 'finished') throw new Error('Corrida já finalizada');
 
     const dispatchService = require('./dispatch.service');
-    if (['finished', 'cancelled'].includes(ride.status)) {
-        // Corrida já encerrada, mas o lock pode ter ficado preso de um cancel antigo.
-        if (ride.captain) {
-            await dispatchService.releaseCaptainBusyLockIfIdle(ride.captain);
+    const alreadyCancelled = ride.status === 'cancelled';
+    const captainId = ride.captain;
+
+    if (!alreadyCancelled) {
+        ride.status = 'cancelled';
+        ride.cancelledBy = 'admin';
+        ride.cancelledAt = new Date();
+        ride.cancellationReason = reason || 'Cancelada pelo painel admin';
+        if (reason) ride.observation = reason;
+        await ride.save();
+
+        await module.exports.logAction({
+            adminId: admin._id,
+            adminName: admin.name,
+            action: 'cancel_ride',
+            targetId: ride._id.toString(),
+            targetModel: 'Ride',
+            reason: reason || 'Cancelada pelo painel admin',
+            ipAddress: ip || '0.0.0.0'
+        });
+
+        if (captainId) {
+            const captainService = require('./captain.service');
+            captainService.recalculateCancellationStats(captainId).catch(console.error);
         }
-        throw new Error('Corrida já finalizada ou cancelada');
     }
 
-    const captainId = ride.captain;
-    ride.status = 'cancelled';
-    if (reason) ride.observation = reason;
-    await ride.save();
-
+    // Sempre tenta liberar: cancel antigo podia deixar busyLock preso.
     if (captainId) {
-        const captainService = require('./captain.service');
-        captainService.recalculateCancellationStats(captainId).catch(console.error);
-        // Sem isso o busyLock do motorista fica true e "Iniciar sem despacho"
-        // continua retornando CAPTAIN_BUSY mesmo com a corrida já cancelada.
         dispatchService.releaseCaptainBusyLockIfIdle(captainId).catch(console.error);
     }
-
-    await module.exports.logAction({
-        adminId: admin._id,
-        adminName: admin.name,
-        action: 'cancel_ride',
-        targetId: ride._id.toString(),
-        targetModel: 'Ride',
-        reason: reason || 'Cancelada pelo painel admin',
-        ipAddress: ip || '0.0.0.0'
-    });
 
     return ride;
 };

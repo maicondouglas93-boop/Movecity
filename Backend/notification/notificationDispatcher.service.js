@@ -454,7 +454,9 @@ module.exports.sendCaptainArrived = async (userId, data) => {
 // Só faz sentido quando a corrida já tinha um motorista específico designado.
 module.exports.sendRideCancelledToCaptain = async (captainId, data) => {
     const title = 'Corrida Cancelada';
-    const message = 'O passageiro cancelou a corrida.';
+    const message = data?.cancelledBy === 'admin'
+        ? 'A corrida foi cancelada pelo administrador.'
+        : 'O passageiro cancelou a corrida.';
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'RIDE_CANCELLED', { ...data, deepLink: DEEP_LINK.captainHome }));
 };
 

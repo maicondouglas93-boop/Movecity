@@ -1,5 +1,7 @@
 package br.com.movecity.driver;
 
+import android.util.Log;
+
 import androidx.annotation.NonNull;
 
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
@@ -9,12 +11,17 @@ import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
 
 /**
- * Background:
- * - NEW_RIDE / NEW_PARCEL → full-screen
- * - demais tipos com título/corpo → bandeja + deep link
- * Foreground → Capacitor (JS/socket).
+ * FCM = transporte. Apresentação no APK = notificação nativa Android.
+ *
+ * Ofertas (NEW_RIDE / NEW_PARCEL) e alertas com título/corpo: sempre
+ * RideOfferNotifier / DriverAlertNotifier — inclusive com o app em foreground.
+ * Não depende de o motorista tocar numa push web/Capacitor para a nativa existir.
+ *
+ * Fallback Capacitor só quando não há payload apresentável nativamente.
  */
 public class MoveCityMessagingService extends FirebaseMessagingService {
+
+    private static final String TAG = "MoveCityFCM";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
@@ -22,17 +29,25 @@ public class MoveCityMessagingService extends FirebaseMessagingService {
         String type = data != null ? data.get("type") : null;
         boolean foreground = RideOfferNotifier.isAppInForeground(this);
 
+        Log.i(TAG, "FCM recebido type=" + type
+            + " foreground=" + foreground
+            + " hasNotificationBlock=" + (remoteMessage.getNotification() != null)
+            + " dataKeys=" + (data != null ? data.keySet() : "null"));
+
         boolean offer = "NEW_RIDE".equals(type) || "NEW_PARCEL".equals(type);
-        if (offer && !foreground) {
+        if (offer) {
+            Log.i(TAG, "processamento oferta → RideOfferNotifier (nativa)");
             RideOfferNotifier.showFullScreenOffer(this, data);
             return;
         }
 
-        if (!foreground && data != null && hasAlertPayload(data)) {
+        if (data != null && hasAlertPayload(data)) {
+            Log.i(TAG, "processamento alerta → DriverAlertNotifier (nativa)");
             DriverAlertNotifier.show(this, data);
             return;
         }
 
+        Log.i(TAG, "sem payload nativo apresentável → Capacitor JS");
         PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
     }
 

@@ -357,8 +357,12 @@ const CaptainHome = () => {
 
         const handleRideCancelled = (data) => {
             // Fase B: a corrida deixa de estar disponível — sai do card persistente.
-            removePendingRide(data.rideId)
-            if (rideRef.current && rideRef.current._id === data.rideId) {
+            const cancelledId = data?.rideId
+            removePendingRide(cancelledId)
+            const matchesActive =
+                (rideRef.current && String(rideRef.current._id) === String(cancelledId)) ||
+                (captainRideRef.current && String(captainRideRef.current._id) === String(cancelledId))
+            if (matchesActive) {
                 // Fase A da experiência de corrida ativa (2026-08-03): também fecha o
                 // ConfirmRidePopUp e limpa o RideContext — antes só o popup de oferta
                 // fechava, e um cancelamento após o aceite deixava a tela de "A caminho/
@@ -367,7 +371,12 @@ const CaptainHome = () => {
                 setConfirmRidePopupPanel(false)
                 setRide(null)
                 setCaptainRide(null)
-                addToast('A corrida foi cancelada pelo passageiro.', 'info')
+                addToast(
+                    data?.cancelledBy === 'admin'
+                        ? 'Corrida cancelada pelo administrador.'
+                        : 'A corrida foi cancelada pelo passageiro.',
+                    'info',
+                )
             }
         }
 

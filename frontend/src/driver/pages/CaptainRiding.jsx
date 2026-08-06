@@ -165,8 +165,10 @@ const CaptainRiding = () => {
         }
     }, [captain?._id, rideData?._id])  // stable deps only
 
-    /* ── Payment received socket event ── */
+    /* ── Payment / cancel socket events ── */
     useEffect(() => {
+        if (!socket) return undefined
+
         const handlePaymentCompleted = () => {
             addToast(`Pagamento recebido! R$${rideData?.fare}`, 'success')
             showBrowserNotification(
@@ -192,15 +194,37 @@ const CaptainRiding = () => {
                 } catch (e) {}
             }
         }
+
+        const handleRideCancelled = (data) => {
+            if (rideData?._id && data?.rideId && String(data.rideId) !== String(rideData._id)) return
+            setCaptainRide(null)
+            setRideData(null)
+            const byAdmin = data?.cancelledBy === 'admin'
+            addToast(
+                byAdmin
+                    ? 'Corrida cancelada pelo administrador.'
+                    : 'A corrida foi cancelada pelo passageiro.',
+                'info',
+            )
+            showBrowserNotification(
+                'Corrida cancelada',
+                byAdmin
+                    ? 'Cancelada pelo administrador.'
+                    : 'O passageiro cancelou a corrida.',
+            )
+            navigate('/captain-home', { replace: true })
+        }
         
         socket.on('payment-completed', handlePaymentCompleted)
         socket.on('receive-message', handleReceiveMessage)
+        socket.on('ride-cancelled', handleRideCancelled)
         
         return () => {
             socket.off('payment-completed', handlePaymentCompleted)
             socket.off('receive-message', handleReceiveMessage)
+            socket.off('ride-cancelled', handleRideCancelled)
         }
-    }, [socket, navigate, rideData, addToast, isChatOpen])
+    }, [socket, navigate, rideData, addToast, isChatOpen, setCaptainRide])
     
     // Reset unread count when chat opens
     useEffect(() => {

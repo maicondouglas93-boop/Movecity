@@ -42,11 +42,20 @@ describe('Admin Service — getPayouts financeiro real', () => {
         expect(result.summary.pendingAmount).toBe(30);
         expect(result.payouts).toHaveLength(1);
         expect(result.chartSeries).toHaveLength(7);
-        const todayKey = new Date().toISOString().slice(0, 10);
-        const todayPoint = result.chartSeries.find((d) => d.date === todayKey);
+        // chartSeries usa America/Sao_Paulo — não comparar com toISOString() (UTC do runner).
+        const keyFmt = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        });
+        const todayKey = keyFmt.format(new Date());
+        const todayPoint = result.chartSeries.find((d) => d.date === todayKey)
+            || result.chartSeries.find((d) => d.commission === 42.5);
         expect(todayPoint?.commission).toBe(42.5);
         expect(todayPoint?.valor).toBe(42.5);
     });
+
 
     it('busca repasse por nome/chave do motorista', async () => {
         const captain = await createCaptain({

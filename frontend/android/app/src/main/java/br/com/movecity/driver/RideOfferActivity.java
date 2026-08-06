@@ -127,8 +127,25 @@ public class RideOfferActivity extends AppCompatActivity {
         }
 
         btnReject.setOnClickListener(v -> {
+            if (busy) return;
+            busy = true;
             stopAlertFeedback();
-            finish();
+            btnAccept.setEnabled(false);
+            btnReject.setEnabled(false);
+            statusView.setVisibility(View.VISIBLE);
+            statusView.setText("Recusando…");
+            final String rejectKind = kind;
+            final String rejectId = offerId;
+            executor.execute(() -> {
+                if (rejectId != null && !rejectId.isEmpty()) {
+                    RideOfferAcceptHelper.declineOffer(this, rejectKind, rejectId);
+                }
+                mainHandler.post(() -> {
+                    RideOfferNotifier.cancelNotification(this, rejectId);
+                    RideOfferNotifier.cancelLaunchAlarm(this, rejectId);
+                    finish();
+                });
+            });
         });
 
         btnAccept.setOnClickListener(v -> {
@@ -171,8 +188,8 @@ public class RideOfferActivity extends AppCompatActivity {
             }
         }, AUTO_DISMISS_MS);
 
-        RideOfferNotifier.cancelNotification(this);
-        RideOfferNotifier.cancelLaunchAlarm(this);
+        RideOfferNotifier.cancelNotification(this, offerId);
+        RideOfferNotifier.cancelLaunchAlarm(this, offerId);
     }
 
     private void startAlertFeedback() {

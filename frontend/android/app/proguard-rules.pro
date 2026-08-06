@@ -30,6 +30,11 @@
 -keepclassmembers class * implements androidx.datastore.preferences.protobuf.MessageLite { *; }
 -dontwarn androidx.datastore.**
 
+# EncryptedSharedPreferences / Tink
+-keep class androidx.security.crypto.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+
 # Cordova compat layer used by Capacitor
 -keep class org.apache.cordova.** { *; }
 -dontwarn org.apache.cordova.**

@@ -26,27 +26,43 @@ public class RideOfferActionReceiver extends BroadcastReceiver {
         if (kind == null || kind.isEmpty()) kind = RideOfferAcceptHelper.KIND_RIDE;
         boolean isParcel = RideOfferAcceptHelper.KIND_PARCEL.equals(kind);
 
-        if (ACTION_REJECT.equals(action)) {
-            RideOfferNotifier.cancelNotification(context);
-            RideOfferNotifier.cancelLaunchAlarm(context);
-            return;
-        }
-
         if (ACTION_OPEN.equals(action)) {
             RideOfferNotifier.openOfferActivity(context, intent);
             return;
         }
 
+        if (ACTION_REJECT.equals(action)) {
+            if (offerId == null || offerId.isEmpty()) {
+                RideOfferNotifier.cancelNotification(context, null);
+                RideOfferNotifier.cancelLaunchAlarm(context, null);
+                return;
+            }
+            final String kindFinal = kind;
+            final String offerFinal = offerId;
+            final PendingResult pending = goAsync();
+            Executors.newSingleThreadExecutor().execute(() -> {
+                RideOfferAcceptHelper.declineOffer(context, kindFinal, offerFinal);
+                Handler main = new Handler(Looper.getMainLooper());
+                main.post(() -> {
+                    RideOfferNotifier.cancelNotification(context, offerFinal);
+                    RideOfferNotifier.cancelLaunchAlarm(context, offerFinal);
+                    pending.finish();
+                });
+            });
+            return;
+        }
+
         if (!ACTION_ACCEPT.equals(action)) return;
         if (offerId == null || offerId.isEmpty()) {
-            RideOfferNotifier.cancelNotification(context);
+            RideOfferNotifier.cancelNotification(context, null);
             return;
         }
 
         final String kindFinal = kind;
+        final String offerFinal = offerId;
         final PendingResult pending = goAsync();
         Executors.newSingleThreadExecutor().execute(() -> {
-            RideOfferAcceptHelper.Result result = RideOfferAcceptHelper.acceptOffer(context, kindFinal, offerId);
+            RideOfferAcceptHelper.Result result = RideOfferAcceptHelper.acceptOffer(context, kindFinal, offerFinal);
             Handler main = new Handler(Looper.getMainLooper());
             main.post(() -> {
                 if (result.ok) {
@@ -59,8 +75,8 @@ public class RideOfferActionReceiver extends BroadcastReceiver {
                         Toast.LENGTH_LONG
                     ).show();
                 }
-                RideOfferNotifier.cancelNotification(context);
-                RideOfferNotifier.cancelLaunchAlarm(context);
+                RideOfferNotifier.cancelNotification(context, offerFinal);
+                RideOfferNotifier.cancelLaunchAlarm(context, offerFinal);
                 pending.finish();
             });
         });

@@ -8,6 +8,7 @@ import {
     openFullScreenIntentSettings,
     openOemAutostartSettings,
     openOemOtherPermissions,
+    requestBackgroundLocationPermission,
     shouldShowOemPermissionsCard,
 } from '@/shared/platform/driverPermissions.service'
 
@@ -80,6 +81,19 @@ export default function DriverOemPermissionsCard() {
                                 />
                             </li>
                         )}
+                        {status.hasBackgroundLocation === false && (
+                            <li>
+                                <ActionRow
+                                    label="Localização o tempo todo"
+                                    hint="Necessário para GPS com app minimizado / tela bloqueada"
+                                    onClick={async () => {
+                                        const r = await requestBackgroundLocationPermission()
+                                        if (!r.granted) await openDriverAppSettings()
+                                        await refresh()
+                                    }}
+                                />
+                            </li>
+                        )}
                         {status.isXiaomiFamily && (
                             <>
                                 <li>
@@ -113,8 +127,13 @@ export default function DriverOemPermissionsCard() {
                             onClick={async () => {
                                 const next = await getDriverPermissionStatus()
                                 setStatus(next)
-                                // Autostart/pop-up MIUI não são consultáveis — se FSI+bateria ok, fecha.
-                                if (next.canUseFullScreenIntent && next.ignoringBatteryOptimizations) {
+                                // Autostart/pop-up MIUI não são consultáveis — fecha se FSI+bateria+bg ok.
+                                const bgOk = next.hasBackgroundLocation !== false
+                                if (
+                                    next.canUseFullScreenIntent
+                                    && next.ignoringBatteryOptimizations
+                                    && bgOk
+                                ) {
                                     markOemPermissionsOnboardingSeen()
                                     setVisible(false)
                                 }

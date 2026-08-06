@@ -104,4 +104,17 @@ describe('pushTransport — contrato do payload com o FCM', () => {
         expect(msg.android).toEqual({ priority: 'high', ttl: 60000 });
         expect(msg.data.type).toBe('NEW_RIDE');
     });
+
+    it('NEW_RIDE/NEW_PARCEL forçam data-only mesmo sem dataOnly no payload', () => {
+        for (const type of ['NEW_RIDE', 'NEW_PARCEL']) {
+            const msg = pushTransport.buildFcmMessage({
+                title: 'Oferta',
+                message: 'Teste',
+                dataOnly: false,
+                data: { type, rideId: 'r1' },
+            });
+            expect(msg.notification).toBeUndefined();
+            expect(msg.data.type).toBe(type);
+        }
+    });
 });

@@ -89,6 +89,21 @@ export async function openOemOtherPermissions() {
     }
 }
 
+/** Android 10+: pede ACCESS_BACKGROUND_LOCATION (após foreground). */
+export async function requestBackgroundLocationPermission() {
+    if (!isNativePlatform()) return { granted: true, state: 'web' }
+    try {
+        const result = await NativeDriverPermissions.requestBackgroundLocation()
+        return {
+            granted: Boolean(result?.granted),
+            state: result?.state || (result?.granted ? 'granted' : 'denied'),
+        }
+    } catch (err) {
+        console.warn('[DriverPermissions] requestBackgroundLocation:', err?.message || err)
+        return { granted: false, state: 'error', message: err?.message }
+    }
+}
+
 /** Precisa mostrar o card? (nativo + ainda não dispensado + algo pendente ou Xiaomi). */
 export async function shouldShowOemPermissionsCard() {
     if (!isNativePlatform()) return false
@@ -96,6 +111,7 @@ export async function shouldShowOemPermissionsCard() {
     const status = await getDriverPermissionStatus()
     if (!status.canUseFullScreenIntent) return true
     if (!status.ignoringBatteryOptimizations) return true
+    if (status.hasBackgroundLocation === false) return true
     if (status.isXiaomiFamily) return true
     return false
 }

@@ -57,4 +57,14 @@ describe('driverAppVersion.service', () => {
   it('rejeita sha256 inválido', async () => {
     await expect(service.update({ sha256: 'abc' })).rejects.toThrow(/sha256/i);
   });
+
+  it('exige sha256 quando apkUrl está definido', async () => {
+    await expect(
+      service.update({
+        version: '1.6.0',
+        versionCode: 16,
+        apkUrl: 'https://cdn.example.com/driver.apk',
+      })
+    ).rejects.toThrow(/sha256/i);
+  });
 });

@@ -20,29 +20,34 @@ public class NativeRideOfferPlugin extends Plugin {
 
     @PluginMethod
     public void presentOffer(PluginCall call) {
-        JSObject data = call.getData();
-        if (data == null) {
-            call.reject("data obrigatória");
-            return;
-        }
-        Map<String, String> map = new HashMap<>();
-        Iterator<String> keys = data.keys();
-        while (keys.hasNext()) {
-            String key = keys.next();
-            Object value = data.get(key);
-            if (value != null && !JSObject.NULL.equals(value)) {
-                map.put(key, String.valueOf(value));
+        try {
+            JSObject data = call.getData();
+            if (data == null) {
+                call.reject("data obrigatória");
+                return;
             }
-        }
-        if (!map.containsKey("type")) {
-            String kind = map.get("kind");
-            if ("parcel".equalsIgnoreCase(kind)) {
-                map.put("type", "NEW_PARCEL");
-            } else {
-                map.put("type", "NEW_RIDE");
+            Map<String, String> map = new HashMap<>();
+            Iterator<String> keys = data.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                if (!data.has(key) || data.isNull(key)) continue;
+                Object value = data.get(key);
+                if (value != null) {
+                    map.put(key, String.valueOf(value));
+                }
             }
+            if (!map.containsKey("type")) {
+                String kind = map.get("kind");
+                if ("parcel".equalsIgnoreCase(kind)) {
+                    map.put("type", "NEW_PARCEL");
+                } else {
+                    map.put("type", "NEW_RIDE");
+                }
+            }
+            RideOfferNotifier.showFullScreenOffer(getContext(), map);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(e.getMessage() != null ? e.getMessage() : "presentOffer failed");
         }
-        RideOfferNotifier.showFullScreenOffer(getContext(), map);
-        call.resolve();
     }
 }

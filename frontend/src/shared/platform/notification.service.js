@@ -14,11 +14,12 @@ let deepLinkHandler = null
  * Sem isso, PushNotifications.register() lança FATAL no thread nativo e o SO
  * mata o app (não dá pra capturar com try/catch JS).
  *
- * Ative com VITE_NATIVE_PUSH_ENABLED=true em .env.driver.local depois de colocar
- * frontend/android/app/google-services.json.
+ * Default: LIGADO (release/driver). Desative só com VITE_NATIVE_PUSH_ENABLED=false
+ * em .env.driver.local quando estiver sem google-services.json.
  */
 function isNativePushConfigured() {
-    return String(import.meta.env.VITE_NATIVE_PUSH_ENABLED || '').toLowerCase() === 'true'
+    const raw = String(import.meta.env.VITE_NATIVE_PUSH_ENABLED ?? 'true').toLowerCase()
+    return raw !== 'false' && raw !== '0' && raw !== 'off'
 }
 
 /**

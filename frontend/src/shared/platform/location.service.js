@@ -145,6 +145,25 @@ export async function requestLocationPermission() {
     }
 }
 
+/**
+ * Passo 2 (Android 10+): “Permitir o tempo todo”.
+ * Só chama depois do foreground granted — requisito da plataforma.
+ */
+export async function requestBackgroundLocationPermission() {
+    if (!isNativePlatform()) return { granted: true, state: 'web' }
+    try {
+        const { requestBackgroundLocationPermission: requestBg } = await import(
+            '@/shared/platform/driverPermissions.service'
+        )
+        const result = await requestBg()
+        log('background permission', result?.state || result?.granted)
+        return result
+    } catch (err) {
+        log('background permission error', err?.message)
+        return { granted: false, state: 'error', message: err?.message }
+    }
+}
+
 /** Abre detalhes do app no Android (usuário pode ativar “Permitir o tempo todo”). */
 export async function openAppSettings() {
     if (!isNativePlatform()) return { opened: false }

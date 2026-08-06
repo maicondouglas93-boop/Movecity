@@ -231,6 +231,10 @@ export async function downloadAndInstall(remote, { onProgress } = {}) {
         throw new Error('Atualização nativa só no Android')
     }
     if (!remote?.apkUrl) throw new Error('URL do APK ausente')
+    const sha256 = String(remote.sha256 || '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+        throw new Error('SHA-256 do APK ausente ou inválido — instalação bloqueada')
+    }
 
     logUpdate('download iniciado', { version: remote.version, versionCode: remote.versionCode })
     const progressSub = onProgress ? addDownloadProgressListener(onProgress) : null
@@ -238,7 +242,7 @@ export async function downloadAndInstall(remote, { onProgress } = {}) {
     try {
         const result = await AppUpdate.downloadAndInstall({
             apkUrl: remote.apkUrl,
-            sha256: remote.sha256 || '',
+            sha256,
             fileSize: Number(remote.fileSize) || 0,
         })
 

@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Download + instalação de APK (distribuição fora da Play Store).
- * URL deve vir do backend confiável; valida HTTPS e SHA-256 opcional.
+ * URL deve vir do backend confiável; valida HTTPS e SHA-256 obrigatório.
  */
 @CapacitorPlugin(name = "AppUpdate")
 public class AppUpdatePlugin extends Plugin {
@@ -121,6 +121,11 @@ public class AppUpdatePlugin extends Plugin {
             call.reject("URL do APK deve usar HTTPS");
             return;
         }
+        String shaNormalized = expectedSha != null ? expectedSha.trim().toLowerCase() : "";
+        if (shaNormalized.isEmpty() || !shaNormalized.matches("^[a-f0-9]{64}$")) {
+            call.reject("SHA-256 do APK é obrigatório (64 hex)");
+            return;
+        }
         if (!downloading.compareAndSet(false, true)) {
             call.reject("Download já em andamento");
             return;
@@ -129,7 +134,7 @@ public class AppUpdatePlugin extends Plugin {
         call.setKeepAlive(true);
 
         final String urlFinal = apkUrl;
-        final String shaFinal = expectedSha != null ? expectedSha.trim().toLowerCase() : "";
+        final String shaFinal = shaNormalized;
         final long sizeFinal = expectedSize;
 
         executor.execute(() -> {
@@ -184,15 +189,13 @@ public class AppUpdatePlugin extends Plugin {
                     throw new Exception("Tamanho do APK não confere");
                 }
 
-                if (!shaFinal.isEmpty()) {
-                    String actual = sha256File(outFile);
-                    if (!shaFinal.equals(actual)) {
-                        //noinspection ResultOfMethodCallIgnored
-                        outFile.delete();
-                        throw new Exception("SHA-256 do APK não confere — instalação bloqueada");
-                    }
-                    Log.i(TAG, "hash validado");
+                String actual = sha256File(outFile);
+                if (!shaFinal.equals(actual)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    outFile.delete();
+                    throw new Exception("SHA-256 do APK não confere — instalação bloqueada");
                 }
+                Log.i(TAG, "hash validado");
 
                 notifyProgress(call, 100, outFile.length(), outFile.length());
 

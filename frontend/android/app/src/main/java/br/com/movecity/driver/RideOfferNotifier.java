@@ -21,16 +21,27 @@ import java.util.Map;
 /**
  * Notificação high-priority + fullScreenIntent + AlarmClock (bypass MIUI BAL)
  * → RideOfferActivity. Ações Aceitar/Recusar na bandeja como fallback.
- * Suporta NEW_RIDE e NEW_PARCEL.
+ * Suporta NEW_RIDE e NEW_PARCEL. ID de notificação por oferta (não sobrescreve).
  */
 public final class RideOfferNotifier {
     // v3: som de ringtone no canal (canais Android não atualizam sound depois de criados).
     public static final String CHANNEL_ID = "ride_offers_v3";
-    private static final int NOTIFICATION_ID = 22001;
-    private static final int ALARM_REQUEST_CODE = 22002;
+    /** ID legado (pré-fila) — cancelado junto para limpar ofertas antigas. */
+    private static final int LEGACY_NOTIFICATION_ID = 22001;
     private static final String TAG = "RideOfferNotifier";
 
     private RideOfferNotifier() {}
+
+    /** Notification ID estável e positivo por oferta. */
+    public static int notificationIdFor(String offerId) {
+        if (offerId == null || offerId.isEmpty()) return LEGACY_NOTIFICATION_ID;
+        return 0x71000000 | (offerId.hashCode() & 0x00FFFFFF);
+    }
+
+    public static int alarmRequestCodeFor(String offerId) {
+        if (offerId == null || offerId.isEmpty()) return 22002;
+        return 0x72000000 | (offerId.hashCode() & 0x00FFFFFF);
+    }
 
     public static void ensureChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
@@ -48,7 +59,6 @@ public final class RideOfferNotifier {
         AudioAttributes audio = new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
             .build();
-        // Ringtone (não só notification) — reforça alerta quando a Activity ainda não abriu.
         Uri ringtone = android.media.RingtoneManager.getDefaultUri(
             android.media.RingtoneManager.TYPE_RINGTONE
         );
@@ -93,6 +103,7 @@ public final class RideOfferNotifier {
         );
         if (offerId == null || offerId.isEmpty()) return;
 
+        int notificationId = notificationIdFor(offerId);
         Intent fullScreen = buildOfferIntent(context, data, kind, offerId);
         PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
 
@@ -128,10 +139,10 @@ public final class RideOfferNotifier {
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
-            nm.notify(NOTIFICATION_ID, builder.build());
+            nm.notify(notificationId, builder.build());
         }
 
-        scheduleLaunchAlarm(context, fullScreen);
+        scheduleLaunchAlarm(context, fullScreen, offerId);
         try {
             context.startActivity(fullScreen);
         } catch (Exception e) {
@@ -147,7 +158,8 @@ public final class RideOfferNotifier {
         if (source != null && source.getExtras() != null) {
             fullScreen.putExtras(source.getExtras());
         }
-        scheduleLaunchAlarm(context, fullScreen);
+        String offerId = source != null ? source.getStringExtra(RideOfferActivity.EXTRA_RIDE_ID) : null;
+        scheduleLaunchAlarm(context, fullScreen, offerId);
         try {
             context.startActivity(fullScreen);
         } catch (Exception e) {
@@ -156,25 +168,37 @@ public final class RideOfferNotifier {
     }
 
     public static void cancelNotification(Context context) {
+        cancelNotification(context, null);
+    }
+
+    public static void cancelNotification(Context context, String offerId) {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) nm.cancel(NOTIFICATION_ID);
+        if (nm == null) return;
+        if (offerId != null && !offerId.isEmpty()) {
+            nm.cancel(notificationIdFor(offerId));
+        }
+        nm.cancel(LEGACY_NOTIFICATION_ID);
     }
 
     public static void cancelLaunchAlarm(Context context) {
+        cancelLaunchAlarm(context, null);
+    }
+
+    public static void cancelLaunchAlarm(Context context, String offerId) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
         PendingIntent pi = activityPi(
             context,
-            ALARM_REQUEST_CODE,
+            alarmRequestCodeFor(offerId),
             new Intent(context, RideOfferActivity.class)
         );
         am.cancel(pi);
     }
 
-    private static void scheduleLaunchAlarm(Context context, Intent fullScreen) {
+    private static void scheduleLaunchAlarm(Context context, Intent fullScreen, String offerId) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
-        PendingIntent pi = activityPi(context, ALARM_REQUEST_CODE, fullScreen);
+        PendingIntent pi = activityPi(context, alarmRequestCodeFor(offerId), fullScreen);
         long when = System.currentTimeMillis() + 300L;
         try {
             am.setAlarmClock(new AlarmManager.AlarmClockInfo(when, pi), pi);

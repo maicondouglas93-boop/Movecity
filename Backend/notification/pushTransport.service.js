@@ -85,8 +85,14 @@ const buildFcmMessage = (payload) => {
         message: payload.message,
     });
 
+    // Ofertas de corrida/encomenda NUNCA podem levar bloco `notification`:
+    // o SO engole o payload e o MoveCityMessagingService não abre full-screen.
+    const offerType = data?.type;
+    const forceDataOnly = offerType === 'NEW_RIDE' || offerType === 'NEW_PARCEL';
+    const dataOnly = Boolean(payload.dataOnly) || forceDataOnly;
+
     return {
-        ...(payload.dataOnly ? {} : {
+        ...(dataOnly ? {} : {
             notification: {
                 title: payload.title,
                 body: payload.message,

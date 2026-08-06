@@ -277,6 +277,19 @@ module.exports.acceptRide = async (req, res) => {
     return performAcceptRide(rideId, req.captain, res);
 }
 
+module.exports.declineRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    await rideService.declineRide({
+        rideId: req.params.id,
+        captain: req.captain,
+    });
+    return res.status(200).json({ ok: true });
+}
+
 module.exports.createPresentialRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

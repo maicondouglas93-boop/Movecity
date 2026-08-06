@@ -91,6 +91,8 @@ dependencies {
     // aparelho físico: NoClassDefFoundError PreferenceDataStoreDelegateKt.
     implementation 'androidx.datastore:datastore-preferences:1.1.1'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.0.21'
+    // Sessão nativa (tokens) — EncryptedSharedPreferences
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 }
 
 apply from: 'capacitor.build.gradle'

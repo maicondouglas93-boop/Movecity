@@ -13,7 +13,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Aceite nativo de corrida/encomenda com retry via /captains/refresh se 401.
+ * Aceite/recusa nativos de corrida/encomenda com retry via /captains/refresh se 401.
  */
 public final class RideOfferAcceptHelper {
     public static final String KIND_RIDE = "ride";
@@ -35,12 +35,24 @@ public final class RideOfferAcceptHelper {
     }
 
     public static Result acceptOffer(Context context, String kind, String offerId) {
+        return withAuthRetry(context, (apiBase, token) -> postOfferAction(apiBase, kind, offerId, token, true));
+    }
+
+    public static Result declineOffer(Context context, String kind, String offerId) {
+        return withAuthRetry(context, (apiBase, token) -> postOfferAction(apiBase, kind, offerId, token, false));
+    }
+
+    private interface AuthorizedAction {
+        Result run(String apiBase, String token);
+    }
+
+    private static Result withAuthRetry(Context context, AuthorizedAction action) {
         String apiBase = NativeSessionStore.getApiBase(context);
         String token = NativeSessionStore.getToken(context);
         if (apiBase == null || apiBase.isEmpty() || token == null || token.isEmpty()) {
             return Result.fail("Faça login novamente no app");
         }
-        Result first = postAccept(apiBase, kind, offerId, token);
+        Result first = action.run(apiBase, token);
         if (first.ok || (first.message != null && !first.message.contains("Sessão expirada"))) {
             return first;
         }
@@ -48,21 +60,28 @@ public final class RideOfferAcceptHelper {
         if (refreshed == null) {
             return Result.fail("Sessão expirada. Abra o app e entre de novo.");
         }
-        return postAccept(apiBase, kind, offerId, refreshed);
+        return action.run(apiBase, refreshed);
     }
 
     /** @deprecated use acceptOffer */
     public static Result acceptRide(String apiBase, String rideId, String token) {
-        return postAccept(apiBase, KIND_RIDE, rideId, token);
+        return postOfferAction(apiBase, KIND_RIDE, rideId, token, true);
     }
 
-    private static Result postAccept(String apiBase, String kind, String offerId, String token) {
+    private static Result postOfferAction(
+        String apiBase,
+        String kind,
+        String offerId,
+        String token,
+        boolean accept
+    ) {
         HttpURLConnection conn = null;
         try {
             String base = apiBase.endsWith("/") ? apiBase.substring(0, apiBase.length() - 1) : apiBase;
+            String action = accept ? "accept" : "decline";
             String path = KIND_PARCEL.equals(kind)
-                ? "/parcels/" + offerId + "/accept"
-                : "/rides/" + offerId + "/accept";
+                ? "/parcels/" + offerId + "/" + action
+                : "/rides/" + offerId + "/" + action;
             URL url = new URL(base + path);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -85,7 +104,7 @@ public final class RideOfferAcceptHelper {
             }
             String msg = parseMessage(responseBody);
             if (code == 401) msg = "Sessão expirada. Abra o app e entre de novo.";
-            if (code == 409) {
+            if (accept && code == 409) {
                 msg = msg != null ? msg : (KIND_PARCEL.equals(kind)
                     ? "Encomenda já foi aceita."
                     : "Corrida já foi aceita.");

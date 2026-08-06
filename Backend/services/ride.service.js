@@ -835,6 +835,12 @@ module.exports.estimatePresentialFare = async ({ captain, destination, clientLat
 // corrida recebiam 200 os dois, e o segundo aceite conseguia rebaixar até uma corrida
 // já `finished`/`cancelled` de volta pra `accepted`. O filtro `status:'requested'`
 // abaixo é a garantia real: só um `findOneAndUpdate` ganha a corrida.
+/** ACK de recusa da oferta — não altera status da corrida (igual parcel.declineParcel). */
+module.exports.declineRide = async ({ rideId, captain }) => {
+    console.log(`[RIDE] Captain ${captain?._id} declined offer ${rideId} (ACK only)`);
+    return { ok: true };
+};
+
 module.exports.acceptRideAtomic = async ({
     rideId, captain
 }) => {

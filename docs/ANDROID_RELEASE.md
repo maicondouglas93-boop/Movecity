@@ -141,10 +141,18 @@ Após a GitHub Release:
 
 1. Abra a Release e copie a URL do APK (ou use `release-metadata.json`).
 2. Painel Admin → **Atualização Motorista**.
-3. Preencha `version`, `versionCode`, `apkUrl`, `sha256`, notas, `mandatory` / versão mínima.
+3. Preencha `version`, `versionCode`, `apkUrl`, **`sha256` (obrigatório)**, notas, `mandatory` / versão mínima.
 4. Salve.
 
-Os motoristas passam a ver a atualização via `GET /api/app-version/driver`.
+Os motoristas passam a ver a atualização via `GET /api/app-version/driver`.  
+O APK **recusa instalar** sem SHA-256 válido (64 hex).
+
+## Hardening do APK (release)
+
+- Sessão nativa em EncryptedSharedPreferences; `allowBackup=false`
+- Cleartext HTTP desligado no release (`androidScheme: https`)
+- Push nativo obrigatório: `scripts/ci/check-native-push-config.mjs` + `VITE_NATIVE_PUSH_ENABLED=true`
+- Configure secrets `VITE_BASE_URL` / `VITE_FIREBASE_*` no GitHub Actions para o `cap:sync` de release
 
 ## Stack do workflow de Release
 

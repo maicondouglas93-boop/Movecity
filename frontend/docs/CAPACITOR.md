@@ -17,6 +17,8 @@ App Android do motorista reutiliza o mesmo React do build `driver`. A Web/PWA co
 - **appId:** `br.com.movecity.driver`
 - **webDir:** `dist-driver`
 - **Arquivo:** `capacitor.config.json`
+- **androidScheme:** `https` (cleartext só no build `debug` / hosts de emulador)
+- **Push nativo:** `VITE_NATIVE_PUSH_ENABLED=true` em `.env.driver` (default ligado; CI de release valida)
 
 ## Plugins (e justificativa)
 
@@ -54,9 +56,9 @@ Causa comum: o APK foi gerado com `VITE_BASE_URL=http://localhost:3000`. No emul
    ```
    Depois Run de novo no Android Studio.
 4. CORS do backend aceita origem Capacitor (`https://localhost`).
-5. Cleartext HTTP liberado no `AndroidManifest` + `network_security_config.xml` (dev).
+5. Build **debug** permite cleartext (`src/debug/res/xml/network_security_config.xml`). Release é HTTPS-only.
 
-**Dispositivo físico:** use o IP da LAN do PC, ex. `VITE_BASE_URL=http://192.168.x.x:3000` (mesmo Wi‑Fi), não `10.0.2.2`.
+**Dispositivo físico (dev):** use HTTPS no backend ou um túnel; release não aceita HTTP de LAN. Emulador: `VITE_BASE_URL=http://10.0.2.2:3000` no build debug.
 
 ## Pendências manuais (não mascarar)
 

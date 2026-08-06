@@ -84,6 +84,16 @@ module.exports.update = async (payload = {}) => {
             throw err;
         }
     }
+    // APK publicado exige SHA-256 (update in-app bloqueia sem hash).
+    const effectiveApkUrl = next.apkUrl !== undefined ? next.apkUrl : doc.apkUrl;
+    const effectiveSha = next.sha256 !== undefined ? next.sha256 : doc.sha256;
+    if (effectiveApkUrl) {
+        if (!effectiveSha || !/^[a-f0-9]{64}$/.test(String(effectiveSha))) {
+            const err = new Error('sha256 é obrigatório quando apkUrl está definido');
+            err.statusCode = 400;
+            throw err;
+        }
+    }
     if (next.releaseNotes !== undefined) {
         next.releaseNotes = Array.isArray(next.releaseNotes)
             ? next.releaseNotes.map((n) => String(n).trim()).filter(Boolean)

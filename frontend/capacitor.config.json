@@ -3,8 +3,8 @@
   "appName": "MoveCity Motorista",
   "webDir": "dist-driver",
   "server": {
-    "androidScheme": "http",
-    "cleartext": true
+    "androidScheme": "https",
+    "cleartext": false
   },
   "plugins": {
     "CapacitorHttp": {

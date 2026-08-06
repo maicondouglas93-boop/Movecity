@@ -8,6 +8,7 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import api from '@/shared/services/axios'
 import {
     requestLocationPermission,
+    requestBackgroundLocationPermission,
     syncTrackingLifecycle,
 } from '@/shared/platform/location.service'
 import { openDriverAppSettings } from '@/shared/platform/driverPermissions.service'
@@ -87,6 +88,15 @@ const CaptainDetails = ({ children = null }) => {
                 }
                 return
             }
+            if (isNativePlatform()) {
+                const bg = await requestBackgroundLocationPermission()
+                if (!bg.granted && bg.state !== 'web') {
+                    addToast(
+                        'Para GPS com tela bloqueada, escolha “Permitir o tempo todo” na próxima tela ou nas configurações.',
+                        'info'
+                    )
+                }
+            }
         }
 
         setLoadingToggle(true)
@@ -106,12 +116,6 @@ const CaptainDetails = ({ children = null }) => {
                 hasActiveTrip: active,
                 serviceKind: resolveServiceKind({ captainRide, captainParcel }) || 'ride',
             })
-            if (updated.isOnline && isNativePlatform()) {
-                addToast(
-                    'Para GPS com tela bloqueada, use “Permitir o tempo todo” nas configurações de localização.',
-                    'info'
-                )
-            }
         } catch (error) {
             console.error('Error toggling online status:', error)
             addToast(error.response?.data?.message || 'Erro ao alterar status online', 'error')

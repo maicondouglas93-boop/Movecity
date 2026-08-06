@@ -37,18 +37,18 @@ export default function Tariffs() {
     queryFn: fetchVehicleCategories
   });
 
-  if (loadingGlobal || loadingCategories) return <div className="text-text-muted">Carregando motor de precificação...</div>;
+  if (loadingGlobal || loadingCategories) return <div className="text-text-muted">Carregando motor de precifica��o...</div>;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Motor de Precificação Avançado</h1>
-          <p className="text-text-muted mt-1">Gerencie taxas, realize agendamentos e simule o faturamento.</p>
+          <h1 className="text-2xl font-bold tracking-tight">Motor de Precifica��o Unificado</h1>
+          <p className="text-text-muted mt-1">Gerencie a tarifa �nica para todos os servi�os (Motos, Carros, Encomendas).</p>
         </div>
         
         {/* Test Mode Toggle */}
-        <label className={`flex items-center gap-2 px-4 py-2 rounded-full cursor-pointer transition-colors border ${testMode ? 'bg-warning/20 border-warning text-warning' : 'bg-surface border-border text-text-muted hover:text-text'}`}>
+        <label className={lex items-center gap-2 px-4 py-2 rounded-full cursor-pointer transition-colors border }>
           <Beaker className="w-4 h-4" />
           <span className="text-sm font-medium">Modo Teste</span>
           <input 
@@ -67,8 +67,7 @@ export default function Tariffs() {
           onChange={(e) => setActiveTab(e.target.value)}
           className="w-full bg-surface border border-border rounded-lg px-4 py-3 text-text font-medium outline-none"
         >
-          <option value="general">Configurações Globais</option>
-          <option value="comparison">Tabela Comparativa</option>
+          <option value="general">Tarifa Unificada Global</option>
           {categories?.map(cat => (
             <option key={cat._id} value={cat._id}>{cat.displayName}</option>
           ))}
@@ -78,21 +77,15 @@ export default function Tariffs() {
       <div className="hidden md:flex border-b border-border overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveTab('general')}
-          className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'general' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
+          className={px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 }
         >
-          Globais
-        </button>
-        <button
-          onClick={() => setActiveTab('comparison')}
-          className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'comparison' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
-        >
-          Comparativo
+          Tarifa Unificada Global
         </button>
         {categories?.map(cat => (
           <button
             key={cat._id}
             onClick={() => setActiveTab(cat._id)}
-            className={`px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 flex items-center gap-2 ${activeTab === cat._id ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}
+            className={px-6 py-3 font-medium text-sm whitespace-nowrap transition-colors border-b-2 flex items-center gap-2 }
           >
             {cat.displayName}
             {!cat.isActive && <span className="w-2 h-2 rounded-full bg-danger"></span>}
@@ -123,11 +116,7 @@ export default function Tariffs() {
           <GlobalSettingsCard settings={globalSettings} queryClient={queryClient} testMode={testMode} />
         )}
 
-        {activeTab === 'comparison' && categories && (
-          <TariffComparisonTable categories={categories} />
-        )}
-
-        {activeTab !== 'general' && activeTab !== 'comparison' && categories && (
+        {activeTab !== 'general' && categories && (
           categories.find(c => c._id === activeTab) ? (
             <div className="mt-6">
               <CategorySettingsCard
@@ -135,9 +124,7 @@ export default function Tariffs() {
                 category={categories.find(c => c._id === activeTab)}
                 queryClient={queryClient}
                 testMode={testMode}
-                platformCommission={
-                  globalSettings?.platformCommissions?.ride ?? globalSettings?.platformCommission
-                }
+                platformCommission={globalSettings?.platformCommission}
               />
             </div>
           ) : (
@@ -151,527 +138,262 @@ export default function Tariffs() {
 
 function GlobalSettingsCard({ settings, queryClient, testMode }) {
   const toast = useToast();
-  const legacyCommission = settings.platformCommission ?? 20;
-  const commissions = settings.platformCommissions || {
-    ride: legacyCommission,
-    presential: legacyCommission,
-    parcel: legacyCommission,
-  };
   const optionalPrices = settings.optionalPrices || {};
-  const { register, handleSubmit, reset, formState: { isDirty } } = useForm({
+  
+  const { register, handleSubmit, reset, watch, formState: { isDirty } } = useForm({
     defaultValues: {
-      cancellationFee: settings.cancellationFee,
-      perMinuteWaitFee: settings.perMinuteWaitFee,
-      maxFreeWaitTime: settings.maxFreeWaitTime,
-      dynamicPricingStatus: settings.dynamicPricingStatus,
-      currentMultiplier: settings.currentMultiplier,
-      manualRainFee: settings.manualRainFee,
-      showAsEstimate: settings.showAsEstimate,
+      baseFare: settings.baseFare ?? 5.0,
+      perKm: settings.perKm ?? 2.0,
+      perMinute: settings.perMinute ?? 0.5,
+      minimumFare: settings.minimumFare ?? 7.0,
+      platformCommission: settings.platformCommission ?? 20,
+      surcharges: {
+        waiting: {
+            active: settings.surcharges?.waiting?.active ?? true,
+            freeMinutes: settings.surcharges?.waiting?.freeMinutes ?? 5,
+            valuePerMinute: settings.surcharges?.waiting?.valuePerMinute ?? 0.5,
+        },
+        extraStops: {
+            active: settings.surcharges?.extraStops?.active ?? false,
+            valuePerStop: settings.surcharges?.extraStops?.valuePerStop ?? 3.0,
+        },
+        cancellation: {
+            active: settings.surcharges?.cancellation?.active ?? true,
+            value: settings.surcharges?.cancellation?.value ?? 5.0,
+        }
+      },
       optionalPrices: {
         porta_malas: optionalPrices.porta_malas ?? 0,
         aceita_animais: optionalPrices.aceita_animais ?? 3,
         aceita_encomendas: optionalPrices.aceita_encomendas ?? 5,
         adaptado_cadeirante: optionalPrices.adaptado_cadeirante ?? 0,
         disposicao_passageiro: optionalPrices.disposicao_passageiro ?? 15,
-      },
-      platformCommissions: {
-        ride: commissions.ride ?? legacyCommission,
-        presential: commissions.presential ?? legacyCommission,
-        parcel: commissions.parcel ?? legacyCommission,
-      },
-      cardFeePercent: settings.cardFeePercent,
-      cardFeeFixed: settings.cardFeeFixed
+      }
     }
   });
+
+  const liveValues = watch();
 
   const updateMutation = useMutation({
     mutationFn: async (data) => {
       const payload = {
         ...data,
-        platformCommissions: {
-          ride: Number(data.platformCommissions?.ride),
-          presential: Number(data.platformCommissions?.presential),
-          parcel: Number(data.platformCommissions?.parcel),
-        },
-        // Legado sincronizado com corrida app.
-        platformCommission: Number(data.platformCommissions?.ride),
       };
       const res = await api.put('/admin/settings/tariffs', payload);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
-      toast.success('Configurações globais atualizadas com sucesso!');
+      toast.success('Configura��es globais unificadas salvas com sucesso!');
     },
     onError: (err) => {
-      // Bloco E (2026-08-02, achado C1): 409 = outro admin salvou entre o carregamento
-      // desta tela e este clique — recarrega os dados em cache (não o form em edição,
-      // pra não descartar o que o admin estava digitando sem avisar) e explica o motivo.
       if (err.response?.status === 409) {
         queryClient.invalidateQueries({ queryKey: ['globalTariffs'] });
       }
-      toast.error(err.response?.data?.message || 'Erro ao salvar configurações globais — verifique se você tem permissão de super_admin');
+      toast.error(err.response?.data?.message || 'Erro ao salvar configura��es');
     }
   });
 
   return (
-    <form
-      onSubmit={handleSubmit((data) => updateMutation.mutate({ ...data, __tariffVersion: settings.__tariffVersion, __globalSettingVersion: settings.__globalSettingVersion }))}
-      className="bg-surface rounded-xl border border-border overflow-hidden"
-    >
-      <div className="bg-background/50 border-b border-border p-4">
-        <h3 className="font-semibold text-lg">Taxas e Regras Globais</h3>
+    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="lg:col-span-1 xl:col-span-2 space-y-6">
+        <form
+          onSubmit={handleSubmit((data) => updateMutation.mutate({ ...data, __tariffVersion: settings.__tariffVersion }))}
+          className="bg-surface rounded-xl border border-border overflow-hidden"
+        >
+          <div className="bg-background/50 border-b border-border p-4">
+            <h3 className="font-semibold text-lg">Tarifa Unificada Global</h3>
+            <p className="text-sm text-text-muted mt-1">Essa tabela se aplica a TODOS os servi�os: Corridas de Moto, Carro, Presenciais e Encomendas.</p>
+          </div>
+          
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Base (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('baseFare', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Por Km (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('perKm', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Por Minuto (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('perMinute', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa M�nima (R$)</label>
+                <input type="number" step="0.01" min="0" {...register('minimumFare', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Comiss�o da Plataforma (%)</label>
+              <input type="number" step="0.1" min="0" max="100" {...register('platformCommission', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cancelamento (R$)</label>
+              <input type="number" step="0.01" min="0" {...register('surcharges.cancellation.value', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+            </div>
+
+            <div className="md:col-span-2 border-t border-border pt-4">
+              <h4 className="font-medium text-text mb-3">Regras de Espera</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-muted mb-1">Minutos Gr�tis</label>
+                  <input type="number" min="0" {...register('surcharges.waiting.freeMinutes', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-muted mb-1">R$ por Minuto Excedente</label>
+                  <input type="number" step="0.01" min="0" {...register('surcharges.waiting.valuePerMinute', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 space-y-3 pt-4 border-t border-border">
+              <div>
+                <p className="text-sm font-semibold text-text">Pre�os dos Opcionais (R$)</p>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-muted mb-1">Porta-malas</label>
+                  <input type="number" step="0.01" min="0" {...register('optionalPrices.porta_malas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-muted mb-1">Animais</label>
+                  <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_animais', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-muted mb-1">Encomendas</label>
+                  <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_encomendas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-background/50 border-t border-border p-4 flex justify-end gap-3">
+            <button type="submit" disabled={!isDirty || updateMutation.isPending || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+              <Save className="w-4 h-4" />
+              {updateMutation.isPending ? 'Salvando...' : 'Salvar Altera��es'}
+            </button>
+          </div>
+        </form>
       </div>
-      
-      <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cancelamento (R$)</label>
-          <input type="number" step="0.01" min="0" {...register('cancellationFee')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Tempo de Espera Grátis (segundos)</label>
-          <input type="number" min="0" {...register('maxFreeWaitTime')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Taxa Extra de Espera (R$/min)</label>
-          <input type="number" step="0.01" min="0" {...register('perMinuteWaitFee')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div className="md:col-span-2 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-text">Preços dos opcionais (R$)</p>
-            <p className="text-xs text-text-muted mt-0.5">
-              Congelados no pedido da corrida. Alterar aqui não muda corridas já criadas.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Porta-malas grande</label>
-              <input type="number" step="0.01" min="0" {...register('optionalPrices.porta_malas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Aceita animais</label>
-              <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_animais', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Aceita encomendas</label>
-              <input type="number" step="0.01" min="0" {...register('optionalPrices.aceita_encomendas', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Adaptado cadeirante</label>
-              <input type="number" step="0.01" min="0" {...register('optionalPrices.adaptado_cadeirante', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">À disposição do passageiro</label>
-              <input type="number" step="0.01" min="0" {...register('optionalPrices.disposicao_passageiro', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Status Dinâmico Global</label>
-          {/* Bloco H (2026-08-02, achado F12): "Automático" foi removido daqui — o
-              backend trata 'auto' exatamente igual a 'manual' hoje (nenhum cálculo de
-              demanda existe). Deixar a opção no seletor prometeria algo que não existe. */}
-          <select {...register('dynamicPricingStatus')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
-            <option value="off">Desligado</option>
-            <option value="manual">Manual</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador Global</label>
-          <input type="number" step="0.1" min="1" {...register('currentMultiplier')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div className="md:col-span-2 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-text">Comissão da Plataforma (%)</p>
-            <p className="text-xs text-text-muted mt-0.5">
-              Percentuais independentes por tipo de serviço. O simulador de categoria usa a % de corrida (app).
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Corrida (app)</label>
-              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.ride', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Corrida presencial</label>
-              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.presential', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Encomendas</label>
-              <input type="number" step="0.1" min="0" max="100" {...register('platformCommissions.parcel', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cartão (%)</label>
-          <input type="number" step="0.01" min="0" {...register('cardFeePercent')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Taxa de Cartão Fixa (R$)</label>
-          <input type="number" step="0.01" min="0" {...register('cardFeeFixed')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-        </div>
-        <div className="flex items-center mt-6">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" {...register('manualRainFee')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
-            <span className="text-sm font-medium text-text">Ativar Taxa de Chuva Global</span>
-          </label>
-        </div>
-        {/* Bloco H (2026-08-02): antes deste bloco, este campo nem tinha controle na
-            UI — era salvo só se enviado manualmente por API, e nada lia o valor. */}
-        <div className="flex items-center mt-6">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" {...register('showAsEstimate')} className="w-5 h-5 rounded border-border text-primary focus:ring-primary bg-background" />
-            <span className="text-sm font-medium text-text">Exibir Valor como Estimativa ao Passageiro</span>
-          </label>
-        </div>
+
+      <div className="lg:col-span-1 xl:col-span-1">
+        <TariffAdvancedSimulator values={liveValues} platformCommission={liveValues.platformCommission} />
       </div>
-      
-      <div className="bg-background/50 border-t border-border p-4 flex justify-end gap-3">
-        <button type="button" onClick={() => reset()} disabled={!isDirty} className="flex items-center gap-2 text-text-muted hover:text-text px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
-          <RotateCcw className="w-4 h-4" />
-          Restaurar
-        </button>
-        <button type="submit" disabled={!isDirty || updateMutation.isPending || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
-          <Save className="w-4 h-4" />
-          {updateMutation.isPending ? 'Salvando...' : 'Salvar Alterações'}
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }
 
-function CategorySettingsCard({ category, queryClient, testMode, platformCommission }) {
+function CategorySettingsCard({ category, queryClient, testMode }) {
   const toast = useToast();
   const confirm = useConfirm();
-  const [schedulerOpen, setSchedulerOpen] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
 
-  const { register, handleSubmit, watch, reset, getValues, formState: { isDirty } } = useForm({
+  const { register, handleSubmit, watch, getValues, formState: { isDirty } } = useForm({
     defaultValues: {
       displayName: category.displayName,
       description: category.description || '',
       capacity: category.capacity ?? 4,
       iconKey: category.iconKey || 'car',
-      baseFare: category.baseFare,
-      perKmRate: category.perKmRate,
-      perMinuteRate: category.perMinuteRate,
-      minFare: category.minFare,
-      dynamicMultiplier: category.dynamicMultiplier || 1.0,
-      rainFeeMultiplier: category.rainFeeMultiplier || 1.0,
       isActive: category.isActive
     }
   });
   
   const isActive = watch('isActive');
-  const liveValues = watch();
 
   const updateMutation = useMutation({
     mutationFn: async (data) => {
-      const res = await api.put(`/admin/vehicle-categories/${category._id}/tariffs`, data);
+      const res = await api.put(/admin/vehicle-categories/ + category._id + /tariffs, data);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
-      queryClient.invalidateQueries({ queryKey: ['tariffHistory'] });
-      toast.success(`Tarifas da categoria ${category.displayName} atualizadas!`);
-      setPreviewOpen(false);
-      reset(getValues()); // resets isDirty state
+      toast.success(Categoria  + category.displayName +  atualizada!);
     },
     onError: (err) => {
-      // Bloco E (2026-08-02, achado C1): mesmo raciocínio de GlobalSettingsCard — em
-      // conflito de versão, atualiza o cache (não o form aberto) e explica o motivo.
-      if (err.response?.status === 409) {
-        queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
-      }
-      toast.error(err.response?.data?.message || 'Erro ao salvar tarifas — verifique se você tem permissão de super_admin');
+      toast.error(err.response?.data?.message || 'Erro ao salvar categoria');
     }
   });
 
-  const duplicateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.post(`/admin/vehicle-categories/${category._id}/duplicate`);
-      return res.data;
-    },
-    onSuccess: (newCat) => {
-      queryClient.invalidateQueries({ queryKey: ['vehicleCategories'] });
-      toast.success(`Categoria duplicada como: ${newCat.displayName}`);
-    },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao duplicar categoria')
-  });
-
-  const onPreviewSubmit = (e) => {
-    e.preventDefault();
-    setPreviewOpen(true);
-  };
-
   return (
-    <>
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 xl:col-span-2 space-y-6">
-          <form onSubmit={onPreviewSubmit} className="bg-surface rounded-xl border border-border overflow-hidden flex flex-col">
-            <div className="bg-background/50 border-b border-border p-4 flex flex-wrap gap-4 justify-between items-center">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-lg">{category.displayName}</h3>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (await confirm(`Tem certeza que deseja duplicar a categoria ${category.displayName}?`)) {
-                      duplicateMutation.mutate();
-                    }
-                  }}
-                  disabled={duplicateMutation.isPending}
-                  title="Duplicar Categoria"
-                  className="p-1.5 bg-background border border-border rounded-lg text-text-muted hover:text-text transition-colors disabled:opacity-50"
-                >
-                  <Copy className="w-4 h-4" />
-                </button>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer bg-background border border-border px-3 py-1.5 rounded-full">
-                <span className="text-sm font-medium">{isActive ? 'Ativo' : 'Inativo'}</span>
-                <input type="checkbox" {...register('isActive')} className="hidden" />
-                <div className={`w-8 h-4 rounded-full transition-colors relative ${isActive ? 'bg-primary' : 'bg-border'}`}>
-                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-surface transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                </div>
-              </label>
+    <div className="max-w-2xl">
+      <form onSubmit={handleSubmit((data) => updateMutation.mutate(data))} className="bg-surface rounded-xl border border-border overflow-hidden flex flex-col">
+        <div className="bg-background/50 border-b border-border p-4 flex flex-wrap gap-4 justify-between items-center">
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold text-lg">{category.displayName}</h3>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer bg-background border border-border px-3 py-1.5 rounded-full">
+            <span className="text-sm font-medium">{isActive ? 'Ativo' : 'Inativo'}</span>
+            <input type="checkbox" {...register('isActive')} className="hidden" />
+            <div className={w-8 h-4 rounded-full transition-colors relative }>
+              <div className={bsolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-surface transition-transform }></div>
             </div>
-            
-            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 border-b border-border">
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição (passageiro vê este nome)</label>
-                <input type="text" {...register('displayName', { required: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Lotação (passageiros)</label>
-                <input type="number" step="1" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-text-muted mb-1">Descrição (subtítulo exibido ao passageiro)</label>
-                <input type="text" {...register('description')} placeholder="Ex: Viagens diárias econômicas" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Ícone do Veículo</label>
-                <select {...register('iconKey')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
-                  <option value="car">Carro</option>
-                  <option value="moto">Moto</option>
-                  <option value="auto">Auto/TukTuk</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1">
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Base (R$)</label>
-                <input type="number" step="0.01" min="0" {...register('baseFare', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Preço por Km (R$)</label>
-                <input type="number" step="0.01" min="0" {...register('perKmRate', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Preço por Minuto (R$)</label>
-                <input type="number" step="0.01" min="0" {...register('perMinuteRate', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Tarifa Mínima (R$)</label>
-                <input type="number" step="0.01" min="0" {...register('minFare', { valueAsNumber: true, min: 0 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador de Demanda</label>
-                <input type="number" step="0.1" min="1" {...register('dynamicMultiplier', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Multiplicador de Chuva</label>
-                <input type="number" step="0.1" min="1" {...register('rainFeeMultiplier', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-              </div>
-            </div>
-            
-            <div className="bg-background/50 border-t border-border p-4 flex flex-wrap gap-3 justify-end items-center mt-auto">
-              <button 
-                type="button" 
-                onClick={() => reset()} 
-                disabled={!isDirty} 
-                className="flex items-center gap-2 text-text-muted hover:text-text px-3 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Restaurar
-              </button>
-              
-              <button 
-                type="button" 
-                onClick={() => setSchedulerOpen(true)}
-                disabled={!isDirty || testMode} 
-                className="flex items-center gap-2 bg-background border border-border hover:bg-surface text-text px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                <CalendarClock className="w-4 h-4" />
-                Agendar
-              </button>
-              
-              <button
-                type="submit"
-                disabled={!isDirty || testMode}
-                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                <FileSearch className="w-4 h-4" />
-                {testMode ? 'Modo Teste Ativo' : 'Revisar & Salvar'}
-              </button>
-            </div>
-          </form>
-
-          {/* Histórico */}
-          <TariffHistory categoryId={category._id} categoryName={category.displayName} />
+          </label>
         </div>
         
-        <div className="lg:col-span-1 xl:col-span-1">
-          <TariffAdvancedSimulator values={liveValues} platformCommission={platformCommission ?? 0} />
-        </div>
-      </div>
-
-      <TariffSchedulerModal 
-        isOpen={schedulerOpen} 
-        onClose={() => setSchedulerOpen(false)} 
-        categoryId={category._id} 
-        categoryName={category.displayName}
-        pendingChanges={liveValues}
-      />
-
-      {/* Preview Modal */}
-      {previewOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-surface rounded-xl border border-border w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-border bg-background/50">
-              <h2 className="font-semibold text-lg text-text">Confirmação de Alteração</h2>
-              <p className="text-sm text-text-muted">Revise as mudanças antes de aplicar as novas tarifas.</p>
-            </div>
-            <div className="p-5 overflow-y-auto space-y-3">
-              {Object.keys(liveValues).map(key => {
-                if(liveValues[key] !== category[key]) {
-                  return (
-                    <div key={key} className="flex justify-between items-center bg-background border border-border p-3 rounded-lg text-sm">
-                      <span className="font-medium text-text-muted capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="line-through text-danger opacity-80">{String(category[key])}</span>
-                        <span className="text-text-muted">→</span>
-                        <span className="text-success font-bold text-base">{String(liveValues[key])}</span>
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })}
-            </div>
-            <div className="p-5 border-t border-border flex justify-end gap-3 bg-background/50 mt-auto">
-              <button 
-                type="button" 
-                onClick={() => setPreviewOpen(false)} 
-                className="px-4 py-2 text-text-muted hover:text-text font-medium transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => updateMutation.mutate({ ...liveValues, __v: category.__v })}
-                disabled={updateMutation.isPending}
-                className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                {updateMutation.isPending ? 'Aplicando...' : 'Aplicar Tarifas'}
-              </button>
-            </div>
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5 border-b border-border">
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibi��o (passageiro v� este nome)</label>
+            <input type="text" {...register('displayName', { required: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Lota��o (passageiros)</label>
+            <input type="number" step="1" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-text-muted mb-1">Descri��o (subt�tulo exibido ao passageiro)</label>
+            <input type="text" {...register('description')} placeholder="Ex: Viagens di�rias econ�micas" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
           </div>
         </div>
-      )}
-    </>
+        
+        <div className="bg-background/50 border-t border-border p-4 flex justify-end">
+          <button type="submit" disabled={!isDirty || updateMutation.isPending || testMode} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+            <Save className="w-4 h-4" />
+            Salvar Categoria
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
 function NewCategoryModal({ onClose, onCreated }) {
   const toast = useToast();
-  const { register, handleSubmit, formState: { errors } } = useForm({
-    defaultValues: { name: '', displayName: '', description: '', capacity: 4, iconKey: 'car' }
-  });
-
+  const { register, handleSubmit } = useForm();
+  
   const createMutation = useMutation({
     mutationFn: async (data) => {
       const res = await api.post('/admin/vehicle-categories', data);
       return res.data;
     },
-    onSuccess: (newCat) => {
-      toast.success(`Categoria ${newCat.displayName} criada com sucesso!`);
-      onCreated(newCat);
+    onSuccess: (data) => {
+      toast.success('Categoria criada!');
+      onCreated(data);
     },
-    onError: (err) => {
-      toast.error(err.response?.data?.message || 'Erro ao criar categoria');
-    }
+    onError: () => toast.error('Erro ao criar categoria')
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-surface rounded-xl border border-border w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
-        <div className="p-5 border-b border-border bg-background/50 flex justify-between items-center">
-          <div>
-            <h2 className="font-semibold text-lg text-text">Nova Categoria de Veículo</h2>
-            <p className="text-sm text-text-muted">Ela aparecerá para o passageiro assim que salva.</p>
-          </div>
-          <button onClick={onClose} className="text-text-muted hover:text-text">
-            <X className="w-5 h-5" />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-surface rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="px-6 py-4 border-b border-border flex justify-between items-center">
+          <h2 className="text-lg font-bold">Nova Categoria de Ve�culo</h2>
+          <button onClick={onClose} className="text-text-muted hover:text-text"><X className="w-5 h-5"/></button>
         </div>
-        <form onSubmit={handleSubmit((data) => createMutation.mutate(data))} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit((data) => createMutation.mutate(data))} className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Nome interno (sem espaços, ex: van)</label>
-            <input
-              type="text"
-              {...register('name', { required: true, pattern: /^[a-z0-9_]+$/ })}
-              placeholder="van"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
-            />
-            {errors.name && <p className="text-xs text-danger mt-1">Use apenas letras minúsculas, números e "_", sem espaços.</p>}
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome Interno</label>
+            <input type="text" {...register('name')} placeholder="Ex: suv" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text outline-none" required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibição</label>
-            <input
-              type="text"
-              {...register('displayName', { required: true })}
-              placeholder="Ex: MoveVan"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
-            />
+            <label className="block text-sm font-medium text-text-muted mb-1">Nome de Exibi��o</label>
+            <input type="text" {...register('displayName')} placeholder="Ex: SUV Premium" className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text outline-none" required />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Descrição</label>
-            <input
-              type="text"
-              {...register('description')}
-              placeholder="Ex: Vans para grupos"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Lotação</label>
-              <input type="number" min="1" {...register('capacity', { valueAsNumber: true, min: 1 })} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-muted mb-1">Ícone</label>
-              <select {...register('iconKey')} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none">
-                <option value="car">Carro</option>
-                <option value="moto">Moto</option>
-                <option value="auto">Auto/TukTuk</option>
-              </select>
-            </div>
-          </div>
-          <p className="text-xs text-text-muted">Tarifas (base, por km, por minuto) começam com valores padrão — ajuste na aba da categoria depois de criada.</p>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-text-muted hover:text-text font-medium transition-colors">
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={createMutation.isPending}
-              className="bg-primary hover:bg-primary-hover text-surface px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              {createMutation.isPending ? 'Criando...' : 'Criar Categoria'}
-            </button>
+          <div className="pt-2 flex justify-end gap-3">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg font-medium border border-border text-text">Cancelar</button>
+            <button type="submit" disabled={createMutation.isPending} className="px-4 py-2 rounded-lg font-medium bg-primary text-surface">Criar</button>
           </div>
         </form>
       </div>

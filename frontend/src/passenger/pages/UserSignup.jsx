@@ -30,10 +30,14 @@ const UserSignup = () => {
     }
   }, [navigate])
 
-  const auth = getAuth(app);
+  const auth = app ? getAuth(app) : null;
   const provider = new GoogleAuthProvider();
 
   const handleGoogleLogin = async () => {
+    if (!auth) {
+      addToast('Login com Google indisponível neste ambiente', 'error');
+      return;
+    }
     try {
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();

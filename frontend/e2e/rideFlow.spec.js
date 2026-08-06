@@ -13,6 +13,7 @@ test.describe('Frontend smoke E2E', () => {
 
   test('login do passageiro carrega', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.locator('input[type="email"], input[type="password"]').first()).toBeVisible();
+    await expect(page.getByPlaceholder('email@exemplo.com')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Entrar$/i })).toBeVisible();
   });
 });

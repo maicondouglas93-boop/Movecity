@@ -206,10 +206,15 @@ const rideSchema = new mongoose.Schema({
         atStatus: { type: String },
         cancelledAt: { type: Date, default: Date.now },
     }],
+    waitTimeSeconds: {
+        type: Number,
+        default: 0,
+        description: "Tempo total em segundos aguardando passageiro além do free time. Passado ao PricingEngine."
+    },
     waitTimeFeeCharged: {
         type: Number,
         default: 0,
-        description: "Taxa de espera excedente (tariffSetting.perMinuteWaitFee) além de maxFreeWaitTime, somada ao finalPrice"
+        description: "[LEGADO] Taxa de espera excedente, substituído pelo cálculo central no PricingEngine"
     },
     commissionPercent: {
         type: Number,

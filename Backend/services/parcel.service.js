@@ -312,62 +312,40 @@ module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
         throw new Error('vehicleType inválido');
     }
 
-    const settings = await getSettings();
-    const pricing = resolveVehiclePricing(settings, vehicleType);
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
     const distanceM = distanceTime.distance.value;
     const durationS = distanceTime.duration.value;
-    const km = distanceM / 1000;
-    const minutes = durationS / 60;
 
-    // Fonte de verdade: deliveryPricing[vehicleType] — sem surcharge legado.
-    let fare = pricing.baseFare + (km * pricing.perKm) + (minutes * pricing.perMinute);
-    fare = Math.max(fare, pricing.minimumFare);
-    fare = Math.round(fare * 100) / 100;
-
-    const {
-        resolvePlatformCommission,
-        ensurePlatformCommissions,
-    } = require('../utils/platformCommission');
-    let globalSettingDoc = await globalSettingModel.findOne();
-    if (globalSettingDoc) {
-        globalSettingDoc = await ensurePlatformCommissions(globalSettingDoc);
-    }
-    const globalSetting = globalSettingDoc
-        ? (globalSettingDoc.toObject?.() || globalSettingDoc)
-        : { platformCommission: 20, platformCommissions: { ride: 20, presential: 20, parcel: 20 } };
-    const commissionPercent = resolvePlatformCommission(globalSetting, 'parcel');
-    const commissionAmount = Math.round(fare * (commissionPercent / 100) * 100) / 100;
-
-    const pricingSnapshot = {
+    const PricingEngine = require('./pricingEngine.service');
+    const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
         vehicleType,
-        baseFare: pricing.baseFare,
-        perKm: pricing.perKm,
-        perMinute: pricing.perMinute,
-        minimumFare: pricing.minimumFare,
-        maxWeightKg: pricing.maxWeightKg,
-        maxPackageSize: pricing.maxPackageSize,
-        requireDeliveryPin: pricing.requireDeliveryPin,
-        blockIncompatibleVehicle: pricing.blockIncompatibleVehicle,
-        platformCommission: commissionPercent,
-    };
+        serviceKind: 'parcel',
+    });
+
+    const pricing = await PricingEngine.calculateFare({
+        distance: distanceM,
+        time: durationS,
+        vehicleType,
+        paymentMethod: 'cash', // Default para estimativa inicial
+        configSnapshot: pricingSnapshot,
+        serviceKind: 'parcel',
+    });
+
+    // Anexar limites físicos do parcelSetting (mantidos para restrição, não para preço)
+    const settings = await getSettings();
+    const parcelPricing = resolveVehiclePricing(settings, vehicleType);
+    pricingSnapshot.maxWeightKg = parcelPricing.maxWeightKg;
+    pricingSnapshot.maxPackageSize = parcelPricing.maxPackageSize;
+    pricingSnapshot.requireDeliveryPin = parcelPricing.requireDeliveryPin;
+    pricingSnapshot.blockIncompatibleVehicle = parcelPricing.blockIncompatibleVehicle;
 
     return {
-        fare,
+        fare: pricing.finalFare,
         estimatedDistance: distanceM,
         estimatedTime: durationS,
-        commissionPercent,
-        commissionAmount,
-        fareBreakdown: {
-            baseFare: pricing.baseFare,
-            distanceComponent: Math.round(km * pricing.perKm * 100) / 100,
-            timeComponent: Math.round(minutes * pricing.perMinute * 100) / 100,
-            vehicleSurcharge: 0,
-            minimumApplied: fare === pricing.minimumFare,
-            platformCommission: commissionAmount,
-            commissionPercent,
-            vehicleType,
-        },
+        commissionPercent: pricing.commissionPercent,
+        commissionAmount: pricing.commissionAmount,
+        fareBreakdown: pricing.fareBreakdown,
         pricingSnapshot,
     };
 };

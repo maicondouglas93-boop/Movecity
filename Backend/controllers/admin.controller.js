@@ -1075,3 +1075,27 @@ module.exports.updateParcelSettings = async (req, res, next) => {
         next(error);
     }
 };
+module.exports.simulateFare = async (req, res, next) => {
+    try {
+        const { distance, time, vehicleType, serviceKind, waitTimeSeconds, extraStopsCount, optionals } = req.body;
+        if (!distance || !time || !vehicleType) {
+            return res.status(400).json({ message: 'distance, time e vehicleType são obrigatórios.' });
+        }
+        
+        const PricingEngine = require('../services/pricingEngine.service');
+        const simulation = await PricingEngine.calculateFare({
+            distance,
+            time,
+            vehicleType,
+            serviceKind: serviceKind || 'ride',
+            waitTimeSeconds: waitTimeSeconds || 0,
+            extraStopsCount: extraStopsCount || 0,
+            optionals: optionals || {},
+            paymentMethod: 'cash'
+        });
+        
+        res.status(200).json(simulation);
+    } catch (error) {
+        next(error);
+    }
+};

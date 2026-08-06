@@ -261,6 +261,22 @@ module.exports.createRide = async ({
         serviceKind: 'ride',
     });
 
+    // Processar opcionais para o PricingEngine
+    const optionalsMap = {};
+    const processedOptionals = [];
+    const optionalPrices = resolveOptionalPrices(pricingSnapshot?.tariffSetting);
+
+    if (Array.isArray(optionals)) {
+        optionals.forEach(opt => {
+            const type = typeof opt === 'string' ? opt : opt.type;
+            if (!type) return;
+            optionalsMap[type] = true;
+            // Preservar array para retrocompatibilidade no schema do banco
+            const price = Number(optionalPrices[type]) || 0;
+            processedOptionals.push({ type, price });
+        });
+    }
+
     // Usar o Pricing Engine Oficial
     const pricing = await PricingEngine.calculateFare({
         distance,
@@ -269,24 +285,10 @@ module.exports.createRide = async ({
         paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod, // Use a fallback method for calculation if carteira
         configSnapshot: pricingSnapshot,
         serviceKind: 'ride',
+        optionals: optionalsMap
     });
 
-    // Opcionais: preço vem do snapshot (tariffSetting.optionalPrices), não de mapa
-    // local hardcoded — o admin edita na aba Tarifas Globais.
-    const optionalPrices = resolveOptionalPrices(pricingSnapshot?.tariffSetting);
-    let optionalsTotal = 0;
-    const processedOptionals = [];
-    if (Array.isArray(optionals)) {
-        optionals.forEach(opt => {
-            const type = typeof opt === 'string' ? opt : opt.type;
-            if (!type || !(type in optionalPrices)) return;
-            const price = Number(optionalPrices[type]) || 0;
-            optionalsTotal += price;
-            processedOptionals.push({ type, price });
-        });
-    }
-
-    let finalPrice = pricing.finalFare + optionalsTotal;
+    let finalPrice = pricing.finalFare;
 
     // Fase 4 (agendamento): no booking NÃO debita carteira nem consome cupom.
     // Intenção de wallet/cupom fica guardada e é liquidada na ativação
@@ -992,23 +994,13 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Invalid OTP');
     }
 
-    // Taxa de espera: usa a tarifa CONGELADA no pricingSnapshot da corrida — mudar
-    // perMinuteWaitFee no painel no meio da espera não altera o contrato. Corridas
-    // antigas sem snapshot caem no TariffSetting live (resolveTariffSetting).
-    let waitTimeFeeCharged = 0;
+    let waitTimeSeconds = 0;
     if (ride.arrivedAt) {
-        const tariffSetting = await resolveTariffSetting(ride);
-        const maxFreeWaitTime = tariffSetting?.maxFreeWaitTime || 0;
-        const perMinuteWaitFee = tariffSetting?.perMinuteWaitFee || 0;
-        const waitSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
-        if (waitSeconds > maxFreeWaitTime && perMinuteWaitFee > 0) {
-            waitTimeFeeCharged = Math.round(((waitSeconds - maxFreeWaitTime) / 60) * perMinuteWaitFee * 100) / 100;
-        }
+        waitTimeSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
     }
 
-    // Guarda atômica: status de origem + otp + captain dono no mesmo filtro (auditoria A1).
     const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
-        waitTimeFeeCharged,
+        waitTimeSeconds,
         startedAt: new Date(),
         // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
         ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
@@ -1170,6 +1162,14 @@ module.exports.endRide = async ({ rideId, captain }) => {
             throw err;
         }
         try {
+            const optionalsMap = {};
+            if (Array.isArray(ride.optionals)) {
+                ride.optionals.forEach(opt => {
+                    const type = typeof opt === 'string' ? opt : opt.type;
+                    if (type) optionalsMap[type] = true;
+                });
+            }
+
             const endServiceKind = ride.source === 'driver_initiated' ? 'presential' : 'ride';
             const pricing = await PricingEngine.calculateFare({
                 distance: actualDistance,
@@ -1184,6 +1184,8 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 // guardado) — cai de volta pro comportamento antigo (config vigente).
                 configSnapshot: ride.pricingSnapshot || null,
                 serviceKind: endServiceKind,
+                waitTimeSeconds: ride.waitTimeSeconds || 0,
+                optionals: optionalsMap
             });
             finalPrice = pricing.finalFare;
             pricingUpdate = {
@@ -1211,13 +1213,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw err;
     }
 
-    // Opcionais congelados em createRide — o recalculateFare só cobre base/km/min;
-    // sem isto o finalPrice perdia porta-malas/animais/etc. ao fechar a corrida.
-    finalPrice += sumRideOptionals(ride);
-
-    // Taxa de espera calculada no startRide (motorista esperou além do tempo grátis) —
-    // soma ao valor final, acertado direto com o motorista igual ao resto da tarifa.
-    finalPrice += ride.waitTimeFeeCharged || 0;
+    // Adicionais já embutidos no finalPrice via Unified Pricing Engine.
 
     const updated = await transitionRide(rideId, 'finished', { captain: captain._id }, {
         actualTime: actualTimeSeconds,

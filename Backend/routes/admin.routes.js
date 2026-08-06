@@ -112,6 +112,7 @@ router.put('/settings/tariffs', authAdmin, authorizeRoles('super_admin'), adminC
 router.put('/vehicle-categories/:id/tariffs', authAdmin, authorizeRoles('super_admin'), adminController.updateVehicleCategory);
 router.post('/vehicle-categories/:id/duplicate', authAdmin, authorizeRoles('super_admin'), adminController.duplicateCategory);
 router.get('/tariffs/history', authAdmin, adminController.getTariffHistory);
+router.post('/tariffs/simulate', authAdmin, authorizeRoles('super_admin'), adminController.simulateFare);
 router.post('/tariffs/schedule', authAdmin, authorizeRoles('super_admin'), adminController.scheduleTariff);
 
 // Logs

@@ -83,6 +83,43 @@ const tariffSettingSchema = new mongoose.Schema({
         adaptado_cadeirante: { type: Number, default: 0, min: 0 },
         disposicao_passageiro: { type: Number, default: 15, min: 0 },
     },
+
+    // --- NOVO MODELO UNIFICADO (Unified Pricing Engine) ---
+    // Estes campos representam a única fonte de verdade para cálculos de tarifas a partir de agora.
+    // Os valores antigos em vehicleCategory, parcelSetting e globalSetting estão obsoletos.
+    baseFare: { type: Number, default: 5.00 },
+    perKm: { type: Number, default: 2.00 },
+    perMinute: { type: Number, default: 0.50 },
+    minimumFare: { type: Number, default: 7.00 },
+    platformCommission: { type: Number, default: 20 }, // Comissão centralizada (porcentagem)
+
+    surcharges: {
+        night: {
+            active: { type: Boolean, default: false },
+            startTime: { type: String, default: '22:00' },
+            endTime: { type: String, default: '06:00' },
+            type: { type: String, enum: ['fixed', 'percent'], default: 'percent' },
+            value: { type: Number, default: 20 },
+        },
+        rain: {
+            active: { type: Boolean, default: false },
+            type: { type: String, enum: ['fixed', 'percent'], default: 'percent' },
+            value: { type: Number, default: 20 },
+        },
+        waiting: {
+            active: { type: Boolean, default: true },
+            freeMinutes: { type: Number, default: 5 },
+            valuePerMinute: { type: Number, default: 0.50 },
+        },
+        extraStops: {
+            active: { type: Boolean, default: false },
+            valuePerStop: { type: Number, default: 3.00 },
+        },
+        cancellation: {
+            active: { type: Boolean, default: true },
+            value: { type: Number, default: 5.00 },
+        }
+    }
 }, { timestamps: true, optimisticConcurrency: true });
 
 const DEFAULT_OPTIONAL_PRICES = {

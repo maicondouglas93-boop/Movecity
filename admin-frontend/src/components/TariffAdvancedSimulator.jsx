@@ -37,8 +37,16 @@ export default function TariffAdvancedSimulator({ values, platformCommission = 2
     stopsCharge = extraStops * (values?.surcharges?.extraStops?.valuePerStop || 0);
   }
 
-  // Example Optionals
-  let optionalsCharge = 0; // Pode adicionar botões se quiser
+  // Optionals
+  const [selectedOptionals, setSelectedOptionals] = useState({});
+  let optionalsCharge = 0;
+  
+  const categoryOptionals = values?.optionals || [];
+  categoryOptionals.forEach(opt => {
+      if (opt.isActive && selectedOptionals[opt.id]) {
+          optionalsCharge += opt.value;
+      }
+  });
 
   let total = subtotal + waitCharge + stopsCharge + optionalsCharge;
 
@@ -77,6 +85,24 @@ export default function TariffAdvancedSimulator({ values, platformCommission = 2
             <input type="number" min="0" step="1" value={extraStops} onChange={(e) => setExtraStops(Number(e.target.value) || 0)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-text focus:border-primary outline-none" />
           </div>
         </div>
+
+        {categoryOptionals.length > 0 && (
+          <div className="pt-2">
+            <label className="block text-xs font-medium text-text-muted mb-2">Simular Adicionais</label>
+            <div className="flex flex-wrap gap-2">
+              {categoryOptionals.filter(o => o.isActive).map(opt => (
+                <label key={opt.id} className="flex items-center gap-1.5 bg-background border border-border px-2 py-1 rounded-md cursor-pointer hover:border-primary transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={!!selectedOptionals[opt.id]}
+                    onChange={(e) => setSelectedOptionals(prev => ({...prev, [opt.id]: e.target.checked}))}
+                  />
+                  <span className="text-xs font-medium">{opt.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Breakdown */}
         <div className="space-y-2 text-sm pt-2">
@@ -118,6 +144,13 @@ export default function TariffAdvancedSimulator({ values, platformCommission = 2
             <div className="flex justify-between text-warning">
               <span>Paradas Extras</span>
               <span>R$ <span>{stopsCharge.toFixed(2)}</span></span>
+            </div>
+          )}
+
+          {optionalsCharge > 0 && (
+            <div className="flex justify-between text-warning">
+              <span>Adicionais (Opcionais)</span>
+              <span>R$ <span>{optionalsCharge.toFixed(2)}</span></span>
             </div>
           )}
         </div>

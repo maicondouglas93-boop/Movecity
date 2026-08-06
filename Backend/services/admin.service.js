@@ -1545,7 +1545,8 @@ module.exports.updateVehicleCategory = async (id, data) => {
         minFare: data.minFare !== undefined ? data.minFare : oldCategory.minFare,
         dynamicMultiplier: data.dynamicMultiplier !== undefined ? data.dynamicMultiplier : oldCategory.dynamicMultiplier,
         rainFeeMultiplier: data.rainFeeMultiplier !== undefined ? data.rainFeeMultiplier : oldCategory.rainFeeMultiplier,
-        isActive: data.isActive !== undefined ? data.isActive : oldCategory.isActive
+        isActive: data.isActive !== undefined ? data.isActive : oldCategory.isActive,
+        pricing: data.pricing !== undefined ? data.pricing : oldCategory.pricing
     };
 
     const filter = { _id: id };

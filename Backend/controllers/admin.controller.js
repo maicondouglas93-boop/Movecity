@@ -1,4 +1,4 @@
-const adminService = require('../services/admin.service');
+﻿const adminService = require('../services/admin.service');
 
 module.exports.login = async (req, res, next) => {
     try {
@@ -56,15 +56,15 @@ module.exports.refresh = async (req, res, next) => {
             refreshToken: newRefreshToken
         });
     } catch (error) {
-        return res.status(401).json({ message: error.message || 'Refresh token inválido' });
+        return res.status(401).json({ message: error.message || 'Refresh token invÃ¡lido' });
     }
 };
 
-// Auditoria de sessão persistente (2026-08-02, achado A1): o painel confiava no
-// localStorage no boot — se o admin tivesse sido desativado ou a sessão revogada, a UI
-// renderizava como autenticada até a primeira chamada falhar. Este endpoint deixa o
-// frontend confirmar a sessão contra o servidor antes de mostrar qualquer coisa.
-// authAdmin já valida token + existência + `active`; se chegou aqui, é válido.
+// Auditoria de sessÃ£o persistente (2026-08-02, achado A1): o painel confiava no
+// localStorage no boot â€” se o admin tivesse sido desativado ou a sessÃ£o revogada, a UI
+// renderizava como autenticada atÃ© a primeira chamada falhar. Este endpoint deixa o
+// frontend confirmar a sessÃ£o contra o servidor antes de mostrar qualquer coisa.
+// authAdmin jÃ¡ valida token + existÃªncia + `active`; se chegou aqui, Ã© vÃ¡lido.
 module.exports.me = async (req, res) => {
     res.status(200).json({
         admin: {
@@ -78,8 +78,8 @@ module.exports.me = async (req, res) => {
 
 module.exports.logout = async (req, res, next) => {
     try {
-        // Revoga só a sessão deste dispositivo quando o refresh token vem junto; sem
-        // ele, encerra todas as sessões do admin (ver invalidateRefreshToken).
+        // Revoga sÃ³ a sessÃ£o deste dispositivo quando o refresh token vem junto; sem
+        // ele, encerra todas as sessÃµes do admin (ver invalidateRefreshToken).
         const refreshToken = req.cookies?.adminRefreshToken || req.body?.refreshToken;
         if (req.admin) {
             await adminService.invalidateRefreshToken(req.admin._id, refreshToken);
@@ -192,12 +192,12 @@ module.exports.sendNotification = async (req, res, next) => {
             adminName: req.admin.name,
             action: 'send_notification',
             targetModel: 'Notification',
-            reason: `Notificação enviada para ${target}: "${title}"`,
+            reason: `NotificaÃ§Ã£o enviada para ${target}: "${title}"`,
             newValue: { target, title, message },
             ipAddress: req.ip
         });
 
-        res.status(200).json({ message: 'Notificação enviada com sucesso' });
+        res.status(200).json({ message: 'NotificaÃ§Ã£o enviada com sucesso' });
     } catch (error) {
         next(error);
     }
@@ -325,11 +325,11 @@ module.exports.createPromotion = async (req, res, next) => {
         await auditService.logAction(req.admin._id, 'CREATE', 'Promotion', promotion._id, { title: data.title, code: data.code }, req.ip);
 
         if (data.sendPush) {
-            // Se tiver integração com Push, cria uma campanha NotificationCampaign espelho
+            // Se tiver integraÃ§Ã£o com Push, cria uma campanha NotificationCampaign espelho
             const NotificationCampaign = require('../models/notificationCampaign.model');
             await NotificationCampaign.create({
                 title: data.title,
-                message: data.description || 'Nova promoção ativada para você!',
+                message: data.description || 'Nova promoÃ§Ã£o ativada para vocÃª!',
                 imageUrl: data.bannerImage,
                 deepLink: 'promotions',
                 type: 'promotion',
@@ -363,7 +363,7 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
         const Promotion = require('../models/promotion.model');
         
         const promotion = await Promotion.findById(id);
-        if (!promotion) return res.status(404).json({ message: 'Promoção não encontrada' });
+        if (!promotion) return res.status(404).json({ message: 'PromoÃ§Ã£o nÃ£o encontrada' });
 
         const previousStatus = promotion.status;
         promotion.status = status;
@@ -382,7 +382,7 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
             action: 'update_promotion_status',
             targetId: promotion._id.toString(),
             targetModel: 'Promotion',
-            reason: `Status da promoção "${promotion.title}" alterado de ${previousStatus} para ${status}`,
+            reason: `Status da promoÃ§Ã£o "${promotion.title}" alterado de ${previousStatus} para ${status}`,
             oldValue: { status: previousStatus },
             newValue: { status },
             ipAddress: req.ip
@@ -397,9 +397,9 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
 module.exports.simulatePromotion = async (req, res, next) => {
     try {
         const { rideValue, promotionData } = req.body;
-        // Bloco H (2026-08-02): usa a mesma função que a aplicação real em createRide
-        // usa (promotion.service.js) — antes essa matemática vivia duplicada só aqui e
-        // não tratava 'cashback' (caía em desconto zero); agora o simulador nunca pode
+        // Bloco H (2026-08-02): usa a mesma funÃ§Ã£o que a aplicaÃ§Ã£o real em createRide
+        // usa (promotion.service.js) â€” antes essa matemÃ¡tica vivia duplicada sÃ³ aqui e
+        // nÃ£o tratava 'cashback' (caÃ­a em desconto zero); agora o simulador nunca pode
         // divergir do que realmente acontece numa corrida.
         const promotionService = require('../services/promotion.service');
         const { discount, clientPays, subsidy } = promotionService.evaluateDiscount(promotionData, rideValue);
@@ -421,7 +421,7 @@ module.exports.getReportDashboard = async (req, res, next) => {
         const reportService = require('../services/report.service');
         const { startDate, endDate } = req.query;
         
-        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatórias' });
+        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatÃ³rias' });
 
         const dashboard = await reportService.getExecutiveDashboard(startDate, endDate);
         res.status(200).json(dashboard);
@@ -435,7 +435,7 @@ module.exports.getReportCharts = async (req, res, next) => {
         const reportService = require('../services/report.service');
         const { startDate, endDate } = req.query;
         
-        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatórias' });
+        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatÃ³rias' });
 
         const charts = await reportService.getChartsData(startDate, endDate);
         res.status(200).json(charts);
@@ -449,7 +449,7 @@ module.exports.getReportRankings = async (req, res, next) => {
         const reportService = require('../services/report.service');
         const { startDate, endDate, limit } = req.query;
         
-        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatórias' });
+        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatÃ³rias' });
 
         const rankings = await reportService.getRankings(startDate, endDate, limit);
         res.status(200).json(rankings);
@@ -464,7 +464,7 @@ module.exports.exportReportCSV = async (req, res, next) => {
         const { type } = req.params;
         const { startDate, endDate } = req.query;
         
-        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatórias' });
+        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas obrigatÃ³rias' });
 
         let csvData = "";
         
@@ -621,7 +621,7 @@ module.exports.cancelRide = async (req, res, next) => {
         const result = await adminService.cancelRide(id, reason, req.admin, req.ip);
 
         // Espelha o cancel de encomenda: avisa motorista (e passageiro, se houver)
-        // por sala + socket direto + push ? sen�o o APK fica na tela da corrida.
+        // por sala + socket direto + push ? senão o APK fica na tela da corrida.
         try {
             const { sendMessageToRoom, sendMessageToSocketId, emitDriverMapUpdate } = require('../socket');
             const captainModel = require('../models/captain.model');
@@ -679,16 +679,16 @@ module.exports.reassignRide = async (req, res, next) => {
         const { id } = req.params;
         const { ride, previousCaptain } = await adminService.reassignRide(id, req.admin, req.ip);
 
-        // Bloco E (2026-08-02): antes disto, ninguém era avisado da reatribuição — nem o
-        // motorista removido (continuava vendo a corrida como sua até o próximo refresh),
-        // nem outros motoristas (a corrida voltava a 'requested' mas não era redespachada).
+        // Bloco E (2026-08-02): antes disto, ninguÃ©m era avisado da reatribuiÃ§Ã£o â€” nem o
+        // motorista removido (continuava vendo a corrida como sua atÃ© o prÃ³ximo refresh),
+        // nem outros motoristas (a corrida voltava a 'requested' mas nÃ£o era redespachada).
         const { sendMessageToRoom } = require('../socket');
         sendMessageToRoom(`ride_${ride._id}`, {
             event: 'ride-reassigned-by-admin',
             data: { rideId: ride._id }
         });
 
-        // Presencial nunca deve ser redespachada (defesa em profundidade; o service j� bloqueia).
+        // Presencial nunca deve ser redespachada (defesa em profundidade; o service já bloqueia).
         if (ride.source !== 'driver_initiated') {
             const { dispatchRideToCaptains } = require('./ride.controller');
             await dispatchRideToCaptains(ride, {
@@ -701,13 +701,13 @@ module.exports.reassignRide = async (req, res, next) => {
 
         res.status(200).json(ride);
     } catch (error) {
-        if (error.message === 'Corrida não encontrada' || error.message === 'Ride not found') {
+        if (error.message === 'Corrida nÃ£o encontrada' || error.message === 'Ride not found') {
             return res.status(404).json({ message: error.message });
         }
         if (
-            error.message.includes('não pode ser reatribuída')
-            || error.message.includes('n�o pode ser reatribu�da')
-            || error.message.includes('n�o pode ser reatribu�da ao despacho')
+            error.message.includes('nÃ£o pode ser reatribuÃ­da')
+            || error.message.includes('não pode ser reatribuída')
+            || error.message.includes('não pode ser reatribuída ao despacho')
             || error.message.includes('Ride cannot be reassigned')
             || error.message.includes('Corrida presencial')
         ) {
@@ -753,9 +753,9 @@ module.exports.approvePayout = async (req, res, next) => {
         const result = await adminService.approvePayout(id, req.admin, req.ip);
         res.status(200).json(result);
     } catch (error) {
-        // Erros de regra de negócio (saldo insuficiente, corrida perdida pro CAS, motorista
-        // bloqueado etc.) precisam do err.message de verdade — em produção, next(error) cairia
-        // no handler global e viraria "Internal Server Error" genérico (ver app.js), escondendo
+        // Erros de regra de negÃ³cio (saldo insuficiente, corrida perdida pro CAS, motorista
+        // bloqueado etc.) precisam do err.message de verdade â€” em produÃ§Ã£o, next(error) cairia
+        // no handler global e viraria "Internal Server Error" genÃ©rico (ver app.js), escondendo
         // exatamente a mensagem que o admin precisa ver.
         res.status(400).json({ message: error.message });
     }
@@ -823,18 +823,18 @@ module.exports.updateTariff = async (req, res, next) => {
             action: 'update_tariff',
             targetId: tariff._id.toString(),
             targetModel: 'TariffSetting',
-            reason: 'Atualização de configurações globais',
+            reason: 'AtualizaÃ§Ã£o de configuraÃ§Ãµes globais',
             newValue: data,
             ipAddress: req.ip
         });
         
         res.status(200).json(tariff);
     } catch (error) {
-        // Bloco E (2026-08-02, achado C1): conflito de edição concorrente — nosso próprio
+        // Bloco E (2026-08-02, achado C1): conflito de ediÃ§Ã£o concorrente â€” nosso prÃ³prio
         // erro marcado (err.statusCode) ou o VersionError nativo do Mongoose no caso raro
-        // de dois PUTs colidindo dentro da janela entre a pré-checagem e o save().
+        // de dois PUTs colidindo dentro da janela entre a prÃ©-checagem e o save().
         if (error.statusCode === 409 || error.name === 'VersionError') {
-            return res.status(409).json({ message: error.statusCode === 409 ? error.message : 'As configurações foram alteradas por outro administrador enquanto você editava. Recarregue a página para ver os valores atuais antes de salvar.' });
+            return res.status(409).json({ message: error.statusCode === 409 ? error.message : 'As configuraÃ§Ãµes foram alteradas por outro administrador enquanto vocÃª editava. Recarregue a pÃ¡gina para ver os valores atuais antes de salvar.' });
         }
         next(error);
     }
@@ -887,7 +887,7 @@ module.exports.updateVehicleCategory = async (req, res, next) => {
             oldValue: oldValue,
             newValue: data,
             categoryId: category._id,
-            reason: `Atualização de tarifas da categoria: ${category.displayName}`
+            reason: `AtualizaÃ§Ã£o de tarifas da categoria: ${category.displayName}`
         });
         
         res.status(200).json(category);
@@ -950,7 +950,7 @@ module.exports.scheduleTariff = async (req, res, next) => {
             action: 'schedule_tariff',
             targetId: (categoryId || schedule._id).toString(),
             targetModel: categoryId ? 'VehicleCategory' : 'TariffSetting',
-            reason: `Alteração de tarifas agendada para ${new Date(scheduledFor).toLocaleString()}`,
+            reason: `AlteraÃ§Ã£o de tarifas agendada para ${new Date(scheduledFor).toLocaleString()}`,
             newValue: changes,
             ipAddress: req.ip
         });
@@ -967,7 +967,7 @@ module.exports.duplicateCategory = async (req, res, next) => {
         const vehicleCategoryModel = require('../models/vehicleCategory.model');
         const original = await vehicleCategoryModel.findById(id);
         if (!original) {
-            return res.status(404).json({ message: "Categoria não encontrada" });
+            return res.status(404).json({ message: "Categoria nÃ£o encontrada" });
         }
         
         const copyData = original.toObject();
@@ -976,7 +976,7 @@ module.exports.duplicateCategory = async (req, res, next) => {
         delete copyData.updatedAt;
         
         copyData.name = copyData.name + '_copy_' + Date.now();
-        copyData.displayName = copyData.displayName + ' (Cópia)';
+        copyData.displayName = copyData.displayName + ' (CÃ³pia)';
         copyData.isActive = false; // Starts inactive
         
         const duplicate = await vehicleCategoryModel.create(copyData);
@@ -1052,7 +1052,7 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
 
         res.status(200).json(parcel);
     } catch (error) {
-        if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda n�o encontrada' });
+        if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         if (error.message === 'PARCEL_NOT_CANCELLABLE') return res.status(400).json({ message: error.message });
         next(error);
     }
@@ -1077,21 +1077,38 @@ module.exports.updateParcelSettings = async (req, res, next) => {
 };
 module.exports.simulateFare = async (req, res, next) => {
     try {
-        const { distance, time, vehicleType, serviceKind, waitTimeSeconds, extraStopsCount, optionals } = req.body;
+        const { distance, time, vehicleType, serviceKind, waitTimeSeconds, extraStopsCount, optionals, customPricing } = req.body;
         if (!distance || !time || !vehicleType) {
-            return res.status(400).json({ message: 'distance, time e vehicleType s�o obrigat�rios.' });
+            return res.status(400).json({ message: "distance, time e vehicleType sao obrigatorios." });
         }
         
-        const PricingEngine = require('../services/pricingEngine.service');
+        const PricingEngine = require("../services/pricingEngine.service");
+        let configSnapshot = null;
+        
+        if (customPricing) {
+            const VehicleCategory = require("../models/vehicleCategory.model");
+            const categoryDoc = await VehicleCategory.findOne({ name: vehicleType, isActive: true });
+            if (categoryDoc) {
+                const categoryObj = categoryDoc.toObject();
+                categoryObj.pricing = customPricing;
+                configSnapshot = {
+                    category: categoryObj,
+                    globalSetting: { cardFeePercent: 0, cardFeeFixed: 0 },
+                    serviceKind: serviceKind || "ride"
+                };
+            }
+        }
+
         const simulation = await PricingEngine.calculateFare({
             distance,
             time,
             vehicleType,
-            serviceKind: serviceKind || 'ride',
+            serviceKind: serviceKind || "ride",
             waitTimeSeconds: waitTimeSeconds || 0,
             extraStopsCount: extraStopsCount || 0,
             optionals: optionals || {},
-            paymentMethod: 'cash'
+            paymentMethod: "cash",
+            configSnapshot: configSnapshot
         });
         
         res.status(200).json(simulation);

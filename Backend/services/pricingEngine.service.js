@@ -7,50 +7,48 @@ class PricingEngine {
     
     /**
      * Monta um snapshot congelado da configuração de tarifa/comissão.
-     * Agora usa apenas o modelo unificado de tarifa.
+     * Agora usa a tabela de categoria (VehicleCategory) como fonte da verdade.
      */
     static async buildConfigSnapshot({ vehicleType, serviceKind = 'ride' }) {
-        const tariffSetting = await TariffSetting.findOne();
-        let globalSetting = await GlobalSetting.findOne();
         const category = await VehicleCategory.findOne({ name: vehicleType, isActive: true });
 
         if (!category) {
             throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
         }
 
+        const globalSetting = await GlobalSetting.findOne();
         const gsPlain = globalSetting ? (typeof globalSetting.toObject === 'function' ? globalSetting.toObject() : { ...globalSetting }) : {
             cardFeePercent: 0,
             cardFeeFixed: 0,
         };
 
-        const tsPlain = tariffSetting ? tariffSetting.toObject() : {};
-
         return {
-            tariffSetting: tsPlain,
-            globalSetting: gsPlain,
             category: category.toObject(),
+            globalSetting: gsPlain,
             serviceKind,
             capturedAt: new Date()
         };
     }
 
     /**
-     * Calcula a tarifa de cancelamento com base no config congelado (ou atual).
+     * Calcula a tarifa de cancelamento com base no config congelado.
      */
     static async calculateCancellationFee({ configSnapshot }) {
-        let ts;
-        if (configSnapshot && configSnapshot.tariffSetting) {
-            ts = configSnapshot.tariffSetting;
-        } else {
-            const tariffSetting = await TariffSetting.findOne();
-            ts = tariffSetting ? tariffSetting.toObject() : {};
+        let category = configSnapshot?.category;
+        
+        // Se a chamada não passar configSnapshot, precisamos de um veículo. Como o cancelamento
+        // geralmente vem do ride, quem chamar (ride.service) DEVE passar o snapshot para ter precisão.
+        if (!category && configSnapshot && configSnapshot.vehicleType) {
+            const catDoc = await VehicleCategory.findOne({ name: configSnapshot.vehicleType, isActive: true });
+            category = catDoc ? catDoc.toObject() : null;
         }
 
-        // Legado (cancellationFee) vs Novo unificado (surcharges.cancellation)
-        if (ts.surcharges && ts.surcharges.cancellation && ts.surcharges.cancellation.active) {
-            return ts.surcharges.cancellation.value || 0;
+        if (category && category.pricing && category.pricing.surcharges?.cancellation?.active) {
+            return category.pricing.surcharges.cancellation.value || 0;
         }
-        return ts.cancellationFee || 0;
+        
+        // Fallback genérico se não tiver snapshot nem veículo
+        return 5.0; 
     }
 
     /**
@@ -82,28 +80,27 @@ class PricingEngine {
         extraStopsCount = 0,
         optionals = {}
     }) {
-        let ts, gs, category;
-        if (configSnapshot) {
-            ts = configSnapshot.tariffSetting || {};
-            gs = configSnapshot.globalSetting || {};
+        let category, gs;
+        if (configSnapshot && configSnapshot.category) {
             category = configSnapshot.category;
+            gs = configSnapshot.globalSetting || {};
         } else {
             const liveConfig = await PricingEngine.buildConfigSnapshot({ vehicleType, serviceKind });
-            ts = liveConfig.tariffSetting;
-            gs = liveConfig.globalSetting;
             category = liveConfig.category;
+            gs = liveConfig.globalSetting || {};
         }
 
         if (!category) {
             throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
         }
 
-        // Lógica de fallback para dados antigos (legado vs novo unificado)
-        const baseFare = ts.baseFare ?? category.baseFare ?? 5.00;
-        const perKm = ts.perKm ?? category.perKmRate ?? 2.00;
-        const perMinute = ts.perMinute ?? category.perMinuteRate ?? 0.50;
-        const minimumFare = ts.minimumFare ?? category.minFare ?? 7.00;
-        const platformCommissionPct = ts.platformCommission ?? 20;
+        // Lógica puramente focada no VehicleCategory
+        const pricing = category.pricing || {};
+        const baseFare = pricing.baseFare ?? category.baseFare ?? 5.00;
+        const perKm = pricing.perKm ?? category.perKmRate ?? 2.00;
+        const perMinute = pricing.perMinute ?? category.perMinuteRate ?? 0.50;
+        const minimumFare = pricing.minimumFare ?? category.minFare ?? 7.00;
+        const platformCommissionPct = pricing.platformCommission ?? 20;
 
         const breakdown = {
             baseFare: baseFare,
@@ -127,8 +124,8 @@ class PricingEngine {
         };
 
         // 1. Cálculo Base + KM + Tempo
-        const minDistanceMeters = (ts.minDistanceIncluded || 0) * 1000;
-        const minTimeSeconds = (ts.minTimeIncluded || 0) * 60;
+        const minDistanceMeters = (pricing.minDistanceIncluded || 0) * 1000;
+        const minTimeSeconds = (pricing.minTimeIncluded || 0) * 60;
 
         const chargeableDistance = Math.max(0, distance - minDistanceMeters);
         const chargeableTime = Math.max(0, time - minTimeSeconds);
@@ -148,10 +145,10 @@ class PricingEngine {
         
         // 3.1. Tempo de Espera
         let waitingCharge = 0;
-        const waitConfig = ts.surcharges?.waiting || {
+        const waitConfig = pricing.surcharges?.waiting || {
             active: true,
-            freeMinutes: (ts.maxFreeWaitTime || 0) / 60,
-            valuePerMinute: ts.perMinuteWaitFee || 0
+            freeMinutes: 5,
+            valuePerMinute: 0.5
         };
         if (waitConfig.active && waitTimeSeconds > 0) {
             const freeSeconds = (waitConfig.freeMinutes || 0) * 60;
@@ -160,13 +157,15 @@ class PricingEngine {
         }
         breakdown.surcharges.waiting = waitingCharge;
 
-        // 3.2. Opcionais (Animais, Porta-malas, etc)
+        // 3.2. Opcionais Dinâmicos (Adicionais)
         let optionalsCharge = 0;
-        if (optionals) {
-            const optionalPrices = ts.optionalPrices || {};
+        if (optionals && pricing.optionals) {
             for (const key in optionals) {
-                if (optionals[key] && optionalPrices[key]) {
-                    optionalsCharge += optionalPrices[key];
+                if (optionals[key]) {
+                    const foundOpt = pricing.optionals.find(opt => opt.id === key && opt.isActive);
+                    if (foundOpt) {
+                        optionalsCharge += foundOpt.value;
+                    }
                 }
             }
         }
@@ -174,7 +173,7 @@ class PricingEngine {
 
         // 3.3. Paradas Extras
         let extraStopsCharge = 0;
-        const stopsConfig = ts.surcharges?.extraStops || { active: false, valuePerStop: 0 };
+        const stopsConfig = pricing.surcharges?.extraStops || { active: false, valuePerStop: 0 };
         if (stopsConfig.active && extraStopsCount > 0) {
             extraStopsCharge = extraStopsCount * (stopsConfig.valuePerStop || 0);
         }
@@ -182,7 +181,7 @@ class PricingEngine {
 
         // 3.4. Noturno (Night Mode)
         let nightCharge = 0;
-        const nightConfig = ts.surcharges?.night || { active: false, type: 'percent', value: 0 };
+        const nightConfig = pricing.surcharges?.night || { active: false, type: 'percent', value: 0 };
         if (nightConfig.active) {
             const reqHour = requestDate.getHours();
             const reqMin = requestDate.getMinutes();
@@ -214,9 +213,8 @@ class PricingEngine {
 
         // 3.5. Chuva / Clima
         let rainCharge = 0;
-        const rainConfig = ts.surcharges?.rain || { active: false, type: 'percent', value: 0 };
-        const isRainActive = rainConfig.active || ts.manualRainFee;
-        if (isRainActive) {
+        const rainConfig = pricing.surcharges?.rain || { active: false, type: 'percent', value: 0 };
+        if (rainConfig.active) {
             if (rainConfig.type === 'fixed') {
                 rainCharge = rainConfig.value || 0;
             } else {
@@ -258,9 +256,9 @@ class PricingEngine {
 
         // 6. Arredondamento
         let finalFare = currentSubtotal;
-        if (ts.roundingRule === 'up') finalFare = Math.ceil(finalFare);
-        else if (ts.roundingRule === 'down') finalFare = Math.floor(finalFare);
-        else if (ts.roundingRule === 'nearest') finalFare = Math.round(finalFare);
+        if (pricing.roundingRule === 'up') finalFare = Math.ceil(finalFare);
+        else if (pricing.roundingRule === 'down') finalFare = Math.floor(finalFare);
+        else if (pricing.roundingRule === 'nearest') finalFare = Math.round(finalFare);
 
         // 7. Comissão (Incidindo sobre tudo que o passageiro paga, mas descontando taxa do cartão)
         const baseForCommission = Math.max(0, finalFare - cardFee);

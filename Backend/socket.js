@@ -90,15 +90,14 @@ const publishPersistedChatMessage = async ({ subject, message, senderType }) => 
 };
 
 function initializeSocket(server) {
-    const allowedOrigins = [
-        "http://localhost:5173",
-        process.env.FRONTEND_URL
-    ];
+    // Mesma lista do REST (Backend/config/corsOrigins.js) — ver o comentário lá
+    // sobre o APK ser barrado no handshake do Socket enquanto passava no REST.
+    const { corsOriginCallback } = require('./config/corsOrigins');
 
     io = socketIo(server, {
         transports: [ 'websocket', 'polling' ],
         cors: {
-            origin: allowedOrigins,
+            origin: corsOriginCallback,
             methods: [ 'GET', 'POST' ],
             credentials: true
         }

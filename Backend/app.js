@@ -27,32 +27,10 @@ require('./services/schedule.service'); // registra o cron que ativa corridas/en
 const adminRoutes = require('./routes/admin.routes');
 const appVersionRoutes = require('./routes/appVersion.routes');
 
-const rawOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  // Capacitor Android/iOS WebView (capacitor.config androidScheme: https)
-  "https://localhost",
-  "http://localhost",
-  "capacitor://localhost",
-  "ionic://localhost",
-  process.env.FRONTEND_URL,
-  process.env.ADMIN_FRONTEND_URL,
-  process.env.CAPACITOR_ORIGIN,
-];
-
-// Remove barras no final (trailing slashes) e ignora valores vazios
-const allowedOrigins = rawOrigins
-  .filter(Boolean)
-  .map(url => url.replace(/\/+$/, ''));
+const { corsOriginCallback } = require('./config/corsOrigins');
 
 app.use(cors({
-    origin: function(origin, callback){
-        if(!origin || allowedOrigins.includes(origin)){
-            callback(null, true);
-        } else {
-            callback(new Error("Não permitido pelo CORS"));
-        }
-    },
+    origin: corsOriginCallback,
     credentials: true
 }));
 

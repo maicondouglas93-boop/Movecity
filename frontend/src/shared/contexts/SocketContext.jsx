@@ -7,6 +7,7 @@ export const SocketContext = createContext();
 import * as Sentry from '@sentry/react';
 import { replayOfflineActions, actionLabel } from '@/shared/services/offlineQueue';
 import { useToast } from '@/shared/contexts/ToastContext';
+import { API_BASE_URL, isApiBaseConfigured } from '@/shared/services/apiBase';
 
 // Auditoria PWA (2026-08-03, A3): forçar só 'polling' nunca deixava o socket fazer
 // upgrade pra WebSocket (o backend já aceita os dois — Backend/socket.js) — toda
@@ -14,9 +15,12 @@ import { useToast } from '@/shared/contexts/ToastContext';
 // HTTP repetidas em vez de uma conexão persistente leve, gastando mais bateria e dados
 // móveis em 100% das sessões. 'polling' continua listado primeiro como fallback — o
 // socket.io-client tenta o upgrade automaticamente depois de conectar.
-const socket = io(`${import.meta.env.VITE_BASE_URL}`, {
-    transports: [ 'polling', 'websocket' ]
-});
+// API_BASE_URL vazia significa build sem VITE_BASE_URL: `io(undefined)` conectaria
+// na origem do WebView e ficaria tentando reconectar contra o próprio app para
+// sempre. Sem URL, o socket nasce desconectado e a tela de configuração assume.
+const socket = isApiBaseConfigured()
+    ? io(API_BASE_URL, { transports: [ 'polling', 'websocket' ] })
+    : io(API_BASE_URL || undefined, { transports: [ 'polling', 'websocket' ], autoConnect: false });
 
 const SocketProvider = ({ children }) => {
     const { addToast } = useToast()

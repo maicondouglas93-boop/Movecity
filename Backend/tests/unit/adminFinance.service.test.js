@@ -42,7 +42,6 @@ describe('Admin Service — getPayouts financeiro real', () => {
         expect(result.summary.pendingAmount).toBe(30);
         expect(result.payouts).toHaveLength(1);
         expect(result.chartSeries).toHaveLength(7);
-        // chartSeries usa America/Sao_Paulo — não comparar com toISOString() (UTC do runner).
         const keyFmt = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'America/Sao_Paulo',
             year: 'numeric',
@@ -50,11 +49,12 @@ describe('Admin Service — getPayouts financeiro real', () => {
             day: '2-digit',
         });
         const todayKey = keyFmt.format(new Date());
-        const todayPoint = result.chartSeries.find((d) => d.date === todayKey)
-            || result.chartSeries.find((d) => d.commission === 42.5);
-        expect(todayPoint?.commission).toBe(42.5);
-        expect(todayPoint?.valor).toBe(42.5);
+        expect(result.chartSeries.some((d) => d.date === todayKey)).toBe(true);
+        const todayPoint = result.chartSeries.find((d) => d.date === todayKey);
+        expect(todayPoint.commission).toBe(42.5);
+        expect(todayPoint.valor).toBe(42.5);
     });
+
 
 
     it('busca repasse por nome/chave do motorista', async () => {

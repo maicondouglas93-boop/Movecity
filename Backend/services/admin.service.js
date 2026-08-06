@@ -1115,18 +1115,21 @@ module.exports.getPayouts = async (page = 1, limit = 10, filters = {}) => {
     const payoutMap = Object.fromEntries(payoutsByDay.map((d) => [d._id, d.total]));
     const weekdayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     const chartSeries = [];
+    // Calendário do gráfico = America/Sao_Paulo (não o fuso do runner do CI/UTC).
     const keyFmt = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/Sao_Paulo',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
     });
-    for (let i = 0; i < 7; i += 1) {
-        const day = new Date(chartStart);
-        day.setDate(chartStart.getDate() + i);
+    const todayKey = keyFmt.format(new Date());
+    const [yy, mm, dd] = todayKey.split('-').map(Number);
+    for (let i = 6; i >= 0; i -= 1) {
+        // Meio-dia UTC do dia civil SP evita virar o dia anterior/posterior no format().
+        const day = new Date(Date.UTC(yy, mm - 1, dd - i, 15, 0, 0));
         const key = keyFmt.format(day);
         chartSeries.push({
-            name: weekdayLabels[day.getDay()],
+            name: weekdayLabels[day.getUTCDay()],
             date: key,
             commission: Math.round((commissionMap[key] || 0) * 100) / 100,
             payouts: Math.round((payoutMap[key] || 0) * 100) / 100,

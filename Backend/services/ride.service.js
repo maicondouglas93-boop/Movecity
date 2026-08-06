@@ -5,8 +5,6 @@ const paymentModel = require('../models/payment.model');
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { getCache, setCache } = require('../cache/cache');
-
 const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 
@@ -64,14 +62,22 @@ async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {},
     );
 }
 
+// Auditoria de integração (2026-08-06): esta cotação era cacheada inteira por 30
+// minutos com a chave `fare:{pickup}:{destination}`, e nenhum caminho que altera
+// tarifa invalidava essa chave — nem o painel admin, nem o cron de tarifa
+// agendada. O passageiro via um preço e `createRide` (que sempre lê a config
+// vigente) cobrava outro.
+//
+// O cache foi removido em vez de invalidado porque ele juntava duas coisas de
+// volatilidade oposta: a ROTA, cara de obter e estável, e o PREÇO, barato de
+// calcular e volátil. A rota continua cacheada uma camada abaixo, dentro dos
+// providers (`google-route:` / `route:`), então tirar o cache daqui não gera
+// nenhuma chamada extra à API de mapas — só recalcula a aritmética da tarifa
+// com a configuração de agora.
 async function getFare(pickup, destination) {
     if (!pickup || !destination) {
         throw new Error('Pickup and destination are required');
     }
-
-    const cacheKey = `fare:${pickup}:${destination}`;
-    const cached = getCache(cacheKey);
-    if (cached) return cached;
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
     const distance = distanceTime.distance.value;
@@ -89,24 +95,33 @@ async function getFare(pickup, destination) {
     const fareBreakdownData = {};
 
     for (const cat of categories) {
-        // Simulação Dinheiro
+        // Uma leitura de configuração por categoria, reaproveitada nas duas simulações:
+        // dinheiro e cartão são o mesmo instante, então têm que ver a mesma tarifa.
+        // Também compensa a remoção do cache — sem isto seriam 8 consultas por
+        // categoria em vez de 4.
+        const configSnapshot = await PricingEngine.buildConfigSnapshot({
+            vehicleType: cat.name,
+            serviceKind: 'ride',
+        });
+
         const cashCalc = await PricingEngine.calculateFare({
             distance,
             time,
             vehicleType: cat.name,
-            paymentMethod: 'cash'
+            paymentMethod: 'cash',
+            configSnapshot,
         });
         fare[cat.name] = cashCalc.finalFare;
-        
+
         // Salva breakdown do dinheiro para referência
         fareBreakdownData[cat.name] = cashCalc.fareBreakdown;
 
-        // Simulação Cartão
         const cardCalc = await PricingEngine.calculateFare({
             distance,
             time,
             vehicleType: cat.name,
-            paymentMethod: 'card'
+            paymentMethod: 'card',
+            configSnapshot,
         });
         fareCard[cat.name] = cardCalc.finalFare;
     }
@@ -134,7 +149,6 @@ async function getFare(pickup, destination) {
         }
     };
 
-    setCache(cacheKey, result, 1800);
     return result;
 }
 

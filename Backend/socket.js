@@ -302,22 +302,40 @@ function initializeSocket(server) {
 
             if (ride) {
                 let currentDistance = ride.actualDistance || 0;
-                
+
                 if (ride.status === 'started' || ride.status === 'ongoing') {
                     if (ride.lastLocation && ride.lastLocation.lat && ride.lastLocation.lng) {
                         const distKm = mapService.haversineKm(ride.lastLocation.lat, ride.lastLocation.lng, location.ltd, location.lng);
                         const distMeters = distKm * 1000;
-                        
+
                         // Filtro de Precisão (GPS accuracy filter)
                         // Ignore jumps > 2000m (2km) - likely a glitch
                         // Ignore jumps < 5m - likely standing still and GPS drifting
                         if (distMeters > 5 && distMeters < 2000) {
-                            currentDistance += distMeters;
-                            // Update distance and location only when valid movement occurred
-                            await rideModel.findByIdAndUpdate(ride._id, {
-                                actualDistance: currentDistance,
-                                lastLocation: { lat: location.ltd, lng: location.lng }
-                            });
+                            // Compare-and-swap (auditoria de integração, 2026-08-06): antes
+                            // era findOne acima + findByIdAndUpdate aqui, sem atomicidade.
+                            // Dois updates de localização quase simultâneos liam o MESMO
+                            // lastLocation e cada um somava seu delta — o mesmo trecho
+                            // entrava duas vezes em actualDistance, que é o número que
+                            // endRide usa pra recalcular o preço final da corrida.
+                            // Com o lastLocation lido dentro do filtro, só a primeira
+                            // escrita casa; a concorrente não encontra documento e é
+                            // descartada em vez de contar de novo.
+                            const applied = await rideModel.findOneAndUpdate(
+                                {
+                                    _id: ride._id,
+                                    'lastLocation.lat': ride.lastLocation.lat,
+                                    'lastLocation.lng': ride.lastLocation.lng,
+                                },
+                                {
+                                    $inc: { actualDistance: distMeters },
+                                    $set: { lastLocation: { lat: location.ltd, lng: location.lng } },
+                                },
+                                { new: true, projection: { actualDistance: 1 } }
+                            );
+                            if (applied) {
+                                currentDistance = applied.actualDistance;
+                            }
                         }
                     } else {
                         // First time saving location after ride started

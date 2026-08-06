@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API_BASE_URL } from './apiBase';
 import { getFriendlyErrorMessage } from './errorMessages';
 import {
     getAccessToken,
@@ -12,7 +13,7 @@ import {
 import { syncTokenWithSW } from './swCommunication';
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_BASE_URL,
+    baseURL: API_BASE_URL || undefined,
     timeout: 10000, // 10s timeout
     // Auditoria de sessão (2026-08-02): sem isto o cookie httpOnly com o refresh token
     // nunca era enviado — os cookies que o backend já setava não serviam pra nada.

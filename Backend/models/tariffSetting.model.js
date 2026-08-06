@@ -72,7 +72,27 @@ const tariffSettingSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
         description: "Ativar taxa de chuva manualmente pelo painel"
-    }
+    },
+    // Auditoria APK↔tarifas (2026-08-06): preços de opcionais estavam hardcoded em
+    // ride.service.createRide — o admin não tinha como mudar. Congelados no
+    // pricingSnapshot.tariffSetting junto com o resto da tarifa da corrida.
+    optionalPrices: {
+        porta_malas: { type: Number, default: 0, min: 0 },
+        aceita_animais: { type: Number, default: 3, min: 0 },
+        aceita_encomendas: { type: Number, default: 5, min: 0 },
+        adaptado_cadeirante: { type: Number, default: 0, min: 0 },
+        disposicao_passageiro: { type: Number, default: 15, min: 0 },
+    },
 }, { timestamps: true, optimisticConcurrency: true });
 
-module.exports = mongoose.model('tariffSetting', tariffSettingSchema);
+const DEFAULT_OPTIONAL_PRICES = {
+    porta_malas: 0,
+    aceita_animais: 3,
+    aceita_encomendas: 5,
+    adaptado_cadeirante: 0,
+    disposicao_passageiro: 15,
+};
+
+const TariffSetting = mongoose.model('tariffSetting', tariffSettingSchema);
+TariffSetting.DEFAULT_OPTIONAL_PRICES = DEFAULT_OPTIONAL_PRICES;
+module.exports = TariffSetting;

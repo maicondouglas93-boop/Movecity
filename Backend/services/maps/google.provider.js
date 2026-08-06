@@ -1,7 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { getCache, setCache } = require('../../cache/cache');
-const { haversineKm } = require('./geo.util');
+const { haversineKm, approximateRouteFromCoords } = require('./geo.util');
 const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 const apiKey = () => process.env.GOOGLE_MAPS_API;
@@ -50,11 +50,10 @@ module.exports.getAddressCoordinate = async (address) => {
         throw err;
     } catch (error) {
         if (!error._tracked) trackMaps('geocoding', started, error);
-        console.warn('[google.provider] Geocoding falhou. Retornando coordenadas aproximadas.', error.message);
-        return {
-            ltd: -23.5505 + (address.length % 10) * 0.001,
-            lng: -46.6333 + (address.length % 7) * 0.001
-        };
+        console.warn('[google.provider] Geocoding falhou.', error.message);
+        // Auditoria APK↔tarifas (2026-08-06): não inventar lat/lng — precificar
+        // sobre ponto fictício gerava corrida com rota/preço errados.
+        throw new Error('Unable to fetch coordinates');
     }
 };
 
@@ -252,12 +251,10 @@ module.exports.getDistanceTime = async (origin, destination) => {
         return result;
     } catch (err) {
         trackMaps('routes', Date.now(), err);
-        console.warn('[google.provider] Routes API falhou. Retornando fallback aproximado.', err.response?.data?.error?.message || err.message);
-        return {
-            distance: { text: '15.2 km', value: 15200 },
-            duration: { text: '32 mins', value: 1920 },
-            polyline: [[originCoords.ltd, originCoords.lng], [destCoords.ltd, destCoords.lng]]
-        };
+        console.warn('[google.provider] Routes API falhou; usando aproximação haversine.', err.response?.data?.error?.message || err.message);
+        const result = approximateRouteFromCoords(originCoords, destCoords);
+        setCache(cacheKey, result, 300);
+        return result;
     }
 };
 

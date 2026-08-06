@@ -27,32 +27,10 @@ require('./services/schedule.service'); // registra o cron que ativa corridas/en
 const adminRoutes = require('./routes/admin.routes');
 const appVersionRoutes = require('./routes/appVersion.routes');
 
-const rawOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  // Capacitor Android/iOS WebView (capacitor.config androidScheme: https)
-  "https://localhost",
-  "http://localhost",
-  "capacitor://localhost",
-  "ionic://localhost",
-  process.env.FRONTEND_URL,
-  process.env.ADMIN_FRONTEND_URL,
-  process.env.CAPACITOR_ORIGIN,
-];
-
-// Remove barras no final (trailing slashes) e ignora valores vazios
-const allowedOrigins = rawOrigins
-  .filter(Boolean)
-  .map(url => url.replace(/\/+$/, ''));
+const { corsOriginCallback } = require('./config/corsOrigins');
 
 app.use(cors({
-    origin: function(origin, callback){
-        if(!origin || allowedOrigins.includes(origin)){
-            callback(null, true);
-        } else {
-            callback(new Error("Não permitido pelo CORS"));
-        }
-    },
+    origin: corsOriginCallback,
     credentials: true
 }));
 
@@ -62,12 +40,6 @@ const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 1000, // limite de requests por IP
     message: "Muitas requisições deste IP, tente novamente mais tarde."
-});
-
-const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5, // max 5 tentativas
-    message: { message: "Muitas tentativas de login. Tente novamente em 15 minutos." }
 });
 
 app.use(limiter);
@@ -110,47 +82,8 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
-app.get('/db-test', async (req, res) => {
-    const rawUri = process.env.DB_CONNECT || '';
-    let maskedUri = 'undefined';
-    if (rawUri) {
-        maskedUri = rawUri.replace(/:([^:@\/\?]+)@/, ':******@');
-    }
-
-    const state = mongoose.connection.readyState;
-    const states = {
-        0: 'disconnected',
-        1: 'connected',
-        2: 'connecting',
-        3: 'disconnecting'
-    };
-
-    try {
-        if (state === 1) {
-            await mongoose.connection.db.admin().ping();
-            return res.json({
-                status: 'OK',
-                connectionState: states[state],
-                uri: maskedUri,
-                ping: 'success'
-            });
-        } else {
-            return res.json({
-                status: 'ERROR',
-                connectionState: states[state],
-                uri: maskedUri,
-                message: 'Mongoose is not connected. Check Render environment variables.'
-            });
-        }
-    } catch (err) {
-        res.status(500).json({
-            status: 'ERROR',
-            connectionState: states[state],
-            uri: maskedUri,
-            error: err.message
-        });
-    }
-});
+// /db-test removido (auditoria 2026-08-06): era público e vazava host/user da
+// connection string. Use GET /api/health (databaseState sem URI).
 
 app.use('/users', userRoutes);
 app.use('/captains', captainRoutes);

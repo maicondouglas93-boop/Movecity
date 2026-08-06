@@ -3,7 +3,7 @@ const { validationResult } = require('express-validator');
 const mapService = require('../services/maps.service');
 const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMapUpdate } = require('../socket');
 const rideModel = require('../models/ride.model');
-const { getCache, setCache, deleteCache, deleteByPrefix } = require('../cache/cache');
+const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const {
     sanitizeCaptainFinance,
@@ -95,8 +95,6 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
 }
 
 module.exports.createRide = async (req, res) => {
-    console.log(`[AUDIT] /rides/create HIT. Body:`, req.body);
-
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         console.log(`[AUDIT] /rides/create Validation Errors:`, errors.array());
@@ -141,8 +139,7 @@ module.exports.createRide = async (req, res) => {
             await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
         }
 
-        // Invalidate dashboard and user history cache
-        deleteCache('dashboard:today');
+        // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
         res.status(201).json({ ...ride.toObject(), promoError });
@@ -232,8 +229,6 @@ async function performAcceptRide(rideId, captain, res) {
         // (exceto presencial, tratado em getCurrentRideForCaptain).
         const rideForCaptain = toCaptainRideResponse(ride);
 
-        // Invalidate dashboard cache
-        deleteCache('dashboard:today');
 
         return res.status(200).json(rideForCaptain);
     } catch (err) {
@@ -316,7 +311,6 @@ module.exports.createPresentialRide = async (req, res) => {
             clientLng: lng != null ? Number(lng) : null,
         });
 
-        deleteCache('dashboard:today');
         if (ride.user) {
             deleteByPrefix(`history:${ride.user._id || ride.user}`);
         }
@@ -406,8 +400,6 @@ module.exports.startRide = async (req, res) => {
             notificationService.sendRideStarted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
         }
 
-        // Invalidate dashboard cache
-        deleteCache('dashboard:today');
 
         return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
@@ -447,8 +439,6 @@ module.exports.updateRideStatus = async (req, res) => {
             notificationService.sendCaptainArrived(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
         }
 
-        // Invalidate dashboard cache
-        deleteCache('dashboard:today');
 
         return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
     } catch (err) {
@@ -504,8 +494,7 @@ module.exports.endRide = async (req, res) => {
 
         announceCaptainAvailable(req.captain, ride);
 
-        // Invalidate dashboard and history cache
-        deleteCache('dashboard:today');
+        // Invalida cache de histórico do usuário
         if (ride.user) {
             deleteByPrefix(`history:${ride.user._id}`);
         }
@@ -566,8 +555,6 @@ module.exports.payRide = async (req, res) => {
             notificationService.sendPaymentCompleted(ride.captain._id, { rideId: ride._id.toString() }).catch(console.error);
         }
 
-        // Invalidate dashboard cache
-        deleteCache('dashboard:today');
 
         return res.status(200).json(ride);
     } catch (err) {
@@ -598,8 +585,7 @@ module.exports.confirmPaymentReceived = async (req, res) => {
             notificationService.sendToUser(ride.user._id, 'Pagamento Confirmado', 'Recebemos o seu pagamento, muito obrigado!', 'ADMIN', { rideId: ride._id.toString() }).catch(console.error);
         }
 
-        // Invalidate dashboard and history cache
-        deleteCache('dashboard:today');
+        // Invalida cache de histórico do usuário
         if (ride.user) {
             deleteByPrefix(`history:${ride.user._id}`);
         }
@@ -787,7 +773,6 @@ module.exports.captainCancelRide = async (req, res) => {
 
         announceCaptainAvailable(req.captain, ride);
 
-        deleteCache('dashboard:today');
 
         return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
@@ -831,8 +816,7 @@ module.exports.cancelRide = async (req, res) => {
             notificationService.sendRideCancelledToCaptain(ride.captain, { rideId: ride._id.toString() }).catch(console.error);
         }
 
-        // Invalidate dashboard and history cache
-        deleteCache('dashboard:today');
+        // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
         return res.status(200).json(ride);

@@ -133,28 +133,18 @@ module.exports.loginCaptain = async (req, res, next) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
 
-    console.log('[captains/login]', {
-        email,
-        hasPassword: Boolean(password),
-        passwordLen: password.length,
-        origin: req.headers.origin || null,
-    });
-
     const captain = await captainModel.findOne({ email }).select('+password');
 
     if (!captain) {
-        console.log('[captains/login] 401 — email não encontrado:', email);
         return res.status(401).json({ message: 'Email ou senha inválidos' });
     }
 
     const isMatch = await captain.comparePassword(password);
 
     if (!isMatch) {
-        console.log('[captains/login] 401 — senha incorreta:', email);
         return res.status(401).json({ message: 'Email ou senha inválidos' });
     }
 
-    console.log('[captains/login] 200 — ok:', email);
     return await respondWithCaptainSession(res, { captain, ip: req.ip });
 }
 

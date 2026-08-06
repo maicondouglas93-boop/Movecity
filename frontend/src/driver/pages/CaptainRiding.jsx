@@ -6,14 +6,12 @@ import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
-import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import api from '@/shared/services/axios'
 import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { db } from '@/shared/services/db'
 import { getAccessToken } from '@/shared/services/session'
 import { flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { joinWithRetry } from '@/shared/services/socketAuth'
@@ -42,7 +40,6 @@ const CaptainRiding = () => {
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
-    const { locationRef } = useContext(LocationContext)
     const { addToast } = useToast()
     const [ isChatOpen, setIsChatOpen ] = useState(false)
     const [ unreadCount, setUnreadCount ] = useState(0)
@@ -124,9 +121,16 @@ const CaptainRiding = () => {
         requestLock();
     }, [requestLock]);
 
-    /* ── Envio periódico da localização real (GPS) do motorista durante a corrida ── */
-    const REAL_LOCATION_INTERVAL_MS = 5000
-
+    /* ── Join do socket + aviso de início da corrida ──
+     * O envio periódico de GPS vive só em CaptainLocationBridge (montado em
+     * DriverAppProviders, 5s com serviço ativo). Auditoria de integração
+     * (2026-08-06): esta tela mantinha um segundo setInterval de 5s emitindo o
+     * mesmo `update-location-captain`, dobrando a taxa de amostragem. Como o
+     * backend soma qualquer deslocamento acima de 5m em `actualDistance`, o
+     * ruído de GPS parado no trânsito era contado duas vezes e inflava a
+     * tarifa final recalculada em endRide. A Bridge já cobre o enfileiramento
+     * offline em IndexedDB, então o bloco inteiro era redundante.
+     */
     useEffect(() => {
         if (!captain?._id || !rideData) return;
 
@@ -145,28 +149,6 @@ const CaptainRiding = () => {
 
         socket.on('connect', handleConnect)
 
-        const updateLocation = () => {
-            const loc = locationRef.current;
-            if (!loc) return;
-
-            if (socket.connected) {
-                socket.emit('update-location-captain', {
-                    userId: captain._id,
-                    location: { ltd: loc.lat, lng: loc.lng }
-                });
-            } else {
-                db.driverLocations.add({
-                    userId: captain._id,
-                    lat: loc.lat,
-                    lng: loc.lng,
-                    timestamp: Date.now()
-                }).catch(e => console.error(e));
-            }
-        };
-
-        const locationInterval = setInterval(updateLocation, REAL_LOCATION_INTERVAL_MS)
-        updateLocation()
-
         const destLabel = rideData?.destinationPending
             ? 'destino a definir ao finalizar'
             : (rideData?.destination?.split(',')[0] || 'destino')
@@ -179,7 +161,6 @@ const CaptainRiding = () => {
         showBrowserNotification('Corrida Iniciada', `A caminho de ${destLabel}`)
 
         return () => {
-            clearInterval(locationInterval);
             socket.off('connect', handleConnect)
         }
     }, [captain?._id, rideData?._id])  // stable deps only

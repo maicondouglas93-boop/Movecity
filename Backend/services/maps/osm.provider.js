@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { getCache, setCache } = require('../../cache/cache');
-const { haversineKm } = require('./geo.util');
+const { haversineKm, approximateRouteFromCoords } = require('./geo.util');
 const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 // Geocoding reverso via Nominatim — não existia no código original (Home.jsx chama
@@ -61,12 +61,11 @@ module.exports.getAddressCoordinate = async (address) => {
                 return result;
             }
         } catch (err) {
-            console.warn("Nominatim geocoding failed. Using mock coordinates.", err.message);
+            console.warn("Nominatim geocoding failed.", err.message);
         }
-        return {
-            ltd: -20.15 + (address.length % 10) * 0.01,
-            lng: -41.62 + (address.length % 7) * 0.01
-        };
+        // Auditoria APK↔tarifas (2026-08-06): inventar coordenadas gerava tarifa
+        // sobre um ponto fictício — quem chama (getFare/createRide) precisa falhar.
+        throw new Error('Unable to fetch coordinates');
     }
 
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
@@ -90,12 +89,8 @@ module.exports.getAddressCoordinate = async (address) => {
             throw new Error('Unable to fetch coordinates');
         }
     } catch (error) {
-        console.warn("Geocoding failed. Returning mock coordinates.", error.message);
-        // Fallback for demo: São Paulo (Brazil) instead of Mumbai
-        return {
-            ltd: -23.5505 + (address.length % 10) * 0.001,
-            lng: -46.6333 + (address.length % 7) * 0.001
-        };
+        console.warn("Geocoding failed.", error.message);
+        throw new Error('Unable to fetch coordinates');
     }
 }
 
@@ -174,12 +169,11 @@ module.exports.getDistanceTime = async (origin, destination) => {
         return result;
     }
 
-    // Final mock fallback
-    return {
-        distance: { text: "15.2 km", value: 15200 },
-        duration: { text: "32 mins", value: 1920 },
-        polyline: [[originCoords.ltd, originCoords.lng], [destCoords.ltd, destCoords.lng]]
-    };
+    // Coordenadas reais já resolvidas — estima linha reta em vez de inventar 15,2 km.
+    console.warn('Routing engines failed; using haversine approximation from resolved coordinates.');
+    result = approximateRouteFromCoords(originCoords, destCoords);
+    setCache(cacheKey, result, 300); // curto: é aproximação
+    return result;
 }
 
 // Fase D da experiência de corrida ativa (2026-08-03): rota COM manobras.

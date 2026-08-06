@@ -53,22 +53,33 @@ const OptionalsPanel = (props) => {
             </div>
 
             <div className='flex flex-col'>
-                {OPTIONS.map((opt) => (
+                {OPTIONS.map((opt) => {
+                    const price = Number(props.optionalPrices?.[opt.id]);
+                    const priceLabel = Number.isFinite(price)
+                        ? (price > 0 ? `+ R$ ${price.toFixed(2)}` : 'Grátis')
+                        : null;
+                    return (
                     <label
                         key={opt.id}
                         htmlFor={opt.id}
-                        className='flex items-center justify-between py-3 border-b border-line cursor-pointer'
+                        className='flex items-center justify-between py-3 border-b border-line cursor-pointer gap-3'
                     >
-                        <span className='text-base text-ink-900 font-medium'>{opt.label}</span>
+                        <span className='text-base text-ink-900 font-medium flex-1'>
+                            {opt.label}
+                            {priceLabel && (
+                                <span className='block text-sm font-normal text-ink-400'>{priceLabel}</span>
+                            )}
+                        </span>
                         <input
                             type="checkbox"
                             id={opt.id}
-                            className='w-5 h-5 accent-brand-600'
+                            className='w-5 h-5 accent-brand-600 shrink-0'
                             checked={selectedOptionals.includes(opt.id)}
                             onChange={() => toggleOptional(opt.id)}
                         />
                     </label>
-                ))}
+                    );
+                })}
 
                 <label htmlFor="motorista_mulher" className='flex items-center justify-between py-3 border-b border-line cursor-pointer'>
                     <span className='text-base text-ink-900 font-medium'>Motorista mulher</span>

@@ -116,7 +116,7 @@ export function sessionKindForUrl(url = '') {
     if (path.includes('/rides/end-ride')) return 'captain';
     if (path.includes('/rides/confirm-payment')) return 'captain';
     if (path.includes('/rides/captain-review')) return 'captain';
-    if (/\/rides\/[^/]+\/accept(?:\/|$)/.test(path)) return 'captain';
+    if (/\/rides\/[^/]+\/(accept|decline)(?:\/|$)/.test(path)) return 'captain';
 
     // Encomendas — motorista
     if (path.includes('/parcels/pending')) return 'captain';

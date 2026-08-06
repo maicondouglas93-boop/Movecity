@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { body } = require("express-validator")
 const authMiddleware = require('../middlewares/auth.middleware');
+const { loginLimiter } = require('../middlewares/rateLimiter');
 
 // Placa: cobre formato antigo (ABC1234) e Mercosul (ABC1D23) — o sistema nunca teve
 // validação de formato além de minlength:3, então esta é a primeira, não uma
@@ -16,7 +17,7 @@ const normalizePlate = (value) => typeof value === 'string' ? value.toUpperCase(
 // passam a ser coletados na etapa de documentação (ver PATCH /captains/document-info),
 // sem bloquear a criação da conta. capacity não é mais pedido ao motorista: vem da
 // categoria escolhida (vehicleCategory.capacity), evitando duplicar esse dado.
-router.post('/register', [
+router.post('/register', loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('fullname.firstname').isLength({ min: 3 }).withMessage('First name must be at least 3 characters long'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
@@ -48,7 +49,7 @@ router.patch('/document-info', [
 )
 
 
-router.post('/login', [
+router.post('/login', loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long')
 ],

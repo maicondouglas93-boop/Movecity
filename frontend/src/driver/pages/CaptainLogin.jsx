@@ -8,6 +8,7 @@ import Button from '@/shared/components/ui/Button'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { saveSession, getAccessToken } from '@/shared/services/session'
 import { syncTokenWithSW } from '@/shared/services/swCommunication'
+import { getAppRole } from '@/shared/platform/platform'
 
 const Captainlogin = () => {
 
@@ -122,6 +123,15 @@ const Captainlogin = () => {
         </form>
         <p className='text-center text-ink-600'>Quer dirigir com a gente? <Link to='/captain-signup' className='text-brand-700 font-medium'>Cadastre-se como Motorista</Link></p>
       </div>
+      {/* Só na web: o APK motorista (VITE_APP_ROLE=driver) não tem rotas de passageiro. */}
+      {getAppRole() === 'web' && (
+        <div className='p-7'>
+          <Link
+            to='/login'
+            className='bg-surface-alt border border-brand-100 flex items-center justify-center text-brand-700 font-semibold mb-5 rounded-panel px-4 py-3 w-full text-lg hover:bg-brand-50 transition-colors'
+          >Entrar como Passageiro</Link>
+        </div>
+      )}
     </div>
   )
 }

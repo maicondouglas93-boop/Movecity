@@ -75,33 +75,33 @@ jobs:
       - name: Build admin (gate)
         run: npm run build
 
-  # E2E ainda frágil (servidor/ambiente). Não bloqueia merge enquanto a suíte
-  # não tiver webServer + backend estáveis no Actions. Builds unitários acima já são gate.
+  # Smoke E2E (páginas sobem). Fluxo completo de corrida/API fica fora do gate.
   e2e-frontend:
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: [frontend]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - name: Install dependencies (Backend)
-        run: cd Backend && npm ci
-      - name: Install dependencies (Frontend)
-        run: cd frontend && npm ci
-      - name: Install Playwright Browsers
-        run: cd frontend && npx playwright install chromium --with-deps
-      - name: Run Playwright tests
-        run: cd frontend && npm run test:e2e
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: ./frontend
+        run: npx playwright install chromium --with-deps
+      - name: Smoke E2E
+        working-directory: ./frontend
+        run: npx playwright test
         env:
-          NODE_ENV: test
+          CI: true
 
   e2e-admin:
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: [admin]
     steps:
       - uses: actions/checkout@v4
@@ -113,9 +113,11 @@ jobs:
       - name: Install dependencies
         working-directory: ./admin-frontend
         run: npm ci
-      - name: Install Playwright Browsers
+      - name: Install Playwright Chromium
         working-directory: ./admin-frontend
-        run: npx playwright install --with-deps
-      - name: Run Playwright E2E Tests
+        run: npx playwright install chromium --with-deps
+      - name: Smoke E2E
         working-directory: ./admin-frontend
         run: npx playwright test
+        env:
+          CI: true

@@ -22,14 +22,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Dispara a RideOfferActivity (tela nativa verde).
+ * Oferta de corrida/encomenda no Android.
  *
- * UI da oferta = só a Activity. Aceitar/Recusar NÃO ficam na bandeja.
- *
- * Em background o Android bloqueia startActivity (BAL). Por isso ainda postamos
- * uma notificação mínima com fullScreenIntent — é o “veículo” do sistema para
- * abrir a Activity. Sem botões Aceitar/Recusar; a Activity cancela essa
- * notificação no onCreate.
+ * UI principal em background: notificação rica (BigText + Aceitar/Recusar).
+ * Ainda tenta abrir a RideOfferActivity (tela verde) quando o sistema permitir;
+ * se a Activity não subir sozinha, o motorista age pela Push.
  */
 public final class RideOfferNotifier {
     public static final String CHANNEL_ID = "ride_offers_v3";
@@ -114,28 +111,21 @@ public final class RideOfferNotifier {
         Intent fullScreen = buildOfferIntent(context, data, kind, offerId);
         boolean foreground = isAppInForeground(context);
 
-        Log.i(TAG, "oferta → RideOfferActivity kind=" + kind
+        Log.i(TAG, "oferta → push rica + Activity kind=" + kind
             + " offerId=" + offerId + " foreground=" + foreground);
 
-        // Sempre tentar abrir a tela nativa (holder / startActivity / AlarmClock).
+        // Push rica = UI confiável (Aceitar/Recusar + detalhes). Activity é best-effort.
+        postRichOfferNotification(context, data, fullScreen, offerId, isParcel);
         launchOfferActivityNow(context, fullScreen, offerId);
-
-        // Em foreground o bridge JS/Activity holder já abre a tela — não postar
-        // heads-up (era a Push duplicada com Aceitar/Recusar).
-        // Em background: notificação mínima + fullScreenIntent é obrigatória no
-        // Android moderno para o sistema permitir a Activity (BAL).
-        if (!foreground) {
-            postLaunchVehicleNotification(context, fullScreen, offerId, isParcel);
-        }
     }
 
     /**
-     * Notificação só para o sistema lançar a Activity (FSI). Sem botões
-     * Aceitar/Recusar e sem detalhar a oferta — a UI é a tela verde.
-     * RideOfferActivity.onCreate chama cancelNotification.
+     * Notificação expandida com detalhes da corrida e ações Aceitar/Recusar.
+     * É a interface principal quando a tela verde não abre sozinha em background.
      */
-    private static void postLaunchVehicleNotification(
+    private static void postRichOfferNotification(
         Context context,
+        Map<String, String> data,
         Intent fullScreen,
         String offerId,
         boolean isParcel
@@ -143,30 +133,164 @@ public final class RideOfferNotifier {
         int notificationId = notificationIdFor(offerId);
         PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
 
-        String title = isParcel ? "Nova encomenda" : "Nova corrida";
-        // Texto genérico de propósito — não é a interface de aceite.
-        String body = "Abrindo oferta…";
+        Intent accept = new Intent(context, RideOfferActionReceiver.class);
+        accept.setAction(RideOfferActionReceiver.ACTION_ACCEPT);
+        copyOfferExtras(fullScreen, accept);
+        PendingIntent acceptPi = broadcastPi(context, offerId.hashCode() + 11, accept);
+
+        Intent reject = new Intent(context, RideOfferActionReceiver.class);
+        reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
+        copyOfferExtras(fullScreen, reject);
+        PendingIntent rejectPi = broadcastPi(context, offerId.hashCode() + 17, reject);
+
+        String title = buildOfferTitle(data, isParcel);
+        String bigBody = buildOfferBigBody(data, isParcel);
+        String summary = firstNonEmpty(
+            firstLine(bigBody),
+            isParcel ? "Nova encomenda disponível" : "Nova corrida disponível"
+        );
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_movecity)
             .setContentTitle(title)
-            .setContentText(body)
+            .setContentText(summary)
+            .setStyle(new NotificationCompat.BigTextStyle()
+                .setBigContentTitle(title)
+                .bigText(bigBody)
+                .setSummaryText(isParcel ? "Encomenda" : "Corrida"))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setOngoing(false)
+            .setOngoing(true)
+            .setOnlyAlertOnce(false)
             .setFullScreenIntent(fullScreenPi, true)
             .setContentIntent(fullScreenPi)
-            // Sem .addAction Aceitar/Recusar — UI exclusiva da RideOfferActivity.
-            .setTimeoutAfter(15_000);
+            .addAction(0, "Recusar", rejectPi)
+            .addAction(0, "Aceitar", acceptPi)
+            .setTimeoutAfter(45_000);
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
             nm.notify(notificationId, builder.build());
-            Log.i(TAG, "notificação-veículo FSI id=" + notificationId
-                + " (sem ações; cancelada ao abrir Activity)");
+            Log.i(TAG, "notificação rica criada id=" + notificationId
+                + " kind=" + (isParcel ? "parcel" : "ride") + " offerId=" + offerId);
         }
+    }
+
+    private static String buildOfferTitle(Map<String, String> data, boolean isParcel) {
+        String fromPayload = data.get("title");
+        if (fromPayload != null && !fromPayload.isEmpty()) return fromPayload;
+        String fare = formatFare(data.get("fare"));
+        if (isParcel) {
+            return fare != null ? "Nova encomenda · " + fare : "Nova encomenda disponível";
+        }
+        return fare != null ? "Nova corrida · " + fare : "Nova corrida disponível";
+    }
+
+    /** Corpo longo para BigTextStyle ocupar área maior na heads-up/bandeja. */
+    private static String buildOfferBigBody(Map<String, String> data, boolean isParcel) {
+        StringBuilder sb = new StringBuilder();
+        String fare = formatFare(data.get("fare"));
+        if (fare != null) {
+            sb.append("Valor: ").append(fare).append('\n');
+        }
+
+        String pickup = firstNonEmpty(data.get("pickup"), null);
+        String destination = firstNonEmpty(data.get("destination"), null);
+        if (pickup != null) {
+            sb.append(isParcel ? "Coleta: " : "Origem: ").append(pickup).append('\n');
+        }
+        if (destination != null) {
+            sb.append(isParcel ? "Entrega: " : "Destino: ").append(destination).append('\n');
+        }
+
+        String distance = formatDistance(data);
+        String duration = formatDuration(data);
+        if (distance != null || duration != null) {
+            String meta = joinNonEmpty(" · ", distance, duration);
+            if (meta != null) sb.append(meta).append('\n');
+        }
+
+        String passenger = firstNonEmpty(
+            data.get("passengerName"),
+            firstNonEmpty(data.get("userName"), null)
+        );
+        if (passenger != null) {
+            String first = passenger.trim().split("\\s+")[0];
+            sb.append("Passageiro: ").append(first).append('\n');
+        }
+
+        String vehicle = firstNonEmpty(data.get("vehicleType"), null);
+        if (vehicle != null) {
+            sb.append("Categoria: ").append(vehicle).append('\n');
+        }
+
+        // message do backend já vem rico (rota/km/min) — acrescenta se ainda não coberto
+        String message = data.get("message");
+        if (message != null && !message.isEmpty() && sb.indexOf(message) < 0) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(message.replace("\\n", "\n"));
+        }
+
+        if (sb.length() == 0) {
+            return isParcel
+                ? "Nova encomenda disponível.\nToque em Aceitar ou Recusar."
+                : "Nova corrida disponível.\nToque em Aceitar ou Recusar.";
+        }
+        sb.append('\n').append("Use Aceitar ou Recusar abaixo.");
+        return sb.toString().trim();
+    }
+
+    private static String formatFare(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        try {
+            double v = Double.parseDouble(raw.replace(',', '.'));
+            return String.format(java.util.Locale.GERMANY, "R$ %.2f", v);
+        } catch (Exception e) {
+            return raw.startsWith("R$") ? raw : "R$ " + raw;
+        }
+    }
+
+    private static String formatDistance(Map<String, String> data) {
+        String meters = firstNonEmpty(data.get("estimatedDistance"), data.get("distance"));
+        if (meters == null) return null;
+        try {
+            double m = Double.parseDouble(meters);
+            if (m <= 0) return null;
+            return String.format(java.util.Locale.GERMANY, "%.1f km", m / 1000.0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String formatDuration(Map<String, String> data) {
+        String seconds = firstNonEmpty(data.get("estimatedTime"), data.get("duration"));
+        if (seconds == null) return null;
+        try {
+            double s = Double.parseDouble(seconds);
+            if (s <= 0) return null;
+            int min = Math.max(1, (int) Math.round(s / 60.0));
+            return min + " min";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String joinNonEmpty(String sep, String... parts) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) {
+            if (p == null || p.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(sep);
+            sb.append(p);
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    private static String firstLine(String text) {
+        if (text == null || text.isEmpty()) return null;
+        int nl = text.indexOf('\n');
+        return nl >= 0 ? text.substring(0, nl).trim() : text.trim();
     }
 
     public static void openOfferActivity(Context context, Intent source) {

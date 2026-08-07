@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
+const adminMapsController = require('../controllers/adminMaps.controller');
 const notificationController = require('../controllers/notification.controller');
 const monitoringController = require('../controllers/monitoring.controller');
 const { authAdmin, authorizeRoles } = require('../middlewares/adminAuth.middleware');
 const { loginLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
-const { body } = require('express-validator');
+const { body, query } = require('express-validator');
 
 // Auth Routes
 router.post('/login', loginLimiter, adminController.login);
@@ -113,7 +114,35 @@ router.put('/vehicle-categories/:id/tariffs', authAdmin, authorizeRoles('super_a
 router.post('/vehicle-categories/:id/duplicate', authAdmin, authorizeRoles('super_admin'), adminController.duplicateCategory);
 router.get('/tariffs/history', authAdmin, adminController.getTariffHistory);
 router.post('/tariffs/simulate', authAdmin, authorizeRoles('super_admin'), adminController.simulateFare);
+router.post(
+    '/tariffs/estimate-route',
+    authAdmin,
+    authorizeRoles('super_admin'),
+    body('pickup').isString().isLength({ min: 3 }),
+    body('destination').isString().isLength({ min: 3 }),
+    adminMapsController.estimateRoute
+);
 router.post('/tariffs/schedule', authAdmin, authorizeRoles('super_admin'), adminController.scheduleTariff);
+
+// Mapas para o simulador de tarifas (token admin — /maps/* público só aceita user/captain)
+router.get(
+    '/maps/suggestions',
+    authAdmin,
+    authorizeRoles('super_admin'),
+    query('input').isString().isLength({ min: 3 }),
+    query('lat').optional().isNumeric(),
+    query('lng').optional().isNumeric(),
+    query('sessionToken').optional().isString(),
+    adminMapsController.getSuggestions
+);
+router.get(
+    '/maps/place-details',
+    authAdmin,
+    authorizeRoles('super_admin'),
+    query('placeId').isString().isLength({ min: 1 }),
+    query('sessionToken').optional().isString(),
+    adminMapsController.getPlaceDetails
+);
 
 const globalTariffController = require('../controllers/globalTariff.controller');
 router.get('/global-tariffs', authAdmin, authorizeRoles('super_admin'), globalTariffController.list);

@@ -66,7 +66,7 @@ const CaptainHome = () => {
     const { socket } = useContext(SocketContext)
     const { captain, setCaptain } = useContext(CaptainDataContext)
     const { locationRef, locationError, userLocation } = useContext(LocationContext)
-    const { captainRide, setCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
+    const { captainRide, setCaptainRide, syncCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const [ refreshingApproval, setRefreshingApproval ] = useState(false)
 
@@ -524,17 +524,28 @@ const CaptainHome = () => {
     useEffect(() => {
         const offerId = searchParams.get('rideOffer')
         if (!offerId || !captain?._id) return
-        // Já em corrida ativa: não sobrescreve com uma oferta.
-        if (captainRide) {
-            const next = new URLSearchParams(searchParams)
-            next.delete('rideOffer')
-            setSearchParams(next, { replace: true })
-            return
-        }
-
         let cancelled = false
         ;(async () => {
             try {
+                // Android: quando o motorista toca em "Aceitar" na notificação nativa,
+                // o backend já pode ter aceitado a corrida antes da WebView montar. A
+                // primeira fonte precisa ser /rides/captain-current; /rides/pending só
+                // vale para ofertas ainda não aceitas. Isso evita reabrir a oferta com
+                // botão "Aceitar" para uma corrida que já é ativa deste motorista.
+                const activeRide = await syncCaptainRide?.()
+                if (cancelled) return
+                if (activeRide && String(activeRide._id) === String(offerId)) {
+                    removePendingRide(offerId)
+                    if (activeRide.status === 'started') {
+                        navigate('/captain-riding', { replace: true, state: { ride: activeRide } })
+                    } else if ([ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(activeRide.status)) {
+                        setRide(activeRide)
+                        setRidePopupPanel(false)
+                        setConfirmRidePopupPanel(true)
+                    }
+                    return
+                }
+
                 const response = await api.get('/rides/pending')
                 if (cancelled) return
                 const list = Array.isArray(response.data) ? response.data : []
@@ -559,7 +570,7 @@ const CaptainHome = () => {
 
         return () => { cancelled = true }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchParams.get('rideOffer'), captain?._id, captainRide?._id])
+    }, [searchParams.get('rideOffer'), captain?._id, captainRide?._id, syncCaptainRide, navigate])
 
     // Deep link ?parcelOffer=<id> — espelha rideOffer.
     useEffect(() => {
@@ -922,6 +933,7 @@ const CaptainHome = () => {
             <BottomSheet expandable open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
                 <ConfirmRidePopUp
                     ride={ride}
+                    setRide={setRide}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />
             </BottomSheet>
             {parcelPopupOpen && parcelOffer && (

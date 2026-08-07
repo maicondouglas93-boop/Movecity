@@ -532,6 +532,23 @@ module.exports.toggleCaptainBlock = async (req, res, next) => {
     }
 };
 
+module.exports.updateCaptainVehicle = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { vehicle, reason } = req.body;
+        if (!vehicle || typeof vehicle !== 'object') {
+            return res.status(400).json({ message: 'Payload vehicle é obrigatório' });
+        }
+        const result = await adminService.updateCaptainVehicle(id, vehicle, req.admin, req.ip, reason);
+        res.status(200).json(result);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        next(error);
+    }
+};
+
 module.exports.getCaptainDocuments = async (req, res, next) => {
     try {
         const { id } = req.params;

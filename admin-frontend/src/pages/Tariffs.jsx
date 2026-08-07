@@ -378,6 +378,7 @@ function CategoryMetaModal({ category, onClose, onSave, saving }) {
                 <option value="car">Carro</option>
                 <option value="moto">Moto</option>
                 <option value="auto">Auto</option>
+                <option value="bike">Bicicleta</option>
               </select>
             </div>
             <div>

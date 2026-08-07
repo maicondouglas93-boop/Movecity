@@ -9,15 +9,18 @@ import Button from '@/shared/components/ui/Button'
 // e um botão "Continuar" separado avança — mesmo padrão de apps de referência.
 // Ver §2.4/item da auditoria de UX.
 const VehiclePanel = (props) => {
+    // Corrida normal usa service=ride — categorias só de encomenda (allowedServices.ride=false) não entram.
+    const service = props.service || 'ride'
     const [categories, setCategories] = useState([])
     const [loading, setLoading] = useState(true)
     const [selectedName, setSelectedName] = useState(null)
 
     useEffect(() => {
         let cancelled = false
-        getVehicleCategories()
+        setLoading(true)
+        getVehicleCategories(service)
             .then((data) => {
-                if (!cancelled) setCategories(data)
+                if (!cancelled) setCategories(Array.isArray(data) ? data : [])
             })
             .catch(() => {
                 if (!cancelled) setCategories([])
@@ -26,7 +29,7 @@ const VehiclePanel = (props) => {
                 if (!cancelled) setLoading(false)
             })
         return () => { cancelled = true }
-    }, [])
+    }, [service])
 
     const handleContinue = () => {
         if (!selectedName) return

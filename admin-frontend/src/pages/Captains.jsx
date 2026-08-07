@@ -10,7 +10,7 @@ import {
   Search, MapPin, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, 
   RotateCcw, ShieldAlert, CheckCircle, XCircle, Lock, Unlock, FileText, FileSearch, Star, 
-  Battery, AlertTriangle, Briefcase, ChevronDown, Check, ArrowRight, History
+  Battery, AlertTriangle, Briefcase, ChevronDown, Check, ArrowRight, History, Pencil
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -277,7 +277,12 @@ export default function Captains() {
 
       {/* CRM DRAWER */}
       {activeCaptainDrawer && (
-        <CaptainDrawer captain={activeCaptainDrawer} onClose={() => setActiveCaptainDrawer(null)} liveDrivers={liveDrivers} />
+        <CaptainDrawer
+          captain={activeCaptainDrawer}
+          onClose={() => setActiveCaptainDrawer(null)}
+          liveDrivers={liveDrivers}
+          onCaptainUpdated={setActiveCaptainDrawer}
+        />
       )}
     </div>
   );
@@ -381,7 +386,7 @@ function CaptainActionMenu({ captain, onAction }) {
   );
 }
 
-function CaptainDrawer({ captain, onClose, liveDrivers }) {
+function CaptainDrawer({ captain, onClose, liveDrivers, onCaptainUpdated }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
@@ -480,7 +485,13 @@ function CaptainDrawer({ captain, onClose, liveDrivers }) {
 
         {/* CRM Content */}
         <div className="flex-1 overflow-y-auto bg-background/30 p-6">
-           {activeTab === 'perfil' && <TabProfile captain={captain} liveDrivers={liveDrivers} />}
+           {activeTab === 'perfil' && (
+             <TabProfile
+               captain={captain}
+               liveDrivers={liveDrivers}
+               onCaptainUpdated={onCaptainUpdated}
+             />
+           )}
            {activeTab === 'documentos' && <TabDocuments captainId={captain._id} />}
            {activeTab === 'corridas' && <TabRides captainId={captain._id} />}
            {activeTab === 'financeiro' && <TabFinance captainId={captain._id} captainName={`${captain.fullname?.firstname || ''} ${captain.fullname?.lastname || ''}`.trim()} />}
@@ -491,9 +502,24 @@ function CaptainDrawer({ captain, onClose, liveDrivers }) {
   )
 }
 
-function TabProfile({ captain, liveDrivers }) {
+function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [editVehicleOpen, setEditVehicleOpen] = useState(false);
   const isLive = liveDrivers[captain._id] || captain.isOnline;
   const liveData = liveDrivers[captain._id]; // Might have ltd/lng from socket
+
+  const vehicleMutation = useMutation({
+    mutationFn: (payload) => api.put(`/admin/captains/${captain._id}/vehicle`, payload),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['captains'] });
+      queryClient.invalidateQueries({ queryKey: ['captain-timeline', captain._id] });
+      if (res?.data) onCaptainUpdated?.(res.data);
+      setEditVehicleOpen(false);
+      toast.success('Dados do veículo atualizados.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar veículo'),
+  });
 
   return (
     <div className="space-y-6">
@@ -516,11 +542,22 @@ function TabProfile({ captain, liveDrivers }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
          {/* Veículo */}
          <div className="bg-surface p-5 rounded-xl border border-border">
-           <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4 flex items-center gap-2"><Car className="w-4 h-4"/> Veículo</h3>
+           <div className="flex items-center justify-between mb-4">
+             <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted flex items-center gap-2"><Car className="w-4 h-4"/> Veículo</h3>
+             <button
+               type="button"
+               onClick={() => setEditVehicleOpen(true)}
+               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-primary hover:text-primary transition-colors"
+             >
+               <Pencil className="w-3.5 h-3.5" /> Editar
+             </button>
+           </div>
            <div className="space-y-3">
-              <div><p className="text-xs text-text-muted">Modelo</p><p className="font-medium text-sm capitalize">{captain.vehicle?.modelo || 'Não informado'}</p></div>
+              <div><p className="text-xs text-text-muted">Categoria</p><p className="font-medium text-sm capitalize">{captain.vehicle?.vehicleType || '—'}</p></div>
+              <div><p className="text-xs text-text-muted">Marca / Modelo</p><p className="font-medium text-sm capitalize">{[captain.vehicle?.marca, captain.vehicle?.modelo].filter(Boolean).join(' ') || 'Não informado'}</p></div>
               <div><p className="text-xs text-text-muted">Placa</p><p className="font-bold text-lg uppercase bg-background border border-border px-3 py-1 rounded w-fit mt-1">{captain.vehicle?.plate || '---'}</p></div>
-              <div><p className="text-xs text-text-muted">Cor / Ano</p><p className="font-medium text-sm capitalize">{captain.vehicle?.color} / {captain.vehicle?.ano}</p></div>
+              <div><p className="text-xs text-text-muted">Cor / Ano</p><p className="font-medium text-sm capitalize">{captain.vehicle?.color || '—'} / {captain.vehicle?.ano || '—'}</p></div>
+              <div><p className="text-xs text-text-muted">Capacidade</p><p className="font-medium text-sm">{captain.vehicle?.capacity ?? '—'} pessoa(s)</p></div>
            </div>
          </div>
 
@@ -576,8 +613,182 @@ function TabProfile({ captain, liveDrivers }) {
            </div>
         </div>
       )}
+
+      {editVehicleOpen && (
+        <EditCaptainVehicleModal
+          captain={captain}
+          saving={vehicleMutation.isPending}
+          onClose={() => !vehicleMutation.isPending && setEditVehicleOpen(false)}
+          onSave={(payload) => vehicleMutation.mutate(payload)}
+        />
+      )}
     </div>
   )
+}
+
+function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
+  const v = captain.vehicle || {};
+  const [form, setForm] = useState({
+    marca: v.marca || '',
+    modelo: v.modelo || '',
+    ano: v.ano || new Date().getFullYear(),
+    color: v.color || '',
+    plate: v.plate || '',
+    vehicleType: v.vehicleType || '',
+    reason: '',
+  });
+
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ['vehicleCategories'],
+    queryFn: async () => {
+      const { data } = await api.get('/admin/vehicle-categories');
+      return data;
+    },
+  });
+
+  const activeCategories = (categories || []).filter((c) => c.isActive !== false);
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+
+  const submit = (e) => {
+    e.preventDefault();
+    onSave({
+      reason: form.reason.trim() || undefined,
+      vehicle: {
+        marca: form.marca.trim(),
+        modelo: form.modelo.trim(),
+        ano: Number(form.ano),
+        color: form.color.trim(),
+        plate: form.plate.trim().toUpperCase().replace(/[\s-]/g, ''),
+        vehicleType: form.vehicleType,
+      },
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[3500] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-surface rounded-xl border border-border w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-lg text-text">Editar veículo</h2>
+            <p className="text-xs text-text-muted mt-0.5">
+              {captain.fullname?.firstname} {captain.fullname?.lastname}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 hover:bg-background rounded-full text-text-muted">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-5 space-y-4 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Marca</label>
+              <input
+                required
+                value={form.marca}
+                onChange={(e) => set('marca', e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Modelo</label>
+              <input
+                required
+                value={form.modelo}
+                onChange={(e) => set('modelo', e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Ano</label>
+              <input
+                required
+                type="number"
+                min={1950}
+                max={new Date().getFullYear() + 1}
+                value={form.ano}
+                onChange={(e) => set('ano', e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Cor</label>
+              <input
+                required
+                minLength={3}
+                value={form.color}
+                onChange={(e) => set('color', e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Placa</label>
+              <input
+                required
+                value={form.plate}
+                onChange={(e) => set('plate', e.target.value.toUpperCase())}
+                placeholder="ABC1D23"
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary uppercase"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">Categoria</label>
+              <select
+                required
+                value={form.vehicleType}
+                onChange={(e) => set('vehicleType', e.target.value)}
+                disabled={categoriesLoading}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Selecione…</option>
+                {activeCategories.map((c) => (
+                  <option key={c._id || c.name} value={c.name}>
+                    {c.displayName || c.name}
+                  </option>
+                ))}
+                {form.vehicleType && !activeCategories.some((c) => c.name === form.vehicleType) && (
+                  <option value={form.vehicleType}>{form.vehicleType} (atual)</option>
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Motivo da correção (opcional)</label>
+            <textarea
+              rows={2}
+              value={form.reason}
+              onChange={(e) => set('reason', e.target.value)}
+              placeholder="Ex.: placa digitada errada no cadastro"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"
+            />
+          </div>
+
+          <p className="text-xs text-text-muted">
+            A capacidade é atualizada automaticamente conforme a categoria escolhida. A alteração fica registrada na auditoria.
+          </p>
+
+          <div className="pt-2 flex justify-end gap-3 border-t border-border">
+            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-text-muted hover:text-text">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !form.vehicleType}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-40"
+            >
+              {saving ? 'Salvando…' : 'Salvar alterações'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 function TabDocuments({ captainId }) {

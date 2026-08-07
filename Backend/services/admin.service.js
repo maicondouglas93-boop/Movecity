@@ -674,6 +674,88 @@ module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, 
     return captain;
 };
 
+const PLATE_REGEX = /^[A-Z]{3}\d[A-Z0-9]\d{2}$/;
+const normalizePlate = (value) =>
+    typeof value === 'string' ? value.toUpperCase().replace(/[\s-]/g, '') : value;
+
+// Correção administrativa de dados do veículo (cadastro errado): marca, modelo, ano,
+// cor, placa, categoria. capacity vem da categoria ativa (igual ao register).
+module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip, reason) => {
+    const captain = await captainModel.findById(captainId);
+    if (!captain) {
+        throw Object.assign(new Error('Motorista não encontrado'), { statusCode: 404 });
+    }
+
+    const marca = String(vehicleInput.marca || '').trim();
+    const modelo = String(vehicleInput.modelo || '').trim();
+    const color = String(vehicleInput.color || '').trim();
+    const plate = normalizePlate(vehicleInput.plate || '');
+    const vehicleType = String(vehicleInput.vehicleType || '').trim();
+    const ano = Number(vehicleInput.ano);
+
+    if (marca.length < 2) throw Object.assign(new Error('Marca inválida'), { statusCode: 400 });
+    if (modelo.length < 1) throw Object.assign(new Error('Modelo inválido'), { statusCode: 400 });
+    if (color.length < 3) throw Object.assign(new Error('Cor deve ter pelo menos 3 caracteres'), { statusCode: 400 });
+    if (!Number.isInteger(ano) || ano < 1950 || ano > new Date().getFullYear() + 1) {
+        throw Object.assign(new Error('Ano do veículo inválido'), { statusCode: 400 });
+    }
+    if (!PLATE_REGEX.test(plate)) {
+        throw Object.assign(new Error('Placa inválida (use ABC1234 ou Mercosul ABC1D23)'), { statusCode: 400 });
+    }
+    if (!vehicleType) throw Object.assign(new Error('Categoria do veículo é obrigatória'), { statusCode: 400 });
+
+    const VehicleCategory = require('../models/vehicleCategory.model');
+    const category = await VehicleCategory.findOne({ name: vehicleType }).lean();
+    if (!category) {
+        throw Object.assign(new Error('Categoria de veículo inexistente'), { statusCode: 400 });
+    }
+    // Troca para categoria nova exige ativa; manter a atual (mesmo inativa) permite só corrigir placa/cor/etc.
+    const keepingCurrentType = captain.vehicle?.vehicleType === vehicleType;
+    if (!category.isActive && !keepingCurrentType) {
+        throw Object.assign(new Error('Categoria de veículo inativa'), { statusCode: 400 });
+    }
+
+    const plateOwner = await captainModel.findOne({
+        _id: { $ne: captainId },
+        'vehicle.plate': plate,
+    }).select('_id').lean();
+    if (plateOwner) {
+        throw Object.assign(new Error('Esta placa já está cadastrada em outro motorista'), { statusCode: 409 });
+    }
+
+    const oldVehicle = captain.vehicle
+        ? (typeof captain.vehicle.toObject === 'function' ? captain.vehicle.toObject() : { ...captain.vehicle })
+        : {};
+    const nextVehicle = {
+        marca,
+        modelo,
+        ano,
+        color,
+        plate,
+        capacity: Number(category.capacity) || captain.vehicle?.capacity || 1,
+        vehicleType,
+    };
+
+    captain.vehicle = nextVehicle;
+    await captain.save();
+
+    deleteByPrefix(`profile:captain:${captainId}`);
+
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'update_captain_vehicle',
+        targetId: captainId.toString(),
+        targetModel: 'Captain',
+        reason: reason || 'Correção de dados do veículo',
+        oldValue: oldVehicle,
+        newValue: nextVehicle,
+        ipAddress: ip || '0.0.0.0',
+    });
+
+    return captain;
+};
+
 module.exports.getCaptainDocuments = async (captainId) => {
     const captain = await captainModel.findById(captainId).select('documents');
     if (!captain) throw new Error('Motorista não encontrado');

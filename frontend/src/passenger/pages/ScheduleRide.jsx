@@ -9,6 +9,8 @@ import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { getAccessToken } from '@/shared/services/session'
 import { useToast } from '@/shared/contexts/ToastContext'
+import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
+import { vehicleImages } from '@/shared/assets/vehicleAssets'
 
 const fieldClass =
   'w-full bg-surface-alt border border-line rounded-panel px-4 py-3.5 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20'
@@ -26,12 +28,35 @@ const ScheduleRide = () => {
 
   const [pickup, setPickup] = useState('')
   const [destination, setDestination] = useState('')
-  const [vehicleType, setVehicleType] = useState('car')
+  const [vehicleType, setVehicleType] = useState('')
+  const [vehicleCategories, setVehicleCategories] = useState([])
+  const [vehiclesLoading, setVehiclesLoading] = useState(true)
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [scheduledAt, setScheduledAt] = useState(toLocalInputValue(minDate))
   const [loading, setLoading] = useState(false)
   const [farePreview, setFarePreview] = useState(null)
   const [fareLoading, setFareLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setVehiclesLoading(true)
+    getVehicleCategories('scheduledRide')
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : []
+        setVehicleCategories(list)
+        setVehicleType((prev) => (
+          prev && list.some((c) => c.name === prev) ? prev : (list[0]?.name || '')
+        ))
+      })
+      .catch(() => {
+        if (!cancelled) setVehicleCategories([])
+      })
+      .finally(() => {
+        if (!cancelled) setVehiclesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (pickup.trim().length < 3 || destination.trim().length < 3) {
@@ -62,6 +87,9 @@ const ScheduleRide = () => {
   const confirm = async () => {
     if (pickup.trim().length < 3 || destination.trim().length < 3) {
       return addToast('Informe coleta e destino', 'error')
+    }
+    if (!vehicleType) {
+      return addToast('Escolha um veículo', 'error')
     }
     if (!scheduledAt) {
       return addToast('Escolha data e horário', 'error')
@@ -141,18 +169,35 @@ const ScheduleRide = () => {
 
         <Card shadow="raised" className="space-y-2">
           <h2 className="text-base font-semibold text-ink-900">Veículo</h2>
-          <SelectableOptionCard
-            selected={vehicleType === 'moto'}
-            onClick={() => setVehicleType('moto')}
-            icon={<i className="ri-e-bike-2-line text-2xl" aria-hidden="true" />}
-            title="Moto"
-          />
-          <SelectableOptionCard
-            selected={vehicleType === 'car'}
-            onClick={() => setVehicleType('car')}
-            icon={<i className="ri-car-line text-2xl" aria-hidden="true" />}
-            title="Carro"
-          />
+          {vehiclesLoading ? (
+            <div className="flex justify-center py-4">
+              <i className="ri-loader-4-line text-2xl animate-spin text-ink-400" aria-hidden="true" />
+            </div>
+          ) : vehicleCategories.length === 0 ? (
+            <p className="text-sm text-ink-400 text-center py-3">
+              Nenhuma categoria disponível para corridas agendadas.
+            </p>
+          ) : (
+            vehicleCategories.map((cat) => (
+              <SelectableOptionCard
+                key={cat._id || cat.name}
+                selected={vehicleType === cat.name}
+                onClick={() => setVehicleType(cat.name)}
+                icon={(
+                  <img
+                    className="h-9 w-12 object-contain"
+                    src={vehicleImages[cat.iconKey] || vehicleImages[cat.name] || vehicleImages.car}
+                    alt=""
+                    width="1024"
+                    height="1024"
+                    loading="lazy"
+                  />
+                )}
+                title={cat.displayName}
+                subtitle={cat.description}
+              />
+            ))
+          )}
         </Card>
 
         <Card shadow="raised" className="space-y-2">

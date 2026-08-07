@@ -82,6 +82,7 @@ router.get('/captains', authAdmin, adminController.getCaptains);
 router.get('/captains/live-map', authAdmin, adminController.getLiveMapCaptains);
 router.put('/captains/:id/approval', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainApproval);
 router.put('/captains/:id/block', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.toggleCaptainBlock);
+router.put('/captains/:id/vehicle', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainVehicle);
 router.get('/captains/:id/documents', authAdmin, adminController.getCaptainDocuments);
 router.get('/captains/:id/documents/:docType/url', authAdmin, adminController.getCaptainDocumentUrl);
 router.put('/captains/:id/documents/:docType', authAdmin, authorizeRoles('super_admin', 'operador', 'suporte'), adminController.updateCaptainDocument);

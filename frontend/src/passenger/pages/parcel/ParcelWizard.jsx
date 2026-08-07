@@ -4,6 +4,8 @@ import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { createParcel, getParcelFare } from '@/shared/services/parcelApi'
+import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
+import { vehicleImages } from '@/shared/assets/vehicleAssets'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import Button from '@/shared/components/ui/Button'
 import Card from '@/shared/components/ui/Card'
@@ -49,13 +51,16 @@ const ParcelWizard = () => {
   const [fareLoading, setFareLoading] = useState(false)
   const [fareInfo, setFareInfo] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [vehicleCategories, setVehicleCategories] = useState([])
+  const [vehiclesLoading, setVehiclesLoading] = useState(true)
   const fareTimer = useRef(null)
   const minSchedule = new Date(Date.now() + 15 * 60 * 1000)
+  const vehicleService = scheduleMode ? 'scheduledParcel' : 'parcel'
 
   const [form, setForm] = useState({
     pickup: '',
     destination: '',
-    vehicleType: 'moto',
+    vehicleType: '',
     itemName: '',
     category: 'documento',
     weightKg: '1',
@@ -70,6 +75,28 @@ const ParcelWizard = () => {
     paymentMethod: 'cash',
     scheduledAt: scheduleMode ? toLocalInputValue(minSchedule) : '',
   })
+
+  useEffect(() => {
+    let cancelled = false
+    setVehiclesLoading(true)
+    getVehicleCategories(vehicleService)
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : []
+        setVehicleCategories(list)
+        setForm((f) => {
+          if (f.vehicleType && list.some((c) => c.name === f.vehicleType)) return f
+          return { ...f, vehicleType: list[0]?.name || '' }
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setVehicleCategories([])
+      })
+      .finally(() => {
+        if (!cancelled) setVehiclesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [vehicleService])
 
   useEffect(() => {
     if (!scheduleMode && userRide) {
@@ -138,7 +165,7 @@ const ParcelWizard = () => {
   const validate = () => {
     if (form.pickup.trim().length < 3) return 'Informe o local de coleta'
     if (form.destination.trim().length < 3) return 'Informe o endereço de entrega'
-    if (!form.vehicleType) return 'Escolha moto ou carro'
+    if (!form.vehicleType) return 'Escolha um veículo'
     if (form.itemName.trim().length < 2) return 'Descreva o que será entregue'
     const weight = Number(form.weightKg)
     if (Number.isNaN(weight) || weight < 0 || weight > 100) return 'Informe um peso válido (0–100 kg)'
@@ -210,7 +237,9 @@ const ParcelWizard = () => {
   }
 
   const sizeLabel = SIZE_OPTIONS.find((s) => s.id === form.size)?.label || form.size
-  const vehicleLabel = form.vehicleType === 'moto' ? 'Moto' : form.vehicleType === 'car' ? 'Carro' : '—'
+  const vehicleLabel =
+    vehicleCategories.find((c) => c.name === form.vehicleType)?.displayName
+    || (form.vehicleType === 'moto' ? 'Moto' : form.vehicleType === 'car' ? 'Carro' : '—')
 
   return (
     <div className="min-h-screen bg-surface-alt flex flex-col">
@@ -252,25 +281,40 @@ const ParcelWizard = () => {
           />
         </Card>
 
-        {/* Veículo */}
+        {/* Veículo — só categorias com allowedServices.parcel / scheduledParcel */}
         <Card shadow="raised" className="space-y-3">
           <h2 className="text-base font-semibold text-ink-900">Veículo</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <SelectableOptionCard
-              selected={form.vehicleType === 'moto'}
-              onClick={() => setField('vehicleType', 'moto')}
-              icon={<i className="ri-e-bike-2-line text-2xl text-ink-900" aria-hidden="true" />}
-              title="Moto"
-              subtitle="Rápida · volumes pequenos"
-            />
-            <SelectableOptionCard
-              selected={form.vehicleType === 'car'}
-              onClick={() => setField('vehicleType', 'car')}
-              icon={<i className="ri-car-line text-2xl text-ink-900" aria-hidden="true" />}
-              title="Carro"
-              subtitle="Caixas maiores · frágeis"
-            />
-          </div>
+          {vehiclesLoading ? (
+            <div className="flex justify-center py-4">
+              <i className="ri-loader-4-line text-2xl animate-spin text-ink-400" aria-hidden="true" />
+            </div>
+          ) : vehicleCategories.length === 0 ? (
+            <p className="text-sm text-ink-400 text-center py-3">
+              Nenhuma categoria disponível para encomendas no momento.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {vehicleCategories.map((cat) => (
+                <SelectableOptionCard
+                  key={cat._id || cat.name}
+                  selected={form.vehicleType === cat.name}
+                  onClick={() => setField('vehicleType', cat.name)}
+                  icon={(
+                    <img
+                      className="h-9 w-12 object-contain"
+                      src={vehicleImages[cat.iconKey] || vehicleImages[cat.name] || vehicleImages.car}
+                      alt=""
+                      width="1024"
+                      height="1024"
+                      loading="lazy"
+                    />
+                  )}
+                  title={cat.displayName}
+                  subtitle={cat.description || (cat.capacity != null ? `Até ${cat.capacity} vol.` : '')}
+                />
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* Pacote */}

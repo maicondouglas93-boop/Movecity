@@ -35,7 +35,8 @@ const pwaPlugin = VitePWA({
         options: {
           cacheName: 'vehicle-categories-cache',
           networkTimeoutSeconds: 4,
-          expiration: { maxEntries: 1, maxAgeSeconds: 60 * 60 * 24 },
+          // Uma entrada por ?service= (ride, parcel, scheduledRide, scheduledParcel) + sem filtro
+          expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 },
         },
       },
     ],

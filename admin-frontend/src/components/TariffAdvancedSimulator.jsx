@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Calculator, ChevronDown, ChevronUp, MapPin, TrendingUp } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../services/api';
@@ -22,74 +21,98 @@ const SERVICE_KINDS = [
 
 const DEFAULT_CENTER = [-23.5505, -46.6333];
 
-function FitBounds({ positions }) {
-  const map = useMap();
-  const signature = positions?.length
-    ? `${positions.length}:${positions[0]?.[0]},${positions[0]?.[1]}:${positions[positions.length - 1]?.[0]},${positions[positions.length - 1]?.[1]}`
-    : '';
+/**
+ * Leaflet imperativo: React só dono do container vazio.
+ * Evita NotFoundError removeChild do react-leaflet + React 19.
+ */
+function SimulatorRouteMap({ pickupCoords, destCoords, polyline }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layersRef = useRef({ pickup: null, dest: null, line: null });
+  const hasRoute = Boolean(pickupCoords || destCoords || (polyline && polyline.length > 1));
 
   useEffect(() => {
-    if (!positions?.length) return undefined;
-    // invalidateSize evita layout quebrado após o painel reflow; try/catch cobre
-    // unmount durante animação do Leaflet (removeChild no React).
-    const apply = () => {
-      try {
-        map.invalidateSize();
-        if (positions.length === 1) {
-          map.setView(positions[0], 14);
-        } else {
-          map.fitBounds(L.latLngBounds(positions), { padding: [28, 28], maxZoom: 15 });
-        }
-      } catch {
-        /* mapa já destruído */
+    const el = containerRef.current;
+    if (!el || mapRef.current) return undefined;
+
+    const map = L.map(el, {
+      center: DEFAULT_CENTER,
+      zoom: 12,
+      scrollWheelZoom: false,
+      zoomControl: true,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OSM &copy; CARTO',
+    }).addTo(map);
+    mapRef.current = map;
+
+    const onResize = () => {
+      try { map.invalidateSize(); } catch { /* ignore */ }
+    };
+    const t = setTimeout(onResize, 80);
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', onResize);
+      try { map.remove(); } catch { /* ignore */ }
+      mapRef.current = null;
+      layersRef.current = { pickup: null, dest: null, line: null };
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const layers = layersRef.current;
+    const clearLayer = (key) => {
+      if (layers[key]) {
+        try { map.removeLayer(layers[key]); } catch { /* ignore */ }
+        layers[key] = null;
       }
     };
-    const t = setTimeout(apply, 50);
-    return () => clearTimeout(t);
-  }, [map, signature, positions]);
 
-  return null;
-}
+    clearLayer('pickup');
+    clearLayer('dest');
+    clearLayer('line');
 
-/** Mapa estável: NÃO remonta MapContainer (key dinâmico / toggle causa removeChild). */
-function SimulatorRouteMap({ pickupCoords, destCoords, polyline }) {
-  const positions = useMemo(() => {
-    if (polyline?.length > 1) return polyline;
-    const pts = [];
-    if (pickupCoords) pts.push([pickupCoords.lat, pickupCoords.lng]);
-    if (destCoords) pts.push([destCoords.lat, destCoords.lng]);
-    return pts;
-  }, [polyline, pickupCoords, destCoords]);
+    const boundsPts = [];
 
-  const hasRoute = positions.length > 0;
+    if (pickupCoords) {
+      layers.pickup = L.marker([pickupCoords.lat, pickupCoords.lng]).addTo(map);
+      boundsPts.push([pickupCoords.lat, pickupCoords.lng]);
+    }
+    if (destCoords) {
+      layers.dest = L.marker([destCoords.lat, destCoords.lng]).addTo(map);
+      boundsPts.push([destCoords.lat, destCoords.lng]);
+    }
+    if (polyline?.length > 1) {
+      layers.line = L.polyline(polyline, { color: '#3b82f6', weight: 4 }).addTo(map);
+      polyline.forEach((p) => boundsPts.push(p));
+    }
+
+    try {
+      map.invalidateSize();
+      if (boundsPts.length === 1) {
+        map.setView(boundsPts[0], 14);
+      } else if (boundsPts.length > 1) {
+        map.fitBounds(L.latLngBounds(boundsPts), { padding: [28, 28], maxZoom: 15 });
+      }
+    } catch {
+      /* mapa destruído */
+    }
+  }, [pickupCoords, destCoords, polyline]);
 
   return (
     <div className="rounded-lg overflow-hidden border border-border h-[220px] bg-background relative z-0">
-      <MapContainer
-        center={DEFAULT_CENTER}
-        zoom={12}
-        style={{ height: '100%', width: '100%' }}
-        scrollWheelZoom={false}
-      >
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-        <FitBounds positions={positions} />
-        {pickupCoords && (
-          <Marker position={[pickupCoords.lat, pickupCoords.lng]} />
-        )}
-        {destCoords && (
-          <Marker position={[destCoords.lat, destCoords.lng]} />
-        )}
-        {polyline?.length > 1 && (
-          <Polyline positions={polyline} pathOptions={{ color: '#3b82f6', weight: 4 }} />
-        )}
-      </MapContainer>
-
+      <div ref={containerRef} className="h-full w-full" />
       {!hasRoute && (
         <div className="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 bg-background/90 px-4 text-center pointer-events-none">
           <MapPin className="w-7 h-7 opacity-40 text-text-muted" />
-          <p className="text-xs text-text-muted">
+          <span className="text-xs text-text-muted">
             Escolha partida e destino no autocomplete para traçar a rota e calcular o valor.
-          </p>
+          </span>
         </div>
       )}
     </div>

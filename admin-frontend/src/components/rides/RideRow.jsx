@@ -1,8 +1,8 @@
 import React, { useState, useEffect, memo } from 'react';
 import {
-  Search, MoreVertical, CreditCard, User, Car, CheckSquare, Square, RotateCcw, ShieldAlert,
+  Search, MoreVertical, CreditCard, User, Car, CheckSquare, Square, RotateCcw, ShieldAlert, Flag,
 } from 'lucide-react';
-import { timeAgo, statusColors, statusNames } from './rideUi';
+import { timeAgo, statusColors, statusNames, canFinalizeRide } from './rideUi';
 
 // Fase 3 da auditoria de production readiness (M3, 2026-08-05): extraído de
 // pages/Rides.jsx sem mudança de comportamento.
@@ -91,6 +91,12 @@ function RideActionMenu({ ride, onAction }) {
                 <RotateCcw className="w-4 h-4" /> Reatribuir
               </button>
             </>
+          )}
+
+          {canFinalizeRide(ride) && (
+            <button onClick={() => onAction(ride, 'finalize')} className="w-full text-left px-4 py-2 text-sm hover:bg-primary/10 flex items-center gap-2 text-primary">
+              <Flag className="w-4 h-4" /> Finalizar manualmente
+            </button>
           )}
 
           {!['cancelled', 'finished'].includes(ride.status) && (

@@ -36,3 +36,22 @@ export const statusNames = {
   finished: 'Finalizada',
   cancelled: 'Cancelada',
 };
+
+/** Motivos aceitos por PUT /admin/rides/:id/finalize (espelha o backend). */
+export const FINALIZE_REASONS = [
+  'Solicitação do passageiro',
+  'Problema técnico',
+  'Motorista não conseguiu finalizar pelo aplicativo',
+  'GPS/localização inconsistente',
+  'Encerramento operacional',
+  'Outro',
+];
+
+/** Corridas iniciadas (ou finished sem pagamento) com motorista — elegíveis à finalização ADM. */
+export function canFinalizeRide(ride) {
+  if (!ride) return false;
+  if (ride.paymentStatus === 'paid') return false;
+  if (!['started', 'finished'].includes(ride.status)) return false;
+  if (!ride.captain) return false;
+  return true;
+}

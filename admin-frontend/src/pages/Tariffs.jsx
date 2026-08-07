@@ -201,6 +201,37 @@ export default function Tariffs() {
   );
 }
 
+const SERVICE_LABELS = {
+  ride: 'Corrida',
+  parcel: 'Encomenda',
+  scheduledRide: 'Agendada',
+  scheduledParcel: 'Enc. agendada',
+};
+
+function serviceBadges(allowedServices) {
+  const services = allowedServices || {
+    ride: true,
+    parcel: true,
+    scheduledRide: true,
+    scheduledParcel: true,
+  };
+  return Object.entries(SERVICE_LABELS).map(([key, label]) => {
+    const on = services[key] !== false;
+    return (
+      <span
+        key={key}
+        className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+          on
+            ? 'bg-primary/10 text-primary border-primary/20'
+            : 'bg-background text-text-muted border-border line-through opacity-60'
+        }`}
+      >
+        {label}
+      </span>
+    );
+  });
+}
+
 function ManageCategoriesModal({ categories, onClose, onCreate, onEdit, onDuplicate, onToggle }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -212,12 +243,14 @@ function ManageCategoriesModal({ categories, onClose, onCreate, onEdit, onDuplic
         <div className="p-4 overflow-y-auto flex-1 space-y-2">
           <p className="text-sm text-text-muted mb-3">
             Categorias com histórico de corridas não devem ser excluídas — desative-as. Duplique para criar uma variação.
+            Serviços permitidos controlam quais tipos de pedido a categoria atende no app e no despacho.
           </p>
           {categories.map((cat) => (
             <div key={cat._id} className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
-              <div>
+              <div className="min-w-0">
                 <div className="font-medium">{cat.displayName}</div>
                 <div className="text-xs text-text-muted">{cat.name} · {cat.isActive ? 'Ativa' : 'Inativa'}</div>
+                <div className="flex flex-wrap gap-1 mt-1.5">{serviceBadges(cat.allowedServices)}</div>
               </div>
               <div className="flex items-center gap-1">
                 <button type="button" title="Editar" onClick={() => onEdit(cat)} className="p-2 text-text-muted hover:text-primary"><Edit className="w-4 h-4" /></button>
@@ -240,6 +273,7 @@ function ManageCategoriesModal({ categories, onClose, onCreate, onEdit, onDuplic
 
 function CategoryMetaModal({ category, onClose, onSave, saving }) {
   const isNew = !category._id;
+  const defaults = category.allowedServices || {};
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: {
       name: category.name || '',
@@ -254,10 +288,22 @@ function CategoryMetaModal({ category, onClose, onSave, saving }) {
       perKmRate: category.pricing?.perKm ?? category.perKmRate ?? 1.5,
       perMinuteRate: category.pricing?.perMinute ?? category.perMinuteRate ?? 0.3,
       minFare: category.pricing?.minimumFare ?? category.minFare ?? 8,
+      allowedRide: defaults.ride !== false,
+      allowedParcel: defaults.parcel !== false,
+      allowedScheduledRide: defaults.scheduledRide !== false,
+      allowedScheduledParcel: defaults.scheduledParcel !== false,
     },
   });
 
+  const buildAllowedServices = (data) => ({
+    ride: data.allowedRide === true || data.allowedRide === 'true',
+    parcel: data.allowedParcel === true || data.allowedParcel === 'true',
+    scheduledRide: data.allowedScheduledRide === true || data.allowedScheduledRide === 'true',
+    scheduledParcel: data.allowedScheduledParcel === true || data.allowedScheduledParcel === 'true',
+  });
+
   const submit = (data) => {
+    const allowedServices = buildAllowedServices(data);
     if (isNew) {
       onSave({
         name: data.name.trim(),
@@ -268,6 +314,7 @@ function CategoryMetaModal({ category, onClose, onSave, saving }) {
         iconKey: data.iconKey,
         sortOrder: Number(data.sortOrder),
         isActive: data.isActive === true || data.isActive === 'true',
+        allowedServices,
         pricing: {
           baseFare: Number(data.baseFare),
           perKm: Number(data.perKmRate),
@@ -286,6 +333,7 @@ function CategoryMetaModal({ category, onClose, onSave, saving }) {
         luggageCapacity: data.luggageCapacity,
         iconKey: data.iconKey,
         sortOrder: Number(data.sortOrder),
+        allowedServices,
       });
     }
   };
@@ -335,6 +383,30 @@ function CategoryMetaModal({ category, onClose, onSave, saving }) {
             <div>
               <label className="block text-sm font-medium text-text-muted mb-1">Ordem</label>
               <input type="number" {...register('sortOrder', { valueAsNumber: true })} className="w-full bg-background border border-border rounded-lg px-3 py-2 outline-none" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-text-muted">Serviços permitidos</p>
+            <p className="text-xs text-text-muted">
+              Define em quais fluxos esta categoria aparece e se motoristas dela recebem o despacho.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="flex items-center gap-2 text-sm bg-background border border-border rounded-lg px-3 py-2">
+                <input type="checkbox" {...register('allowedRide')} />
+                Corrida
+              </label>
+              <label className="flex items-center gap-2 text-sm bg-background border border-border rounded-lg px-3 py-2">
+                <input type="checkbox" {...register('allowedParcel')} />
+                Encomenda
+              </label>
+              <label className="flex items-center gap-2 text-sm bg-background border border-border rounded-lg px-3 py-2">
+                <input type="checkbox" {...register('allowedScheduledRide')} />
+                Corrida agendada
+              </label>
+              <label className="flex items-center gap-2 text-sm bg-background border border-border rounded-lg px-3 py-2">
+                <input type="checkbox" {...register('allowedScheduledParcel')} />
+                Encomenda agendada
+              </label>
             </div>
           </div>
           {isNew && (

@@ -12,6 +12,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import RideRow from '../components/rides/RideRow';
 import RideDrawer from '../components/rides/RideDrawer';
+import FinalizeRideModal from '../components/rides/FinalizeRideModal';
 import { timeAgo } from '../components/rides/rideUi';
 
 // Fix leaflet icon
@@ -91,6 +92,7 @@ export default function Rides() {
   const [liveDrivers, setLiveDrivers] = useState({});
   const [mapBootstrapped, setMapBootstrapped] = useState(false);
   const [activeRideDrawer, setActiveRideDrawer] = useState(null);
+  const [finalizeRide, setFinalizeRide] = useState(null);
   const [showMap, setShowMap] = useState(true); // Split view toggle
 
   // Query
@@ -209,6 +211,18 @@ export default function Rides() {
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao reatribuir corrida')
   });
 
+  const finalizeMutation = useMutation({
+    mutationFn: ({ id, reason, observation }) =>
+      api.put(`/admin/rides/${id}/finalize`, { reason, observation }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
+      setFinalizeRide(null);
+      if (res?.data) setActiveRideDrawer(res.data);
+      toast.success('Corrida finalizada pelo administrador.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao finalizar corrida'),
+  });
+
   const bulkActionMutation = useMutation({
     mutationFn: (data) => api.post(`/admin/rides/bulk-action`, data),
     onSuccess: () => {
@@ -260,6 +274,8 @@ export default function Rides() {
         confirmLabel: 'Reatribuir'
       });
       if (ok) reassignMutation.mutate(ride._id);
+    } else if (actionType === 'finalize') {
+      setFinalizeRide(ride);
     } else if (actionType === 'view') {
       setActiveRideDrawer(ride);
     }
@@ -484,6 +500,17 @@ export default function Rides() {
 
       {/* RIDE DRAWER */}
       <RideDrawer ride={activeRideDrawer} onClose={() => setActiveRideDrawer(null)} onAction={handleAction} />
+
+      {finalizeRide && (
+        <FinalizeRideModal
+          ride={finalizeRide}
+          onClose={() => !finalizeMutation.isPending && setFinalizeRide(null)}
+          saving={finalizeMutation.isPending}
+          onConfirm={({ reason, observation }) =>
+            finalizeMutation.mutate({ id: finalizeRide._id, reason, observation })
+          }
+        />
+      )}
 
     </div>
   );

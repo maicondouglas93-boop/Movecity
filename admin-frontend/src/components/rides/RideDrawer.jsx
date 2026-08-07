@@ -1,11 +1,13 @@
 import React from 'react';
-import { X, Activity, User, Car, CreditCard } from 'lucide-react';
-import { timeAgo, statusColors, statusNames } from './rideUi';
+import { X, Activity, User, Car, CreditCard, Flag, Shield } from 'lucide-react';
+import { timeAgo, statusColors, statusNames, canFinalizeRide } from './rideUi';
 
 // Fase 3 da auditoria de production readiness (M3, 2026-08-05): extraído de
 // pages/Rides.jsx sem mudança de comportamento.
 export default function RideDrawer({ ride, onClose, onAction }) {
   if (!ride) return null;
+
+  const af = ride.adminFinalization;
 
   // Fake timeline events for visual demo
   const events = [
@@ -52,16 +54,51 @@ export default function RideDrawer({ ride, onClose, onAction }) {
           </div>
 
           {/* Quick Actions (Inside Drawer) */}
-          {!['cancelled', 'finished'].includes(ride.status) && (
-            <div className="flex gap-2">
-               <button onClick={() => { onClose(); onAction(ride, 'cancel'); }} className="flex-1 py-2 bg-danger/10 text-danger text-sm font-medium rounded-lg border border-danger/20 hover:bg-danger/20 transition-colors">
-                  Cancelar Corrida
-               </button>
+          {(canFinalizeRide(ride) || !['cancelled', 'finished'].includes(ride.status)) && (
+            <div className="flex flex-wrap gap-2">
+               {canFinalizeRide(ride) && (
+                 <button
+                   onClick={() => { onClose(); onAction(ride, 'finalize'); }}
+                   className="flex-1 min-w-[140px] py-2 bg-primary/10 text-primary text-sm font-medium rounded-lg border border-primary/20 hover:bg-primary/20 transition-colors inline-flex items-center justify-center gap-1.5"
+                 >
+                    <Flag className="w-4 h-4" /> Finalizar manualmente
+                 </button>
+               )}
+               {!['cancelled', 'finished'].includes(ride.status) && (
+                 <button onClick={() => { onClose(); onAction(ride, 'cancel'); }} className="flex-1 min-w-[120px] py-2 bg-danger/10 text-danger text-sm font-medium rounded-lg border border-danger/20 hover:bg-danger/20 transition-colors">
+                    Cancelar Corrida
+                 </button>
+               )}
                {ride.status === 'requested' && (
-                 <button onClick={() => { onClose(); onAction(ride, 'reassign'); }} className="flex-1 py-2 bg-warning/10 text-warning text-sm font-medium rounded-lg border border-warning/20 hover:bg-warning/20 transition-colors">
+                 <button onClick={() => { onClose(); onAction(ride, 'reassign'); }} className="flex-1 min-w-[120px] py-2 bg-warning/10 text-warning text-sm font-medium rounded-lg border border-warning/20 hover:bg-warning/20 transition-colors">
                     Reatribuir
                  </button>
                )}
+            </div>
+          )}
+
+          {af && (
+            <div className="p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
+              <div className="flex items-center gap-2 text-primary">
+                <Shield className="w-4 h-4" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Finalização administrativa</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5 text-sm">
+                <p><span className="text-text-muted">Admin:</span> {af.adminName || '—'}</p>
+                <p><span className="text-text-muted">Quando:</span> {af.finalizedAt ? new Date(af.finalizedAt).toLocaleString() : '—'}</p>
+                <p><span className="text-text-muted">Motivo:</span> {af.reason || '—'}</p>
+                {af.observation ? (
+                  <p><span className="text-text-muted">Observação:</span> {af.observation}</p>
+                ) : null}
+                {Number.isFinite(Number(af.finalPrice)) && (
+                  <p><span className="text-text-muted">Valor final:</span> R$ {Number(af.finalPrice).toFixed(2)}</p>
+                )}
+                {Number.isFinite(Number(af.finishLocation?.lat)) && Number.isFinite(Number(af.finishLocation?.lng)) && (
+                  <p className="text-xs text-text-muted">
+                    GPS: {Number(af.finishLocation.lat).toFixed(5)}, {Number(af.finishLocation.lng).toFixed(5)}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

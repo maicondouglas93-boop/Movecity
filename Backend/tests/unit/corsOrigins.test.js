@@ -14,6 +14,12 @@ describe('corsOrigins — lista compartilhada REST + Socket.IO', () => {
         expect(isOriginAllowed('http://localhost:5174')).toBe(true);
     });
 
+    it('aceita o domínio de produção moovecity.com.br (www e apex)', () => {
+        expect(isOriginAllowed('https://www.moovecity.com.br')).toBe(true);
+        expect(isOriginAllowed('https://moovecity.com.br')).toBe(true);
+        expect(isOriginAllowed('https://www.moovecity.com.br/')).toBe(true);
+    });
+
     it('aceita requisição sem Origin (cliente não-browser / health check)', () => {
         expect(isOriginAllowed(undefined)).toBe(true);
         expect(isOriginAllowed('')).toBe(true);

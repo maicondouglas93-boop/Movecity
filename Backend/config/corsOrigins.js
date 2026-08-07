@@ -8,6 +8,14 @@
 // O APK aparece com origem `https://localhost` (androidScheme: https) ou
 // `http://localhost` em builds antigos; os dois ficam na lista para que a troca
 // de esquema não derrube a conexão de quem ainda não atualizou o app.
+//
+// Domínio de produção do site (www + apex) fica hardcoded para o CORS não
+// depender só da env FRONTEND_URL no Render.
+const PRODUCTION_SITE_ORIGINS = [
+    'https://www.moovecity.com.br',
+    'https://moovecity.com.br',
+];
+
 const rawOrigins = [
     'http://localhost:5173',
     'http://localhost:5174',
@@ -15,6 +23,7 @@ const rawOrigins = [
     'http://localhost',
     'capacitor://localhost',
     'ionic://localhost',
+    ...PRODUCTION_SITE_ORIGINS,
     process.env.FRONTEND_URL,
     process.env.ADMIN_FRONTEND_URL,
     process.env.CAPACITOR_ORIGIN,
@@ -42,4 +51,9 @@ function corsOriginCallback(origin, callback) {
     callback(new Error('Não permitido pelo CORS'));
 }
 
-module.exports = { allowedOrigins, isOriginAllowed, corsOriginCallback };
+module.exports = {
+    allowedOrigins,
+    isOriginAllowed,
+    corsOriginCallback,
+    PRODUCTION_SITE_ORIGINS,
+};

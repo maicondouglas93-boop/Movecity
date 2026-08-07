@@ -25,7 +25,11 @@ Painel do Render → serviço do backend → **Environment**.
 | Chave | Valor |
 |---|---|
 | `BASE_URL` | `https://movecity.onrender.com` |
+| `FRONTEND_URL` | `https://www.moovecity.com.br` |
 | `CAPTAIN_AVAILABILITY_TTL_MINUTES` | `15` |
+
+**`FRONTEND_URL`** — origem do site/PWA (deep links nas push). Preferir o www.
+CORS também libera `https://moovecity.com.br` no código (`Backend/config/corsOrigins.js`).
 
 **`BASE_URL`** — para onde o Service Worker do motorista manda o "Aceitar" da
 notificação. Regras do valor:
@@ -59,9 +63,10 @@ notificação sai.
 
 ---
 
-## 2. VERCEL — app do passageiro/motorista (`movecity-six.vercel.app`)
+## 2. VERCEL — app do passageiro/motorista (`https://www.moovecity.com.br` / `movecity-six.vercel.app`)
 
-Vercel → projeto do app → Settings → **Environment Variables**.
+Vercel → projeto do app → Settings → **Domains** (adicione `moovecity.com.br` e `www.moovecity.com.br`)
+e **Environment Variables**.
 
 ⚠️ **Este app usa o Firebase para push *e* para o login com Google.** Se faltar
 configuração aqui, o botão "Entrar com o Google" também para de funcionar.

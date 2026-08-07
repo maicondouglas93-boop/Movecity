@@ -2,6 +2,7 @@ package br.com.movecity.driver;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.ActivityOptions;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -126,7 +127,7 @@ public final class RideOfferNotifier {
      * Tocar no corpo abre a tela verde; os botões Aceitar/Recusar executam a ação
      * sem depender de abertura automática de Activity em segundo plano.
      */
-    private static void postRichOfferNotification(
+    private static void postFullScreenTransportNotification(
         Context context,
         Map<String, String> data,
         Intent fullScreen,
@@ -159,10 +160,6 @@ public final class RideOfferNotifier {
             .setSmallIcon(R.drawable.ic_stat_movecity)
             .setContentTitle(title)
             .setContentText(summary)
-            .setStyle(new NotificationCompat.BigTextStyle()
-                .setBigContentTitle(title)
-                .bigText(bigBody)
-                .setSummaryText(isParcel ? "Encomenda" : "Corrida"))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -332,6 +329,8 @@ public final class RideOfferNotifier {
             }
         }
 
+        sendFullScreenPendingIntent(context, fullScreen, offerId);
+
         Handler main = new Handler(Looper.getMainLooper());
         Runnable tryStart = () -> {
             try {
@@ -346,6 +345,30 @@ public final class RideOfferNotifier {
         main.postDelayed(tryStart, 700);
 
         scheduleLaunchAlarm(context, fullScreen, offerId);
+    }
+
+    private static void sendFullScreenPendingIntent(Context context, Intent fullScreen, String offerId) {
+        try {
+            PendingIntent pi = activityPi(
+                context,
+                offerId != null ? offerId.hashCode() : LEGACY_NOTIFICATION_ID,
+                fullScreen
+            );
+            if (Build.VERSION.SDK_INT >= 34) {
+                ActivityOptions options = ActivityOptions.makeBasic();
+                options.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                );
+                pi.send(context, 0, null, null, null, null, options.toBundle());
+            } else {
+                pi.send(context, 0, null);
+            }
+            Log.i(TAG, "RideOfferActivity solicitada via PendingIntent.send");
+        } catch (PendingIntent.CanceledException e) {
+            Log.w(TAG, "PendingIntent da RideOfferActivity cancelado", e);
+        } catch (Exception e) {
+            Log.w(TAG, "PendingIntent.send bloqueado (BAL/OEM)", e);
+        }
     }
 
     public static void cancelNotification(Context context) {

@@ -41,7 +41,7 @@ const ConfirmRidePopUp = (props) => {
     const [customReason, setCustomReason] = useState('')
     const navigate = useNavigate()
     const { addToast } = useToast()
-    const { setCaptainRide } = useContext(RideContext)
+    const { setCaptainRide, syncCaptainRide } = useContext(RideContext)
 
     // Motivo só é obrigatório com o motorista já chegado/esperando — antes disso é
     // só solicitado (fica registrado se o motorista informar, mas não bloqueia).
@@ -93,11 +93,18 @@ const ConfirmRidePopUp = (props) => {
     const updateStatus = async (status) => {
         setLoading(true)
         try {
-            await api.post('/rides/update-status', {
+            const response = await api.post('/rides/update-status', {
                 rideId: props.ride._id,
                 status: status
             })
-            setRideStatus(status)
+            const updatedRide = response.data || await syncCaptainRide?.()
+            if (updatedRide) {
+                props.setRide?.(updatedRide)
+                setCaptainRide(updatedRide)
+                setRideStatus(deriveStatusFromRide(updatedRide.status))
+            } else {
+                setRideStatus(status)
+            }
         } catch (err) {
             console.error('Update status error:', err)
             if (!navigator.onLine || err.message === 'Network Error') {
@@ -106,6 +113,9 @@ const ConfirmRidePopUp = (props) => {
                     rideId: props.ride._id,
                     payload: { rideId: props.ride._id, status }
                 }).catch(e => console.error(e));
+                const optimisticRide = { ...props.ride, status }
+                props.setRide?.(optimisticRide)
+                setCaptainRide(optimisticRide)
                 setRideStatus(status); // optimistic
             } else {
                 setError('Failed to update status')
@@ -132,9 +142,12 @@ const ConfirmRidePopUp = (props) => {
             })
 
             if (response.status === 200) {
+                const startedRide = response.data || { ...props.ride, status: 'started' }
+                props.setRide?.(startedRide)
+                setCaptainRide(startedRide)
                 props.setConfirmRidePopupPanel(false)
                 props.setRidePopupPanel(false)
-                navigate('/captain-riding', { state: { ride: response.data } })
+                navigate('/captain-riding', { replace: true, state: { ride: startedRide } })
             }
         } catch (err) {
             if (!navigator.onLine || err.message === 'Network Error') {
@@ -143,9 +156,12 @@ const ConfirmRidePopUp = (props) => {
                     rideId: props.ride._id,
                     payload: { rideId: props.ride._id, otp: otp }
                 }).catch(e => console.error(e));
+                const optimisticRide = { ...props.ride, status: 'started' }
+                props.setRide?.(optimisticRide)
+                setCaptainRide(optimisticRide)
                 props.setConfirmRidePopupPanel(false)
                 props.setRidePopupPanel(false)
-                navigate('/captain-riding', { state: { ride: props.ride } }) // Optimistic
+                navigate('/captain-riding', { replace: true, state: { ride: optimisticRide } }) // Optimistic
             } else {
                 setError(err.response?.data?.message || 'Invalid OTP. Please try again.')
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });

@@ -37,11 +37,15 @@ export default function CaptainLocationBridge() {
         let cancelled = false
         ;(async () => {
             if (cancelled) return
-            await syncTrackingLifecycle({
-                isOnline,
-                hasActiveTrip: active,
-                serviceKind: serviceKind || 'ride',
-            })
+            try {
+                await syncTrackingLifecycle({
+                    isOnline,
+                    hasActiveTrip: active,
+                    serviceKind: serviceKind || 'ride',
+                })
+            } catch (err) {
+                console.warn('[CaptainLocationBridge] FGS:', err?.message || err)
+            }
         })()
         return () => { cancelled = true }
     }, [captain?._id, isOnline, active, serviceKind])

@@ -8,6 +8,7 @@ import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import Button from '@/shared/components/ui/Button'
 import { saveSession, getAccessToken } from '@/shared/services/session'
 import { syncTokenWithSW } from '@/shared/services/swCommunication'
+import { isImageFile, postImageUpload } from '@/shared/services/imageUpload'
 
 // Simplificação do cadastro do motorista (2026-08-04): o formulário inicial pede só
 // conta (nome/e-mail/senha) e veículo — CPF, telefone, data de nascimento, CNH e PIX
@@ -49,7 +50,7 @@ const CaptainSignup = () => {
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) {
+    if (!isImageFile(file)) {
       addToast('Selecione uma imagem válida.', 'error')
       return
     }
@@ -110,17 +111,10 @@ const CaptainSignup = () => {
         // Foto de perfil: sobe depois do registro (precisa do JWT do motorista).
         if (photoFile) {
           try {
-            const formData = new FormData()
-            formData.append('image', photoFile)
-            const uploadRes = await api.post(
+            const uploadRes = await postImageUpload(
               `${import.meta.env.VITE_BASE_URL}/uploads/captain-profile`,
-              formData,
-              {
-                headers: {
-                  Authorization: `Bearer ${data.token}`,
-                  'Content-Type': 'multipart/form-data',
-                },
-              }
+              photoFile,
+              { token: data.token }
             )
             if (uploadRes.data?.captain) {
               setCaptain(uploadRes.data.captain)

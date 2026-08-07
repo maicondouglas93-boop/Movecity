@@ -11,6 +11,7 @@ import Button from '@/shared/components/ui/Button';
 import { useToast } from '@/shared/contexts/ToastContext';
 import { getAccessToken } from '@/shared/services/session';
 import { getFriendlyErrorMessage } from '@/shared/services/errorMessages';
+import { isImageFile, postImageUpload } from '@/shared/services/imageUpload';
 import { isNativePlatform } from '@/shared/platform/platform';
 import { getInstalledVersion } from '@/shared/platform/appUpdate.service';
 import { requestAppUpdateCheck } from '@/shared/components/AppUpdateGate';
@@ -177,7 +178,7 @@ const CaptainProfile = () => {
     const handlePhotoChange = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        if (!file.type.startsWith('image/')) {
+        if (!isImageFile(file)) {
             addToast('Selecione uma imagem válida.', 'error');
             return;
         }
@@ -188,17 +189,10 @@ const CaptainProfile = () => {
 
         setPhotoUploading(true);
         try {
-            const formData = new FormData();
-            formData.append('image', file);
-            const response = await api.post(
+            const response = await postImageUpload(
                 `${import.meta.env.VITE_BASE_URL}/uploads/captain-profile`,
-                formData,
-                {
-                    headers: {
-                        Authorization: `Bearer ${getAccessToken('captain')}`,
-                        'Content-Type': 'multipart/form-data',
-                    },
-                }
+                file,
+                { token: getAccessToken('captain') }
             );
             if (response.data?.captain) setCaptain(response.data.captain);
             addToast('Foto de perfil atualizada!', 'success');

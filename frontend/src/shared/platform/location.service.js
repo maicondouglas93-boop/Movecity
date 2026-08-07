@@ -10,6 +10,8 @@ let webWatchId = null
 let fgsActive = false
 let fgsTitle = null
 let fgsBody = null
+/** Evita start/update concorrente (toggle + CaptainLocationBridge). */
+let fgsOpPromise = null
 
 function log(...args) {
     if (isDev) console.log('[Location]', ...args)
@@ -195,15 +197,23 @@ function fgsPayload(title, body) {
         body,
         smallIcon: 'ic_stat_movecity',
         notificationChannelId: FGS_CHANNEL,
-        silent: true,
+        // silent=true só silencia updates; notificação precisa existir (Android 14 FGS).
+        silent: false,
         serviceType: 8, // ServiceType.Location
     }
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
  * Foreground Service Android — só nativo.
  * Justificativa: @capacitor/geolocation sozinho é suspenso em background/lock;
  * FGS com notificação persistente é o mecanismo Android suportado para tracking contínuo.
+ *
+ * Android 14+: startForeground(location) sem ACCESS_FINE/COARSE gera SecurityException
+ * e pode matar o processo — por isso checamos permissão antes e nunca deixamos throw.
  */
 export async function startForegroundTracking({
     title = 'MoveCity Motorista',
@@ -211,44 +221,71 @@ export async function startForegroundTracking({
 } = {}) {
     if (!isNativePlatform()) return { started: false, reason: 'web' }
 
-    try {
-        const { ForegroundService, Importance } = await import(
-            '@capawesome-team/capacitor-android-foreground-service'
-        )
-        await ForegroundService.createNotificationChannel({
-            id: FGS_CHANNEL,
-            name: 'Localização MoveCity',
-            description: 'Rastreamento enquanto online ou em serviço',
-            importance: Importance?.Default ?? 3,
-        }).catch(() => {})
-
-        const perm = await ForegroundService.checkPermissions().catch(() => null)
-        if (perm && perm.display !== 'granted') {
-            await ForegroundService.requestPermissions().catch(() => {})
+    if (fgsOpPromise) {
+        try {
+            await fgsOpPromise
+        } catch {
+            /* ignore */
         }
+    }
 
-        const payload = fgsPayload(title, body)
-
-        if (fgsActive) {
-            if (fgsTitle === title && fgsBody === body) {
-                return { started: true, reason: 'already' }
+    fgsOpPromise = (async () => {
+        try {
+            const loc = await checkLocationPermission()
+            if (!loc.granted) {
+                console.warn('[ForegroundService] abort — sem permissão de localização')
+                return { started: false, reason: 'no_location_permission' }
             }
-            await ForegroundService.updateForegroundService(payload)
+
+            const { ForegroundService, Importance } = await import(
+                '@capawesome-team/capacitor-android-foreground-service'
+            )
+            await ForegroundService.createNotificationChannel({
+                id: FGS_CHANNEL,
+                name: 'Localização MoveCity',
+                description: 'Rastreamento enquanto online ou em serviço',
+                importance: Importance?.Default ?? 3,
+            }).catch(() => {})
+
+            // Android 13+: sem POST_NOTIFICATIONS o FGS pode falhar ao promover startForeground.
+            const notifPerm = await ForegroundService.checkPermissions().catch(() => null)
+            if (notifPerm && notifPerm.display !== 'granted') {
+                await ForegroundService.requestPermissions().catch(() => {})
+            }
+
+            // Volta do diálogo de permissão: dá um tick para a Activity ficar elegível ao FGS.
+            await delay(250)
+
+            const payload = fgsPayload(title, body)
+
+            if (fgsActive) {
+                if (fgsTitle === title && fgsBody === body) {
+                    return { started: true, reason: 'already' }
+                }
+                await ForegroundService.updateForegroundService(payload)
+                fgsTitle = title
+                fgsBody = body
+                logFgs('updated', title)
+                return { started: true, reason: 'updated' }
+            }
+
+            await ForegroundService.startForegroundService(payload)
+            fgsActive = true
             fgsTitle = title
             fgsBody = body
-            logFgs('updated', title)
-            return { started: true, reason: 'updated' }
+            logFgs('started', title)
+            return { started: true }
+        } catch (err) {
+            console.warn('[ForegroundService] start failed:', err?.message || err)
+            fgsActive = false
+            return { started: false, reason: err?.message || 'fgs_failed' }
         }
+    })()
 
-        await ForegroundService.startForegroundService(payload)
-        fgsActive = true
-        fgsTitle = title
-        fgsBody = body
-        logFgs('started', title)
-        return { started: true }
-    } catch (err) {
-        console.warn('[ForegroundService] start failed:', err?.message || err)
-        return { started: false, reason: err?.message || 'fgs_failed' }
+    try {
+        return await fgsOpPromise
+    } finally {
+        fgsOpPromise = null
     }
 }
 

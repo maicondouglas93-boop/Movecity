@@ -76,6 +76,8 @@ const CaptainDetails = ({ children = null }) => {
 
         const nextOnline = !isOnline
         // Pedir GPS ao ficar ONLINE (não no GO — GO é corrida presencial).
+        // Background location fica DEPOIS do online+FGS: empilhar 2 diálogos e
+        // startForeground(location) em seguida derruba o processo em Android 14+.
         if (nextOnline) {
             const perm = await requestLocationPermission()
             if (!perm.granted) {
@@ -87,15 +89,6 @@ const CaptainDetails = ({ children = null }) => {
                     addToast('Ative a localização nas configurações do app se o pedido não aparecer.', 'info')
                 }
                 return
-            }
-            if (isNativePlatform()) {
-                const bg = await requestBackgroundLocationPermission()
-                if (!bg.granted && bg.state !== 'web') {
-                    addToast(
-                        'Para GPS com tela bloqueada, escolha “Permitir o tempo todo” na próxima tela ou nas configurações.',
-                        'info'
-                    )
-                }
             }
         }
 
@@ -111,11 +104,35 @@ const CaptainDetails = ({ children = null }) => {
                 console.log('[DriverStatus]', updated.isOnline ? 'ONLINE' : 'OFFLINE')
             }
             const active = hasActiveService({ captainRide, captainParcel })
-            await syncTrackingLifecycle({
-                isOnline: updated.isOnline,
-                hasActiveTrip: active,
-                serviceKind: resolveServiceKind({ captainRide, captainParcel }) || 'ride',
-            })
+            try {
+                const fgs = await syncTrackingLifecycle({
+                    isOnline: updated.isOnline,
+                    hasActiveTrip: active,
+                    serviceKind: resolveServiceKind({ captainRide, captainParcel }) || 'ride',
+                })
+                if (updated.isOnline && fgs?.started === false) {
+                    addToast(
+                        'Online, mas o rastreamento em segundo plano falhou. Verifique localização e notificações.',
+                        'info'
+                    )
+                }
+            } catch (fgsErr) {
+                console.warn('[DriverStatus] FGS após toggle:', fgsErr?.message || fgsErr)
+            }
+
+            if (updated.isOnline && isNativePlatform()) {
+                // Não bloqueia o toggle — pedido “o tempo todo” depois que o FGS já subiu.
+                requestBackgroundLocationPermission()
+                    .then((bg) => {
+                        if (!bg.granted && bg.state !== 'web' && bg.state !== 'granted') {
+                            addToast(
+                                'Para GPS com tela bloqueada, escolha “Permitir o tempo todo” nas configurações do app.',
+                                'info'
+                            )
+                        }
+                    })
+                    .catch(() => {})
+            }
         } catch (error) {
             console.error('Error toggling online status:', error)
             addToast(error.response?.data?.message || 'Erro ao alterar status online', 'error')

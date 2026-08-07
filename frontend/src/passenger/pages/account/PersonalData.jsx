@@ -10,6 +10,7 @@ import { useToast } from '@/shared/contexts/ToastContext';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import Button from '@/shared/components/ui/Button';
 import { getFriendlyErrorMessage } from '@/shared/services/errorMessages';
+import { isImageFile, postImageUpload } from '@/shared/services/imageUpload';
 
 const personalDataSchema = z.object({
     firstname: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
@@ -107,7 +108,7 @@ const PersonalData = () => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        if (!file.type.startsWith('image/')) {
+        if (!isImageFile(file)) {
             addToast('Selecione uma imagem válida.', 'error');
             return;
         }
@@ -121,17 +122,10 @@ const PersonalData = () => {
         setPhotoUploading(true);
 
         try {
-            const formData = new FormData();
-            formData.append('image', file);
-            const response = await api.post(
+            const response = await postImageUpload(
                 `${import.meta.env.VITE_BASE_URL}/uploads/profile`,
-                formData,
-                {
-                    headers: {
-                        Authorization: `Bearer ${getAccessToken('user')}`,
-                        'Content-Type': 'multipart/form-data',
-                    },
-                }
+                file,
+                { token: getAccessToken('user') }
             );
             const url = response.data?.url;
             const updatedUser = response.data?.user;

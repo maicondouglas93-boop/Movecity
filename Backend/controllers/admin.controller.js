@@ -1155,3 +1155,19 @@ module.exports.simulateFare = async (req, res, next) => {
         next(error);
     }
 };
+
+module.exports.finalizeRide = async (req, res, next) => {
+    try {
+        const ride = await adminService.finalizeRideByAdmin({
+            rideId: req.params.id,
+            admin: req.admin,
+            reason: req.body.reason,
+            observation: req.body.observation,
+            ip: req.ip,
+        });
+        res.status(200).json(ride);
+    } catch (error) {
+        const status = error.statusCode || (error.message?.includes('não') ? 409 : 500);
+        res.status(status).json({ message: error.message });
+    }
+};

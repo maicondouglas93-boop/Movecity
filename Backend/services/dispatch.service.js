@@ -1,5 +1,6 @@
 const mapService = require('./maps.service');
 const rideModel = require('../models/ride.model');
+const vehicleCategoryModel = require('../models/vehicleCategory.model');
 
 const CAPTAIN_SEARCH_RADIUS_KM = 15;
 
@@ -101,11 +102,35 @@ async function filterCaptainsWithoutActiveWork(captains, { excludeActiveRide = t
     return results;
 }
 
+async function isVehicleCategoryAllowed(vehicleType, serviceKind) {
+    if (!vehicleType || !serviceKind) return false;
+    const fieldByKind = { ride: 'ride', parcel: 'parcel', scheduledRide: 'scheduledRide', scheduledParcel: 'scheduledParcel' };
+    const field = fieldByKind[serviceKind];
+    if (!field) return false;
+    const category = await vehicleCategoryModel.findOne({ name: vehicleType }).select('isActive allowedServices').lean();
+    if (!category) return true; // legado: bancos antigos sem catálogo completo continuam operando até o seed/admin normalizar.
+    if (category.isActive !== true) return false;
+    return category.allowedServices?.[field] !== false;
+}
+
+async function filterCaptainsByServicePermission(captains, serviceKind, { TRACE_ID = '[AUDIT]' } = {}) {
+    const cache = new Map();
+    const out = [];
+    for (const captain of captains) {
+        const vehicleType = captain.vehicle?.vehicleType;
+        if (!cache.has(vehicleType)) cache.set(vehicleType, await isVehicleCategoryAllowed(vehicleType, serviceKind));
+        if (cache.get(vehicleType)) out.push(captain);
+        else console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (categoria ${vehicleType} sem permissão para ${serviceKind})`);
+    }
+    return out;
+}
+
 async function findCaptainsNearPickup(pickup, vehicleType, {
     TRACE_ID = '[AUDIT]',
     excludeCaptainId,
     excludeActiveRide = false,
     excludeActiveParcel = false,
+    serviceKind = 'ride',
 } = {}) {
     const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
     const captainsInRadius = await mapService.getCaptainsInTheRadius(
@@ -119,6 +144,8 @@ async function findCaptainsNearPickup(pickup, vehicleType, {
         excludeCaptainId,
         TRACE_ID,
     });
+
+    matching = await filterCaptainsByServicePermission(matching, serviceKind, { TRACE_ID });
 
     matching = await filterCaptainsWithoutActiveWork(matching, {
         excludeActiveRide,
@@ -137,6 +164,8 @@ module.exports = {
     ACTIVE_PARCEL_STATUSES,
     filterCaptainsByVehicleType,
     filterCaptainsWithoutActiveWork,
+    isVehicleCategoryAllowed,
+    filterCaptainsByServicePermission,
     captainHasActiveRide,
     captainHasActiveParcel,
     acquireCaptainBusyLock,

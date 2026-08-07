@@ -430,6 +430,15 @@ module.exports.createParcel = async (payload) => {
         throw err;
     }
 
+    {
+        const serviceKind = parsedSchedule ? 'scheduledParcel' : 'parcel';
+        if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, serviceKind))) {
+            const err = new Error('VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE');
+            err.code = 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE';
+            throw err;
+        }
+    }
+
     const fareData = await module.exports.getParcelFare({ pickup, destination, vehicleType });
     let destinationCoordinates;
     let pickupCoordinates;
@@ -987,7 +996,8 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
     if (!isAvailable) return [];
 
     const vehicleType = freshCaptain.vehicle?.vehicleType;
-    if (!vehicleType || !['moto', 'car'].includes(vehicleType)) return [];
+    if (!vehicleType) return [];
+    if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, 'parcel'))) return [];
 
     const position = freshCaptain.location;
     if (!position || position.ltd == null || position.lng == null) return [];

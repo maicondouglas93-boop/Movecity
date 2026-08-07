@@ -46,7 +46,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
     const { pickupCoordinates, captains: matchingCaptains } = await dispatchService.findCaptainsNearPickup(
         pickup,
         vehicleType,
-        { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true }
+        { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true, serviceKind: ride.scheduledAt ? 'scheduledRide' : 'ride' }
     );
 
     console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);

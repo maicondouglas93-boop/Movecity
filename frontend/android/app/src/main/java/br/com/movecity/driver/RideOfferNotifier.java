@@ -2,6 +2,7 @@ package br.com.movecity.driver;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.ActivityOptions;
 import android.app.AlarmManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -301,9 +302,10 @@ public final class RideOfferNotifier {
 
     /**
      * 1) Activity em foreground (melhor — BAL ok)
-     * 2) startActivity com retries no main looper
-     * 3) AlarmClock → RideOfferLaunchReceiver (isenção BAL)
-     * 4) setExactAndAllowWhileIdle backup
+     * 2) PendingIntent.send com opt-in de background activity start (Android 14+)
+     * 3) startActivity com retries no main looper
+     * 4) AlarmClock → RideOfferLaunchReceiver (isenção BAL)
+     * 5) setExactAndAllowWhileIdle backup
      */
     public static void launchOfferActivityNow(Context context, Intent fullScreen, String offerId) {
         wakeScreen(context);
@@ -320,6 +322,8 @@ public final class RideOfferNotifier {
             }
         }
 
+        sendFullScreenPendingIntent(context, fullScreen, offerId);
+
         Handler main = new Handler(Looper.getMainLooper());
         Runnable tryStart = () -> {
             try {
@@ -334,6 +338,30 @@ public final class RideOfferNotifier {
         main.postDelayed(tryStart, 700);
 
         scheduleLaunchAlarm(context, fullScreen, offerId);
+    }
+
+    private static void sendFullScreenPendingIntent(Context context, Intent fullScreen, String offerId) {
+        try {
+            PendingIntent pi = activityPi(
+                context,
+                offerId != null ? offerId.hashCode() : LEGACY_NOTIFICATION_ID,
+                fullScreen
+            );
+            if (Build.VERSION.SDK_INT >= 34) {
+                ActivityOptions options = ActivityOptions.makeBasic();
+                options.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                );
+                pi.send(context, 0, null, null, null, null, options.toBundle());
+            } else {
+                pi.send(context, 0, null);
+            }
+            Log.i(TAG, "RideOfferActivity solicitada via PendingIntent.send");
+        } catch (PendingIntent.CanceledException e) {
+            Log.w(TAG, "PendingIntent da RideOfferActivity cancelado", e);
+        } catch (Exception e) {
+            Log.w(TAG, "PendingIntent.send bloqueado (BAL/OEM)", e);
+        }
     }
 
     public static void cancelNotification(Context context) {

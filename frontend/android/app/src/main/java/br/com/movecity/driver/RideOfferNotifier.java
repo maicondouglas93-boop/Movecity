@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.app.AlarmManager;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -25,14 +26,12 @@ import java.util.Map;
 /**
  * Oferta de corrida/encomenda no Android.
  *
- * UI principal: RideOfferActivity (tela verde) com Aceitar/Recusar.
- *
- * No Android em background o full-screen intent ainda precisa nascer de uma
- * notificação. Ela fica apenas como fallback para abrir a tela verde se o
- * sistema/OEM bloquear a abertura automática — sem aceitar/recusar fora da tela.
+ * UI principal em foreground: RideOfferActivity (tela verde).
+ * UI principal em background/lock screen: notificação nativa rica com
+ * Aceitar/Recusar, som e vibração insistentes até uma ação ou expiração.
  */
 public final class RideOfferNotifier {
-    public static final String CHANNEL_ID = "ride_offers_v3";
+    public static final String CHANNEL_ID = "ride_offers_v4";
     private static final int LEGACY_NOTIFICATION_ID = 22001;
     private static final String TAG = "RideOfferNotifier";
 
@@ -54,11 +53,12 @@ public final class RideOfferNotifier {
         if (nm == null) return;
         NotificationChannel channel = new NotificationChannel(
             CHANNEL_ID,
-            "Ofertas de corrida",
+            "Ofertas urgentes",
             NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("Corridas e encomendas — tela cheia");
+        channel.setDescription("Corridas e encomendas urgentes com som e vibração");
         channel.enableVibration(true);
+        channel.setVibrationPattern(new long[]{0, 700, 300, 700, 300, 1000});
         channel.setBypassDnd(true);
         channel.setLockscreenVisibility(NotificationCompat.VISIBILITY_PUBLIC);
         AudioAttributes audio = new AudioAttributes.Builder()
@@ -96,13 +96,6 @@ public final class RideOfferNotifier {
     public static void showFullScreenOffer(Context context, Map<String, String> data) {
         ensureChannel(context);
         wakeScreen(context);
-        if (Build.VERSION.SDK_INT >= 34) {
-            NotificationManager nmCheck = context.getSystemService(NotificationManager.class);
-            if (nmCheck != null && !nmCheck.canUseFullScreenIntent()) {
-                Log.w(TAG, "USE_FULL_SCREEN_INTENT negada — Activity via holder/alarme");
-            }
-        }
-
         boolean isParcel = "NEW_PARCEL".equals(data.get("type"));
         String kind = isParcel ? RideOfferAcceptHelper.KIND_PARCEL : RideOfferAcceptHelper.KIND_RIDE;
         String offerId = firstNonEmpty(
@@ -111,27 +104,28 @@ public final class RideOfferNotifier {
         );
         if (offerId == null || offerId.isEmpty()) return;
 
-        Intent fullScreen = buildOfferIntent(context, data, kind, offerId);
+        Intent offerScreen = buildOfferIntent(context, data, kind, offerId);
         boolean foreground = isAppInForeground(context);
 
-        Log.i(TAG, "oferta → Activity verde kind=" + kind
+        Log.i(TAG, "oferta recebida kind=" + kind
             + " offerId=" + offerId + " foreground=" + foreground);
 
-        // Com o app já em foreground, abrir direto evita a heads-up duplicada.
-        // Em background, o Android exige uma notificação para entregar o
-        // fullScreenIntent. A Activity é iniciada automaticamente abaixo; o toque
-        // na notificação é só fallback para ROMs que bloqueiam abertura em background.
-        if (!foreground) {
-            postFullScreenTransportNotification(context, data, fullScreen, offerId, isParcel);
+        if (foreground) {
+            // App aberto: mantém a experiência da tela verde.
+            launchOfferActivityNow(context, offerScreen, offerId);
+            return;
         }
-        launchOfferActivityNow(context, fullScreen, offerId);
+
+        // App em segundo plano ou tela bloqueada: não tentar abrir Activity por
+        // background start. A UI confiável passa a ser a notificação nativa rica.
+        postRichOfferNotification(context, data, offerScreen, offerId, isParcel);
     }
 
     /**
-     * Notificação mínima usada como transporte/fallback do full-screen intent.
+     * Notificação rica usada como UI principal em background/lock screen.
      *
-     * Não adiciona Aceitar/Recusar para evitar duas UIs concorrentes: se ela for
-     * tocada, abre a RideOfferActivity e a decisão continua na tela verde.
+     * Tocar no corpo abre a tela verde; os botões Aceitar/Recusar executam a ação
+     * sem depender de abertura automática de Activity em segundo plano.
      */
     private static void postFullScreenTransportNotification(
         Context context,
@@ -141,7 +135,19 @@ public final class RideOfferNotifier {
         boolean isParcel
     ) {
         int notificationId = notificationIdFor(offerId);
-        PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
+        PendingIntent contentPi = activityPi(context, offerId.hashCode(), fullScreen);
+
+        Intent accept = new Intent(context, RideOfferAcceptActivity.class);
+        copyOfferExtras(fullScreen, accept);
+        accept.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent acceptPi = activityPi(context, offerId.hashCode() + 11, accept);
+
+        Intent reject = new Intent(context, RideOfferActionReceiver.class);
+        reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
+        copyOfferExtras(fullScreen, reject);
+        PendingIntent rejectPi = broadcastPi(context, offerId.hashCode() + 17, reject);
 
         String title = buildOfferTitle(data, isParcel);
         String bigBody = buildOfferBigBody(data, isParcel);
@@ -158,17 +164,21 @@ public final class RideOfferNotifier {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setOngoing(false)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .setFullScreenIntent(fullScreenPi, true)
-            .setContentIntent(fullScreenPi)
+            .setOngoing(true)
+            .setOnlyAlertOnce(false)
+            .setVibrate(new long[]{0, 700, 300, 700, 300, 1000})
+            .setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE))
+            .setContentIntent(contentPi)
+            .addAction(0, "Recusar", rejectPi)
+            .addAction(0, "Aceitar", acceptPi)
             .setTimeoutAfter(45_000);
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
-            nm.notify(notificationId, builder.build());
-            Log.i(TAG, "notificação transporte FSI criada id=" + notificationId
+            Notification notification = builder.build();
+            notification.flags |= Notification.FLAG_INSISTENT;
+            nm.notify(notificationId, notification);
+            Log.i(TAG, "notificação rica criada id=" + notificationId
                 + " kind=" + (isParcel ? "parcel" : "ride") + " offerId=" + offerId);
         }
     }
@@ -301,11 +311,8 @@ public final class RideOfferNotifier {
     }
 
     /**
-     * 1) Activity em foreground (melhor — BAL ok)
-     * 2) PendingIntent.send com opt-in de background activity start (Android 14+)
-     * 3) startActivity com retries no main looper
-     * 4) AlarmClock → RideOfferLaunchReceiver (isenção BAL)
-     * 5) setExactAndAllowWhileIdle backup
+     * Usado apenas com o app em foreground ou quando o usuário toca no corpo da
+     * notificação. Em background, não forçamos mais abertura automática da Activity.
      */
     public static void launchOfferActivityNow(Context context, Intent fullScreen, String offerId) {
         wakeScreen(context);

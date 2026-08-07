@@ -30,6 +30,17 @@ export default function AppUpdateGate() {
         try {
             const result = await checkForUpdate({ force })
             if (result.available) {
+                try {
+                    const sessionDismissed = sessionStorage.getItem('driverAppUpdate_sessionDismissed')
+                    if (
+                        result.mandatory
+                        && sessionDismissed
+                        && Number(sessionDismissed) === Number(result.remote?.versionCode)
+                        && !force
+                    ) {
+                        return
+                    }
+                } catch { /* ignore */ }
                 setState(result)
                 setVisible(true)
                 setError('')
@@ -81,10 +92,25 @@ export default function AppUpdateGate() {
     const upToDate = Boolean(state.manualUpToDate)
     const offlineMsg = Boolean(state.manualOffline)
 
-    const onLater = () => {
-        if (mandatory) return
-        if (remote.versionCode) dismissOptionalUpdate(remote.versionCode)
+    const onClose = () => {
+        // Sempre permite fechar a UI — inclusive em "obrigatória".
+        // Sem isso o motorista fica preso se o download falhar (ex.: tamanho).
+        // Opcional: lembra no localStorage. Obrigatória: só nesta sessão do app.
+        if (remote.versionCode) {
+            if (mandatory) {
+                try {
+                    sessionStorage.setItem(
+                        'driverAppUpdate_sessionDismissed',
+                        String(remote.versionCode),
+                    )
+                } catch { /* ignore */ }
+            } else {
+                dismissOptionalUpdate(remote.versionCode)
+            }
+        }
         setVisible(false)
+        setError('')
+        setDownloading(false)
     }
 
     const onUpdate = async () => {
@@ -159,10 +185,23 @@ export default function AppUpdateGate() {
                     </>
                 ) : (
                     <>
-                        <h2 id="app-update-title" className="text-lg font-bold text-ink-900">
-                            {mandatory ? 'Atualização obrigatória' : 'Nova versão disponível'}
-                        </h2>
-                        <p className="text-sm text-ink-600 mt-1">MoveCity Motorista</p>
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h2 id="app-update-title" className="text-lg font-bold text-ink-900">
+                                    {mandatory ? 'Atualização obrigatória' : 'Nova versão disponível'}
+                                </h2>
+                                <p className="text-sm text-ink-600 mt-1">MoveCity Motorista</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                disabled={downloading}
+                                aria-label="Fechar"
+                                className="shrink-0 min-w-[44px] min-h-[44px] -mt-1 -mr-1 flex items-center justify-center rounded-xl text-ink-500 hover:bg-surface-alt disabled:opacity-40"
+                            >
+                                <i className="ri-close-line text-2xl" aria-hidden="true" />
+                            </button>
+                        </div>
 
                         {mandatory && (
                             <p className="text-sm text-danger-600 mt-3 bg-danger-50 rounded-xl p-3">
@@ -224,16 +263,14 @@ export default function AppUpdateGate() {
                             >
                                 {downloading ? 'Baixando...' : 'Atualizar agora'}
                             </button>
-                            {!mandatory && (
-                                <button
-                                    type="button"
-                                    disabled={downloading}
-                                    onClick={onLater}
-                                    className="w-full py-3 rounded-xl bg-surface-alt text-ink-800 font-semibold border border-line"
-                                >
-                                    Depois
-                                </button>
-                            )}
+                            <button
+                                type="button"
+                                disabled={downloading}
+                                onClick={onClose}
+                                className="w-full py-3 rounded-xl bg-surface-alt text-ink-800 font-semibold border border-line disabled:opacity-60"
+                            >
+                                Fechar
+                            </button>
                             {remote.apkUrl && (
                                 <button
                                     type="button"

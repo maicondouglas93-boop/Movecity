@@ -7,12 +7,10 @@ import LiveTracking from '@/shared/components/LiveTracking'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { RideContext } from '@/shared/contexts/RideContext'
-import api from '@/shared/services/axios'
 import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { getAccessToken } from '@/shared/services/session'
 import { flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/shared/services/maps/navigationMath'
@@ -34,7 +32,7 @@ const CaptainRiding = () => {
     // Fase A da experiência de corrida ativa (2026-08-03): o RideContext pode já ter a
     // corrida restaurada (ele consulta /rides/captain-current a cada abertura/retorno) —
     // usa como segunda fonte imediata antes de cair no fetch próprio abaixo.
-    const { captainRide, setCaptainRide } = useContext(RideContext)
+    const { captainRide, setCaptainRide, syncCaptainRide } = useContext(RideContext)
     const [ rideData, setRideData ] = useState(location.state?.ride || captainRide || null)
     const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || captainRide))
     const { socket } = useContext(SocketContext)
@@ -93,28 +91,54 @@ const CaptainRiding = () => {
     }, [socket, rideData?._id])
 
     useEffect(() => {
-        if (rideData) {
-            setRehydrating(false)
-            return
-        }
-
         let cancelled = false
-        api.get(`${import.meta.env.VITE_BASE_URL}/rides/captain-current`, {
-            headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-        }).then(response => {
-            if (cancelled) return
-            setRideData(response.data)
-        }).catch(() => {
-            if (cancelled) return
-            addToast('Nenhuma corrida em andamento encontrada.', 'info')
-            navigate('/captain-home')
-        }).finally(() => {
-            if (!cancelled) setRehydrating(false)
-        })
+
+        ;(async () => {
+            try {
+                // Mesmo quando chegamos aqui via navigate(state), reconcilia com o backend:
+                // um snapshot antigo de accepted/going_to_pickup não pode derrubar uma
+                // corrida que acabou de virar started, e o RideContext ignora regressões.
+                const currentRide = await syncCaptainRide()
+                if (cancelled) return
+
+                if (currentRide?.status === 'started') {
+                    setRideData(currentRide)
+                    setCaptainRide(currentRide)
+                    return
+                }
+
+                if (currentRide) {
+                    setCaptainRide(currentRide)
+                    navigate(currentRide.source === 'driver_initiated' ? '/captain-presential' : '/captain-home', {
+                        replace: true,
+                        state: { ride: currentRide },
+                    })
+                    return
+                }
+
+                if (!rideData) {
+                    addToast('Nenhuma corrida em andamento encontrada.', 'info')
+                    navigate('/captain-home', { replace: true })
+                }
+            } catch {
+                if (cancelled || rideData) return
+                addToast('Nenhuma corrida em andamento encontrada.', 'info')
+                navigate('/captain-home', { replace: true })
+            } finally {
+                if (!cancelled) setRehydrating(false)
+            }
+        })()
 
         return () => { cancelled = true }
+        // Roda uma vez ao montar; os demais retornos/reconexões são tratados pelo RideContext.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    useEffect(() => {
+        if (!captainRide?._id || captainRide.status !== 'started') return
+        if (rideData?._id && String(rideData._id) !== String(captainRide._id)) return
+        setRideData(captainRide)
+    }, [captainRide, rideData?._id])
 
     const { requestLock } = useWakeLock();
     useEffect(() => {

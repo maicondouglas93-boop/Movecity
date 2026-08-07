@@ -30,6 +30,42 @@ const PARCEL_ENDPOINT_BY_KIND = {
 
 const UNKNOWN = undefined
 
+const RIDE_STATUS_RANK = {
+    scheduled: 0,
+    requested: 1,
+    accepted: 2,
+    going_to_pickup: 3,
+    arrived: 4,
+    waiting_passenger: 5,
+    started: 6,
+    finished: 7,
+    cancelled: 7,
+}
+
+function isRideRegression(previous, next) {
+    if (!previous || !next?._id) return false
+    if (String(previous._id) !== String(next._id)) return false
+
+    const previousRank = RIDE_STATUS_RANK[previous.status] ?? -1
+    const nextRank = RIDE_STATUS_RANK[next.status] ?? -1
+    return nextRank >= 0 && previousRank > nextRank
+}
+
+function mergeRideByStatus(previous, next) {
+    if (typeof next === 'function') {
+        return mergeRideByStatus(previous, next(previous))
+    }
+    if (isRideRegression(previous, next)) {
+        if (import.meta.env.DEV) {
+            console.info(
+                `[RideContext] Ignorando snapshot antigo da corrida ${next._id}: ${previous.status} → ${next.status}`
+            )
+        }
+        return previous
+    }
+    return next
+}
+
 const PARCEL_RESTORE_STATUSES = [
     'awaiting_provider',
     'provider_accepted',
@@ -58,7 +94,7 @@ async function fetchActive(kind, endpointMap) {
 
 const RideProvider = ({ children }) => {
     const [ userRide, setUserRide ] = useState(null)
-    const [ captainRide, setCaptainRide ] = useState(null)
+    const [ captainRide, setCaptainRideState ] = useState(null)
     const [ userParcel, setUserParcel ] = useState(null)
     const [ captainParcel, setCaptainParcel ] = useState(null)
     const { socket } = useContext(SocketContext)
@@ -73,7 +109,7 @@ const RideProvider = ({ children }) => {
         if (seq !== syncSeqRef.current[kind]) return result
         if (result !== UNKNOWN) {
             if (kind === 'user') setUserRide(result)
-            else setCaptainRide(result)
+            else setCaptainRideState(previous => mergeRideByStatus(previous, result))
         }
         return result
     }, [])
@@ -94,6 +130,10 @@ const RideProvider = ({ children }) => {
     const syncCaptainRide = useCallback(() => syncRide('captain'), [syncRide])
     const syncUserParcel = useCallback(() => syncParcel('user'), [syncParcel])
     const syncCaptainParcel = useCallback(() => syncParcel('captain'), [syncParcel])
+
+    const setCaptainRide = useCallback((nextRide) => {
+        setCaptainRideState(previous => mergeRideByStatus(previous, nextRide))
+    }, [])
 
     const clearUserRide = useCallback(() => {
         setUserRide(null)
@@ -125,7 +165,7 @@ const RideProvider = ({ children }) => {
                 setUserParcel(null)
             }
             if (!getAccessToken('captain')) {
-                setCaptainRide(null)
+                setCaptainRideState(null)
                 setCaptainParcel(null)
             }
             syncAll()

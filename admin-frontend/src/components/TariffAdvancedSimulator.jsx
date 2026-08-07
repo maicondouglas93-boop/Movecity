@@ -1,17 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Calculator, ChevronDown, ChevronUp, MapPin, TrendingUp } from 'lucide-react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import api from '../services/api';
 import AdminAddressAutocomplete from './AdminAddressAutocomplete';
 import { estimateRoute, parseAddressCoords } from '../services/mapsApi';
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
 
 const SERVICE_KINDS = [
   { id: 'ride', label: 'Corrida' },
@@ -19,106 +10,10 @@ const SERVICE_KINDS = [
   { id: 'parcel', label: 'Encomenda' },
 ];
 
-const DEFAULT_CENTER = [-23.5505, -46.6333];
-
 /**
- * Leaflet imperativo: React só dono do container vazio.
- * Evita NotFoundError removeChild do react-leaflet + React 19.
+ * Simulador com partida/destino reais (autocomplete + estimate-route).
+ * Sem Leaflet/mapa: React 19 + Leaflet gerava NotFoundError removeChild no painel.
  */
-function SimulatorRouteMap({ pickupCoords, destCoords, polyline }) {
-  const containerRef = useRef(null);
-  const mapRef = useRef(null);
-  const layersRef = useRef({ pickup: null, dest: null, line: null });
-  const hasRoute = Boolean(pickupCoords || destCoords || (polyline && polyline.length > 1));
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || mapRef.current) return undefined;
-
-    const map = L.map(el, {
-      center: DEFAULT_CENTER,
-      zoom: 12,
-      scrollWheelZoom: false,
-      zoomControl: true,
-    });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OSM &copy; CARTO',
-    }).addTo(map);
-    mapRef.current = map;
-
-    const onResize = () => {
-      try { map.invalidateSize(); } catch { /* ignore */ }
-    };
-    const t = setTimeout(onResize, 80);
-    window.addEventListener('resize', onResize);
-
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener('resize', onResize);
-      try { map.remove(); } catch { /* ignore */ }
-      mapRef.current = null;
-      layersRef.current = { pickup: null, dest: null, line: null };
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const layers = layersRef.current;
-    const clearLayer = (key) => {
-      if (layers[key]) {
-        try { map.removeLayer(layers[key]); } catch { /* ignore */ }
-        layers[key] = null;
-      }
-    };
-
-    clearLayer('pickup');
-    clearLayer('dest');
-    clearLayer('line');
-
-    const boundsPts = [];
-
-    if (pickupCoords) {
-      layers.pickup = L.marker([pickupCoords.lat, pickupCoords.lng]).addTo(map);
-      boundsPts.push([pickupCoords.lat, pickupCoords.lng]);
-    }
-    if (destCoords) {
-      layers.dest = L.marker([destCoords.lat, destCoords.lng]).addTo(map);
-      boundsPts.push([destCoords.lat, destCoords.lng]);
-    }
-    if (polyline?.length > 1) {
-      layers.line = L.polyline(polyline, { color: '#3b82f6', weight: 4 }).addTo(map);
-      polyline.forEach((p) => boundsPts.push(p));
-    }
-
-    try {
-      map.invalidateSize();
-      if (boundsPts.length === 1) {
-        map.setView(boundsPts[0], 14);
-      } else if (boundsPts.length > 1) {
-        map.fitBounds(L.latLngBounds(boundsPts), { padding: [28, 28], maxZoom: 15 });
-      }
-    } catch {
-      /* mapa destruído */
-    }
-  }, [pickupCoords, destCoords, polyline]);
-
-  return (
-    <div className="rounded-lg overflow-hidden border border-border h-[220px] bg-background relative z-0">
-      <div ref={containerRef} className="h-full w-full" />
-      {!hasRoute && (
-        <div className="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 bg-background/90 px-4 text-center pointer-events-none">
-          <MapPin className="w-7 h-7 opacity-40 text-text-muted" />
-          <span className="text-xs text-text-muted">
-            Escolha partida e destino no autocomplete para traçar a rota e calcular o valor.
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function TariffAdvancedSimulator({
   values,
   vehicleType,
@@ -128,7 +23,6 @@ export default function TariffAdvancedSimulator({
   const [destination, setDestination] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
   const [destCoords, setDestCoords] = useState(null);
-  const [polyline, setPolyline] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
   const [showManual, setShowManual] = useState(false);
@@ -146,6 +40,7 @@ export default function TariffAdvancedSimulator({
 
   const categoryOptionals = values?.optionals || [];
   const commPct = parseFloat(values?.platformCommission) || platformCommission;
+  const hasAddresses = Boolean(pickupCoords && destCoords);
 
   const resolvePickup = (formatted, coords) => {
     setPickup(formatted);
@@ -162,33 +57,37 @@ export default function TariffAdvancedSimulator({
     const dest = destination.trim();
     const oCoords = pickupCoords || parseAddressCoords(origin);
     const dCoords = destCoords || parseAddressCoords(destination);
-    // Só estima após autocomplete resolver coords (evita spam enquanto digita)
     if (!oCoords || !dCoords || origin.length < 3 || dest.length < 3) return undefined;
 
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setRouteLoading(true);
       setRouteError('');
       try {
         const data = await estimateRoute(origin, dest);
+        if (cancelled) return;
         setDistance(Number(data.distanceKm) || 0);
         setTime(Number(data.durationMin) || 1);
-        setPolyline(Array.isArray(data.polyline) ? data.polyline : []);
         if (!pickupCoords) setPickupCoords(oCoords);
         if (!destCoords) setDestCoords(dCoords);
       } catch (err) {
-        setPolyline([]);
+        if (cancelled) return;
         setRouteError(err.response?.data?.message || 'Não foi possível calcular a rota');
       } finally {
-        setRouteLoading(false);
+        if (!cancelled) setRouteLoading(false);
       }
     }, 400);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [pickup, destination, pickupCoords, destCoords]);
 
   useEffect(() => {
     if (!vehicleType || !values) return undefined;
 
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setLoading(true);
       setError('');
@@ -203,16 +102,20 @@ export default function TariffAdvancedSimulator({
           optionals: selectedOptionals,
           customPricing: values,
         });
-        setResult(data);
+        if (!cancelled) setResult(data);
       } catch (err) {
+        if (cancelled) return;
         setResult(null);
         setError(err.response?.data?.message || 'Falha na simulação');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 350);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [
     distance,
     time,
@@ -280,27 +183,30 @@ export default function TariffAdvancedSimulator({
           biasLocation={pickupCoords}
         />
 
-        <div className="relative">
-          <SimulatorRouteMap
-            pickupCoords={pickupCoords}
-            destCoords={destCoords}
-            polyline={polyline}
-          />
-          {routeLoading && (
-            <div className="absolute inset-x-0 bottom-0 z-[600] bg-background/80 text-xs text-center py-1 text-text-muted rounded-b-lg">
-              Calculando rota…
-            </div>
+        <div className="rounded-lg border border-border bg-background px-3 py-4 flex flex-col items-center justify-center gap-2 text-center min-h-[96px]">
+          <MapPin className="w-6 h-6 text-primary opacity-70" />
+          {!hasAddresses && (
+            <span className="text-xs text-text-muted">
+              Escolha partida e destino no autocomplete para calcular a rota e o valor.
+            </span>
+          )}
+          {hasAddresses && (
+            <span className="text-sm text-text font-medium">
+              {routeLoading
+                ? 'Calculando rota…'
+                : `Rota: ${distance} km · ${time} min`}
+            </span>
+          )}
+          {hasAddresses && !routeLoading && (
+            <span className="text-[11px] text-text-muted">
+              Distância e tempo via Google/OSM no backend (PricingEngine).
+            </span>
           )}
         </div>
 
-        {routeError && <p className="text-sm text-danger">{routeError}</p>}
-
-        {(pickup || destination) && (
-          <p className="text-xs text-text-muted">
-            Rota: {distance} km · {time} min
-            {routeLoading ? ' (atualizando…)' : ''}
-          </p>
-        )}
+        {routeError ? (
+          <div className="text-sm text-danger">{routeError}</div>
+        ) : null}
 
         <button
           type="button"
@@ -405,8 +311,8 @@ export default function TariffAdvancedSimulator({
           </div>
         )}
 
-        {error && <p className="text-sm text-danger">{error}</p>}
-        {loading && !result && <p className="text-sm text-text-muted">Calculando…</p>}
+        {error ? <div className="text-sm text-danger">{error}</div> : null}
+        {loading && !result ? <div className="text-sm text-text-muted">Calculando…</div> : null}
 
         <div className="space-y-2 text-sm pt-2">
           <div className="flex justify-between">

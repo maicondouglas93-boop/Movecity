@@ -80,6 +80,9 @@ export default function AdminAddressAutocomplete({
   };
 
   const resolveAndSelect = async (item) => {
+    // Fecha a lista antes do async — evita removeChild quando o pai re-renderiza a rota.
+    setOpen(false);
+    setSuggestions([]);
     setResolving(true);
     try {
       let address = suggestionTitle(item);

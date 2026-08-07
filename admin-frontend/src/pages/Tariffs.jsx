@@ -5,6 +5,7 @@ import { Save, Beaker, Plus, X, Edit, Trash2, Copy, Power, Settings2 } from 'luc
 import { useForm, useFieldArray } from 'react-hook-form';
 
 import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
+import SimulatorErrorBoundary from '../components/SimulatorErrorBoundary';
 import GlobalTariffsSection from '../components/GlobalTariffsSection';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
@@ -596,11 +597,13 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
       </div>
 
       <div className={`lg:col-span-1 xl:col-span-1 ${testMode ? 'ring-2 ring-warning/40 rounded-xl' : ''}`}>
-        <TariffAdvancedSimulator
-          values={liveValues}
-          vehicleType={category.name}
-          platformCommission={liveValues.platformCommission}
-        />
+        <SimulatorErrorBoundary>
+          <TariffAdvancedSimulator
+            values={liveValues}
+            vehicleType={category.name}
+            platformCommission={liveValues.platformCommission}
+          />
+        </SimulatorErrorBoundary>
       </div>
 
       {modalOptional && (

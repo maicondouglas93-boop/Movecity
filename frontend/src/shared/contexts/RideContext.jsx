@@ -171,7 +171,32 @@ const RideProvider = ({ children }) => {
                 redirectedJobsRef.current.add(key)
             } else if ((path === '/captain-home' || path === '/') && !redirectedJobsRef.current.has(key)) {
                 redirectedJobsRef.current.add(key)
+                if (import.meta.env.DEV) {
+                    console.info('[RideOfferFlow] NAVIGATION_TARGET=/captain-riding CURRENT_RIDE_STATUS=started')
+                }
                 navigate('/captain-riding', { state: { ride: captainRide } })
+                return
+            }
+        }
+
+        // Proteção: accepted/pré-início NUNCA deve ficar em /captain-riding
+        // (deep link nativo legado pós-aceite). ConfirmRidePopUp vive na home.
+        const captainPreStart = [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ]
+        if (
+            captainRide
+            && captainPreStart.includes(captainRide.status)
+            && path === '/captain-riding'
+        ) {
+            const key = `captain-prestart-guard:${captainRide._id}:${captainRide.status}`
+            if (!redirectedJobsRef.current.has(key)) {
+                redirectedJobsRef.current.add(key)
+                const target = captainRide.source === 'driver_initiated'
+                    ? '/captain-presential'
+                    : '/captain-home'
+                console.info(
+                    `[RideOfferFlow] NAVIGATION_TARGET=${target} CURRENT_RIDE_STATUS=${captainRide.status} (guard from /captain-riding)`
+                )
+                navigate(target, { replace: true, state: { ride: captainRide } })
                 return
             }
         }
@@ -179,14 +204,13 @@ const RideProvider = ({ children }) => {
         // Presencial pré-início: reconduz ao wizard do PIN de qualquer tela do motorista.
         if (
             captainRide?.source === 'driver_initiated'
-            && [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(captainRide.status)
+            && captainPreStart.includes(captainRide.status)
         ) {
             const key = `captain-presential:${captainRide._id}`
             if (path === '/captain-presential') {
                 redirectedJobsRef.current.add(key)
             } else if (
                 path.startsWith('/captain')
-                && path !== '/captain-riding'
                 && !redirectedJobsRef.current.has(key)
             ) {
                 redirectedJobsRef.current.add(key)

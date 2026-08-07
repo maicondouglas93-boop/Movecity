@@ -37,6 +37,11 @@ public class MoveCityMessagingService extends FirebaseMessagingService {
 
         boolean offer = "NEW_RIDE".equals(type) || "NEW_PARCEL".equals(type);
         if (offer) {
+            String offerId = data != null
+                ? (data.containsKey("rideId") ? data.get("rideId") : data.get("parcelId"))
+                : null;
+            RideOfferFlowLog.i("PUSH_RECEIVED", "type=" + type
+                + " offerId=" + offerId + " foreground=" + foreground);
             Log.i(TAG, "processamento oferta → RideOfferNotifier (nativa)");
             RideOfferNotifier.showFullScreenOffer(this, data);
             return;

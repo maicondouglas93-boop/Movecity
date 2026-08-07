@@ -3,7 +3,8 @@ import { consumeNativeDeepLink } from '@/shared/platform/nativeSession.service'
 
 /**
  * Consome deep links nativos (intent extra / pós-aceite) e navega.
- * navigate(pathWithSearch) — ex.: '/captain-riding'
+ * Pós-aceite (status accepted): '/captain-home' → ConfirmRidePopUp.
+ * Corrida já iniciada: '/captain-riding' (via RideContext quando status=started).
  */
 export async function bindNativeDeepLinks(navigate) {
     if (!isNativePlatform() || typeof navigate !== 'function') {
@@ -13,14 +14,18 @@ export async function bindNativeDeepLinks(navigate) {
     const go = (raw) => {
         if (!raw) return
         try {
+            let target
             if (raw.startsWith('http://') || raw.startsWith('https://')) {
                 const url = new URL(raw)
-                navigate(`${url.pathname}${url.search}`)
-                return
+                target = `${url.pathname}${url.search}`
+            } else {
+                target = raw.startsWith('/') ? raw : `/${raw}`
             }
-            const path = raw.startsWith('/') ? raw : `/${raw}`
-            navigate(path)
+            console.info(`[RideOfferFlow] DEEP_LINK_CONSUMED | ${target}`)
+            console.info(`[RideOfferFlow] NAVIGATION_TARGET | ${target}`)
+            navigate(target)
         } catch {
+            console.info('[RideOfferFlow] NAVIGATION_TARGET | /captain-home (fallback)')
             navigate('/captain-home')
         }
     }

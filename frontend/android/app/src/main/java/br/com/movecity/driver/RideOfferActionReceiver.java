@@ -10,9 +10,11 @@ import android.widget.Toast;
 import java.util.concurrent.Executors;
 
 /**
- * Aceitar/Recusar direto da notificação (quando o MIUI bloqueia a Activity em background).
+ * Ações da notificação que NÃO abrem Activity (compatível com Android 12+).
+ * Aceitar sai daqui: usa RideOfferAcceptActivity via PendingIntent.getActivity.
  */
 public class RideOfferActionReceiver extends BroadcastReceiver {
+    /** @deprecated Aceitar usa RideOfferAcceptActivity; mantido só por Intent legados. */
     public static final String ACTION_ACCEPT = "br.com.movecity.driver.RIDE_OFFER_ACCEPT";
     public static final String ACTION_REJECT = "br.com.movecity.driver.RIDE_OFFER_REJECT";
     public static final String ACTION_OPEN = "br.com.movecity.driver.RIDE_OFFER_OPEN";
@@ -24,71 +26,42 @@ public class RideOfferActionReceiver extends BroadcastReceiver {
         String offerId = intent.getStringExtra(RideOfferActivity.EXTRA_RIDE_ID);
         String kind = intent.getStringExtra(RideOfferActivity.EXTRA_KIND);
         if (kind == null || kind.isEmpty()) kind = RideOfferAcceptHelper.KIND_RIDE;
-        boolean isParcel = RideOfferAcceptHelper.KIND_PARCEL.equals(kind);
 
         if (ACTION_OPEN.equals(action)) {
+            RideOfferFlowLog.i("OFFER_OPEN_CLICKED", "offerId=" + offerId);
             RideOfferNotifier.openOfferActivity(context, intent);
             return;
         }
 
-        if (ACTION_REJECT.equals(action)) {
-            if (offerId == null || offerId.isEmpty()) {
-                RideOfferNotifier.cancelNotification(context, null);
-                RideOfferNotifier.cancelLaunchAlarm(context, null);
-                return;
-            }
-            final String kindFinal = kind;
-            final String offerFinal = offerId;
-            final PendingResult pending = goAsync();
-            Executors.newSingleThreadExecutor().execute(() -> {
-                RideOfferAcceptHelper.declineOffer(context, kindFinal, offerFinal);
-                Handler main = new Handler(Looper.getMainLooper());
-                main.post(() -> {
-                    RideOfferNotifier.cancelNotification(context, offerFinal);
-                    RideOfferNotifier.cancelLaunchAlarm(context, offerFinal);
-                    pending.finish();
-                });
-            });
+        // Aceitar não passa mais por BroadcastReceiver (notification trampoline Android 12+).
+        // Notificações novas usam PendingIntent.getActivity → RideOfferAcceptActivity.
+        if (ACTION_ACCEPT.equals(action)) {
+            RideOfferFlowLog.w("OFFER_ACCEPT_LEGACY_RECEIVER",
+                "ignorado — use RideOfferAcceptActivity; offerId=" + offerId);
+            Toast.makeText(context, "Abra a oferta novamente ou atualize o app", Toast.LENGTH_LONG).show();
             return;
         }
 
-        if (!ACTION_ACCEPT.equals(action)) return;
+        if (!ACTION_REJECT.equals(action)) return;
+
+        RideOfferFlowLog.i("OFFER_REJECT_CLICKED", "kind=" + kind + " offerId=" + offerId);
         if (offerId == null || offerId.isEmpty()) {
             RideOfferNotifier.cancelNotification(context, null);
+            RideOfferNotifier.cancelLaunchAlarm(context, null);
             return;
         }
-
         final String kindFinal = kind;
         final String offerFinal = offerId;
         final PendingResult pending = goAsync();
         Executors.newSingleThreadExecutor().execute(() -> {
-            RideOfferAcceptHelper.Result result = RideOfferAcceptHelper.acceptOffer(context, kindFinal, offerFinal);
+            RideOfferAcceptHelper.declineOffer(context, kindFinal, offerFinal);
             Handler main = new Handler(Looper.getMainLooper());
             main.post(() -> {
-                if (result.ok) {
-                    Toast.makeText(context, isParcel ? "Encomenda aceita" : "Corrida aceita", Toast.LENGTH_SHORT).show();
-                    openMain(context, isParcel ? "/captain-parcel" : "/captain-riding");
-                } else {
-                    Toast.makeText(
-                        context,
-                        result.message != null ? result.message : "Não foi possível aceitar",
-                        Toast.LENGTH_LONG
-                    ).show();
-                }
+                Toast.makeText(context, "Oferta recusada", Toast.LENGTH_SHORT).show();
                 RideOfferNotifier.cancelNotification(context, offerFinal);
                 RideOfferNotifier.cancelLaunchAlarm(context, offerFinal);
                 pending.finish();
             });
         });
-    }
-
-    private static void openMain(Context context, String deepLink) {
-        NativeDeepLinkStore.set(context, deepLink);
-        Intent launch = new Intent(context, MainActivity.class);
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        launch.putExtra("deepLink", deepLink);
-        try {
-            context.startActivity(launch);
-        } catch (Exception ignored) {}
     }
 }

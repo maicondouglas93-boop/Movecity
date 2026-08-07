@@ -14,6 +14,7 @@ public final class NativeDeepLinkStore {
 
     public static void set(Context context, String deepLink) {
         if (deepLink == null || deepLink.isEmpty()) return;
+        RideOfferFlowLog.i("DEEP_LINK_RECEIVED", deepLink);
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY, deepLink)
@@ -26,6 +27,7 @@ public final class NativeDeepLinkStore {
         String value = prefs.getString(KEY, null);
         if (value != null) {
             prefs.edit().remove(KEY).apply();
+            RideOfferFlowLog.i("DEEP_LINK_CONSUMED", value);
         }
         return value;
     }

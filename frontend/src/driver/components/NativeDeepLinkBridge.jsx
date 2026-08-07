@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { bindNativeDeepLinks } from '@/shared/platform/nativeDeepLink.service'
 
 /**
- * Consome deep links nativos em qualquer rota do app motorista
- * (pós-aceite → /captain-riding ou /captain-parcel, não só na Home).
+ * Consome deep links nativos em qualquer rota do app motorista.
+ * Pós-aceite (accepted): /captain-home → ConfirmRidePopUp; parcel → /captain-parcel.
  */
 export default function NativeDeepLinkBridge() {
     const navigate = useNavigate()

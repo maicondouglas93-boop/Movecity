@@ -162,16 +162,25 @@ public class RideOfferActivity extends AppCompatActivity {
             btnReject.setEnabled(false);
             statusView.setVisibility(View.VISIBLE);
             statusView.setText(isParcel ? "Aceitando encomenda…" : "Aceitando corrida…");
+            RideOfferFlowLog.i("OFFER_ACCEPT_CLICKED", "source=green_screen kind=" + kind
+                + " offerId=" + offerId);
 
             executor.execute(() -> {
+                RideOfferFlowLog.i("ACCEPT_HTTP_START", "kind=" + kind + " offerId=" + offerId);
                 RideOfferAcceptHelper.Result result = RideOfferAcceptHelper.acceptOffer(this, kind, offerId);
                 mainHandler.post(() -> {
                     if (result.ok) {
+                        RideOfferFlowLog.i("ACCEPT_HTTP_SUCCESS", "kind=" + kind
+                            + " offerId=" + offerId + " status=accepted");
                         statusView.setText(isParcel ? "Encomenda aceita!" : "Corrida aceita!");
                         Toast.makeText(this, statusView.getText(), Toast.LENGTH_SHORT).show();
-                        openMainApp(successDeepLink(isParcel));
+                        String deepLink = RideOfferLaunchHelper.postAcceptDeepLink(isParcel);
+                        RideOfferFlowLog.i("NAVIGATION_TARGET", deepLink);
+                        RideOfferLaunchHelper.openMainAfterAccept(this, deepLink);
                         finish();
                     } else {
+                        RideOfferFlowLog.e("ACCEPT_HTTP_ERROR",
+                            result.message != null ? result.message : "falha");
                         busy = false;
                         btnAccept.setEnabled(true);
                         btnReject.setEnabled(true);
@@ -286,19 +295,6 @@ public class RideOfferActivity extends AppCompatActivity {
             keep.add(line);
         }
         return String.join("\n", keep);
-    }
-
-    private String successDeepLink(boolean isParcel) {
-        if (isParcel) return "/captain-parcel";
-        return "/captain-riding";
-    }
-
-    private void openMainApp(String deepLink) {
-        NativeDeepLinkStore.set(this, deepLink);
-        Intent launch = new Intent(this, MainActivity.class);
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        launch.putExtra("deepLink", deepLink);
-        startActivity(launch);
     }
 
     @Override

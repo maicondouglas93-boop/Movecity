@@ -40,6 +40,17 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:launchMode="singleTop" />
 
+        <!-- Aceitar da notificação: getActivity (evita notification trampoline Android 12+) -->
+        <activity
+            android:name=".RideOfferAcceptActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity=""
+            android:theme="@style/AppTheme.NoActionBar"
+            android:launchMode="singleTop" />
+
         <!-- Substitui o MessagingService do Capacitor para NEW_RIDE full-screen -->
         <service
             android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"

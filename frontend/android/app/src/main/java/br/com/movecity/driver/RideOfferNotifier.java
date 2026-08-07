@@ -133,11 +133,16 @@ public final class RideOfferNotifier {
         int notificationId = notificationIdFor(offerId);
         PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
 
-        Intent accept = new Intent(context, RideOfferActionReceiver.class);
-        accept.setAction(RideOfferActionReceiver.ACTION_ACCEPT);
+        // Aceitar: getActivity (RideOfferAcceptActivity) — Android 12+ bloqueia
+        // BroadcastReceiver → startActivity (notification trampoline).
+        Intent accept = new Intent(context, RideOfferAcceptActivity.class);
         copyOfferExtras(fullScreen, accept);
-        PendingIntent acceptPi = broadcastPi(context, offerId.hashCode() + 11, accept);
+        accept.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent acceptPi = activityPi(context, offerId.hashCode() + 11, accept);
 
+        // Recusar: Broadcast ok — não abre Activity.
         Intent reject = new Intent(context, RideOfferActionReceiver.class);
         reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
         copyOfferExtras(fullScreen, reject);

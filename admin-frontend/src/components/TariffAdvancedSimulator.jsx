@@ -24,15 +24,76 @@ const DEFAULT_CENTER = [-23.5505, -46.6333];
 
 function FitBounds({ positions }) {
   const map = useMap();
+  const signature = positions?.length
+    ? `${positions.length}:${positions[0]?.[0]},${positions[0]?.[1]}:${positions[positions.length - 1]?.[0]},${positions[positions.length - 1]?.[1]}`
+    : '';
+
   useEffect(() => {
-    if (!positions?.length) return;
-    if (positions.length === 1) {
-      map.setView(positions[0], 14);
-      return;
-    }
-    map.fitBounds(L.latLngBounds(positions), { padding: [28, 28], maxZoom: 15 });
-  }, [map, positions]);
+    if (!positions?.length) return undefined;
+    // invalidateSize evita layout quebrado após o painel reflow; try/catch cobre
+    // unmount durante animação do Leaflet (removeChild no React).
+    const apply = () => {
+      try {
+        map.invalidateSize();
+        if (positions.length === 1) {
+          map.setView(positions[0], 14);
+        } else {
+          map.fitBounds(L.latLngBounds(positions), { padding: [28, 28], maxZoom: 15 });
+        }
+      } catch {
+        /* mapa já destruído */
+      }
+    };
+    const t = setTimeout(apply, 50);
+    return () => clearTimeout(t);
+  }, [map, signature, positions]);
+
   return null;
+}
+
+/** Mapa estável: NÃO remonta MapContainer (key dinâmico / toggle causa removeChild). */
+function SimulatorRouteMap({ pickupCoords, destCoords, polyline }) {
+  const positions = useMemo(() => {
+    if (polyline?.length > 1) return polyline;
+    const pts = [];
+    if (pickupCoords) pts.push([pickupCoords.lat, pickupCoords.lng]);
+    if (destCoords) pts.push([destCoords.lat, destCoords.lng]);
+    return pts;
+  }, [polyline, pickupCoords, destCoords]);
+
+  const hasRoute = positions.length > 0;
+
+  return (
+    <div className="rounded-lg overflow-hidden border border-border h-[220px] bg-background relative z-0">
+      <MapContainer
+        center={DEFAULT_CENTER}
+        zoom={12}
+        style={{ height: '100%', width: '100%' }}
+        scrollWheelZoom={false}
+      >
+        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        <FitBounds positions={positions} />
+        {pickupCoords && (
+          <Marker position={[pickupCoords.lat, pickupCoords.lng]} />
+        )}
+        {destCoords && (
+          <Marker position={[destCoords.lat, destCoords.lng]} />
+        )}
+        {polyline?.length > 1 && (
+          <Polyline positions={polyline} pathOptions={{ color: '#3b82f6', weight: 4 }} />
+        )}
+      </MapContainer>
+
+      {!hasRoute && (
+        <div className="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 bg-background/90 px-4 text-center pointer-events-none">
+          <MapPin className="w-7 h-7 opacity-40 text-text-muted" />
+          <p className="text-xs text-text-muted">
+            Escolha partida e destino no autocomplete para traçar a rota e calcular o valor.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function TariffAdvancedSimulator({
@@ -140,16 +201,6 @@ export default function TariffAdvancedSimulator({
     values,
   ]);
 
-  const mapPositions = useMemo(() => {
-    if (polyline.length > 1) return polyline;
-    const pts = [];
-    if (pickupCoords) pts.push([pickupCoords.lat, pickupCoords.lng]);
-    if (destCoords) pts.push([destCoords.lat, destCoords.lng]);
-    return pts;
-  }, [polyline, pickupCoords, destCoords]);
-
-  const mapCenter = mapPositions[0] || DEFAULT_CENTER;
-
   const breakdown = result?.fareBreakdown || {};
   const surcharges = breakdown.surcharges || {};
   const total = result?.finalFare ?? 0;
@@ -206,37 +257,14 @@ export default function TariffAdvancedSimulator({
           biasLocation={pickupCoords}
         />
 
-        <div className="rounded-lg overflow-hidden border border-border h-[220px] bg-background relative z-0">
-          {mapPositions.length > 0 ? (
-            <MapContainer
-              key={`${mapCenter[0]}-${mapCenter[1]}-${mapPositions.length}`}
-              center={mapCenter}
-              zoom={13}
-              style={{ height: '100%', width: '100%' }}
-              scrollWheelZoom={false}
-            >
-              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <FitBounds positions={mapPositions} />
-              {pickupCoords && (
-                <Marker position={[pickupCoords.lat, pickupCoords.lng]} />
-              )}
-              {destCoords && (
-                <Marker position={[destCoords.lat, destCoords.lng]} />
-              )}
-              {polyline.length > 1 && (
-                <Polyline positions={polyline} pathOptions={{ color: '#3b82f6', weight: 4 }} />
-              )}
-            </MapContainer>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-text-muted gap-2 px-4 text-center">
-              <MapPin className="w-7 h-7 opacity-40" />
-              <p className="text-xs">
-                Escolha partida e destino no autocomplete para traçar a rota e calcular o valor.
-              </p>
-            </div>
-          )}
+        <div className="relative">
+          <SimulatorRouteMap
+            pickupCoords={pickupCoords}
+            destCoords={destCoords}
+            polyline={polyline}
+          />
           {routeLoading && (
-            <div className="absolute inset-x-0 bottom-0 bg-background/80 text-xs text-center py-1 text-text-muted">
+            <div className="absolute inset-x-0 bottom-0 z-[600] bg-background/80 text-xs text-center py-1 text-text-muted rounded-b-lg">
               Calculando rota…
             </div>
           )}

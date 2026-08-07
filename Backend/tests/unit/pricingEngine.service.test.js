@@ -2,6 +2,7 @@ const PricingEngine = require('../../services/pricingEngine.service');
 const VehicleCategory = require('../../models/vehicleCategory.model');
 const GlobalSetting = require('../../models/globalSetting.model');
 const Coupon = require('../../models/coupon.model');
+const GlobalTariff = require('../../models/globalTariff.model');
 
 async function seedCategory(overrides = {}) {
     const pricing = {
@@ -284,5 +285,110 @@ describe('Pricing Engine', () => {
         expect(priced.finalFare).toBe(29);
         expect(priced.commissionPercent).toBe(10);
         expect(priced.fareBreakdown.surcharges.parcelAdjustment).toBe(4);
+    });
+
+    it('soma tarifas globais ativas no total (várias ao mesmo tempo)', async () => {
+        await GlobalTariff.create([
+            { name: 'Taxa de embarque', value: 2, active: true },
+            { name: 'Taxa noturna', value: 3, active: true },
+            { name: 'Inativa', value: 50, active: false },
+        ]);
+
+        const result = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+        });
+
+        // base 25 + 2 + 3 = 30 (inativa ignorada)
+        expect(result.finalFare).toBe(30);
+        expect(result.fareBreakdown.surcharges.globalTariffs).toBe(5);
+        expect(result.fareBreakdown.globalTariffsApplied).toHaveLength(2);
+    });
+
+    it('aplica a mesma tarifa global em carro e moto', async () => {
+        await GlobalTariff.create({ name: 'Embarque', value: 2, active: true });
+        await VehicleCategory.create({
+            name: 'moto',
+            displayName: 'Moto',
+            isActive: true,
+            baseFare: 5,
+            perKmRate: 1,
+            perMinuteRate: 0.2,
+            minFare: 5,
+            pricing: {
+                baseFare: 5,
+                perKm: 1,
+                perMinute: 0.2,
+                minimumFare: 5,
+                platformCommission: 20,
+            },
+        });
+
+        const car = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+        });
+        const moto = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'moto',
+            paymentMethod: 'cash',
+        });
+
+        // car 25+2=27; moto 12+2=14
+        expect(car.finalFare).toBe(27);
+        expect(moto.finalFare).toBe(14);
+        expect(car.fareBreakdown.surcharges.globalTariffs).toBe(2);
+        expect(moto.fareBreakdown.surcharges.globalTariffs).toBe(2);
+    });
+
+    it('desativar ou excluir remove impacto no cálculo', async () => {
+        const t = await GlobalTariff.create({ name: 'Embarque', value: 2, active: true });
+        let priced = await PricingEngine.calculateFare({
+            distance: 5000, time: 600, vehicleType: 'car', paymentMethod: 'cash',
+        });
+        expect(priced.finalFare).toBe(27);
+
+        await GlobalTariff.updateOne({ _id: t._id }, { $set: { active: false } });
+        priced = await PricingEngine.calculateFare({
+            distance: 5000, time: 600, vehicleType: 'car', paymentMethod: 'cash',
+        });
+        expect(priced.finalFare).toBe(25);
+
+        await GlobalTariff.updateOne({ _id: t._id }, { $set: { active: true } });
+        await GlobalTariff.deleteOne({ _id: t._id });
+        priced = await PricingEngine.calculateFare({
+            distance: 5000, time: 600, vehicleType: 'car', paymentMethod: 'cash',
+        });
+        expect(priced.finalFare).toBe(25);
+        expect(priced.fareBreakdown.surcharges.globalTariffs).toBe(0);
+    });
+
+    it('congela tarifas globais no snapshot', async () => {
+        await GlobalTariff.create({ name: 'Embarque', value: 2, active: true });
+        const snapshot = await PricingEngine.buildConfigSnapshot({
+            vehicleType: 'car',
+            serviceKind: 'ride',
+        });
+        expect(snapshot.globalTariffs).toHaveLength(1);
+        expect(snapshot.globalTariffs[0].value).toBe(2);
+
+        await GlobalTariff.deleteMany({});
+        await GlobalTariff.create({ name: 'Nova', value: 99, active: true });
+
+        const priced = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            configSnapshot: snapshot,
+        });
+        // snapshot ainda tem +2, não +99
+        expect(priced.finalFare).toBe(27);
+        expect(priced.fareBreakdown.surcharges.globalTariffs).toBe(2);
     });
 });

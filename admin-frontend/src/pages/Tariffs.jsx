@@ -5,6 +5,7 @@ import { Save, Beaker, Plus, X, Edit, Trash2, Copy, Power, Settings2 } from 'luc
 import { useForm, useFieldArray } from 'react-hook-form';
 
 import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
+import GlobalTariffsSection from '../components/GlobalTariffsSection';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 
@@ -95,9 +96,9 @@ export default function Tariffs() {
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Tarifas por categoria</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Tarifas</h1>
           <p className="text-text-muted mt-1">
-            Uma tarifa por categoria de veículo. Encomendas usam a mesma base + acréscimo opcional.
+            Globais (todas as categorias) e tarifas por veículo. Encomendas usam a base da categoria + acréscimo opcional.
           </p>
         </div>
 
@@ -120,6 +121,13 @@ export default function Tariffs() {
             />
           </label>
         </div>
+      </div>
+
+      <GlobalTariffsSection />
+
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Tarifas por categoria</h2>
+        <p className="text-sm text-text-muted mt-1">Base, km, minuto, comissão, encomendas e adicionais de cada veículo.</p>
       </div>
 
       <div className="block md:hidden">

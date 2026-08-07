@@ -2,12 +2,13 @@ const TariffSetting = require('../models/tariffSetting.model');
 const VehicleCategory = require('../models/vehicleCategory.model');
 const GlobalSetting = require('../models/globalSetting.model');
 const Coupon = require('../models/coupon.model');
+const globalTariffService = require('./globalTariff.service');
 
 class PricingEngine {
     
     /**
      * Monta um snapshot congelado da configuração de tarifa/comissão.
-     * Agora usa a tabela de categoria (VehicleCategory) como fonte da verdade.
+     * Fonte: VehicleCategory + tarifas globais ativas (congeladas no momento).
      */
     static async buildConfigSnapshot({ vehicleType, serviceKind = 'ride' }) {
         const category = await VehicleCategory.findOne({ name: vehicleType, isActive: true });
@@ -29,6 +30,8 @@ class PricingEngine {
             value: 0,
         };
 
+        const globalTariffs = await globalTariffService.listActiveForPricing();
+
         return {
             category: categoryPlain,
             globalSetting: gsPlain,
@@ -39,6 +42,8 @@ class PricingEngine {
                 type: parcelAdj.type === 'fixed' ? 'fixed' : 'percentage',
                 value: Number(parcelAdj.value) || 0,
             },
+            // Tarifas globais ativas no momento da cotação/criação.
+            globalTariffs,
             capturedAt: new Date()
         };
     }
@@ -127,7 +132,9 @@ class PricingEngine {
                 extraStops: 0,
                 optionals: 0,
                 parcelAdjustment: 0,
+                globalTariffs: 0,
             },
+            globalTariffsApplied: [],
             discounts: {
                 coupon: 0
             },
@@ -264,8 +271,31 @@ class PricingEngine {
         }
         breakdown.surcharges.parcelAdjustment = parcelAdjustmentCharge;
         currentSubtotal += parcelAdjustmentCharge;
-        breakdown.subtotal = currentSubtotal;
         breakdown.serviceKind = effectiveKind;
+
+        // 4.5 Tarifas globais ativas (todas as categorias / serviceKinds)
+        let globalTariffsList = Array.isArray(configSnapshot?.globalTariffs)
+            ? configSnapshot.globalTariffs
+            : null;
+        if (!globalTariffsList) {
+            globalTariffsList = await globalTariffService.listActiveForPricing();
+        }
+        let globalTariffsCharge = 0;
+        const appliedGlobals = [];
+        for (const t of globalTariffsList) {
+            const v = Number(t.value) || 0;
+            if (v <= 0) continue;
+            globalTariffsCharge += v;
+            appliedGlobals.push({
+                _id: t._id != null ? String(t._id) : undefined,
+                name: t.name || 'Tarifa global',
+                value: v,
+            });
+        }
+        breakdown.surcharges.globalTariffs = globalTariffsCharge;
+        breakdown.globalTariffsApplied = appliedGlobals;
+        currentSubtotal += globalTariffsCharge;
+        breakdown.subtotal = currentSubtotal;
 
         // 5. Taxa de Cartão (opcional - legado globalSetting)
         let cardFee = 0;

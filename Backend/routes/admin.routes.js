@@ -115,6 +115,13 @@ router.get('/tariffs/history', authAdmin, adminController.getTariffHistory);
 router.post('/tariffs/simulate', authAdmin, authorizeRoles('super_admin'), adminController.simulateFare);
 router.post('/tariffs/schedule', authAdmin, authorizeRoles('super_admin'), adminController.scheduleTariff);
 
+const globalTariffController = require('../controllers/globalTariff.controller');
+router.get('/global-tariffs', authAdmin, authorizeRoles('super_admin'), globalTariffController.list);
+router.post('/global-tariffs', authAdmin, authorizeRoles('super_admin'), globalTariffController.create);
+router.put('/global-tariffs/:id', authAdmin, authorizeRoles('super_admin'), globalTariffController.update);
+router.patch('/global-tariffs/:id/active', authAdmin, authorizeRoles('super_admin'), globalTariffController.setActive);
+router.delete('/global-tariffs/:id', authAdmin, authorizeRoles('super_admin'), globalTariffController.remove);
+
 // Logs
 router.get('/logs', authAdmin, authorizeRoles('super_admin'), adminController.getLogs);
 

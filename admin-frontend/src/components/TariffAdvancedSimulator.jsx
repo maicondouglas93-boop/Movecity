@@ -184,6 +184,13 @@ export default function TariffAdvancedSimulator({
               <span>R$ {parcelAdj.toFixed(2)}</span>
             </div>
           )}
+
+          {(Number(surcharges.globalTariffs) || 0) > 0 && (
+            <div className="flex justify-between text-warning">
+              <span>Tarifas globais</span>
+              <span>R$ {(Number(surcharges.globalTariffs) || 0).toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         <div className="border-t border-border pt-3 space-y-2">

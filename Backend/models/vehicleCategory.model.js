@@ -58,7 +58,6 @@ const vehicleCategorySchema = new mongoose.Schema({
     },
     iconKey: {
         type: String,
-        enum: [ 'car', 'moto', 'auto' ],
         default: 'car',
         description: "Qual ilustração de veículo (do conjunto disponível no app) representa esta categoria"
     },
@@ -70,6 +69,12 @@ const vehicleCategorySchema = new mongoose.Schema({
     isActive: {
         type: Boolean,
         default: true
+    },
+    allowedServices: {
+        ride: { type: Boolean, default: true },
+        parcel: { type: Boolean, default: true },
+        scheduledRide: { type: Boolean, default: true },
+        scheduledParcel: { type: Boolean, default: true },
     },
     dynamicMultiplier: {
         type: Number,

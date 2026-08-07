@@ -14,6 +14,7 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
             excludeCaptainId,
             excludeActiveRide: true,
             excludeActiveParcel: true,
+            serviceKind: parcel.scheduledAt ? 'scheduledParcel' : 'parcel',
         }
     );
 

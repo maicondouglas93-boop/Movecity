@@ -1584,7 +1584,13 @@ module.exports.updateVehicleCategory = async (id, data) => {
         dynamicMultiplier: data.dynamicMultiplier !== undefined ? data.dynamicMultiplier : oldCategory.dynamicMultiplier,
         rainFeeMultiplier: data.rainFeeMultiplier !== undefined ? data.rainFeeMultiplier : oldCategory.rainFeeMultiplier,
         isActive: nextIsActive,
-        pricing: nextPricing
+        pricing: nextPricing,
+        allowedServices: data.allowedServices !== undefined ? {
+            ride: data.allowedServices.ride !== false,
+            parcel: data.allowedServices.parcel !== false,
+            scheduledRide: data.allowedServices.scheduledRide !== false,
+            scheduledParcel: data.allowedServices.scheduledParcel !== false,
+        } : oldCategory.allowedServices
     };
 
     const filter = { _id: id };
@@ -1642,6 +1648,12 @@ module.exports.createVehicleCategory = async (data) => {
         perMinuteRate: pricing.perMinute,
         minFare: pricing.minimumFare,
         isActive,
+        allowedServices: data.allowedServices ? {
+            ride: data.allowedServices.ride !== false,
+            parcel: data.allowedServices.parcel !== false,
+            scheduledRide: data.allowedServices.scheduledRide !== false,
+            scheduledParcel: data.allowedServices.scheduledParcel !== false,
+        } : { ride: true, parcel: true, scheduledRide: true, scheduledParcel: true },
         pricing,
     });
 
@@ -1671,3 +1683,83 @@ module.exports.getLogs = async (page = 1, limit = 15, filters = {}) => {
     return { logs, total, pages: Math.ceil(total / limit) };
 };
 
+
+module.exports.finalizeRideByAdmin = async ({ rideId, admin, reason, observation, ip }) => {
+    const allowedReasons = [
+        'Solicitação do passageiro',
+        'Problema técnico',
+        'Motorista não conseguiu finalizar pelo aplicativo',
+        'GPS/localização inconsistente',
+        'Encerramento operacional',
+        'Outro',
+    ];
+    if (!allowedReasons.includes(reason)) {
+        const err = new Error('Motivo de finalização inválido');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const ride = await rideModel.findById(rideId).populate('captain').populate('user');
+    if (!ride) throw Object.assign(new Error('Corrida não encontrada'), { statusCode: 404 });
+    if (ride.status === 'finished' && ride.paymentStatus === 'paid') {
+        return ride;
+    }
+    if (ride.paymentStatus === 'paid') {
+        throw Object.assign(new Error('Corrida já possui financeiro liquidado'), { statusCode: 409 });
+    }
+    if (!['started', 'finished'].includes(ride.status)) {
+        throw Object.assign(new Error('Somente corridas iniciadas podem ser finalizadas manualmente'), { statusCode: 409 });
+    }
+    if (!ride.captain) throw Object.assign(new Error('Corrida sem motorista'), { statusCode: 409 });
+
+    const captain = await captainModel.findById(ride.captain._id || ride.captain).select('location lastSeenAt');
+    const lat = ride.lastLocation?.lat ?? captain?.location?.ltd;
+    const lng = ride.lastLocation?.lng ?? captain?.location?.lng;
+    if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+        throw Object.assign(new Error('Última localização GPS válida do motorista não encontrada'), { statusCode: 409 });
+    }
+
+    const rideService = require('./ride.service');
+    const finished = ride.status === 'finished'
+        ? ride
+        : await rideService.endRide({ rideId, captain: { _id: ride.captain._id || ride.captain } });
+
+    let paid = finished;
+    if (finished.paymentStatus !== 'paid') {
+        paid = await rideService.confirmPaymentReceived({ rideId, captain: { _id: ride.captain._id || ride.captain } });
+    }
+
+    const updated = await rideModel.findByIdAndUpdate(
+        rideId,
+        { $set: { adminFinalization: {
+            admin: admin._id,
+            adminName: admin.name,
+            finalizedAt: new Date(),
+            reason,
+            observation: observation || '',
+            finishLocation: { lat: Number(lat), lng: Number(lng) },
+            finalPrice: paid.finalPrice || paid.fare,
+        } } },
+        { new: true }
+    ).populate('user').populate('captain');
+
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'admin_finalize_ride',
+        targetId: rideId.toString(),
+        targetModel: 'Ride',
+        reason,
+        oldValue: { status: ride.status, paymentStatus: ride.paymentStatus },
+        newValue: {
+            status: updated.status,
+            paymentStatus: updated.paymentStatus,
+            finishLocation: { lat: Number(lat), lng: Number(lng) },
+            finalPrice: updated.finalPrice || updated.fare,
+            observation: observation || '',
+        },
+        ipAddress: ip || '0.0.0.0',
+    });
+
+    return updated;
+};

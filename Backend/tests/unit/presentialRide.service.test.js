@@ -34,6 +34,8 @@ jest.mock('../../services/dispatch.service', () => ({
     ACTIVE_PARCEL_STATUSES: [ 'accepted', 'picking_up', 'in_transit' ],
     acquireCaptainBusyLock: jest.fn().mockResolvedValue(true),
     releaseCaptainBusyLock: jest.fn().mockResolvedValue(undefined),
+    releaseCaptainBusyLockIfIdle: jest.fn().mockResolvedValue(true),
+    isVehicleCategoryAllowed: jest.fn().mockResolvedValue(true),
     captainHasActiveParcel: jest.fn().mockResolvedValue(false),
 }));
 

@@ -94,6 +94,7 @@ router.get('/captains/:id/timeline', authAdmin, adminController.getCaptainTimeli
 router.get('/rides', authAdmin, adminController.getRides);
 router.put('/rides/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.cancelRide);
 router.put('/rides/:id/reassign', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.reassignRide);
+router.put('/rides/:id/finalize', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.finalizeRide);
 router.post('/rides/bulk-action', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.bulkActionRides);
 
 // Finance (Payouts)

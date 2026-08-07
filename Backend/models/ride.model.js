@@ -261,6 +261,16 @@ const rideSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    adminFinalization: {
+        admin: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser' },
+        adminName: String,
+        finalizedAt: Date,
+        reason: String,
+        observation: String,
+        finishLocation: { lat: Number, lng: Number },
+        finalPrice: Number,
+    },
+
     paymentGateway: {
         type: String,
         default: 'asaas'

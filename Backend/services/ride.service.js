@@ -237,6 +237,16 @@ module.exports.createRide = async ({
         parsedSchedule = scheduleService.assertValidScheduledAt(scheduledAt);
     }
 
+    {
+        const dispatchService = require('./dispatch.service');
+        const serviceKind = parsedSchedule ? 'scheduledRide' : 'ride';
+        if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, serviceKind))) {
+            const err = new Error('VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE');
+            err.code = 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE';
+            throw err;
+        }
+    }
+
     // Exclusão mútua user: não criar corrida imediata se há encomenda ativa.
     // Agendamento futuro não conflita com encomenda em andamento.
     if (!parsedSchedule) {
@@ -1602,6 +1612,7 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
 
     const vehicleType = freshCaptain.vehicle?.vehicleType;
     if (!vehicleType) return [];
+    if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, 'ride'))) return [];
 
     const position = freshCaptain.location;
     if (!position || position.ltd == null || position.lng == null) return [];

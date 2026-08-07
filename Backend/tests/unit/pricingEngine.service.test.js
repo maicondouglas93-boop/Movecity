@@ -1,94 +1,82 @@
 const PricingEngine = require('../../services/pricingEngine.service');
-const TariffSetting = require('../../models/tariffSetting.model');
 const VehicleCategory = require('../../models/vehicleCategory.model');
 const GlobalSetting = require('../../models/globalSetting.model');
-const PricingRule = require('../../models/pricingRule.model');
 const Coupon = require('../../models/coupon.model');
+
+async function seedCategory(overrides = {}) {
+    const pricing = {
+        baseFare: 10,
+        perKm: 2,
+        perMinute: 0.5,
+        minimumFare: 15,
+        platformCommission: 20,
+        parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+        optionals: [],
+        ...(overrides.pricing || {}),
+    };
+    return VehicleCategory.create({
+        name: 'car',
+        displayName: 'Carro Econômico',
+        isActive: true,
+        baseFare: pricing.baseFare,
+        perKmRate: pricing.perKm,
+        perMinuteRate: pricing.perMinute,
+        minFare: pricing.minimumFare,
+        ...overrides,
+        pricing,
+    });
+}
 
 describe('Pricing Engine', () => {
     beforeEach(async () => {
-        // Setup initial default configs
-        await TariffSetting.create({
-            minDistanceIncluded: 0,
-            minTimeIncluded: 0,
-            roundingRule: 'none',
-            dynamicPricingStatus: 'off'
-        });
-
         await GlobalSetting.create({
             platformCommission: 20,
             cardFeePercent: 2,
-            cardFeeFixed: 0.50
+            cardFeeFixed: 0.50,
         });
-
-        await VehicleCategory.create({
-            name: 'car',
-            displayName: 'Carro Econômico',
-            isActive: true,
-            baseFare: 10,
-            perKmRate: 2,
-            perMinuteRate: 0.5,
-            minFare: 15
-        });
+        await seedCategory();
     });
 
-    it('should calculate base fare correctly', async () => {
-        const result = await PricingEngine.calculateFare({
-            distance: 5000, // 5km
-            time: 600, // 10 minutes
-            vehicleType: 'car',
-            paymentMethod: 'cash'
-        });
-
-        // 10 + (5 * 2) + (10 * 0.5) = 10 + 10 + 5 = 25
-        expect(result.finalFare).toBe(25);
-        expect(result.commissionAmount).toBe(5); // 20% of 25
-        expect(result.fareBreakdown.driverNetEarnings).toBe(20);
-    });
-
-    it('should apply minimum fare rule', async () => {
-        const result = await PricingEngine.calculateFare({
-            distance: 1000, // 1km
-            time: 120, // 2 minutes
-            vehicleType: 'car',
-            paymentMethod: 'cash'
-        });
-
-        // 10 + 2 + 1 = 13 (below 15 minFare) -> 15
-        expect(result.finalFare).toBe(15);
-    });
-
-    it('should apply card fees correctly', async () => {
-        const result = await PricingEngine.calculateFare({
-            distance: 5000, // 5km (10)
-            time: 600, // 10 min (5)
-            vehicleType: 'car',
-            paymentMethod: 'card' // base: 25
-        });
-
-        // card fee = (25 * 0.02) + 0.50 = 0.50 + 0.50 = 1.00
-        // final = 25 + 1 = 26
-        // commision base = 25 -> 20% = 5
-        expect(result.finalFare).toBe(26);
-        expect(result.fareBreakdown.cardFee).toBe(1.00);
-        expect(result.commissionAmount).toBe(5);
-    });
-
-    it('should apply dynamic pricing multiplier', async () => {
-        await TariffSetting.updateOne({}, { dynamicPricingStatus: 'manual', currentMultiplier: 1.5 });
-
+    it('calcula tarifa base corretamente', async () => {
         const result = await PricingEngine.calculateFare({
             distance: 5000,
             time: 600,
             vehicleType: 'car',
-            paymentMethod: 'cash'
+            paymentMethod: 'cash',
         });
 
-        // 25 * 1.5 = 37.5
-        expect(result.finalFare).toBe(37.5);
+        // 10 + (5 * 2) + (10 * 0.5) = 25
+        expect(result.finalFare).toBe(25);
+        expect(result.commissionAmount).toBe(5);
+        expect(result.fareBreakdown.driverNetEarnings).toBe(20);
     });
 
-    it('should apply coupons correctly (fixed)', async () => {
+    it('aplica tarifa mínima', async () => {
+        const result = await PricingEngine.calculateFare({
+            distance: 1000,
+            time: 120,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+        });
+
+        expect(result.finalFare).toBe(15);
+    });
+
+    it('aplica taxa de cartão', async () => {
+        const result = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'card',
+        });
+
+        // card fee = (25 * 0.02) + 0.50 = 1.00 → final 26; comissão sobre 25
+        expect(result.finalFare).toBe(26);
+        expect(result.fareBreakdown.cardFee).toBe(1);
+        expect(result.commissionAmount).toBe(5);
+    });
+
+    it('aplica cupom fixo', async () => {
         await Coupon.create({
             code: 'TOMA10',
             isActive: true,
@@ -96,7 +84,7 @@ describe('Pricing Engine', () => {
             value: 10,
             expirationDate: new Date('2050-01-01'),
             usageLimit: 100,
-            usedCount: 0
+            usedCount: 0,
         });
 
         const result = await PricingEngine.calculateFare({
@@ -104,63 +92,18 @@ describe('Pricing Engine', () => {
             time: 600,
             vehicleType: 'car',
             paymentMethod: 'cash',
-            couponCode: 'TOMA10'
+            couponCode: 'TOMA10',
         });
 
-        // 25 - 10 = 15
         expect(result.finalFare).toBe(15);
-        expect(result.fareBreakdown.couponDiscount).toBe(10);
+        expect(result.fareBreakdown.discounts.coupon).toBe(10);
     });
 
-    it('should NOT apply a PricingRule without conditions (regression: "Taxa de Chuva" bug)', async () => {
-        await PricingRule.create({
-            name: 'Taxa de Chuva',
-            type: 'weather',
-            modificationType: 'percentage',
-            value: 20,
-            priority: 1,
-            isActive: true
-            // sem `conditions` — antes isso era aplicado sempre, incondicionalmente
-        });
-
-        const result = await PricingEngine.calculateFare({
-            distance: 5000,
-            time: 600,
-            vehicleType: 'car',
-            paymentMethod: 'cash'
-        });
-
-        expect(result.finalFare).toBe(25); // sem +20% de chuva
-        expect(result.fareBreakdown.appliedRules).toEqual([]);
-    });
-
-    it('should NOT apply a PricingRule with conditions yet (no evaluator implemented)', async () => {
-        await PricingRule.create({
-            name: 'Horário de Pico',
-            type: 'time_based',
-            modificationType: 'percentage',
-            value: 10,
-            priority: 1,
-            isActive: true,
-            conditions: { startHour: 18, endHour: 20 }
-        });
-
-        const result = await PricingEngine.calculateFare({
-            distance: 5000,
-            time: 600,
-            vehicleType: 'car',
-            paymentMethod: 'cash'
-        });
-
-        expect(result.finalFare).toBe(25);
-        expect(result.fareBreakdown.appliedRules).toEqual([]);
-    });
-
-    it('usa comissão distinta para ride vs presential', async () => {
-        await GlobalSetting.updateOne({}, {
-            platformCommission: 15,
-            platformCommissions: { ride: 15, presential: 5, parcel: 25 },
-        });
+    it('usa comissão única da categoria (igual em ride e presential)', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            { $set: { 'pricing.platformCommission': 15 } }
+        );
 
         const ride = await PricingEngine.calculateFare({
             distance: 5000,
@@ -180,30 +123,153 @@ describe('Pricing Engine', () => {
         expect(ride.finalFare).toBe(25);
         expect(presential.finalFare).toBe(25);
         expect(ride.commissionPercent).toBe(15);
-        expect(presential.commissionPercent).toBe(5);
-        expect(ride.commissionAmount).toBe(3.75); // 15% of 25
-        expect(presential.commissionAmount).toBe(1.25); // 5% of 25
+        expect(presential.commissionPercent).toBe(15);
+        expect(ride.commissionAmount).toBe(3.75);
+        expect(presential.commissionAmount).toBe(3.75);
         expect(ride.fareBreakdown.serviceKind).toBe('ride');
         expect(presential.fareBreakdown.serviceKind).toBe('presential');
+        expect(ride.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
+        expect(presential.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
     });
 
-    it('congela serviceKind no snapshot de buildConfigSnapshot', async () => {
-        await GlobalSetting.updateOne({}, {
-            platformCommissions: { ride: 20, presential: 8, parcel: 20 },
-            platformCommission: 20,
+    it('aplica parcelAdjustment percentual só em serviceKind=parcel', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            {
+                $set: {
+                    'pricing.parcelAdjustment': { isActive: true, type: 'percentage', value: 10 },
+                },
+            }
+        );
+
+        const ride = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'ride',
         });
+        const parcel = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'parcel',
+        });
+
+        expect(ride.finalFare).toBe(25);
+        expect(ride.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
+        // 25 + 10% = 27.5
+        expect(parcel.finalFare).toBe(27.5);
+        expect(parcel.fareBreakdown.surcharges.parcelAdjustment).toBe(2.5);
+    });
+
+    it('aplica parcelAdjustment fixo e ignora quando desligado', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            {
+                $set: {
+                    'pricing.parcelAdjustment': { isActive: true, type: 'fixed', value: 5 },
+                },
+            }
+        );
+
+        const on = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'parcel',
+        });
+        expect(on.finalFare).toBe(30);
+        expect(on.fareBreakdown.surcharges.parcelAdjustment).toBe(5);
+
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            { $set: { 'pricing.parcelAdjustment.isActive': false } }
+        );
+
+        const off = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+            serviceKind: 'parcel',
+        });
+        expect(off.finalFare).toBe(25);
+        expect(off.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
+    });
+
+    it('isola tarifas entre categorias (carro vs moto)', async () => {
+        await VehicleCategory.create({
+            name: 'moto',
+            displayName: 'Moto',
+            isActive: true,
+            baseFare: 5,
+            perKmRate: 1,
+            perMinuteRate: 0.2,
+            minFare: 5,
+            pricing: {
+                baseFare: 5,
+                perKm: 1,
+                perMinute: 0.2,
+                minimumFare: 5,
+                platformCommission: 20,
+                parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+            },
+        });
+
+        const car = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'car',
+            paymentMethod: 'cash',
+        });
+        const moto = await PricingEngine.calculateFare({
+            distance: 5000,
+            time: 600,
+            vehicleType: 'moto',
+            paymentMethod: 'cash',
+        });
+
+        // car 25; moto: 5 + 5*1 + 10*0.2 = 12
+        expect(car.finalFare).toBe(25);
+        expect(moto.finalFare).toBe(12);
+    });
+
+    it('congela parcelAdjustment e comissão no snapshot', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            {
+                $set: {
+                    'pricing.platformCommission': 10,
+                    'pricing.parcelAdjustment': { isActive: true, type: 'fixed', value: 4 },
+                },
+            }
+        );
 
         const snapshot = await PricingEngine.buildConfigSnapshot({
             vehicleType: 'car',
-            serviceKind: 'presential',
+            serviceKind: 'parcel',
         });
-        expect(snapshot.serviceKind).toBe('presential');
-        expect(snapshot.commissionPercent).toBe(8);
+        expect(snapshot.serviceKind).toBe('parcel');
+        expect(snapshot.parcelAdjustment).toEqual({
+            isActive: true,
+            type: 'fixed',
+            value: 4,
+        });
 
-        // Mudança posterior no banco não altera cálculo com snapshot.
-        await GlobalSetting.updateOne({}, {
-            platformCommissions: { ride: 20, presential: 50, parcel: 20 },
-        });
+        // Mudança live não afeta cálculo com snapshot
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            {
+                $set: {
+                    'pricing.platformCommission': 50,
+                    'pricing.parcelAdjustment': { isActive: true, type: 'fixed', value: 99 },
+                    'pricing.baseFare': 100,
+                },
+            }
+        );
 
         const priced = await PricingEngine.calculateFare({
             distance: 5000,
@@ -211,9 +277,12 @@ describe('Pricing Engine', () => {
             vehicleType: 'car',
             paymentMethod: 'cash',
             configSnapshot: snapshot,
-            serviceKind: 'ride', // ignorado — snapshot manda
+            serviceKind: 'parcel',
         });
-        expect(priced.commissionPercent).toBe(8);
-        expect(priced.commissionAmount).toBe(2); // 8% of 25
+
+        // snapshot ainda tem base 10 → 25 + 4 = 29; comissão 10%
+        expect(priced.finalFare).toBe(29);
+        expect(priced.commissionPercent).toBe(10);
+        expect(priced.fareBreakdown.surcharges.parcelAdjustment).toBe(4);
     });
 });

@@ -1526,17 +1526,55 @@ module.exports.getVehicleCategories = async () => {
 // checagem de versão precisa ser manual, dos dois lados: uma pré-checagem (mensagem
 // rápida e clara pro caso comum) e o próprio __v no filtro do findOneAndUpdate (garantia
 // atômica de verdade pro caso raro de dois PUTs chegando quase juntos).
+function assertCategoryTariffValid(pricing, topLevel = {}, { activating = false } = {}) {
+    const p = pricing || {};
+    const baseFare = Number(p.baseFare ?? topLevel.baseFare ?? 0);
+    const perKm = Number(p.perKm ?? topLevel.perKmRate ?? 0);
+    const perMinute = Number(p.perMinute ?? topLevel.perMinuteRate ?? 0);
+    const minimumFare = Number(p.minimumFare ?? topLevel.minFare ?? 0);
+    const nums = [baseFare, perKm, perMinute, minimumFare];
+    if (nums.some((n) => !Number.isFinite(n) || n < 0)) {
+        throw Object.assign(new Error('Tarifa inválida: valores não podem ser negativos.'), { statusCode: 400 });
+    }
+    if (activating && nums.every((n) => n === 0)) {
+        throw Object.assign(
+            new Error('Não é possível ativar uma categoria sem tarifa válida (base/km/minuto/mínimo não podem ser todos zero).'),
+            { statusCode: 400 }
+        );
+    }
+    if (p.parcelAdjustment) {
+        const adj = p.parcelAdjustment;
+        const val = Number(adj.value);
+        if (adj.isActive && (!Number.isFinite(val) || val < 0)) {
+            throw Object.assign(new Error('Acréscimo de encomenda inválido.'), { statusCode: 400 });
+        }
+        if (adj.type && !['percentage', 'fixed'].includes(adj.type)) {
+            throw Object.assign(new Error('Tipo de acréscimo de encomenda inválido.'), { statusCode: 400 });
+        }
+    }
+}
+
 module.exports.updateVehicleCategory = async (id, data) => {
     const oldCategory = await vehicleCategoryModel.findById(id).lean();
     if (!oldCategory) throw new Error('Categoria não encontrada');
 
     assertVersionMatches(data.__v, oldCategory.__v, 'Esta categoria de veículo foi alterada por outro administrador enquanto você editava.');
 
+    const nextPricing = data.pricing !== undefined ? data.pricing : oldCategory.pricing;
+    const nextIsActive = data.isActive !== undefined ? data.isActive : oldCategory.isActive;
+    assertCategoryTariffValid(nextPricing, {
+        baseFare: data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare,
+        perKmRate: data.perKmRate !== undefined ? data.perKmRate : oldCategory.perKmRate,
+        perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : oldCategory.perMinuteRate,
+        minFare: data.minFare !== undefined ? data.minFare : oldCategory.minFare,
+    }, { activating: Boolean(nextIsActive) });
+
     // extrair campos permitidos
     const updateData = {
         displayName: data.displayName !== undefined ? data.displayName : oldCategory.displayName,
         description: data.description !== undefined ? data.description : oldCategory.description,
         capacity: data.capacity !== undefined ? data.capacity : oldCategory.capacity,
+        luggageCapacity: data.luggageCapacity !== undefined ? data.luggageCapacity : oldCategory.luggageCapacity,
         iconKey: data.iconKey !== undefined ? data.iconKey : oldCategory.iconKey,
         sortOrder: data.sortOrder !== undefined ? data.sortOrder : oldCategory.sortOrder,
         baseFare: data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare,
@@ -1545,8 +1583,8 @@ module.exports.updateVehicleCategory = async (id, data) => {
         minFare: data.minFare !== undefined ? data.minFare : oldCategory.minFare,
         dynamicMultiplier: data.dynamicMultiplier !== undefined ? data.dynamicMultiplier : oldCategory.dynamicMultiplier,
         rainFeeMultiplier: data.rainFeeMultiplier !== undefined ? data.rainFeeMultiplier : oldCategory.rainFeeMultiplier,
-        isActive: data.isActive !== undefined ? data.isActive : oldCategory.isActive,
-        pricing: data.pricing !== undefined ? data.pricing : oldCategory.pricing
+        isActive: nextIsActive,
+        pricing: nextPricing
     };
 
     const filter = { _id: id };
@@ -1573,18 +1611,38 @@ module.exports.createVehicleCategory = async (data) => {
     const existing = await vehicleCategoryModel.findOne({ name });
     if (existing) throw new Error('Já existe uma categoria com este nome interno');
 
+    const pricing = data.pricing || {
+        baseFare: data.baseFare !== undefined ? data.baseFare : 5.0,
+        perKm: data.perKmRate !== undefined ? data.perKmRate : 1.5,
+        perMinute: data.perMinuteRate !== undefined ? data.perMinuteRate : 0.3,
+        minimumFare: data.minFare !== undefined ? data.minFare : 8.0,
+        platformCommission: 20,
+        parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+        optionals: [],
+    };
+
+    const isActive = data.isActive !== undefined ? data.isActive : true;
+    assertCategoryTariffValid(pricing, {
+        baseFare: pricing.baseFare,
+        perKmRate: pricing.perKm,
+        perMinuteRate: pricing.perMinute,
+        minFare: pricing.minimumFare,
+    }, { activating: Boolean(isActive) });
+
     const category = await vehicleCategoryModel.create({
         name,
         displayName,
         description: data.description || '',
         capacity: data.capacity !== undefined ? data.capacity : 4,
+        luggageCapacity: data.luggageCapacity || '',
         iconKey: data.iconKey || 'car',
         sortOrder: data.sortOrder !== undefined ? data.sortOrder : 0,
-        baseFare: data.baseFare !== undefined ? data.baseFare : 5.0,
-        perKmRate: data.perKmRate !== undefined ? data.perKmRate : 1.5,
-        perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : 0.3,
-        minFare: data.minFare !== undefined ? data.minFare : 8.0,
-        isActive: data.isActive !== undefined ? data.isActive : true
+        baseFare: pricing.baseFare,
+        perKmRate: pricing.perKm,
+        perMinuteRate: pricing.perMinute,
+        minFare: pricing.minimumFare,
+        isActive,
+        pricing,
     });
 
     return category;

@@ -1,6 +1,4 @@
-// Regressão da auditoria de integração (2026-08-06): a cotação era cacheada por 30
-// minutos e nenhum caminho que altera tarifa invalidava a chave. O passageiro via um
-// preço e createRide cobrava outro. Este teste falha se o cache voltar.
+// Regressão: cotação não pode ser cacheada com preço stale.
 const rideService = require('../../services/ride.service');
 const mapService = require('../../services/maps.service');
 const TariffSetting = require('../../models/tariffSetting.model');
@@ -13,13 +11,11 @@ describe('getFare — frescor da tarifa', () => {
     });
 
     beforeEach(async () => {
-        // Rota fixa: o teste é sobre tarifa, não sobre distância real.
         vi.spyOn(mapService, 'getDistanceTime').mockResolvedValue({
             distance: { value: 5000 },
             duration: { value: 600 },
             polyline: 'fake',
         });
-        // ETA consulta motoristas próximos — irrelevante pra frescor de tarifa.
         vi.spyOn(mapService, 'getAddressCoordinate').mockResolvedValue({ ltd: -23.55, lng: -46.63 });
         vi.spyOn(mapService, 'getCaptainsInTheRadius').mockResolvedValue([]);
 
@@ -42,54 +38,60 @@ describe('getFare — frescor da tarifa', () => {
             perKmRate: 2,
             perMinuteRate: 0,
             minFare: 1,
+            pricing: {
+                baseFare: 10,
+                perKm: 2,
+                perMinute: 0,
+                minimumFare: 1,
+                platformCommission: 20,
+                optionals: [
+                    { id: 'aceita_animais', name: 'Aceita animais', value: 4, isActive: true },
+                ],
+            },
         });
     });
 
-    it('reflete imediatamente uma mudança de perKmRate feita pelo admin', async () => {
+    it('reflete imediatamente uma mudança de perKm feita pelo admin', async () => {
         const antes = await rideService.getFare('Origem A', 'Destino B');
-        // 10 base + 5km * 2 = 20
         expect(antes.fare.car).toBe(20);
 
-        await VehicleCategory.updateOne({ name: 'car' }, { $set: { perKmRate: 4 } });
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            { $set: { perKmRate: 4, 'pricing.perKm': 4 } }
+        );
 
-        // Mesma origem/destino: antes o cache devolveria 20 por até 30 minutos.
         const depois = await rideService.getFare('Origem A', 'Destino B');
-        // 10 base + 5km * 4 = 30
         expect(depois.fare.car).toBe(30);
     });
 
     it('reflete imediatamente uma mudança de baseFare', async () => {
         const antes = await rideService.getFare('Origem A', 'Destino B');
-        await VehicleCategory.updateOne({ name: 'car' }, { $set: { baseFare: 25 } });
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            { $set: { baseFare: 25, 'pricing.baseFare': 25 } }
+        );
         const depois = await rideService.getFare('Origem A', 'Destino B');
 
         expect(depois.fare.car).toBe(antes.fare.car + 15);
     });
 
-    it('reflete imediatamente uma mudança de comissão da plataforma', async () => {
+    it('reflete imediatamente uma mudança de comissão da categoria', async () => {
         const antes = await rideService.getFare('Origem A', 'Destino B');
         expect(antes.breakdown.car.commissionPercent).toBe(20);
 
-        await GlobalSetting.updateOne({}, { $set: { platformCommission: 30, 'platformCommissions.ride': 30 } });
+        await VehicleCategory.updateOne(
+            { name: 'car' },
+            { $set: { 'pricing.platformCommission': 30 } }
+        );
 
         const depois = await rideService.getFare('Origem A', 'Destino B');
         expect(depois.breakdown.car.commissionPercent).toBe(30);
     });
 
-    it('expõe optionalPrices vigentes e não devolve fareMax mockado', async () => {
-        await TariffSetting.updateOne({}, {
-            $set: {
-                optionalPrices: {
-                    porta_malas: 0,
-                    aceita_animais: 4,
-                    aceita_encomendas: 5,
-                    adaptado_cadeirante: 0,
-                    disposicao_passageiro: 15,
-                },
-            },
-        });
+    it('expõe optionalPrices da categoria e não devolve fareMax mockado', async () => {
         const result = await rideService.getFare('Origem A', 'Destino B');
         expect(result.optionalPrices.aceita_animais).toBe(4);
+        expect(result.optionalPricesByCategory.car.aceita_animais).toBe(4);
         expect(result.fareMax).toBeUndefined();
         expect(result.fareCardMax).toBeUndefined();
     });

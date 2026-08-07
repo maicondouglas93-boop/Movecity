@@ -7,7 +7,6 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
-const { DEFAULT_OPTIONAL_PRICES } = require('../models/tariffSetting.model');
 const { haversineKm } = require('./maps/geo.util');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
@@ -76,10 +75,16 @@ async function resolveTariffSetting(ride) {
     return live ? (live.toObject?.() || live) : {};
 }
 
-function resolveOptionalPrices(tariffSetting) {
-    const raw = tariffSetting?.optionalPrices;
-    const plain = raw?.toObject?.() || raw || {};
-    return { ...DEFAULT_OPTIONAL_PRICES, ...plain };
+/** Preços de adicionais a partir da categoria (fonte única — não TariffSetting). */
+function resolveOptionalPricesFromCategory(category) {
+    const optionals = category?.pricing?.optionals || [];
+    const map = {};
+    for (const opt of optionals) {
+        if (!opt?.id) continue;
+        if (opt.isActive === false) continue;
+        map[opt.id] = Number(opt.value) || 0;
+    }
+    return map;
 }
 
 function sumRideOptionals(ride) {
@@ -147,6 +152,7 @@ async function getFare(pickup, destination) {
     const fare = {};
     const fareCard = {};
     const fareBreakdownData = {};
+    const optionalPricesByCategory = {};
 
     for (const cat of categories) {
         // Uma leitura de configuração por categoria, reaproveitada nas duas simulações:
@@ -168,7 +174,10 @@ async function getFare(pickup, destination) {
         fare[cat.name] = cashCalc.finalFare;
 
         // Salva breakdown do dinheiro para referência
-        fareBreakdownData[cat.name] = cashCalc.fareBreakdown;
+        fareBreakdownData[cat.name] = {
+            ...cashCalc.fareBreakdown,
+            commissionPercent: cashCalc.commissionPercent,
+        };
 
         const cardCalc = await PricingEngine.calculateFare({
             distance,
@@ -178,6 +187,7 @@ async function getFare(pickup, destination) {
             configSnapshot,
         });
         fareCard[cat.name] = cardCalc.finalFare;
+        optionalPricesByCategory[cat.name] = resolveOptionalPricesFromCategory(configSnapshot.category);
     }
 
     // Bloco H (2026-08-02, achado §6): showAsEstimate era salvo em Configurações e
@@ -195,8 +205,10 @@ async function getFare(pickup, destination) {
         polyline: distanceTime.polyline,
         breakdown: fareBreakdownData,
         showAsEstimate: tariffSetting?.showAsEstimate ?? true,
-        // Preços dos opcionais vigentes (mesmo mapa congelado em createRide).
-        optionalPrices: resolveOptionalPrices(tariffSetting),
+        // Por categoria (fonte: VehicleCategory.pricing.optionals).
+        optionalPricesByCategory,
+        // Compat: primeira categoria ativa (Home deve preferir optionalPricesByCategory[vehicleType]).
+        optionalPrices: optionalPricesByCategory[categories[0]?.name] || {},
         eta,
     };
 
@@ -261,10 +273,10 @@ module.exports.createRide = async ({
         serviceKind: 'ride',
     });
 
-    // Processar opcionais para o PricingEngine
+    // Processar opcionais para o PricingEngine (preços da categoria, não TariffSetting)
     const optionalsMap = {};
     const processedOptionals = [];
-    const optionalPrices = resolveOptionalPrices(pricingSnapshot?.tariffSetting);
+    const optionalPrices = resolveOptionalPricesFromCategory(pricingSnapshot?.category);
 
     if (Array.isArray(optionals)) {
         optionals.forEach(opt => {

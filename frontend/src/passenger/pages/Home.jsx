@@ -1058,7 +1058,10 @@ const Home = () => {
                     setOptionals={setOptionals}
                     setObservation={setObservation}
                     setRequestFemaleDriver={setRequestFemaleDriver}
-                    optionalPrices={fare?.optionalPrices}
+                    optionalPrices={
+                        (vehicleType && fare?.optionalPricesByCategory?.[vehicleType])
+                            || fare?.optionalPrices
+                    }
                 />
             </div>
             <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>

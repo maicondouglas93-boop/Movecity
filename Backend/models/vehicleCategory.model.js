@@ -51,6 +51,11 @@ const vehicleCategorySchema = new mongoose.Schema({
         default: 4,
         description: "Lotação máxima de passageiros"
     },
+    luggageCapacity: {
+        type: String,
+        default: '',
+        description: "Bagagem / capacidade de carga (texto livre para exibição)"
+    },
     iconKey: {
         type: String,
         enum: [ 'car', 'moto', 'auto' ],
@@ -82,6 +87,12 @@ const vehicleCategorySchema = new mongoose.Schema({
         perMinute: { type: Number, default: 0.3 },
         minimumFare: { type: Number, default: 8.0 },
         platformCommission: { type: Number, default: 20 },
+        // Acréscimo opcional quando serviceKind === 'parcel' (não é segunda tarifa).
+        parcelAdjustment: {
+            isActive: { type: Boolean, default: false },
+            type: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+            value: { type: Number, default: 0, min: 0 }
+        },
         surcharges: {
             night: {
                 active: { type: Boolean, default: false },

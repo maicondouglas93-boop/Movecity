@@ -22,10 +22,23 @@ class PricingEngine {
             cardFeeFixed: 0,
         };
 
+        const categoryPlain = category.toObject();
+        const parcelAdj = categoryPlain.pricing?.parcelAdjustment || {
+            isActive: false,
+            type: 'percentage',
+            value: 0,
+        };
+
         return {
-            category: category.toObject(),
+            category: categoryPlain,
             globalSetting: gsPlain,
             serviceKind,
+            // Congela o ajuste de encomenda para histórico (mesmo se admin mudar depois).
+            parcelAdjustment: {
+                isActive: Boolean(parcelAdj.isActive),
+                type: parcelAdj.type === 'fixed' ? 'fixed' : 'percentage',
+                value: Number(parcelAdj.value) || 0,
+            },
             capturedAt: new Date()
         };
     }
@@ -112,16 +125,23 @@ class PricingEngine {
                 rain: 0,
                 waiting: 0,
                 extraStops: 0,
-                optionals: 0
+                optionals: 0,
+                parcelAdjustment: 0,
             },
             discounts: {
                 coupon: 0
             },
+            cardFee: 0,
+            serviceKind: serviceKind || 'ride',
+            commissionPercent: 0,
             subtotal: 0,
             finalFare: 0,
             platformCommission: 0,
-            driverEarnings: 0
+            driverEarnings: 0,
+            driverNetEarnings: 0,
         };
+
+        breakdown.commissionPercent = platformCommissionPct;
 
         // 1. Cálculo Base + KM + Tempo
         const minDistanceMeters = (pricing.minDistanceIncluded || 0) * 1000;
@@ -224,18 +244,38 @@ class PricingEngine {
         }
         breakdown.surcharges.rain = rainCharge;
 
-        // Soma surcharges
+        // Soma surcharges (exceto parcel — aplicado só no passo 4)
         currentSubtotal += (waitingCharge + optionalsCharge + extraStopsCharge + nightCharge + rainCharge);
-        breakdown.subtotal = currentSubtotal;
 
-        // 4. Taxa de Cartão (opcional - legado globalSetting)
+        // 4. Acréscimo de encomenda (uma única vez; nunca em ride/presential)
+        let parcelAdjustmentCharge = 0;
+        const effectiveKind = configSnapshot?.serviceKind || serviceKind || 'ride';
+        if (effectiveKind === 'parcel') {
+            const adjFromSnap = configSnapshot?.parcelAdjustment;
+            const adjLive = pricing.parcelAdjustment;
+            const adj = adjFromSnap || adjLive || { isActive: false, type: 'percentage', value: 0 };
+            if (adj.isActive && Number(adj.value) > 0) {
+                if (adj.type === 'fixed') {
+                    parcelAdjustmentCharge = Number(adj.value) || 0;
+                } else {
+                    parcelAdjustmentCharge = currentSubtotal * ((Number(adj.value) || 0) / 100);
+                }
+            }
+        }
+        breakdown.surcharges.parcelAdjustment = parcelAdjustmentCharge;
+        currentSubtotal += parcelAdjustmentCharge;
+        breakdown.subtotal = currentSubtotal;
+        breakdown.serviceKind = effectiveKind;
+
+        // 5. Taxa de Cartão (opcional - legado globalSetting)
         let cardFee = 0;
         if (paymentMethod === 'card') {
             cardFee = (currentSubtotal * ((gs.cardFeePercent || 0) / 100)) + (gs.cardFeeFixed || 0);
             currentSubtotal += cardFee;
         }
+        breakdown.cardFee = cardFee;
 
-        // 5. Cupons de Desconto
+        // 6. Cupons de Desconto
         let couponDiscount = 0;
         if (couponCode) {
             const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
@@ -254,13 +294,13 @@ class PricingEngine {
         }
         breakdown.discounts.coupon = couponDiscount;
 
-        // 6. Arredondamento
+        // 7. Arredondamento
         let finalFare = currentSubtotal;
         if (pricing.roundingRule === 'up') finalFare = Math.ceil(finalFare);
         else if (pricing.roundingRule === 'down') finalFare = Math.floor(finalFare);
         else if (pricing.roundingRule === 'nearest') finalFare = Math.round(finalFare);
 
-        // 7. Comissão (Incidindo sobre tudo que o passageiro paga, mas descontando taxa do cartão)
+        // 8. Comissão da categoria (única — não há comissão separada por serviço)
         const baseForCommission = Math.max(0, finalFare - cardFee);
         const commissionAmount = baseForCommission * (platformCommissionPct / 100);
 
@@ -269,6 +309,7 @@ class PricingEngine {
         breakdown.finalFare = finalFare;
         breakdown.platformCommission = commissionAmount;
         breakdown.driverEarnings = driverEarnings;
+        breakdown.driverNetEarnings = driverEarnings;
 
         // Formatação
         const formatDecimals = (obj) => {
@@ -285,8 +326,10 @@ class PricingEngine {
         return {
             finalFare: breakdown.finalFare,
             commissionAmount: breakdown.platformCommission,
+            commissionPercent: platformCommissionPct,
             driverEarnings: breakdown.driverEarnings,
-            fareBreakdown: breakdown
+            fareBreakdown: breakdown,
+            serviceKind: effectiveKind,
         };
     }
 }

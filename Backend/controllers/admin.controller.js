@@ -895,6 +895,9 @@ module.exports.updateVehicleCategory = async (req, res, next) => {
         if (error.statusCode === 409) {
             return res.status(409).json({ message: error.message });
         }
+        if (error.statusCode === 400) {
+            return res.status(400).json({ message: error.message });
+        }
         next(error);
     }
 };
@@ -1077,40 +1080,76 @@ module.exports.updateParcelSettings = async (req, res, next) => {
 };
 module.exports.simulateFare = async (req, res, next) => {
     try {
-        const { distance, time, vehicleType, serviceKind, waitTimeSeconds, extraStopsCount, optionals, customPricing } = req.body;
-        if (!distance || !time || !vehicleType) {
-            return res.status(400).json({ message: "distance, time e vehicleType sao obrigatorios." });
+        const {
+            distance,
+            time,
+            vehicleType: vehicleTypeBody,
+            vehicleCategoryId,
+            serviceKind,
+            waitTimeSeconds,
+            extraStopsCount,
+            optionals,
+            customPricing,
+        } = req.body;
+
+        const VehicleCategory = require("../models/vehicleCategory.model");
+        let vehicleType = vehicleTypeBody;
+        if (!vehicleType && vehicleCategoryId) {
+            const byId = await VehicleCategory.findById(vehicleCategoryId).lean();
+            if (!byId) {
+                return res.status(404).json({ message: "Categoria n�o encontrada." });
+            }
+            vehicleType = byId.name;
         }
-        
+
+        if (distance == null || time == null || !vehicleType) {
+            return res.status(400).json({ message: "distance, time e vehicleType (ou vehicleCategoryId) s�o obrigat�rios." });
+        }
+
         const PricingEngine = require("../services/pricingEngine.service");
+        const kind = serviceKind || "ride";
         let configSnapshot = null;
-        
+
         if (customPricing) {
-            const VehicleCategory = require("../models/vehicleCategory.model");
-            const categoryDoc = await VehicleCategory.findOne({ name: vehicleType, isActive: true });
+            const categoryDoc = await VehicleCategory.findOne({ name: vehicleType });
             if (categoryDoc) {
                 const categoryObj = categoryDoc.toObject();
                 categoryObj.pricing = customPricing;
+                const parcelAdj = customPricing.parcelAdjustment || {
+                    isActive: false,
+                    type: "percentage",
+                    value: 0,
+                };
                 configSnapshot = {
                     category: categoryObj,
                     globalSetting: { cardFeePercent: 0, cardFeeFixed: 0 },
-                    serviceKind: serviceKind || "ride"
+                    serviceKind: kind,
+                    parcelAdjustment: {
+                        isActive: Boolean(parcelAdj.isActive),
+                        type: parcelAdj.type === "fixed" ? "fixed" : "percentage",
+                        value: Number(parcelAdj.value) || 0,
+                    },
                 };
             }
         }
 
+        // distance/time no simulador admin: km e minutos ? converter para m/s do engine
+        const distanceMeters = Number(distance) * 1000;
+        const timeSeconds = Number(time) * 60;
+        const waitSeconds = Number(waitTimeSeconds || 0) * 60;
+
         const simulation = await PricingEngine.calculateFare({
-            distance,
-            time,
+            distance: distanceMeters,
+            time: timeSeconds,
             vehicleType,
-            serviceKind: serviceKind || "ride",
-            waitTimeSeconds: waitTimeSeconds || 0,
+            serviceKind: kind,
+            waitTimeSeconds: waitSeconds,
             extraStopsCount: extraStopsCount || 0,
             optionals: optionals || {},
             paymentMethod: "cash",
             configSnapshot: configSnapshot
         });
-        
+
         res.status(200).json(simulation);
     } catch (error) {
         next(error);

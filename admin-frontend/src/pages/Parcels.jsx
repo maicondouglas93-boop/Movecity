@@ -15,11 +15,7 @@ const STATUS_LABEL = {
   scheduled: 'Agendada',
 };
 
-const EMPTY_VEHICLE = {
-  baseFare: 0,
-  perKm: 0,
-  perMinute: 0,
-  minimumFare: 0,
+const EMPTY_OPS = {
   maxWeightKg: 10,
   maxPackageSize: 'medium',
   requireDeliveryPin: true,
@@ -31,66 +27,28 @@ const normalizeSettings = (raw) => {
   return {
     ...raw,
     deliveryPricing: {
-      moto: { ...EMPTY_VEHICLE, maxWeightKg: 10, maxPackageSize: 'medium', ...dp.moto },
-      car: { ...EMPTY_VEHICLE, maxWeightKg: 50, maxPackageSize: 'large', baseFare: 10, minimumFare: 12, ...dp.car },
+      moto: { ...EMPTY_OPS, maxWeightKg: 10, maxPackageSize: 'medium', ...pickOps(dp.moto) },
+      car: { ...EMPTY_OPS, maxWeightKg: 50, maxPackageSize: 'large', ...pickOps(dp.car) },
     },
   };
 };
 
-function VehicleTariffCard({ title, icon, vehicleKey, pricing, onChange }) {
+function pickOps(block = {}) {
+  return {
+    maxWeightKg: block.maxWeightKg,
+    maxPackageSize: block.maxPackageSize,
+    requireDeliveryPin: block.requireDeliveryPin,
+    blockIncompatibleVehicle: block.blockIncompatibleVehicle,
+  };
+}
+
+function VehicleOpsCard({ title, vehicleKey, pricing, onChange }) {
   const set = (key, value) => onChange(vehicleKey, { ...pricing, [key]: value });
 
   return (
     <div className="bg-surface border border-border rounded-xl p-4 space-y-3 flex-1 min-w-[280px]">
-      <h3 className="font-semibold text-text flex items-center gap-2">
-        <span aria-hidden="true">{icon}</span>
-        {title}
-      </h3>
+      <h3 className="font-semibold text-text">{title}</h3>
       <div className="grid grid-cols-2 gap-3 text-sm">
-        <label className="flex flex-col gap-1">
-          <span className="text-text-muted">Tarifa base (R$)</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className="border border-border rounded-lg px-3 py-2 bg-background"
-            value={pricing.baseFare ?? ''}
-            onChange={(e) => set('baseFare', Number(e.target.value))}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-text-muted">Por km (R$)</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className="border border-border rounded-lg px-3 py-2 bg-background"
-            value={pricing.perKm ?? ''}
-            onChange={(e) => set('perKm', Number(e.target.value))}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-text-muted">Por minuto (R$)</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className="border border-border rounded-lg px-3 py-2 bg-background"
-            value={pricing.perMinute ?? ''}
-            onChange={(e) => set('perMinute', Number(e.target.value))}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-text-muted">Tarifa mínima (R$)</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className="border border-border rounded-lg px-3 py-2 bg-background"
-            value={pricing.minimumFare ?? ''}
-            onChange={(e) => set('minimumFare', Number(e.target.value))}
-          />
-        </label>
         <label className="flex flex-col gap-1">
           <span className="text-text-muted">Peso máximo (kg)</span>
           <input
@@ -154,7 +112,7 @@ export default function Parcels() {
       setSettings(normalizeSettings(settingsRes.data));
     } catch (err) {
       console.error(err);
-      setSaveMsg(err.response?.data?.message || 'Falha ao carregar configurações');
+      setSaveMsg(err.response?.data?.message || 'Falha ao carregar');
     } finally {
       setLoading(false);
     }
@@ -183,11 +141,15 @@ export default function Parcels() {
     setSaving(true);
     setSaveMsg('');
     try {
+      // Só regras operacionais — preço fica em Tarifas por categoria.
       const { data } = await api.put('/admin/parcel-settings', {
-        deliveryPricing: settings.deliveryPricing,
+        deliveryPricing: {
+          moto: pickOps(settings.deliveryPricing.moto),
+          car: pickOps(settings.deliveryPricing.car),
+        },
       });
       setSettings(normalizeSettings(data));
-      setSaveMsg('Tarifas salvas. Moto e carro usam configurações independentes no cálculo.');
+      setSaveMsg('Regras operacionais salvas. Preços de encomenda ficam em Tarifas por categoria.');
     } catch (err) {
       console.error(err);
       setSaveMsg(err.response?.data?.message || 'Erro ao salvar (verifique se você é super_admin).');
@@ -201,24 +163,23 @@ export default function Parcels() {
       <div>
         <h1 className="text-2xl font-bold text-text">Encomendas</h1>
         <p className="text-sm text-text-muted mt-1">
-          Listagem e tarifas. Moto e carro têm tabelas independentes — o preço do cliente usa só a do veículo escolhido.
+          Listagem e regras operacionais (peso, tamanho, PIN). Tarifas ficam em{' '}
+          <a href="/tariffs" className="text-primary font-medium">Tarifas por categoria</a>.
         </p>
       </div>
 
       {settings?.deliveryPricing && (
         <section className="space-y-3">
-          <h2 className="font-semibold text-lg">Tarifas & regras por veículo</h2>
+          <h2 className="font-semibold text-lg">Regras operacionais por veículo</h2>
           <div className="flex flex-wrap gap-4">
-            <VehicleTariffCard
-              title="Entregas de Moto"
-              icon="🏍️"
+            <VehicleOpsCard
+              title="Moto"
               vehicleKey="moto"
               pricing={settings.deliveryPricing.moto}
               onChange={patchVehicle}
             />
-            <VehicleTariffCard
-              title="Entregas de Carro"
-              icon="🚗"
+            <VehicleOpsCard
+              title="Carro"
               vehicleKey="car"
               pricing={settings.deliveryPricing.car}
               onChange={patchVehicle}
@@ -231,7 +192,7 @@ export default function Parcels() {
               onClick={saveSettings}
               className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium disabled:opacity-50"
             >
-              {saving ? 'Salvando…' : 'Salvar tarifas'}
+              {saving ? 'Salvando…' : 'Salvar regras'}
             </button>
             {saveMsg && <p className="text-sm text-text-muted">{saveMsg}</p>}
           </div>

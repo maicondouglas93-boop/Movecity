@@ -16,14 +16,57 @@ const parcelService = require('../../services/parcel.service');
 const parcelModel = require('../../models/parcel.model');
 const parcelSettingModel = require('../../models/parcelSetting.model');
 const captainModel = require('../../models/captain.model');
+const VehicleCategory = require('../../models/vehicleCategory.model');
+const GlobalSetting = require('../../models/globalSetting.model');
 const { createCaptain } = require('../factories/captain.factory');
 const { createUser } = require('../factories/user.factory');
+
+async function seedVehicleCategories() {
+    await VehicleCategory.deleteMany({});
+    await VehicleCategory.create({
+        name: 'moto',
+        displayName: 'Moto',
+        isActive: true,
+        baseFare: 10,
+        perKmRate: 3,
+        perMinuteRate: 0.5,
+        minFare: 10,
+        pricing: {
+            baseFare: 10,
+            perKm: 3,
+            perMinute: 0.5,
+            minimumFare: 10,
+            platformCommission: 20,
+            parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+        },
+    });
+    await VehicleCategory.create({
+        name: 'car',
+        displayName: 'Carro',
+        isActive: true,
+        baseFare: 15,
+        perKmRate: 4,
+        perMinuteRate: 0.7,
+        minFare: 15,
+        pricing: {
+            baseFare: 15,
+            perKm: 4,
+            perMinute: 0.7,
+            minimumFare: 15,
+            platformCommission: 20,
+            parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+        },
+    });
+}
 
 describe('parcel.service', () => {
     beforeEach(async () => {
         await parcelModel.deleteMany({});
         await parcelSettingModel.deleteMany({});
         await captainModel.deleteMany({});
+        await GlobalSetting.deleteMany({});
+        await GlobalSetting.create({ platformCommission: 20, cardFeePercent: 0, cardFeeFixed: 0 });
+        await seedVehicleCategories();
     });
 
     const basePayload = (overrides = {}) => ({
@@ -42,22 +85,7 @@ describe('parcel.service', () => {
         ...overrides,
     });
 
-    it('getParcelFare usa deliveryPricing independente por veículo', async () => {
-        await parcelService.updateSettings({
-            deliveryPricing: {
-                moto: {
-                    baseFare: 10, perKm: 3, perMinute: 0.5, minimumFare: 10,
-                    maxWeightKg: 10, maxPackageSize: 'medium',
-                    requireDeliveryPin: true, blockIncompatibleVehicle: true,
-                },
-                car: {
-                    baseFare: 15, perKm: 4, perMinute: 0.7, minimumFare: 15,
-                    maxWeightKg: 50, maxPackageSize: 'large',
-                    requireDeliveryPin: true, blockIncompatibleVehicle: true,
-                },
-            },
-        });
-
+    it('getParcelFare usa VehicleCategory.pricing independente por veículo', async () => {
         const moto = await parcelService.getParcelFare({
             pickup: 'aaa street',
             destination: 'bbb street',
@@ -70,28 +98,31 @@ describe('parcel.service', () => {
         });
 
         // distance mock 5km, duration 900s = 15min
-        // moto: 10 + 5*3 + 15*0.5 = 10+15+7.5 = 32.5
-        // car:  15 + 5*4 + 15*0.7 = 15+20+10.5 = 45.5
+        // moto: 10 + 5*3 + 15*0.5 = 32.5
+        // car:  15 + 5*4 + 15*0.7 = 45.5
         expect(moto.fare).toBe(32.5);
         expect(car.fare).toBe(45.5);
-        expect(moto.pricingSnapshot.baseFare).toBe(10);
-        expect(car.pricingSnapshot.baseFare).toBe(15);
-        expect(moto.pricingSnapshot.perKm).toBe(3);
-        expect(car.pricingSnapshot.perKm).toBe(4);
+        expect(moto.pricingSnapshot.category.pricing.baseFare).toBe(10);
+        expect(car.pricingSnapshot.category.pricing.baseFare).toBe(15);
+        expect(moto.pricingSnapshot.category.pricing.perKm).toBe(3);
+        expect(car.pricingSnapshot.category.pricing.perKm).toBe(4);
+        expect(moto.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
     });
 
-    it('alterar só moto não muda tarifa do carro', async () => {
-        await parcelService.updateSettings({
-            deliveryPricing: {
-                moto: { baseFare: 10, perKm: 3, perMinute: 0.5, minimumFare: 10 },
-                car: { baseFare: 15, perKm: 4, perMinute: 0.7, minimumFare: 15 },
-            },
-        });
-        await parcelService.updateSettings({
-            deliveryPricing: {
-                moto: { baseFare: 20, perKm: 5, perMinute: 0.5, minimumFare: 20 },
-            },
-        });
+    it('alterar só moto na categoria não muda tarifa do carro', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'moto' },
+            {
+                $set: {
+                    'pricing.baseFare': 20,
+                    'pricing.perKm': 5,
+                    'pricing.minimumFare': 20,
+                    baseFare: 20,
+                    perKmRate: 5,
+                    minFare: 20,
+                },
+            }
+        );
 
         const moto = await parcelService.getParcelFare({
             pickup: 'aaa street', destination: 'bbb street', vehicleType: 'moto',
@@ -100,14 +131,14 @@ describe('parcel.service', () => {
             pickup: 'aaa street', destination: 'bbb street', vehicleType: 'car',
         });
 
-        expect(moto.pricingSnapshot.baseFare).toBe(20);
-        expect(moto.pricingSnapshot.perKm).toBe(5);
-        expect(car.pricingSnapshot.baseFare).toBe(15);
-        expect(car.pricingSnapshot.perKm).toBe(4);
+        expect(moto.pricingSnapshot.category.pricing.baseFare).toBe(20);
+        expect(moto.pricingSnapshot.category.pricing.perKm).toBe(5);
+        expect(car.pricingSnapshot.category.pricing.baseFare).toBe(15);
+        expect(car.pricingSnapshot.category.pricing.perKm).toBe(4);
         expect(car.fare).toBe(45.5);
     });
 
-    it('migra settings legado (global + surcharge) para deliveryPricing', async () => {
+    it('migra settings legado (global + surcharge) para deliveryPricing operacional', async () => {
         await parcelSettingModel.deleteMany({});
         await parcelSettingModel.create({
             baseFare: 8,
@@ -127,18 +158,18 @@ describe('parcel.service', () => {
         expect(settings.deliveryPricing.moto.maxWeightKg).toBe(12);
         expect(settings.deliveryPricing.moto.maxPackageSize).toBe('small');
 
+        // Preço vem da categoria, não do deliveryPricing legado
         const moto = await parcelService.getParcelFare({
             pickup: 'aaa street', destination: 'bbb street', vehicleType: 'moto',
         });
-        expect(moto.pricingSnapshot.baseFare).toBe(8);
-        expect(moto.pricingSnapshot.perKm).toBe(2);
+        expect(moto.fare).toBe(32.5);
+        expect(moto.pricingSnapshot.category.pricing.baseFare).toBe(10);
     });
 
     it('validateVehicleCompatibility bloqueia carro acima do limite', async () => {
         await parcelService.updateSettings({
             deliveryPricing: {
                 car: {
-                    baseFare: 15, perKm: 4, perMinute: 0.7, minimumFare: 15,
                     maxWeightKg: 20, maxPackageSize: 'medium',
                     blockIncompatibleVehicle: true, requireDeliveryPin: true,
                 },
@@ -154,28 +185,13 @@ describe('parcel.service', () => {
     });
 
     it('createParcel persiste fare recalculado do backend (ignora preço do cliente)', async () => {
-        await parcelService.updateSettings({
-            deliveryPricing: {
-                moto: {
-                    baseFare: 10, perKm: 3, perMinute: 0.5, minimumFare: 10,
-                    maxWeightKg: 10, maxPackageSize: 'medium',
-                    requireDeliveryPin: true, blockIncompatibleVehicle: true,
-                },
-                car: {
-                    baseFare: 15, perKm: 4, perMinute: 0.7, minimumFare: 15,
-                    maxWeightKg: 50, maxPackageSize: 'large',
-                    requireDeliveryPin: true, blockIncompatibleVehicle: true,
-                },
-            },
-        });
-
         const { parcel: motoParcel } = await parcelService.createParcel(basePayload({
             vehicleType: 'moto',
-            fare: 9999, // cliente não pode impor preço
+            fare: 9999,
         }));
         expect(motoParcel.fare).toBe(32.5);
-        expect(motoParcel.pricingSnapshot.baseFare).toBe(10);
-        expect(motoParcel.pricingSnapshot.perKm).toBe(3);
+        expect(motoParcel.pricingSnapshot.category.pricing.baseFare).toBe(10);
+        expect(motoParcel.pricingSnapshot.category.pricing.perKm).toBe(3);
 
         const { parcel: carParcel } = await parcelService.createParcel(basePayload({
             vehicleType: 'car',
@@ -184,24 +200,14 @@ describe('parcel.service', () => {
             fare: 1,
         }));
         expect(carParcel.fare).toBe(45.5);
-        expect(carParcel.pricingSnapshot.baseFare).toBe(15);
+        expect(carParcel.pricingSnapshot.category.pricing.baseFare).toBe(15);
     });
 
-    it('getParcelFare usa platformCommissions.parcel (não a % de corrida)', async () => {
-        const globalSettingModel = require('../../models/globalSetting.model');
-        await globalSettingModel.deleteMany({});
-        await globalSettingModel.create({
-            platformCommission: 10,
-            platformCommissions: { ride: 10, presential: 10, parcel: 30 },
-        });
-        await parcelService.updateSettings({
-            deliveryPricing: {
-                moto: {
-                    baseFare: 10, perKm: 3, perMinute: 0.5, minimumFare: 10,
-                    maxWeightKg: 10, maxPackageSize: 'medium',
-                },
-            },
-        });
+    it('getParcelFare usa comissão da categoria (não platformCommissions.parcel)', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'moto' },
+            { $set: { 'pricing.platformCommission': 30 } }
+        );
 
         const fare = await parcelService.getParcelFare({
             pickup: 'aaa street',
@@ -212,6 +218,26 @@ describe('parcel.service', () => {
         expect(fare.fare).toBe(32.5);
         expect(fare.commissionPercent).toBe(30);
         expect(fare.commissionAmount).toBe(9.75);
+    });
+
+    it('getParcelFare aplica parcelAdjustment da categoria', async () => {
+        await VehicleCategory.updateOne(
+            { name: 'moto' },
+            {
+                $set: {
+                    'pricing.parcelAdjustment': { isActive: true, type: 'percentage', value: 10 },
+                },
+            }
+        );
+
+        const fare = await parcelService.getParcelFare({
+            pickup: 'aaa street',
+            destination: 'bbb street',
+            vehicleType: 'moto',
+        });
+        // 32.5 + 10% = 35.75
+        expect(fare.fare).toBe(35.75);
+        expect(fare.fareBreakdown.surcharges.parcelAdjustment).toBe(3.25);
     });
 
     it('getCaptainParcelHistory retorna histórico finished/cancelled do motorista', async () => {

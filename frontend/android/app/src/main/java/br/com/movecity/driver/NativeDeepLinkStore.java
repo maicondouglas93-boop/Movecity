@@ -7,7 +7,13 @@ import android.content.SharedPreferences;
  * Deep link pendente (push tap / pós-aceite) consumido pelo JS Capacitor.
  */
 public final class NativeDeepLinkStore {
-    private static final String PREFS = "MoveCityNative";
+    // Auditoria Android (2026-08-07, M2): antes usava o MESMO nome de arquivo
+    // ("MoveCityNative") que NativeSessionStore.LEGACY_PREFS. A migração one-shot de
+    // NativeSessionStore (para EncryptedSharedPreferences) termina com
+    // legacy.edit().clear().apply() sobre esse arquivo inteiro — um deep link gravado
+    // aqui bem na janela entre o app subir e a primeira leitura de sessão podia ser
+    // apagado antes do JS conseguir consumi-lo. Arquivo próprio elimina a colisão.
+    private static final String PREFS = "MoveCityNativeDeepLink";
     private static final String KEY = "movecity_pending_deeplink";
 
     private NativeDeepLinkStore() {}

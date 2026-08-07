@@ -20,8 +20,10 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Oferta de corrida/encomenda no Android.
@@ -31,11 +33,39 @@ import java.util.Map;
  * Aceitar/Recusar, som e vibração insistentes até uma ação ou expiração.
  */
 public final class RideOfferNotifier {
-    public static final String CHANNEL_ID = "ride_offers_v4";
+    // Auditoria Android (2026-08-07, H3): bump v4 → v5 — canal já existente no
+    // aparelho tinha mBypassDnd=false travado (canais são imutáveis depois de
+    // criados; createNotificationChannel() com o mesmo id não reaplica nada em quem
+    // já instalou). Sem o novo id, quem já tem o app não ganharia o bypass de DND
+    // mesmo depois de conceder a permissão nova (ver NativeDriverPermissionsPlugin).
+    public static final String CHANNEL_ID = "ride_offers_v5";
     private static final int LEGACY_NOTIFICATION_ID = 22001;
     private static final String TAG = "RideOfferNotifier";
 
+    // Auditoria Android (2026-08-07, H2): a mesma oferta chega por dois canais
+    // independentes (Socket.IO com o app em foreground + FCM sempre, sem o backend
+    // checar se o socket já entregou) — sem isto, os dois podiam disparar
+    // showFullScreenOffer() quase ao mesmo tempo para o mesmo offerId. singleTop já
+    // evita uma segunda Activity, mas não evita reprocessar (segunda notificação,
+    // segundo wakeScreen, etc.). TTL curto: só suprime duplicata do mesmo evento, não
+    // uma oferta genuinamente nova que reaproveitasse o mesmo id (nunca acontece — é
+    // um ObjectId do Mongo).
+    private static final long DEDUP_WINDOW_MS = 8_000L;
+    private static final Map<String, Long> recentOffers = new ConcurrentHashMap<>();
+
     private RideOfferNotifier() {}
+
+    /** true se já processamos este offerId há menos de DEDUP_WINDOW_MS. */
+    private static boolean isDuplicateOffer(String offerId) {
+        long now = System.currentTimeMillis();
+        // Limpeza oportunista — mapa nunca cresce sem limite numa sessão longa.
+        Iterator<Map.Entry<String, Long>> it = recentOffers.entrySet().iterator();
+        while (it.hasNext()) {
+            if (now - it.next().getValue() > DEDUP_WINDOW_MS) it.remove();
+        }
+        Long last = recentOffers.put(offerId, now);
+        return last != null && (now - last) <= DEDUP_WINDOW_MS;
+    }
 
     public static int notificationIdFor(String offerId) {
         if (offerId == null || offerId.isEmpty()) return LEGACY_NOTIFICATION_ID;
@@ -104,6 +134,11 @@ public final class RideOfferNotifier {
         );
         if (offerId == null || offerId.isEmpty()) return;
 
+        if (isDuplicateOffer(offerId)) {
+            Log.i(TAG, "oferta duplicada ignorada (socket+FCM quase simultâneos) offerId=" + offerId);
+            return;
+        }
+
         Intent offerScreen = buildOfferIntent(context, data, kind, offerId);
         boolean foreground = isAppInForeground(context);
 
@@ -170,6 +205,14 @@ public final class RideOfferNotifier {
             .setVibrate(new long[]{0, 700, 300, 700, 300, 1000})
             .setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE))
             .setContentIntent(contentPi)
+            // Auditoria Android (2026-08-07, H1): sem isto, a tela verde (RideOfferActivity)
+            // só abria quando o motorista tocava a notificação — com a tela bloqueada,
+            // Full-Screen Intent é o único mecanismo do Android que abre uma Activity por
+            // cima do lock screen automaticamente (com a tela ligada/desbloqueada, o
+            // próprio sistema degrada isto para heads-up, então não interfere no
+            // comportamento já correto desse caso). contentPi já é o PendingIntent de
+            // Activity certo — reaproveitado aqui, não duplica lógica.
+            .setFullScreenIntent(contentPi, true)
             .addAction(0, "Recusar", rejectPi)
             .addAction(0, "Aceitar", acceptPi)
             .setTimeoutAfter(45_000);

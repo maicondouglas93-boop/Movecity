@@ -5,9 +5,21 @@ const NativeDriverPermissions = registerPlugin('NativeDriverPermissions')
 
 const STORAGE_KEY = 'driverOemPermsSeen_v1'
 
+// Auditoria Android (2026-08-07, M1): antes, "Agora não" (ou "Já configurei") gravava
+// um '1' fixo e o card nunca mais reaparecia — um motorista que dispensasse sem
+// configurar nada (ex.: Full-Screen Intent) ficava sem aviso pelo resto da vida do
+// app. Agora grava o timestamp da dispensa; RECHECK_INTERVAL_MS define depois de
+// quanto tempo o card pode voltar a aparecer, e só volta se algo crítico continuar
+// pendente (shouldShowOemPermissionsCard já reconfere o status real).
+const RECHECK_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000 // 3 dias
+
 export function hasSeenOemPermissionsOnboarding() {
     try {
-        return localStorage.getItem(STORAGE_KEY) === '1'
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (!raw) return false
+        const dismissedAt = Number(raw)
+        if (!Number.isFinite(dismissedAt)) return false
+        return (Date.now() - dismissedAt) < RECHECK_INTERVAL_MS
     } catch {
         return false
     }
@@ -15,7 +27,7 @@ export function hasSeenOemPermissionsOnboarding() {
 
 export function markOemPermissionsOnboardingSeen() {
     try {
-        localStorage.setItem(STORAGE_KEY, '1')
+        localStorage.setItem(STORAGE_KEY, String(Date.now()))
     } catch {
         /* ignore */
     }
@@ -27,6 +39,7 @@ export async function getDriverPermissionStatus() {
             native: false,
             canUseFullScreenIntent: true,
             ignoringBatteryOptimizations: true,
+            hasNotificationPolicyAccess: true,
             isXiaomiFamily: false,
         }
     }
@@ -39,6 +52,7 @@ export async function getDriverPermissionStatus() {
             native: true,
             canUseFullScreenIntent: true,
             ignoringBatteryOptimizations: true,
+            hasNotificationPolicyAccess: true,
             isXiaomiFamily: false,
         }
     }
@@ -59,6 +73,17 @@ export async function openFullScreenIntentSettings() {
         await NativeDriverPermissions.openFullScreenIntentSettings()
     } catch (err) {
         console.warn('[DriverPermissions] openFullScreenIntentSettings:', err?.message || err)
+    }
+}
+
+/** Auditoria Android (2026-08-07, H3): acesso a Não Perturbe — sem ele, setBypassDnd()
+ *  do canal de ofertas não tem efeito nenhum (confirmado no aparelho de teste). */
+export async function openNotificationPolicySettings() {
+    if (!isNativePlatform()) return
+    try {
+        await NativeDriverPermissions.openNotificationPolicySettings()
+    } catch (err) {
+        console.warn('[DriverPermissions] openNotificationPolicySettings:', err?.message || err)
     }
 }
 
@@ -111,6 +136,7 @@ export async function shouldShowOemPermissionsCard() {
     const status = await getDriverPermissionStatus()
     if (!status.canUseFullScreenIntent) return true
     if (!status.ignoringBatteryOptimizations) return true
+    if (status.hasNotificationPolicyAccess === false) return true
     if (status.hasBackgroundLocation === false) return true
     if (status.isXiaomiFamily) return true
     return false

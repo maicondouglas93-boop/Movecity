@@ -6,6 +6,7 @@ import {
     openBatteryOptimizationSettings,
     openDriverAppSettings,
     openFullScreenIntentSettings,
+    openNotificationPolicySettings,
     openOemAutostartSettings,
     openOemOtherPermissions,
     requestBackgroundLocationPermission,
@@ -81,6 +82,15 @@ export default function DriverOemPermissionsCard() {
                                 />
                             </li>
                         )}
+                        {status.hasNotificationPolicyAccess === false && (
+                            <li>
+                                <ActionRow
+                                    label="Permitir em Não Perturbe"
+                                    hint="Sem isso, a oferta não toca nem vibra com o celular em silêncio/foco"
+                                    onClick={openNotificationPolicySettings}
+                                />
+                            </li>
+                        )}
                         {status.hasBackgroundLocation === false && (
                             <li>
                                 <ActionRow
@@ -127,11 +137,13 @@ export default function DriverOemPermissionsCard() {
                             onClick={async () => {
                                 const next = await getDriverPermissionStatus()
                                 setStatus(next)
-                                // Autostart/pop-up MIUI não são consultáveis — fecha se FSI+bateria+bg ok.
+                                // Autostart/pop-up MIUI não são consultáveis — fecha se o resto ok.
                                 const bgOk = next.hasBackgroundLocation !== false
+                                const dndOk = next.hasNotificationPolicyAccess !== false
                                 if (
                                     next.canUseFullScreenIntent
                                     && next.ignoringBatteryOptimizations
+                                    && dndOk
                                     && bgOk
                                 ) {
                                     markOemPermissionsOnboardingSeen()

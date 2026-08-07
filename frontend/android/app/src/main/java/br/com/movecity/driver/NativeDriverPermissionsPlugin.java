@@ -61,7 +61,28 @@ public class NativeDriverPermissionsPlugin extends Plugin {
         ret.put("hasBackgroundLocation", hasBackgroundLocation());
         ret.put("hasForegroundLocation", hasForegroundLocation());
 
+        // Auditoria Android (2026-08-07, H3): setBypassDnd(true) no canal de ofertas
+        // (RideOfferNotifier) só tem efeito real se o usuário conceder este acesso —
+        // confirmado empiricamente: canal existente no aparelho de teste tinha
+        // mBypassDnd=false mesmo com o código pedindo true. Sem este acesso, a oferta
+        // não toca nem vibra com o aparelho em Não Perturbe/Foco.
+        NotificationManager nmDnd = getContext().getSystemService(NotificationManager.class);
+        boolean hasDndAccess = nmDnd != null && nmDnd.isNotificationPolicyAccessGranted();
+        ret.put("hasNotificationPolicyAccess", hasDndAccess);
+
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openNotificationPolicySettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
     }
 
     @PluginMethod

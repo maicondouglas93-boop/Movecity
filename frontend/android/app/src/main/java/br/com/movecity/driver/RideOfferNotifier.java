@@ -127,7 +127,7 @@ public final class RideOfferNotifier {
      * Tocar no corpo abre a tela verde; os botões Aceitar/Recusar executam a ação
      * sem depender de abertura automática de Activity em segundo plano.
      */
-    private static void postFullScreenTransportNotification(
+    private static void postRichOfferNotification(
         Context context,
         Map<String, String> data,
         Intent fullScreen,
@@ -160,6 +160,7 @@ public final class RideOfferNotifier {
             .setSmallIcon(R.drawable.ic_stat_movecity)
             .setContentTitle(title)
             .setContentText(summary)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(bigBody))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

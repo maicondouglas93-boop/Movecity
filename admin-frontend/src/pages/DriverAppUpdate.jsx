@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { Save, Smartphone, Link2, ShieldAlert } from 'lucide-react';
@@ -10,10 +10,21 @@ const fetchDriverAppVersion = async () => {
   return data;
 };
 
+function sanitizeSha256(value) {
+  return String(value || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+}
+
 export default function DriverAppUpdate() {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const { register, handleSubmit, reset, watch } = useForm({
+  const [formError, setFormError] = useState('');
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm({
     defaultValues: {
       version: '1.1.0',
       versionCode: 2,
@@ -55,22 +66,36 @@ export default function DriverAppUpdate() {
       return res;
     },
     onSuccess: () => {
+      setFormError('');
       toast.success('Configuração de atualização salva.');
       queryClient.invalidateQueries({ queryKey: ['driverAppVersion'] });
     },
     onError: (err) => {
-      toast.error(err.response?.data?.message || 'Erro ao salvar configuração');
+      const msg = err.response?.data?.message || err.message || 'Erro ao salvar configuração';
+      setFormError(msg);
+      toast.error(msg);
     },
   });
 
   const onSubmit = (form) => {
+    setFormError('');
+    const sha256 = sanitizeSha256(form.sha256);
+    const apkUrl = String(form.apkUrl || '').trim();
+
+    if (apkUrl && sha256.length !== 64) {
+      const msg = 'Com URL do APK preenchida, o SHA-256 precisa ter exatamente 64 caracteres hex.';
+      setFormError(msg);
+      toast.error(msg);
+      return;
+    }
+
     saveMutation.mutate({
-      version: form.version,
+      version: String(form.version || '').trim(),
       versionCode: Number(form.versionCode),
-      minimumVersion: form.minimumVersion,
+      minimumVersion: String(form.minimumVersion || '').trim(),
       minimumVersionCode: Number(form.minimumVersionCode),
-      apkUrl: form.apkUrl,
-      sha256: form.sha256,
+      apkUrl,
+      sha256,
       fileSize: Number(form.fileSize) || 0,
       mandatory: Boolean(form.mandatory),
       isActive: Boolean(form.isActive),
@@ -78,11 +103,18 @@ export default function DriverAppUpdate() {
     });
   };
 
+  const onInvalid = () => {
+    const msg = 'Preencha versão, versionCode, versão mínima e minimumVersionCode.';
+    setFormError(msg);
+    toast.error(msg);
+  };
+
   if (isLoading) {
     return <div className="text-text-muted">Carregando configuração do APK...</div>;
   }
 
   const apkUrl = watch('apkUrl');
+  const saving = saveMutation.isPending || isSubmitting;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -96,70 +128,89 @@ export default function DriverAppUpdate() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="bg-surface border border-border rounded-xl p-6 space-y-5">
+      <form
+        noValidate
+        onSubmit={handleSubmit(onSubmit, onInvalid)}
+        className="bg-surface border border-border rounded-xl p-6 space-y-5"
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
             <span className="text-sm font-medium text-text">Versão publicada (versionName)</span>
             <input
-              {...register('version', { required: true })}
+              {...register('version', { required: 'Obrigatório' })}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
               placeholder="1.5.0"
             />
+            {errors.version && <p className="text-xs text-danger mt-1">{errors.version.message}</p>}
           </label>
           <label className="block">
             <span className="text-sm font-medium text-text">versionCode</span>
             <input
               type="number"
-              {...register('versionCode', { required: true, min: 1 })}
+              {...register('versionCode', {
+                required: 'Obrigatório',
+                valueAsNumber: true,
+                min: { value: 1, message: 'Mínimo 1' },
+              })}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
             />
+            {errors.versionCode && <p className="text-xs text-danger mt-1">{errors.versionCode.message}</p>}
           </label>
           <label className="block">
             <span className="text-sm font-medium text-text">Versão mínima (semver)</span>
             <input
-              {...register('minimumVersion', { required: true })}
+              {...register('minimumVersion', { required: 'Obrigatório' })}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
               placeholder="1.4.0"
             />
+            {errors.minimumVersion && <p className="text-xs text-danger mt-1">{errors.minimumVersion.message}</p>}
           </label>
           <label className="block">
             <span className="text-sm font-medium text-text">minimumVersionCode</span>
             <input
               type="number"
-              {...register('minimumVersionCode', { required: true, min: 1 })}
+              {...register('minimumVersionCode', {
+                required: 'Obrigatório',
+                valueAsNumber: true,
+                min: { value: 1, message: 'Mínimo 1' },
+              })}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
             />
+            {errors.minimumVersionCode && (
+              <p className="text-xs text-danger mt-1">{errors.minimumVersionCode.message}</p>
+            )}
           </label>
         </div>
 
         <label className="block">
           <span className="text-sm font-medium text-text flex items-center gap-2">
-            <Link2 className="w-4 h-4" /> URL do APK (HTTPS / CDN)
+            <Link2 className="w-4 h-4" /> URL do APK (HTTPS / GitHub Release)
           </span>
           <input
             {...register('apkUrl')}
             className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary font-mono text-sm"
-            placeholder="https://cdn.exemplo.com/movecity-driver-1.5.0.apk"
+            placeholder="https://github.com/.../releases/download/v1.1.7/movecity-driver-1.1.7.apk"
           />
           <p className="text-xs text-text-muted mt-1">
-            Não hospede o APK no MongoDB. Apenas a URL. Em produção, use HTTPS.
+            Use a URL da Release no GitHub. Em produção precisa ser HTTPS.
           </p>
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-sm font-medium text-text">SHA-256 do APK (opcional, recomendado)</span>
+            <span className="text-sm font-medium text-text">SHA-256 do APK (64 hex)</span>
             <input
               {...register('sha256')}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary font-mono text-xs"
-              placeholder="64 caracteres hex"
+              placeholder="96305d09fd2f75be67947a24ef0a81d5c6ab017d2f30b89aa4b4c605ee1f539c"
             />
+            <p className="text-xs text-text-muted mt-1">Obrigatório se houver URL. Espaços são ignorados.</p>
           </label>
           <label className="block">
             <span className="text-sm font-medium text-text">Tamanho do arquivo (bytes)</span>
             <input
               type="number"
-              {...register('fileSize')}
+              {...register('fileSize', { valueAsNumber: true })}
               className="mt-1 w-full bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
             />
           </label>
@@ -191,31 +242,45 @@ export default function DriverAppUpdate() {
 
         {apkUrl && (
           <div className="rounded-lg bg-background border border-border p-3 text-sm text-text-muted break-all">
-            Preview URL: <a href={apkUrl} target="_blank" rel="noreferrer" className="text-primary underline">{apkUrl}</a>
+            Preview URL:{' '}
+            <a href={apkUrl} target="_blank" rel="noreferrer" className="text-primary underline">
+              {apkUrl}
+            </a>
+          </div>
+        )}
+
+        {formError && (
+          <div className="rounded-lg border border-danger/40 bg-danger/10 text-danger text-sm px-3 py-2">
+            {formError}
           </div>
         )}
 
         <div className="pt-2">
           <button
             type="submit"
-            disabled={saveMutation.isPending}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white font-medium hover:opacity-90 disabled:opacity-50"
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-wait"
           >
             <Save className="w-4 h-4" />
-            {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
+            {saving ? 'Salvando...' : 'Salvar'}
           </button>
+          <p className="text-xs text-text-muted mt-2">
+            Conta precisa ser <strong>super_admin</strong>. Se o botão não salvar, a mensagem de erro aparece acima.
+          </p>
         </div>
       </form>
 
       <div className="text-xs text-text-muted space-y-1 border border-border rounded-xl p-4 bg-surface">
-        <p className="font-semibold text-text">Rollback</p>
+        <p className="font-semibold text-text">Valores v1.1.7 (copiar)</p>
+        <p>version: 1.1.7 · versionCode: 9 · minimumVersion: 1.1.5 · minimumVersionCode: 7</p>
+        <p className="break-all">
+          apkUrl: https://github.com/maicondouglas93-boop/Movecity/releases/download/v1.1.7/movecity-driver-1.1.7.apk
+        </p>
+        <p className="break-all">sha256: 96305d09fd2f75be67947a24ef0a81d5c6ab017d2f30b89aa4b4c605ee1f539c</p>
+        <p>fileSize: 6911676 · mandatory: desmarcado</p>
+        <p className="font-semibold text-text pt-2">Rollback</p>
         <p>
           Se uma versão apresentar problema, publique novamente a versão anterior (version, versionCode, apkUrl, minimumVersion).
-          Não é necessário apagar o APK antigo do CDN.
-        </p>
-        <p className="font-semibold text-text pt-2">Assinatura</p>
-        <p>
-          Todas as versões devem usar a mesma chave de release (`br.com.movecity.driver`). Assinatura diferente impede atualização sobre a instalação existente.
         </p>
       </div>
     </div>

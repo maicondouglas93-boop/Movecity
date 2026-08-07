@@ -28,14 +28,27 @@ function assertHttpsUrl(url) {
         err.statusCode = 400;
         throw err;
     }
+    // Hosts das GitHub Releases (canal oficial do APK MoveCity) — sempre aceitos.
+    const githubReleaseHosts = [
+        'github.com',
+        'objects.githubusercontent.com',
+        'release-assets.githubusercontent.com',
+    ];
     const allow = (process.env.APK_ALLOWED_HOSTS || '')
         .split(',')
         .map((h) => h.trim().toLowerCase())
         .filter(Boolean);
-    if (allow.length > 0 && !allow.includes(parsed.hostname.toLowerCase())) {
-        const err = new Error(`Host do APK não permitido: ${parsed.hostname}`);
-        err.statusCode = 400;
-        throw err;
+    const hostname = parsed.hostname.toLowerCase();
+    if (allow.length > 0) {
+        const effective = new Set([...allow, ...githubReleaseHosts]);
+        if (!effective.has(hostname)) {
+            const err = new Error(
+                `Host do APK não permitido: ${parsed.hostname}. ` +
+                `Inclua em APK_ALLOWED_HOSTS ou use a URL da Release no GitHub.`
+            );
+            err.statusCode = 400;
+            throw err;
+        }
     }
 }
 
@@ -77,19 +90,22 @@ module.exports.update = async (payload = {}) => {
         assertHttpsUrl(next.apkUrl);
     }
     if (next.sha256 !== undefined) {
-        next.sha256 = String(next.sha256 || '').trim().toLowerCase();
+        // Remove espaços/quebras colados do painel (ex.: SHA256SUMS.txt).
+        next.sha256 = String(next.sha256 || '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
         if (next.sha256 && !/^[a-f0-9]{64}$/.test(next.sha256)) {
-            const err = new Error('sha256 deve ter 64 caracteres hex');
+            const err = new Error('sha256 deve ter exatamente 64 caracteres hexadecimais');
             err.statusCode = 400;
             throw err;
         }
     }
     // APK publicado exige SHA-256 (update in-app bloqueia sem hash).
     const effectiveApkUrl = next.apkUrl !== undefined ? next.apkUrl : doc.apkUrl;
-    const effectiveSha = next.sha256 !== undefined ? next.sha256 : doc.sha256;
+    const effectiveSha = String(
+        next.sha256 !== undefined ? next.sha256 : (doc.sha256 || '')
+    ).replace(/[^a-f0-9]/gi, '').toLowerCase();
     if (effectiveApkUrl) {
-        if (!effectiveSha || !/^[a-f0-9]{64}$/.test(String(effectiveSha))) {
-            const err = new Error('sha256 é obrigatório quando apkUrl está definido');
+        if (!effectiveSha || !/^[a-f0-9]{64}$/.test(effectiveSha)) {
+            const err = new Error('sha256 é obrigatório quando apkUrl está definido (64 caracteres hex)');
             err.statusCode = 400;
             throw err;
         }

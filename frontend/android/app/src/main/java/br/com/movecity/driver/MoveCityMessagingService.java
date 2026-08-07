@@ -11,12 +11,13 @@ import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
 
 /**
- * FCM = transporte. Apresentação no APK = notificação nativa Android.
+ * FCM = transporte (acordar/receber data message em background).
  *
- * Ofertas (NEW_RIDE / NEW_PARCEL) e alertas com título/corpo: sempre
- * RideOfferNotifier / DriverAlertNotifier — inclusive com o app em foreground.
- * Não depende de o motorista tocar numa push web/Capacitor para a nativa existir.
+ * Ofertas (NEW_RIDE / NEW_PARCEL): dispara RideOfferNotifier → RideOfferActivity
+ * (tela nativa verde). A Push visual da bandeja com Aceitar/Recusar está
+ * desativada em RideOfferNotifier — FCM continua necessário para o fluxo.
  *
+ * Alertas com título/corpo: DriverAlertNotifier (nativa).
  * Fallback Capacitor só quando não há payload apresentável nativamente.
  */
 public class MoveCityMessagingService extends FirebaseMessagingService {

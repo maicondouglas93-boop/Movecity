@@ -12,8 +12,9 @@ import java.util.Map;
 
 /**
  * Bridge JS → RideOfferNotifier. Usado quando o socket entrega a oferta com o
- * app aberto (tela desbloqueada): FSI do sistema vira só heads-up; aqui abrimos
- * a Activity nativa na hora.
+ * app aberto: abre a RideOfferActivity (tela nativa verde) na hora.
+ * A Push heads-up da bandeja está desativada — este bridge é o caminho
+ * principal com o app em foreground.
  */
 @CapacitorPlugin(name = "NativeRideOffer")
 public class NativeRideOfferPlugin extends Plugin {

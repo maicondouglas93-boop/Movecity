@@ -22,11 +22,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Notificação high-priority + fullScreenIntent + AlarmClock/Broadcast (bypass BAL)
- * → RideOfferActivity. Ações Aceitar/Recusar na bandeja como fallback.
+ * Dispara a RideOfferActivity (tela nativa verde) via Activity em foreground,
+ * startActivity com retries e AlarmClock/Broadcast (bypass BAL).
  *
- * Com a tela DESBLOQUEADA o Android degradou FSI a heads-up — por isso também
- * abrimos a Activity via Activity em foreground, retries e LaunchReceiver.
+ * DESATIVADO (2026-08): a Push/heads-up com Aceitar/Recusar na bandeja foi
+ * desligada — a oferta usa exclusivamente a tela nativa. O bloco NotificationCompat
+ * permanece comentado abaixo para rollback.
  */
 public final class RideOfferNotifier {
     public static final String CHANNEL_ID = "ride_offers_v3";
@@ -108,48 +109,61 @@ public final class RideOfferNotifier {
         );
         if (offerId == null || offerId.isEmpty()) return;
 
-        int notificationId = notificationIdFor(offerId);
         Intent fullScreen = buildOfferIntent(context, data, kind, offerId);
-        PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
 
-        Intent accept = new Intent(context, RideOfferActionReceiver.class);
-        accept.setAction(RideOfferActionReceiver.ACTION_ACCEPT);
-        copyOfferExtras(fullScreen, accept);
-        PendingIntent acceptPi = broadcastPi(context, offerId.hashCode() + 11, accept);
+        // DESATIVADO:
+        // A oferta de nova corrida agora utiliza exclusivamente
+        // a tela nativa do Android (RideOfferActivity).
+        // Mantido comentado para facilitar rollback.
+        //
+        // Motivo: com a tela desbloqueada o Android degradava fullScreenIntent
+        // a heads-up — Push "Nova corrida · R$ …" com [Recusar]/[Aceitar]
+        // aparecia junto da Activity verde (duplicata).
+        //
+        // int notificationId = notificationIdFor(offerId);
+        // PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
+        //
+        // Intent accept = new Intent(context, RideOfferActionReceiver.class);
+        // accept.setAction(RideOfferActionReceiver.ACTION_ACCEPT);
+        // copyOfferExtras(fullScreen, accept);
+        // PendingIntent acceptPi = broadcastPi(context, offerId.hashCode() + 11, accept);
+        //
+        // Intent reject = new Intent(context, RideOfferActionReceiver.class);
+        // reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
+        // copyOfferExtras(fullScreen, reject);
+        // PendingIntent rejectPi = broadcastPi(context, offerId.hashCode() + 17, reject);
+        //
+        // String defaultTitle = isParcel ? "Nova encomenda disponível" : "Nova corrida disponível";
+        // String title = firstNonEmpty(data.get("title"), defaultTitle);
+        // String message = firstNonEmpty(data.get("message"), "Toque para ver a oferta");
+        //
+        // NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
+        //     .setSmallIcon(R.drawable.ic_stat_movecity)
+        //     .setContentTitle(title)
+        //     .setContentText(message)
+        //     .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+        //     .setPriority(NotificationCompat.PRIORITY_MAX)
+        //     .setCategory(NotificationCompat.CATEGORY_CALL)
+        //     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        //     .setAutoCancel(true)
+        //     .setOngoing(true)
+        //     .setFullScreenIntent(fullScreenPi, true)
+        //     .setContentIntent(fullScreenPi)
+        //     .addAction(0, "Recusar", rejectPi)
+        //     .addAction(0, "Aceitar", acceptPi)
+        //     .setTimeoutAfter(45_000);
+        //
+        // NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        // if (nm != null) {
+        //     nm.notify(notificationId, builder.build());
+        //     Log.i(TAG, "notificação nativa criada id=" + notificationId
+        //         + " kind=" + kind + " offerId=" + offerId);
+        // }
 
-        Intent reject = new Intent(context, RideOfferActionReceiver.class);
-        reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
-        copyOfferExtras(fullScreen, reject);
-        PendingIntent rejectPi = broadcastPi(context, offerId.hashCode() + 17, reject);
+        Log.i(TAG, "Push visual de oferta DESATIVADA — abrindo só RideOfferActivity"
+            + " kind=" + kind + " offerId=" + offerId);
 
-        String defaultTitle = isParcel ? "Nova encomenda disponível" : "Nova corrida disponível";
-        String title = firstNonEmpty(data.get("title"), defaultTitle);
-        String message = firstNonEmpty(data.get("message"), "Toque para ver a oferta");
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_movecity)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
-            .setOngoing(true)
-            .setFullScreenIntent(fullScreenPi, true)
-            .setContentIntent(fullScreenPi)
-            .addAction(0, "Recusar", rejectPi)
-            .addAction(0, "Aceitar", acceptPi)
-            .setTimeoutAfter(45_000);
-
-        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) {
-            nm.notify(notificationId, builder.build());
-            Log.i(TAG, "notificação nativa criada id=" + notificationId
-                + " kind=" + kind + " offerId=" + offerId);
-        }
-
-        // Não esperar o toque: abre a Activity por todos os caminhos possíveis.
+        // Preservado: abre a tela nativa verde sem depender da Push da bandeja.
         launchOfferActivityNow(context, fullScreen, offerId);
     }
 

@@ -22,12 +22,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Dispara a RideOfferActivity (tela nativa verde) via Activity em foreground,
- * startActivity com retries e AlarmClock/Broadcast (bypass BAL).
+ * Dispara a RideOfferActivity (tela nativa verde).
  *
- * DESATIVADO (2026-08): a Push/heads-up com Aceitar/Recusar na bandeja foi
- * desligada — a oferta usa exclusivamente a tela nativa. O bloco NotificationCompat
- * permanece comentado abaixo para rollback.
+ * UI da oferta = só a Activity. Aceitar/Recusar NÃO ficam na bandeja.
+ *
+ * Em background o Android bloqueia startActivity (BAL). Por isso ainda postamos
+ * uma notificação mínima com fullScreenIntent — é o “veículo” do sistema para
+ * abrir a Activity. Sem botões Aceitar/Recusar; a Activity cancela essa
+ * notificação no onCreate.
  */
 public final class RideOfferNotifier {
     public static final String CHANNEL_ID = "ride_offers_v3";
@@ -110,61 +112,61 @@ public final class RideOfferNotifier {
         if (offerId == null || offerId.isEmpty()) return;
 
         Intent fullScreen = buildOfferIntent(context, data, kind, offerId);
+        boolean foreground = isAppInForeground(context);
 
-        // DESATIVADO:
-        // A oferta de nova corrida agora utiliza exclusivamente
-        // a tela nativa do Android (RideOfferActivity).
-        // Mantido comentado para facilitar rollback.
-        //
-        // Motivo: com a tela desbloqueada o Android degradava fullScreenIntent
-        // a heads-up — Push "Nova corrida · R$ …" com [Recusar]/[Aceitar]
-        // aparecia junto da Activity verde (duplicata).
-        //
-        // int notificationId = notificationIdFor(offerId);
-        // PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
-        //
-        // Intent accept = new Intent(context, RideOfferActionReceiver.class);
-        // accept.setAction(RideOfferActionReceiver.ACTION_ACCEPT);
-        // copyOfferExtras(fullScreen, accept);
-        // PendingIntent acceptPi = broadcastPi(context, offerId.hashCode() + 11, accept);
-        //
-        // Intent reject = new Intent(context, RideOfferActionReceiver.class);
-        // reject.setAction(RideOfferActionReceiver.ACTION_REJECT);
-        // copyOfferExtras(fullScreen, reject);
-        // PendingIntent rejectPi = broadcastPi(context, offerId.hashCode() + 17, reject);
-        //
-        // String defaultTitle = isParcel ? "Nova encomenda disponível" : "Nova corrida disponível";
-        // String title = firstNonEmpty(data.get("title"), defaultTitle);
-        // String message = firstNonEmpty(data.get("message"), "Toque para ver a oferta");
-        //
-        // NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-        //     .setSmallIcon(R.drawable.ic_stat_movecity)
-        //     .setContentTitle(title)
-        //     .setContentText(message)
-        //     .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-        //     .setPriority(NotificationCompat.PRIORITY_MAX)
-        //     .setCategory(NotificationCompat.CATEGORY_CALL)
-        //     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        //     .setAutoCancel(true)
-        //     .setOngoing(true)
-        //     .setFullScreenIntent(fullScreenPi, true)
-        //     .setContentIntent(fullScreenPi)
-        //     .addAction(0, "Recusar", rejectPi)
-        //     .addAction(0, "Aceitar", acceptPi)
-        //     .setTimeoutAfter(45_000);
-        //
-        // NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        // if (nm != null) {
-        //     nm.notify(notificationId, builder.build());
-        //     Log.i(TAG, "notificação nativa criada id=" + notificationId
-        //         + " kind=" + kind + " offerId=" + offerId);
-        // }
+        Log.i(TAG, "oferta → RideOfferActivity kind=" + kind
+            + " offerId=" + offerId + " foreground=" + foreground);
 
-        Log.i(TAG, "Push visual de oferta DESATIVADA — abrindo só RideOfferActivity"
-            + " kind=" + kind + " offerId=" + offerId);
-
-        // Preservado: abre a tela nativa verde sem depender da Push da bandeja.
+        // Sempre tentar abrir a tela nativa (holder / startActivity / AlarmClock).
         launchOfferActivityNow(context, fullScreen, offerId);
+
+        // Em foreground o bridge JS/Activity holder já abre a tela — não postar
+        // heads-up (era a Push duplicada com Aceitar/Recusar).
+        // Em background: notificação mínima + fullScreenIntent é obrigatória no
+        // Android moderno para o sistema permitir a Activity (BAL).
+        if (!foreground) {
+            postLaunchVehicleNotification(context, fullScreen, offerId, isParcel);
+        }
+    }
+
+    /**
+     * Notificação só para o sistema lançar a Activity (FSI). Sem botões
+     * Aceitar/Recusar e sem detalhar a oferta — a UI é a tela verde.
+     * RideOfferActivity.onCreate chama cancelNotification.
+     */
+    private static void postLaunchVehicleNotification(
+        Context context,
+        Intent fullScreen,
+        String offerId,
+        boolean isParcel
+    ) {
+        int notificationId = notificationIdFor(offerId);
+        PendingIntent fullScreenPi = activityPi(context, offerId.hashCode(), fullScreen);
+
+        String title = isParcel ? "Nova encomenda" : "Nova corrida";
+        // Texto genérico de propósito — não é a interface de aceite.
+        String body = "Abrindo oferta…";
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_movecity)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .setFullScreenIntent(fullScreenPi, true)
+            .setContentIntent(fullScreenPi)
+            // Sem .addAction Aceitar/Recusar — UI exclusiva da RideOfferActivity.
+            .setTimeoutAfter(15_000);
+
+        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) {
+            nm.notify(notificationId, builder.build());
+            Log.i(TAG, "notificação-veículo FSI id=" + notificationId
+                + " (sem ações; cancelada ao abrir Activity)");
+        }
     }
 
     public static void openOfferActivity(Context context, Intent source) {

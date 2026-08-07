@@ -13,9 +13,9 @@ import java.util.Map;
 /**
  * FCM = transporte (acordar/receber data message em background).
  *
- * Ofertas (NEW_RIDE / NEW_PARCEL): dispara RideOfferNotifier → RideOfferActivity
- * (tela nativa verde). A Push visual da bandeja com Aceitar/Recusar está
- * desativada em RideOfferNotifier — FCM continua necessário para o fluxo.
+ * Ofertas (NEW_RIDE / NEW_PARCEL): RideOfferNotifier → RideOfferActivity.
+ * Em background ainda há notificação mínima com fullScreenIntent (sem botões
+ * Aceitar/Recusar) para o Android permitir abrir a Activity.
  *
  * Alertas com título/corpo: DriverAlertNotifier (nativa).
  * Fallback Capacitor só quando não há payload apresentável nativamente.

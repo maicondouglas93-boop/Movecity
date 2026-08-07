@@ -58,6 +58,14 @@ public class RideOfferActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Cancela cedo a notificação-veículo FSI para não ficar heads-up ao lado da tela.
+        String earlyOfferId = getIntent() != null
+            ? getIntent().getStringExtra(EXTRA_RIDE_ID)
+            : null;
+        RideOfferNotifier.cancelNotification(this, earlyOfferId);
+        RideOfferNotifier.cancelLaunchAlarm(this, earlyOfferId);
+
         setShowWhenLocked(true);
         setTurnScreenOn(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {

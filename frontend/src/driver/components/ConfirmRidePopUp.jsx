@@ -142,9 +142,10 @@ const ConfirmRidePopUp = (props) => {
             })
 
             if (response.status === 200) {
-                const startedRide = response.data || { ...props.ride, status: 'started' }
+                const startedRide = { ...(response.data || props.ride), status: 'started' }
                 props.setRide?.(startedRide)
                 setCaptainRide(startedRide)
+                setRideStatus('started')
                 props.setConfirmRidePopupPanel(false)
                 props.setRidePopupPanel(false)
                 navigate('/captain-riding', { replace: true, state: { ride: startedRide } })

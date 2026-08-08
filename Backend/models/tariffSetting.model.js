@@ -85,13 +85,19 @@ const tariffSettingSchema = new mongoose.Schema({
     },
 
     // --- NOVO MODELO UNIFICADO (Unified Pricing Engine) ---
-    // Estes campos representam a única fonte de verdade para cálculos de tarifas a partir de agora.
-    // Os valores antigos em vehicleCategory, parcelSetting e globalSetting estão obsoletos.
+    // baseFare/perKm/perMinute/minimumFare: mantidos por compatibilidade, mas
+    // PricingEngine.calculateFare() NUNCA lê este model — a fonte real de preço é
+    // VehicleCategory.pricing (por categoria de veículo).
     baseFare: { type: Number, default: 5.00 },
     perKm: { type: Number, default: 2.00 },
     perMinute: { type: Number, default: 0.50 },
     minimumFare: { type: Number, default: 7.00 },
-    platformCommission: { type: Number, default: 20 }, // Comissão centralizada (porcentagem)
+    // Auditoria financeira (2026-08-08, CRÍTICO #1/#5): campo removido. Existia aqui
+    // E em VehicleCategory.pricing.platformCommission E em GlobalSetting — três fontes
+    // divergentes para o mesmo número, e só a de VehicleCategory é lida de verdade por
+    // calculateFare(). Editável hoje só pela aba "Tarifas por categoria" do Admin
+    // (Comissão (%) em CategorySettingsCard), que já grava direto em
+    // VehicleCategory.pricing.platformCommission — essa continua sendo a fonte real.
 
     surcharges: {
         night: {

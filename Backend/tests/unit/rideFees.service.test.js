@@ -132,12 +132,16 @@ describe('Ride Service — cancellation & wait-time fees', () => {
         it('should charge wait fee from the ride snapshot, not live tariff', async () => {
             const user = await createUser();
             const captain = await createCaptain();
-            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+            // 9 min: acima da janela grátis do live (5 min) mas dentro da do snapshot
+            // (10 min) — distingue as duas fontes sem cravar o teste exatamente na
+            // borda dos 10 min (flaky: o tempo de execução real entre criar a fixture
+            // e o Date.now() lido dentro de startRide já basta pra estourar por alguns ms).
+            const nineMinutesAgo = new Date(Date.now() - 9 * 60 * 1000);
             const ride = await createRide({
                 user: user._id,
                 captain: captain._id,
                 status: 'arrived',
-                arrivedAt: tenMinutesAgo,
+                arrivedAt: nineMinutesAgo,
                 otp: '1234',
                 pricingSnapshot: {
                     // 10 min grátis → 0 de taxa apesar do live (5 min / R$1)

@@ -1022,8 +1022,21 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         waitTimeSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
     }
 
+    // Auditoria financeira (2026-08-08, ALTO #9): waitTimeSeconds era calculado mas
+    // nunca convertido em valor monetário — waitTimeFeeCharged nunca era gravado na
+    // corrida, então endRide não tinha o que somar depois. Respeita o snapshot
+    // congelado da corrida (resolveTariffSetting), igual cancelRide já fazia.
+    let waitTimeFeeCharged = 0;
+    if (waitTimeSeconds > 0) {
+        const tariffSetting = await resolveTariffSetting(ride);
+        const freeSeconds = Number(tariffSetting.maxFreeWaitTime) || 0;
+        const chargeableSeconds = Math.max(0, waitTimeSeconds - freeSeconds);
+        waitTimeFeeCharged = (chargeableSeconds / 60) * (Number(tariffSetting.perMinuteWaitFee) || 0);
+    }
+
     const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
         waitTimeSeconds,
+        waitTimeFeeCharged,
         startedAt: new Date(),
         // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
         ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
@@ -1228,6 +1241,17 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 throw err;
             }
         }
+    } else {
+        // Auditoria financeira (2026-08-08, CRÍTICO #4): sem recálculo por distância
+        // (actualDistance===0 e não é presencial pendente), finalPrice ficava só em
+        // ride.fare — a taxa de espera cobrada em startRide e os opcionais escolhidos
+        // na criação (já com price congelado, ver processedOptionals em createRide)
+        // nunca entravam na conta final. Confirmado por rideFees.service.test.js
+        // (testes pré-existentes, estavam falhando antes desta correção).
+        const optionalsTotal = Array.isArray(ride.optionals)
+            ? ride.optionals.reduce((sum, opt) => sum + (Number(opt?.price) || 0), 0)
+            : 0;
+        finalPrice = (Number(ride.fare) || 0) + (Number(ride.waitTimeFeeCharged) || 0) + optionalsTotal;
     }
 
     if (isPresentialPendingDest && !(finalPrice > 0)) {
@@ -1236,7 +1260,8 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw err;
     }
 
-    // Adicionais já embutidos no finalPrice via Unified Pricing Engine.
+    // Adicionais já embutidos no finalPrice via Unified Pricing Engine (recálculo) ou
+    // somados diretamente acima (sem recálculo).
 
     const updated = await transitionRide(rideId, 'finished', { captain: captain._id }, {
         actualTime: actualTimeSeconds,
@@ -1431,24 +1456,23 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
     return updatedRide;
 }
 
+// Auditoria financeira (2026-08-08, CRÍTICO #3): antes gerava paymentID/orderId/
+// signature com crypto.randomBytes — nomes de campo que imitam retorno de gateway
+// real, mas 100% fabricados localmente, sem nenhuma chamada a gateway. Nada lê esses
+// valores de volta (nem o frontend, nem nenhum fluxo de conciliação real) — só
+// existiam pra criar um rastro que parecia de gateway e não era. Este endpoint é o
+// passageiro confirmando "já paguei" (dinheiro/Pix, fora do app); o efeito
+// financeiro real (crédito/comissão) só acontece em confirmPaymentReceived, do lado
+// do motorista. Aqui só confirma que a corrida existe e pertence a este passageiro.
 module.exports.payRide = async ({ rideId, user }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
 
-    const crypto = require('crypto');
-    const paymentId = 'pay_' + crypto.randomBytes(8).toString('hex');
-    const orderId = 'order_' + crypto.randomBytes(8).toString('hex');
-    const signature = crypto.randomBytes(16).toString('hex');
-
-    const ride = await rideModel.findOneAndUpdate({
+    const ride = await rideModel.findOne({
         _id: rideId,
         user: user._id
-    }, {
-        paymentID: paymentId,
-        orderId: orderId,
-        signature: signature
-    }, { new: true }).populate('user').populate('captain');
+    }).populate('user').populate('captain');
 
     if (!ride) {
         throw new Error('Ride not found');

@@ -12,6 +12,13 @@ router.post('/create',
     body('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination address'),
     body('vehicleType').isString().isLength({ min: 1 }).withMessage('Invalid vehicle type'),
     body('scheduledAt').optional({ values: 'null' }).isISO8601().withMessage('scheduledAt must be ISO8601'),
+    // Auditoria financeira (2026-08-08, CRÍTICO #2): sem isto, um cliente podia enviar
+    // paymentMethod:'card' direto na API — método que a UI nunca oferece e que não tem
+    // cobrança real por trás (Asaas não está integrado) — e ainda assim receber
+    // pendingBalance sacável no confirmPaymentReceived. 'carteira' fica de fora de
+    // propósito: é decidido pelo servidor (useWalletBalance cobrindo 100% da corrida),
+    // nunca enviado pelo cliente.
+    body('paymentMethod').optional().isIn([ 'cash', 'pix' ]).withMessage('Invalid payment method'),
     rideController.createRide
 )
 

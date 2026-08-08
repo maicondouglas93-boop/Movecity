@@ -405,7 +405,7 @@ function PayoutDrawer({ payoutId, onClose }) {
     return (
       <>
         <div className="fixed inset-0 bg-black/50 z-[2000]" onClick={onClose} />
-        <div className="fixed inset-y-0 right-0 w-[500px] bg-surface z-[2001] flex items-center justify-center">
+        <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface z-[2001] flex items-center justify-center">
           <p className="text-text-muted">Carregando detalhes...</p>
         </div>
       </>

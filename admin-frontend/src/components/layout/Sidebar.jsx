@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Map, CreditCard,
   Bell, LogOut, Receipt, ClipboardList, Tag,
-  BarChart3, Package, Activity, Smartphone
+  BarChart3, Package, Activity, Smartphone, X
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -27,48 +27,80 @@ const navItems = [
   { icon: Smartphone, label: 'Atualização Motorista', path: '/driver-app', roles: ['super_admin'] },
 ];
 
-export default function Sidebar() {
+// Responsividade (2026-08-08, CSS-only): abaixo de md:, a sidebar vira um drawer
+// off-canvas (fixed + translate-x, controlado por mobileOpen/onClose vindos do
+// Layout) com overlay pra fechar ao tocar fora; a partir de md: volta a ser a
+// coluna estática de sempre (mobileOpen/onClose ficam sem efeito).
+export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="w-64 bg-surface border-r border-border min-h-screen flex flex-col">
-      <div className="p-6">
-        <h2 className="text-xl font-bold text-primary tracking-tight">MoveCity Admin</h2>
-        <p className="text-xs text-text-muted mt-1">{user?.role?.toUpperCase()}</p>
-      </div>
+    <>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
-      <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
-          // OWNER é quem o backend sempre deixa passar (authorizeRoles), não super_admin.
-          if (item.roles && user?.role !== 'OWNER' && !item.roles.includes(user?.role)) return null;
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-50 w-64 bg-surface border-r border-border min-h-screen flex flex-col
+          transform transition-transform duration-200 ease-in-out
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:static md:translate-x-0 md:z-auto
+        `}
+      >
+        <div className="p-6 flex items-start justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-bold text-primary tracking-tight">MoveCity Admin</h2>
+            <p className="text-xs text-text-muted mt-1">{user?.role?.toUpperCase()}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar menu"
+            className="p-1 rounded-lg text-text-muted hover:bg-border/50 hover:text-text md:hidden"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `
-                flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium
-                ${isActive 
-                  ? 'bg-primary/10 text-primary' 
-                  : 'text-text-muted hover:bg-border/50 hover:text-text'}
-              `}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </NavLink>
-          );
-        })}
-      </nav>
+        <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
+          {navItems.map((item) => {
+            // OWNER é quem o backend sempre deixa passar (authorizeRoles), não super_admin.
+            if (item.roles && user?.role !== 'OWNER' && !item.roles.includes(user?.role)) return null;
 
-      <div className="p-4 border-t border-border">
-        <button
-          onClick={logout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-text-muted hover:bg-danger/10 hover:text-danger transition-colors w-full"
-        >
-          <LogOut className="w-5 h-5" />
-          Sair do Sistema
-        </button>
-      </div>
-    </aside>
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={onClose}
+                className={({ isActive }) => `
+                  flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium
+                  ${isActive
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-text-muted hover:bg-border/50 hover:text-text'}
+                `}
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </NavLink>
+            );
+          })}
+        </nav>
+
+        <div className="p-4 border-t border-border">
+          <button
+            onClick={logout}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-text-muted hover:bg-danger/10 hover:text-danger transition-colors w-full"
+          >
+            <LogOut className="w-5 h-5" />
+            Sair do Sistema
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }

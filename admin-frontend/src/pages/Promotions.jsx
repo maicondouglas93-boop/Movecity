@@ -139,7 +139,7 @@ export default function Promotions() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Tag className="w-4 h-4" /> 1. Configuração Básica</h2>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Tipo de Promoção</label>
                     <select {...register('type')} className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none">
@@ -168,7 +168,7 @@ export default function Promotions() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Gift className="w-4 h-4" /> 2. O Benefício</h2>
                 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Mecânica</label>
                     <select {...register('discountType')} className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none">
@@ -198,7 +198,7 @@ export default function Promotions() {
                   <input type="text" {...register('rules.cities')} placeholder="Ex: Lajinha, Mutum, Ibatiba" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <label className="flex items-center gap-3 p-3 border border-border rounded-lg bg-background cursor-pointer hover:border-primary/50 transition-colors">
                     <input type="checkbox" {...register('rules.firstRideOnly')} className="w-4 h-4 text-primary bg-surface border-border rounded focus:ring-primary" />
                     <span className="text-sm font-medium">Apenas Primeira Corrida (Novos)</span>
@@ -223,7 +223,7 @@ export default function Promotions() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><DollarSign className="w-4 h-4" /> 4. Orçamento & Validade</h2>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Data Início</label>
                     <input type="date" {...register('startDate')} required className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
@@ -350,6 +350,7 @@ export default function Promotions() {
           </div>
 
           <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-background/50 border-b border-border text-text-muted">
                 <tr>
@@ -441,6 +442,7 @@ export default function Promotions() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

@@ -97,7 +97,7 @@ function InboxQuickSend({ onSent }) {
       )}
       <input required maxLength={120} className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="Título" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
       <textarea required maxLength={500} rows={3} className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background" placeholder="Descrição" value={form.message} onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))} />
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <select className="border border-border rounded-lg px-3 py-2 text-sm bg-background" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}>
           {['admin','promotion','coupon','system','alert','payment','ride','parcel','schedule'].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -252,7 +252,7 @@ export default function Notifications() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Users className="w-4 h-4" /> 1. Público Alvo</h2>
                 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {['all', 'passengers', 'drivers'].map(aud => (
                     <button type="button" key={aud} onClick={() => setValue('targetRules.audienceType', aud)} className={`p-4 rounded-xl border flex flex-col items-center justify-center transition-all ${formValues.targetRules.audienceType === aud ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-text-muted hover:border-text-muted'}`}>
                       {aud === 'all' && <Globe className="w-6 h-6 mb-2" />}
@@ -263,7 +263,7 @@ export default function Notifications() {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border">
                   {formValues.targetRules.audienceType !== 'drivers' && (
                     <label className="flex items-center gap-3 p-3 border border-border rounded-lg bg-background cursor-pointer hover:border-primary/50 transition-colors">
                       <input type="checkbox" {...register('targetRules.isVIP')} className="w-4 h-4 text-primary bg-surface border-border rounded focus:ring-primary" />
@@ -280,7 +280,7 @@ export default function Notifications() {
                     <input type="checkbox" {...register('targetRules.isBlocked')} className="w-4 h-4 text-primary bg-surface border-border rounded focus:ring-primary" />
                     <span className="text-sm font-medium">Apenas Usuários Bloqueados</span>
                   </label>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <input type="text" {...register('targetRules.city')} placeholder="Filtrar por Cidade (Ex: Lajinha)" className="w-full p-3 bg-background border border-border rounded-lg text-sm text-text focus:border-primary outline-none" />
                   </div>
                 </div>
@@ -290,7 +290,7 @@ export default function Notifications() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><MessageSquare className="w-4 h-4" /> 2. Conteúdo</h2>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Tipo de Notificação</label>
                     <select {...register('type')} className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none">
@@ -459,6 +459,7 @@ export default function Notifications() {
           {(inboxStatsData?.items?.length > 0) && (
             <div className="bg-surface border border-border rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-border font-semibold text-sm">Inbox in-app — entregues / lidas</div>
+              <div className="overflow-x-auto">
               <table className="w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-background/50 border-b border-border text-text-muted">
                   <tr>
@@ -484,10 +485,12 @@ export default function Notifications() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
           <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-background/50 border-b border-border text-text-muted">
                 <tr>
@@ -567,6 +570,7 @@ export default function Notifications() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

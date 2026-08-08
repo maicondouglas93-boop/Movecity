@@ -126,6 +126,7 @@ export default function GlobalTariffsSection() {
           </div>
         ) : (
           <div className="border border-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-background/80 text-text-muted uppercase text-xs">
                 <tr>
@@ -187,6 +188,7 @@ export default function GlobalTariffsSection() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

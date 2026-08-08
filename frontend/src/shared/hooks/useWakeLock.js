@@ -15,7 +15,9 @@ export const useWakeLock = () => {
         setIsSupported('wakeLock' in navigator);
     }, []);
 
-    const requestLock = useCallback(async () => {
+    // Implementação real (chama a Wake Lock API) — nomes próprios pra não colidir
+    // com requestLock/releaseLock públicos (abaixo), que são o toggle de intenção.
+    const acquireWakeLock = useCallback(async () => {
         if (!isSupported) {
             console.warn('Wake Lock API not supported. Fallback required if playing silent video.');
             return;
@@ -38,7 +40,7 @@ export const useWakeLock = () => {
         }
     }, [isSupported]);
 
-    const releaseLock = useCallback(async () => {
+    const releaseWakeLock = useCallback(async () => {
         if (wakeLockRef.current) {
             if (releaseHandlerRef.current) {
                 wakeLockRef.current.removeEventListener('release', releaseHandlerRef.current);
@@ -52,28 +54,38 @@ export const useWakeLock = () => {
 
     useEffect(() => {
         if (intentToLock && document.visibilityState === 'visible') {
-            requestLock();
+            acquireWakeLock();
         } else if (!intentToLock) {
-            releaseLock();
+            releaseWakeLock();
         }
-    }, [intentToLock, requestLock, releaseLock]);
+    }, [intentToLock, acquireWakeLock, releaseWakeLock]);
 
     useEffect(() => {
         const handleVisibility = () => {
             if (document.visibilityState === 'visible' && intentToLock) {
-                requestLock();
+                acquireWakeLock();
             }
         };
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility);
-            releaseLock(); // Clean up on unmount
+            releaseWakeLock(); // Clean up on unmount
         };
-    }, [intentToLock, requestLock, releaseLock]);
+    }, [intentToLock, acquireWakeLock, releaseWakeLock]);
 
-    const toggleLock = (shouldLock) => {
+    const toggleLock = useCallback((shouldLock) => {
         setIntentToLock(shouldLock);
-    };
+    }, []);
 
-    return { isSupported, isLocked, requestLock: () => toggleLock(true), releaseLock: () => toggleLock(false) };
+    // Auditoria de performance (2026-08-08, P2): requestLock/releaseLock (a API
+    // pública deste hook) eram funções inline recriadas a cada chamada do hook —
+    // qualquer efeito consumidor com deps [requestLock] (ex.: CaptainRiding.jsx)
+    // redisparava a cada render do componente hospedeiro, não só na montagem. Hoje
+    // o disparo repetido era inofensivo (guards internos em acquireWakeLock, ex.
+    // `if (wakeLockRef.current) return`), mas useCallback é a correção correta na
+    // fonte, não um paliativo no chamador.
+    const requestLock = useCallback(() => toggleLock(true), [toggleLock]);
+    const releaseLock = useCallback(() => toggleLock(false), [toggleLock]);
+
+    return { isSupported, isLocked, requestLock, releaseLock };
 };

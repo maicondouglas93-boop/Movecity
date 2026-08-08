@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef } from 'react'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
-import { LocationContext } from '@/shared/contexts/LocationContext'
+import { LocationRefContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { syncTrackingLifecycle } from '@/shared/platform/location.service'
 import {
@@ -22,7 +22,11 @@ import {
 export default function CaptainLocationBridge() {
     const { captain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    const { locationRef } = useContext(LocationContext)
+    // Auditoria de performance (2026-08-08, P1): LocationRefContext, não
+    // LocationContext — este componente só lê locationRef.current dentro do
+    // setInterval abaixo (nunca no corpo do render), então não precisa
+    // re-renderizar a cada fix de GPS (o componente nem tem JSX — retorna null).
+    const { locationRef } = useContext(LocationRefContext)
     const { captainRide, captainParcel } = useContext(RideContext)
     const intervalRef = useRef(null)
 

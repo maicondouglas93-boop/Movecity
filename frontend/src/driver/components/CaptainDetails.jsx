@@ -2,7 +2,7 @@ import React, { useContext, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
-import { LocationContext } from '@/shared/contexts/LocationContext'
+import { LocationRefContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import api from '@/shared/services/axios'
@@ -22,7 +22,12 @@ const ACCENT_GOLD = 'text-amber-300'
 const CaptainDetails = ({ children = null }) => {
     const { captain, setCaptain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    const { locationError } = useContext(LocationContext)
+    // Auditoria de performance (2026-08-08, P1): LocationRefContext, não
+    // LocationContext — este componente só lê locationError (muda raríssimo, só
+    // pro banner de "sem GPS"), não userLocation. Sem essa separação, o card
+    // inteiro (ganhos, ações rápidas, sempre visível na Home) re-renderizava a
+    // cada fix de GPS por nada.
+    const { locationError } = useContext(LocationRefContext)
     const { captainRide, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const navigate = useNavigate()

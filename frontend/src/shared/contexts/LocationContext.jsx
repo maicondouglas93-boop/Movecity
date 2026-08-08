@@ -1,9 +1,25 @@
-import React, { createContext, useState, useEffect, useRef } from 'react'
+import React, { createContext, useState, useEffect, useMemo, useRef } from 'react'
 import { hasActiveSession, onSessionChanged } from '@/shared/services/session'
 import { computeBearing, distanceMeters } from '@/shared/services/maps/navigationMath'
 import { watchPosition, clearWatch } from '@/shared/platform/location.service'
 
 export const LocationContext = createContext()
+
+// Auditoria de performance do app do motorista (2026-08-08, P1): LocationContext
+// original empacotava { userLocation, locationRef, locationError } num objeto só,
+// recriado a cada fix de GPS — qualquer consumidor de useContext(LocationContext)
+// re-renderizava junto, mesmo quem só lia `locationRef` (uma ref — nunca muda de
+// verdade) ou `locationError` (muda raríssimo). CaptainLocationBridge (retorna null,
+// só lê locationRef dentro de um setInterval próprio) e CaptainDetails (só lê
+// locationError, pra um banner de "sem GPS") são os dois casos claros: nenhum dos
+// dois precisa re-renderizar a ~1x/seg. LocationRefContext expõe só essas duas
+// partes, memoizado com deps [locationError] — locationRef em si já é estável
+// (useRef nunca muda de identidade), então este valor só ganha referência nova
+// quando locationError muda de verdade, nunca por causa de userLocation.
+// LocationContext original fica intacto (mesmo formato, mesmo comportamento) para
+// quem genuinamente precisa de userLocation reativo (LiveTracking, CaptainHome,
+// RidePopUp, etc.).
+export const LocationRefContext = createContext()
 
 const MIN_BEARING_DISTANCE_M = 8
 
@@ -103,9 +119,14 @@ export const LocationProvider = ({ children }) => {
         }
     }, [hasSession])
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const refValue = useMemo(() => ({ locationRef, locationError }), [locationError])
+
     return (
         <LocationContext.Provider value={{ userLocation, locationRef, locationError }}>
-            {children}
+            <LocationRefContext.Provider value={refValue}>
+                {children}
+            </LocationRefContext.Provider>
         </LocationContext.Provider>
     )
 }

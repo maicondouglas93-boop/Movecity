@@ -1173,6 +1173,18 @@ module.exports.endRide = async ({ rideId, captain }) => {
                 throw err;
             }
         }
+    } else if (isValidGpsCoord(ride.lastLocation?.lat, ride.lastLocation?.lng)) {
+        // Auditoria estimativa×final (2026-08-08): registra ONDE a corrida realmente
+        // terminou (último GPS conhecido), sem tocar em destination/destinationCoordinates
+        // — o destino PESQUISADO (Y) precisa continuar intacto pra auditoria comparar
+        // contra isto (ex.: passageiro pediu X→Y mas o motorista finalizou em Z antes de
+        // chegar). Reaproveita destinationMeta — já modelado para essa distinção
+        // (source: 'user_provided' | 'gps_at_finish') — em vez de criar campo novo.
+        finishExtras.destinationMeta = {
+            coordinates: [ ride.lastLocation.lng, ride.lastLocation.lat ],
+            timestamp: new Date(),
+            source: 'gps_at_finish',
+        };
     }
 
     const actualDistance = finishExtras.actualDistance ?? ride.actualDistance ?? 0;

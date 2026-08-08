@@ -1,11 +1,15 @@
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoMemoryReplSet } = require('mongodb-memory-server');
 
 let mongoServer;
 
 // Start memory server before all tests
+// Replica set de 1 nó (não standalone) — necessário pra mongoose.startSession() +
+// transações funcionarem (ex.: confirmPaymentReceived em ride.service.js). Standalone
+// falha com "Transaction numbers are only allowed on a replica set member or mongos".
+// Mesmo motivo/solução já usada em tests/setup/testDatabase.js (suíte Jest).
 beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
+    mongoServer = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
     const mongoUri = mongoServer.getUri();
     
     // Connect mongoose to the memory server

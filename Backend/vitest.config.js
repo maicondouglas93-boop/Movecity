@@ -30,6 +30,10 @@ export default defineConfig({
       // Integração/sockets flaky ou acoplados a estado global — gate do CI fica nas units Vitest.
       'tests/integration/**',
       'tests/sockets/**',
+      // Simulador E2E MoveCity (2026-08-08): usa jest.mock/jest real (socket.io-client +
+      // supertest + MongoMemoryReplSet), mesmo motivo de tests/sockets acima — não é o
+      // gate do CI, roda via `npm run test:movecity`.
+      'tests/e2e-simulator/**',
       'tests/auth.test.js',
       'tests/performance/**',
     ],

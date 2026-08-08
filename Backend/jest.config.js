@@ -5,7 +5,8 @@ module.exports = {
     '**/tests/unit/**/*.test.js',
     '**/tests/integration/**/*.test.js',
     '**/tests/sockets/**/*.test.js',
-    '**/tests/security/**/*.test.js'
+    '**/tests/security/**/*.test.js',
+    '**/tests/e2e-simulator/**/*.test.js'
   ],
   moduleNameMapper: {
     '^firebase-admin$': '<rootDir>/tests/mocks/firebase-admin.mock.js',

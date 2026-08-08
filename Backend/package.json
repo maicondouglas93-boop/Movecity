@@ -14,7 +14,12 @@
     "test:integration": "jest tests/integration",
     "test:sockets": "jest tests/sockets",
     "test:security": "jest tests/security",
-    "test:load": "artillery run tests/performance/load.yml"
+    "test:load": "artillery run tests/performance/load.yml",
+    "test:movecity": "jest tests/e2e-simulator --runInBand --forceExit --verbose",
+    "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",
+    "test:movecity:delivery": "jest tests/e2e-simulator/parcel.immediate.test.js --forceExit",
+    "test:movecity:scheduled-ride": "jest tests/e2e-simulator/ride.scheduled.test.js --forceExit",
+    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit"
   },
   "keywords": [],
   "author": "",

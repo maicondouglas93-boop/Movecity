@@ -1,14 +1,23 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
 
 const SIZE_LABEL = { small: 'Pequeno', medium: 'Médio', large: 'Grande' }
 
-const ParcelPopUp = ({ parcel, onAccept, onDecline }) => {
+// Auditoria PWA (2026-08-07, P1): mesmo contador do RidePopUp, sincronizado com
+// `parcel.offerExpiresAt` (backend) — ver RidePopUp.jsx para o raciocínio completo.
+const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
   const [busy, setBusy] = useState(false)
+  const { remainingSeconds, expired } = useOfferCountdown(parcel?.offerExpiresAt)
+
+  useEffect(() => {
+    if (expired) onExpire?.(parcel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expired])
 
   if (!parcel) return null
 
   const run = async (fn) => {
-    if (busy) return
+    if (busy || expired) return
     setBusy(true)
     try {
       await fn()
@@ -48,6 +57,17 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline }) => {
         </p>
       </div>
 
+      {remainingSeconds != null && (
+        <p
+          className={
+            'text-center text-xs font-bold tabular-nums mb-2 ' +
+            (remainingSeconds <= 10 ? 'text-danger-600' : 'text-ink-500')
+          }
+        >
+          {String(Math.max(0, remainingSeconds)).padStart(2, '0')} segundos
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -59,11 +79,11 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline }) => {
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || expired}
           onClick={() => run(onAccept)}
           className="min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold text-sm disabled:opacity-50"
         >
-          {busy ? 'Aguarde…' : 'Aceitar'}
+          {expired ? 'Oferta expirada' : (busy ? 'Aceitando...' : 'Aceitar')}
         </button>
       </div>
     </div>

@@ -1,15 +1,22 @@
-import React, { useContext } from 'react'
+import React, { useContext, useEffect, useState } from 'react'
 import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
+import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
 
 // Fase B da experiência de corrida ativa (2026-08-03): o countdown de 20s saiu. Ele só
 // escondia o painel no frontend, sem declinar nada no servidor — a corrida continuava
 // 'requested' no banco, mas sumia da tela do motorista para sempre (estado fantasma).
 // Agora a oferta só sai da tela quando: o motorista aceita, outro motorista aceita
-// ('ride-taken'), o passageiro cancela ('ride-cancelled') ou o motorista toca "Ignorar"
-// — e mesmo ignorada ela continua acessível no card "Corrida disponível" da Home.
+// ('ride-taken'), o passageiro cancela ('ride-cancelled'), o motorista toca "Ignorar"
+// ou o contador chega a zero — e mesmo ignorada/expirada ela continua acessível no
+// card "Corrida disponível" da Home.
+//
+// Auditoria PWA (2026-08-07, P1): o contador voltou, mas desta vez sincronizado com
+// `ride.offerExpiresAt`, calculado pelo BACKEND (mesma âncora usada no socket, no FCM
+// e no pull /rides/pending) — nunca um timer local iniciado na hora em que a tela
+// recebeu a oferta.
 
 const haversineKm = (a, b) => {
     if (!a || !b) return null
@@ -23,6 +30,16 @@ const haversineKm = (a, b) => {
 
 const RidePopUp = (props) => {
     const { userLocation } = useContext(LocationContext)
+    const [accepting, setAccepting] = useState(false)
+    const { remainingSeconds, expired } = useOfferCountdown(props.ride?.offerExpiresAt)
+
+    // Zera sozinho quando o prazo acaba — some da tela e desabilita Aceitar, mas
+    // NÃO chama a API de recusa (o motorista só não respondeu a tempo; a corrida
+    // segue disponível no card "Corrida disponível" até o real prazo do backend).
+    useEffect(() => {
+        if (expired) props.onExpire?.(props.ride)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [expired])
 
     // §2.10 do relatório: a distância até o passageiro (não a distância DA corrida) é a
     // informação que mais pesa na decisão de aceitar — antes não existia em lugar nenhum.
@@ -94,22 +111,43 @@ const RidePopUp = (props) => {
                 </div>
             </div>
 
+            {remainingSeconds != null && (
+                <p
+                    className={
+                        'mt-2 text-center text-xs font-bold tabular-nums ' +
+                        (remainingSeconds <= 10 ? 'text-danger-600' : 'text-ink-500')
+                    }
+                >
+                    {String(Math.max(0, remainingSeconds)).padStart(2, '0')} segundos
+                </p>
+            )}
+
             <div className='mt-3 w-full flex gap-2'>
                 <Button
-                    onClick={() => {
+                    disabled={accepting || expired}
+                    onClick={async () => {
+                        if (accepting || expired) return
+                        setAccepting(true)
                         props.setConfirmRidePopupPanel(true)
-                        props.confirmRide()
+                        try {
+                            await props.confirmRide()
+                        } finally {
+                            setAccepting(false)
+                        }
                     }}
                     fullWidth={false}
-                    className="flex-1 !min-h-[44px] !text-sm"
+                    className="flex-1 !min-h-[44px] !text-sm disabled:opacity-50"
                 >
-                    <i className="ri-checkbox-circle-line mr-1"></i>Aceitar
+                    <i className="ri-checkbox-circle-line mr-1"></i>
+                    {expired ? 'Oferta expirada' : (accepting ? 'Aceitando...' : 'Aceitar')}
                 </Button>
                 <Button
                     variant="secondary"
+                    disabled={accepting}
                     fullWidth={false}
-                    className="flex-1 !min-h-[44px] !text-sm"
+                    className="flex-1 !min-h-[44px] !text-sm disabled:opacity-50"
                     onClick={() => {
+                        if (accepting) return
                         // Espelha parcel: ACK de recusa no backend (nativo já fazia isso).
                         if (typeof props.onDecline === 'function') {
                             props.onDecline(props.ride)

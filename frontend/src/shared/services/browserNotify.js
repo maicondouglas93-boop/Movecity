@@ -14,7 +14,11 @@ import { isNativePlatform } from '@/shared/platform/platform'
 // dois casos (desktop e Android) e reusa o mesmo worker que o FCM já registra
 // (getFcmRegistration, services/fcm.js) — nunca lança de forma síncrona, então é seguro
 // chamar de dentro de qualquer efeito/handler sem try/catch no chamador.
-export function showBrowserNotification(title, body) {
+// Auditoria PWA (2026-08-07, P7): `tag` opcional — mesmo padrão do SW de
+// background (firebase-messaging-sw.js, `ride-<id>`/`parcel-<id>`). Se os dois
+// caminhos dispararem quase juntos pra mesma oferta, o SO funde numa notificação
+// só em vez de empilhar duas.
+export function showBrowserNotification(title, body, { tag } = {}) {
     if (isNativePlatform()) return
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     if (!('serviceWorker' in navigator)) return
@@ -22,7 +26,11 @@ export function showBrowserNotification(title, body) {
     getFcmRegistration()
         .then((registration) => {
             if (!registration) return
-            return registration.showNotification(title, { body, icon: '/movecity-icon.jpg' })
+            return registration.showNotification(title, {
+                body,
+                icon: '/movecity-icon.jpg',
+                ...(tag ? { tag, renotify: true } : {}),
+            })
         })
         .catch((err) => console.error('Falha ao exibir notificação do browser:', err))
 }

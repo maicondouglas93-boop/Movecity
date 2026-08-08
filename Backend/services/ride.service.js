@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 const { haversineKm } = require('./maps/geo.util');
+const { computeOfferExpiresAt } = require('../config/offerPolicy');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -1639,6 +1640,10 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
     }).map((ride) => {
         const obj = ride.toObject();
         obj.user = toOfferPassengerPreview(ride.user);
+        // Auditoria PWA (2026-08-07, P1): mesma âncora do despacho por socket/FCM
+        // (dispatchRideToCaptains) — sem isto, uma oferta recuperada por este pull
+        // (reconexão, troca de aba) reabria o popup sem contador sincronizado.
+        obj.offerExpiresAt = computeOfferExpiresAt(obj);
         return obj;
     });
 }

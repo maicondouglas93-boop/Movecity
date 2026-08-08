@@ -7,6 +7,7 @@ const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
+const { computeOfferExpiresAt } = require('../config/offerPolicy');
 
 const ALLOWED_PAYMENT_METHODS = ['cash', 'pix'];
 
@@ -1055,6 +1056,9 @@ module.exports.toParcelOfferDTO = (parcel) => {
         status: raw.status,
         createdAt: raw.createdAt,
         paymentMethod: raw.paymentMethod,
+        // Auditoria PWA (2026-08-07, P1): só enquanto ainda é uma oferta em aberto —
+        // espelha toCaptainRideResponse (ride.controller.js).
+        ...(raw.status === 'awaiting_provider' ? { offerExpiresAt: computeOfferExpiresAt(raw) } : {}),
         // Sem telefones / nomes completos na oferta pré-aceite.
     };
 };

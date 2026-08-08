@@ -10,6 +10,7 @@ const {
     sanitizeCaptainFinanceList,
     computeDriverAmount,
 } = require('../utils/financePrivacy');
+const { computeOfferExpiresAt } = require('../config/offerPolicy');
 
 /** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
 function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
@@ -18,6 +19,12 @@ function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
     const isPresential = sanitized.source === 'driver_initiated';
     if (!(keepPresentialOtp && isPresential)) {
         delete sanitized.otp;
+    }
+    // Auditoria PWA (2026-08-07, P1): só faz sentido enquanto a corrida ainda é
+    // uma oferta em aberto — depois de aceita/finalizada/cancelada o campo some
+    // sozinho (o popup de oferta não deve reagir a mais nada nesse estado).
+    if (sanitized.status === 'requested') {
+        sanitized.offerExpiresAt = computeOfferExpiresAt(sanitized);
     }
     return sanitized;
 }
@@ -85,6 +92,11 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
             estimatedDistance: rideWithUser.estimatedDistance,
             estimatedTime: rideWithUser.estimatedTime,
             vehicleType: rideWithUser.vehicleType || vehicleType,
+            // Auditoria PWA (2026-08-07, P1): mesma âncora do socket/pull — o
+            // popup do PWA sincroniza o contador com isto em vez de um timer
+            // local. Campo extra e inofensivo pro Android nativo (ele não lê
+            // esta chave hoje).
+            offerExpiresAt: computeOfferExpiresAt(rideWithUser)?.toISOString(),
             passengerName: rideWithUser.user?.fullname?.firstname || '',
             isScheduled: Boolean(rideWithUser.scheduledAt),
             scheduledAt: rideWithUser.scheduledAt,

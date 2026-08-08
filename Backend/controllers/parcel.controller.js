@@ -45,6 +45,9 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
                 size: parcelWithUser.size,
                 isScheduled: Boolean(parcelWithUser.scheduledAt),
                 scheduledAt: parcelWithUser.scheduledAt,
+                // Auditoria PWA (2026-08-07, P1): mesma âncora do socket (offerPayload já
+                // computou via toParcelOfferDTO) — reaproveitado, não recalculado.
+                offerExpiresAt: offerPayload.offerExpiresAt?.toISOString?.() || offerPayload.offerExpiresAt,
             }, TRACE_ID).catch(console.error);
         }
     });

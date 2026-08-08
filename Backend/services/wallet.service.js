@@ -3,7 +3,7 @@ const transactionModel = require('../models/transaction.model');
 const payoutModel = require('../models/payout.model');
 const { deleteByPrefix } = require('../cache/cache');
 const captainModel = require('../models/captain.model');
-const globalSettingModel = require('../models/globalSetting.model');
+const { getCachedGlobalSetting } = require('./globalSettingCache.service');
 const { sendMessageToSocketId } = require('../socket');
 const notificationService = require('./notification.service');
 
@@ -97,14 +97,22 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
 
     // Regra de bloqueio de motorista — parte da mesma unidade atômica da movimentação
     // que a disparou (saldo negativo pode ser resultado direto desta transação).
-    const settings = await globalSettingModel.findOne().session(session || null)
+    // Auditoria de cache (2026-08-08, A5): singleton cacheado (TTL curto, 120s,
+    // justamente por gatear essa regra financeira) em vez de findOne().session() —
+    // não há escrita concorrente em GlobalSetting dentro desta transação, então não
+    // há risco de leitura inconsistente por sair da session; o único efeito é
+    // aceitar até 120s de atraso numa mudança de regra feita pelo admin, aceito de
+    // propósito no plano de cache.
+    const settings = await getCachedGlobalSetting()
         || { blockDriverOnNegativeBalance: true, maximumNegativeBalance: 0 };
     const shouldBlock = settings.blockDriverOnNegativeBalance && wallet.creditBalance < settings.maximumNegativeBalance;
     await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: !shouldBlock }, { session });
 
     const applySideEffects = async () => {
-        deleteByPrefix(`wallet:${captainId}`);
-        deleteByPrefix(`transactions:${captainId}`);
+        // Auditoria de cache (2026-08-08): wallet:/transactions: não existem mais —
+        // GET /captains/wallet e /captains/transactions pararam de cachear (decisão
+        // explícita: financeiro sempre fonte única de verdade). profile:captain/summary
+        // continuam cacheados por outros motivos, então essas duas invalidações ficam.
         deleteByPrefix(`profile:captain:${captainId}`);
         deleteByPrefix(`summary:${captainId}`);
 
@@ -191,7 +199,8 @@ const requestPayout = async (captainId) => {
         throw new Error('Cadastre uma chave Pix antes de solicitar o saque');
     }
 
-    const settings = await globalSettingModel.findOne();
+    // Auditoria de cache (2026-08-08, A5): mesmo singleton cacheado usado em createTransaction.
+    const settings = await getCachedGlobalSetting();
     const minimumPayout = settings?.minimumPayout ?? 50;
 
     const wallet = await getWallet(captainId);

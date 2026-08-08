@@ -73,6 +73,14 @@ beforeAll(async () => {
 afterEach(async () => {
     await clearDatabase();
     jest.clearAllMocks();
+
+    // Auditoria de cache (2026-08-08): mesmo motivo do afterEach equivalente em
+    // tests/setup.js (Vitest) — Backend/cache/cache.js é uma instância única por
+    // processo, não por teste; sem limpar aqui um teste que recria um documento com
+    // o mesmo identificador (ex.: VehicleCategory) recebe de volta o valor cacheado
+    // do teste anterior.
+    const { clearCache } = require('../../cache/cache');
+    clearCache();
 });
 
 afterAll(async () => {

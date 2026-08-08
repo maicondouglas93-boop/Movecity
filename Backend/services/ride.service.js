@@ -9,6 +9,7 @@ const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const { getCachedTariffSetting } = require('./tariffSettingCache.service');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -71,8 +72,9 @@ async function resolveTariffSetting(ride) {
     if (fromSnapshot && typeof fromSnapshot === 'object') {
         return fromSnapshot.toObject?.() || fromSnapshot;
     }
-    const TariffSetting = require('../models/tariffSetting.model');
-    const live = await TariffSetting.findOne();
+    // Auditoria de cache (2026-08-08, A4): singleton cacheado (600s) em vez de
+    // findOne() direto — só é lido aqui pra corridas antigas sem snapshot congelado.
+    const live = await getCachedTariffSetting();
     return live ? (live.toObject?.() || live) : {};
 }
 
@@ -143,8 +145,12 @@ async function getFare(pickup, destination) {
     const distance = distanceTime.distance.value;
     const time = distanceTime.duration.value;
 
-    const VehicleCategory = require('../models/vehicleCategory.model');
-    const categories = await VehicleCategory.find({ isActive: true });
+    // Auditoria de cache (2026-08-08, A3): getFare fazia essa leitura em bulk e
+    // depois buildConfigSnapshot relia CADA categoria de novo (1+N leituras do
+    // mesmo tipo de dado) — helper cacheado (600s) resolve a leitura em bulk;
+    // buildConfigSnapshot resolve a de cada categoria por dentro dele mesmo.
+    const { getCachedActiveVehicleCategories } = require('./vehicleCategoryCache.service');
+    const categories = await getCachedActiveVehicleCategories();
 
     if (categories.length === 0) {
         throw new Error("Nenhuma categoria de veículo ativa configurada.");
@@ -194,8 +200,9 @@ async function getFare(pickup, destination) {
     // Bloco H (2026-08-02, achado §6): showAsEstimate era salvo em Configurações e
     // nunca lido por nada — o app do passageiro sempre mostrava "valor estimado" fixo,
     // então o toggle nunca teve efeito nenhum, ligado ou desligado.
-    const TariffSetting = require('../models/tariffSetting.model');
-    const tariffSetting = await TariffSetting.findOne();
+    // Auditoria de cache (2026-08-08, A4): buscava o documento inteiro só pra ler
+    // 1 boolean, em toda cotação de tarifa — agora vem do singleton cacheado (600s).
+    const tariffSetting = await getCachedTariffSetting();
     const eta = await estimateEtaByVehicleType(pickup, categories.map((c) => c.name));
 
     const result = {

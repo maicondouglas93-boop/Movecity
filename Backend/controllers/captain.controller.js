@@ -249,17 +249,15 @@ module.exports.logoutCaptain = async (req, res, next) => {
     res.status(200).json({ message: 'Logout successfully' });
 }
 
+// Auditoria de cache (2026-08-08): saldo é módulo financeiro — nunca cacheado, sempre
+// lido fresco do banco (fonte única de verdade). Cache de 5min removido de propósito
+// (decisão explícita do usuário na auditoria de cache do backend, ver
+// docs/plans/2026-08-08-auditoria-cache-backend.md).
 module.exports.getWallet = async (req, res, next) => {
     try {
         const { sanitizeCaptainWallet } = require('../utils/financePrivacy');
-        const cacheKey = `wallet:${req.captain._id}`;
-        const cached = getCache(cacheKey);
-        if (cached) return res.status(200).json({ wallet: sanitizeCaptainWallet(cached) });
-
         const walletService = require('../services/wallet.service');
         const wallet = await walletService.getWallet(req.captain._id);
-
-        setCache(cacheKey, wallet, 300); // 5 minutes
 
         res.status(200).json({ wallet: sanitizeCaptainWallet(wallet) });
     } catch (err) {
@@ -271,20 +269,19 @@ module.exports.requestPayout = async (req, res, next) => {
     try {
         const walletService = require('../services/wallet.service');
         const payout = await walletService.requestPayout(req.captain._id);
-        deleteByPrefix(`wallet:${req.captain._id}`);
         res.status(201).json({ payout });
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
 }
 
+// Auditoria de cache (2026-08-08): transações é módulo financeiro — mesmo motivo de
+// getWallet acima, cache removido de propósito.
 module.exports.getTransactions = async (req, res, next) => {
     try {
         const { sanitizeCaptainTransactions } = require('../utils/financePrivacy');
         const transactionModel = require('../models/transaction.model');
         const limit = parseInt(req.query.limit) || 50;
-        const cacheKey = `transactions:${req.captain._id}:${limit}`;
-        const cached = getCache(cacheKey);
 
         const withHints = async (transactions) => {
             const rideIds = [];
@@ -316,14 +313,8 @@ module.exports.getTransactions = async (req, res, next) => {
             return sanitizeCaptainTransactions(transactions, hints);
         };
 
-        if (cached) {
-            return res.status(200).json({ transactions: await withHints(cached) });
-        }
-
         const walletService = require('../services/wallet.service');
         const transactions = await walletService.getTransactions(req.captain._id, limit);
-
-        setCache(cacheKey, transactions, 300); // 5 minutes
 
         res.status(200).json({ transactions: await withHints(transactions) });
     } catch (err) {

@@ -95,8 +95,19 @@ module.exports.getReverseGeocode = async (lat, lng) => {
 // O padrão correto e mais barato do Google é: autocomplete devolve `placeId` +
 // `sessionToken`; getPlaceDetails() só é chamado quando o usuário efetivamente
 // seleciona uma sugestão, fechando a sessão (cobrança combinada, mais barata).
+// Auditoria de cache (2026-08-08, A1): mesma chave/TTL que o branch Google já
+// usado em osm.provider.js pra essa mesma função (google-autocomplete:<input>_<lat>_<lng>,
+// 600s sucesso / 60s fallback) — só cacheia a lista de `suggestions`, nunca o
+// `sessionToken`. sessionToken é gerado sempre fresco (com ou sem HIT) porque ele
+// é o identificador de correlação de UMA sessão de busca pra fins de cobrança
+// combinada do Google (autocomplete + place details); devolver um token
+// reaproveitado de outra busca em cache não muda o resultado pro usuário, mas
+// evita qualquer ambiguidade de sessão do lado do Google.
 module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken) => {
     const token = sessionToken || crypto.randomUUID();
+    const cacheKey = `google-autocomplete:${input}_${lat || 'none'}_${lng || 'none'}`;
+    const cached = getCache(cacheKey);
+    if (cached) return { suggestions: cached, sessionToken: token };
 
     const body = {
         input,
@@ -141,10 +152,14 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken
                 placeId: p.placeId
             }));
 
+        setCache(cacheKey, suggestions, 600); // 10min — mesmo TTL do branch Google em osm.provider.js
         return { suggestions, sessionToken: token };
     } catch (err) {
         trackMaps('places_autocomplete', Date.now(), err);
         console.warn('[google.provider] Places Autocomplete falhou. Retornando lista vazia.', err.response?.data?.error?.message || err.message);
+        // TTL curto de propósito (60s, mesmo valor do fallback em osm.provider.js):
+        // não trava uma lista vazia por 10min só porque a API oscilou por um instante.
+        setCache(cacheKey, [], 60);
         return { suggestions: [], sessionToken: token };
     }
 };

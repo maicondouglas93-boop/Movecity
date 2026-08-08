@@ -8,6 +8,7 @@ const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const { getCache, setCache, deleteCache } = require('../cache/cache');
 
 const ALLOWED_PAYMENT_METHODS = ['cash', 'pix'];
 
@@ -252,7 +253,16 @@ function resolveVehiclePricing(settings, vehicleType) {
     return legacy[key];
 }
 
+// Auditoria de cache (2026-08-08, A6): singleton lido em validateVehicleCompatibility,
+// getParcelFare e confirmDelivery — um fluxo cotação→criação de encomenda lia o
+// mesmo documento 4x. TTL 600s (10min), mesmo padrão de VehicleCategory/TariffSetting
+// pra dado administrativo estático. Invalidado em updateSettings (mesmo arquivo).
+const PARCEL_SETTING_CACHE_KEY = 'parcel-setting:singleton';
+
 async function getSettings() {
+    const cached = getCache(PARCEL_SETTING_CACHE_KEY);
+    if (cached) return cached;
+
     let settings = await parcelSettingModel.findOne().sort({ updatedAt: -1 });
     if (!settings) {
         settings = await parcelSettingModel.create({
@@ -266,6 +276,7 @@ async function getSettings() {
     } else {
         settings = await ensureDeliveryPricing(settings);
     }
+    setCache(PARCEL_SETTING_CACHE_KEY, settings, 600);
     return settings;
 }
 
@@ -1150,6 +1161,10 @@ module.exports.updateSettings = async (patch = {}) => {
     settings.pricingVersion = 2;
 
     await settings.save();
+    // Auditoria de cache (2026-08-08, A6): invalida o singleton — getSettings()
+    // já retornaria o mesmo objeto mutado em memória (useClones:false), mas
+    // invalidar explicitamente é o padrão usado em todo o resto desta auditoria.
+    deleteCache(PARCEL_SETTING_CACHE_KEY);
     return settings;
 };
 

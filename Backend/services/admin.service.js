@@ -1471,6 +1471,9 @@ const {
     ensurePlatformCommissions,
     normalizePlatformCommissionsPatch,
 } = require('../utils/platformCommission');
+const { invalidateVehicleCategoryCache } = require('./vehicleCategoryCache.service');
+const { invalidateGlobalSettingCache } = require('./globalSettingCache.service');
+const { invalidateTariffSettingCache } = require('./tariffSettingCache.service');
 
 // Campos de globalSetting expostos junto com tariffSetting na aba "Globais" do painel.
 // Antes o simulador de tarifas usava um platformCommission=15 fixo no front porque o
@@ -1591,6 +1594,13 @@ module.exports.updateGlobalSettings = async (data) => {
         globalSetting = await ensurePlatformCommissions(globalSetting);
     }
 
+    // Auditoria de cache (2026-08-08, A4/A5): TariffSetting é sempre escrito acima
+    // (tariff.save()/create); GlobalSetting só quando havia campo global no patch —
+    // invalidar os dois incondicionalmente é mais simples e seguro que replicar essa
+    // condicional aqui (custo de invalidar à toa é zero).
+    invalidateTariffSettingCache();
+    invalidateGlobalSettingCache();
+
     const merged = tariff.toObject();
     mergeGlobalFieldsIntoTariff(merged, globalSetting);
     merged.__tariffVersion = tariff.__v;
@@ -1689,6 +1699,10 @@ module.exports.updateVehicleCategory = async (id, data) => {
         throw err;
     }
 
+    // Auditoria de cache (2026-08-08, A3): invalida o cache compartilhado de
+    // VehicleCategory — sem isso, a mudança só valeria depois de até 10min.
+    invalidateVehicleCategoryCache();
+
     return { category, oldValue: oldCategory };
 };
 
@@ -1738,6 +1752,10 @@ module.exports.createVehicleCategory = async (data) => {
         } : { ride: true, parcel: true, scheduledRide: true, scheduledParcel: true },
         pricing,
     });
+
+    // Auditoria de cache (2026-08-08, A3): nova categoria — invalida a lista de
+    // ativas (o cache por nome desta categoria específica ainda não existia).
+    invalidateVehicleCategoryCache();
 
     return category;
 };

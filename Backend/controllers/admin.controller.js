@@ -1000,7 +1000,12 @@ module.exports.duplicateCategory = async (req, res, next) => {
         copyData.isActive = false; // Starts inactive
         
         const duplicate = await vehicleCategoryModel.create(copyData);
-        
+
+        // Auditoria de cache (2026-08-08, A3): categoria nova começa isActive:false,
+        // mas invalida mesmo assim — mantém o cache sempre consistente com o banco.
+        const { invalidateVehicleCategoryCache } = require('../services/vehicleCategoryCache.service');
+        invalidateVehicleCategoryCache();
+
         const tariffHistoryModel = require('../models/tariffHistory.model');
         await tariffHistoryModel.create({
             admin: req.admin.name || req.admin.email,

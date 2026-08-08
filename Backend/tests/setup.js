@@ -26,6 +26,15 @@ afterEach(async () => {
         const collection = collections[key];
         await collection.deleteMany({});
     }
+
+    // Auditoria de cache (2026-08-08): Backend/cache/cache.js é uma instância única
+    // de NodeCache por processo — sem limpar aqui, um teste que recria um documento
+    // (ex.: VehicleCategory com o mesmo `name`) com configuração diferente do teste
+    // anterior recebia de volta o valor cacheado do teste anterior, não o que acabou
+    // de semear. Descoberto pelos testes de pricingEngine.service.js quebrando depois
+    // da auditoria de cache adicionar cache-aside em VehicleCategory/GlobalSetting.
+    const { clearCache } = require('../cache/cache');
+    clearCache();
 });
 
 // Disconnect and stop memory server after all tests

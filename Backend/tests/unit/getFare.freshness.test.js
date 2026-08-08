@@ -1,9 +1,19 @@
 // Regressão: cotação não pode ser cacheada com preço stale.
+//
+// Auditoria de cache (2026-08-08, A3): buildConfigSnapshot passou a ler VehicleCategory
+// por um cache de 600s. Numa mudança feita pelo painel admin de verdade
+// (adminService.updateVehicleCategory), isso continua "imediato" — a própria função
+// invalida o cache antes de devolver. Este teste escreve direto no model (bypassa o
+// admin.service.js de propósito, pra isolar só a lógica de tarifa) — sem chamar a
+// mesma invalidação que uma edição real dispararia, o teste não reproduziria uma
+// mudança de admin de verdade. `invalidateVehicleCategoryCache()` depois de cada
+// update deixa o teste fiel ao que uma edição real do painel causa.
 const rideService = require('../../services/ride.service');
 const mapService = require('../../services/maps.service');
 const TariffSetting = require('../../models/tariffSetting.model');
 const GlobalSetting = require('../../models/globalSetting.model');
 const VehicleCategory = require('../../models/vehicleCategory.model');
+const { invalidateVehicleCategoryCache } = require('../../services/vehicleCategoryCache.service');
 
 describe('getFare — frescor da tarifa', () => {
     afterEach(() => {
@@ -59,6 +69,7 @@ describe('getFare — frescor da tarifa', () => {
             { name: 'car' },
             { $set: { perKmRate: 4, 'pricing.perKm': 4 } }
         );
+        invalidateVehicleCategoryCache();
 
         const depois = await rideService.getFare('Origem A', 'Destino B');
         expect(depois.fare.car).toBe(30);
@@ -70,6 +81,7 @@ describe('getFare — frescor da tarifa', () => {
             { name: 'car' },
             { $set: { baseFare: 25, 'pricing.baseFare': 25 } }
         );
+        invalidateVehicleCategoryCache();
         const depois = await rideService.getFare('Origem A', 'Destino B');
 
         expect(depois.fare.car).toBe(antes.fare.car + 15);
@@ -83,6 +95,7 @@ describe('getFare — frescor da tarifa', () => {
             { name: 'car' },
             { $set: { 'pricing.platformCommission': 30 } }
         );
+        invalidateVehicleCategoryCache();
 
         const depois = await rideService.getFare('Origem A', 'Destino B');
         expect(depois.breakdown.car.commissionPercent).toBe(30);

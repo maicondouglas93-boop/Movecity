@@ -1,6 +1,6 @@
 const mapService = require('./maps.service');
 const rideModel = require('../models/ride.model');
-const vehicleCategoryModel = require('../models/vehicleCategory.model');
+const { getCachedVehicleCategoryByName } = require('./vehicleCategoryCache.service');
 
 const CAPTAIN_SEARCH_RADIUS_KM = 15;
 
@@ -107,7 +107,12 @@ async function isVehicleCategoryAllowed(vehicleType, serviceKind) {
     const fieldByKind = { ride: 'ride', parcel: 'parcel', scheduledRide: 'scheduledRide', scheduledParcel: 'scheduledParcel' };
     const field = fieldByKind[serviceKind];
     if (!field) return false;
-    const category = await vehicleCategoryModel.findOne({ name: vehicleType }).select('isActive allowedServices').lean();
+    // Auditoria de cache (2026-08-08, A3): chamado por captain no despacho (uma vez
+    // por tipo de veículo único entre os motoristas candidatos) — mesmo helper
+    // cacheado (600s) usado em pricingEngine. Doc completo em vez de projeção
+    // {isActive, allowedServices}: dataset pequeno, e um cache único por nome serve
+    // todo mundo que precisa dessa categoria, não só esta função.
+    const category = await getCachedVehicleCategoryByName(vehicleType);
     if (!category) return true; // legado: bancos antigos sem catálogo completo continuam operando até o seed/admin normalizar.
     if (category.isActive !== true) return false;
     return category.allowedServices?.[field] !== false;

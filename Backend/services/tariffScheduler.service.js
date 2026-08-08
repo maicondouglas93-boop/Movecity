@@ -2,6 +2,8 @@ const cron = require('node-cron');
 const tariffScheduleModel = require('../models/tariffSchedule.model');
 const tariffSettingModel = require('../models/tariffSetting.model');
 const vehicleCategoryModel = require('../models/vehicleCategory.model');
+const { invalidateVehicleCategoryCache } = require('./vehicleCategoryCache.service');
+const { invalidateTariffSettingCache } = require('./tariffSettingCache.service');
 
 // Aplica agendamentos de tarifa cujo scheduledFor já passou. Antes, o botão "Agendar"
 // no painel só criava o documento tariffSchedule no banco — nenhum código nunca o lia
@@ -21,6 +23,11 @@ async function applyDueSchedules() {
                 }
                 Object.assign(category, schedule.changes);
                 await category.save();
+                // Auditoria de cache (2026-08-08, A3): sem isto, uma alteração agendada
+                // aplicada por este cron só valeria depois de até 10min de cache velho —
+                // exatamente o tipo de bug que já aconteceu uma vez com o cache de fare
+                // removido (ver docs/plans/2026-08-08-auditoria-cache-backend.md).
+                invalidateVehicleCategoryCache();
             } else {
                 let tariffSetting = await tariffSettingModel.findOne();
                 if (!tariffSetting) {
@@ -28,6 +35,8 @@ async function applyDueSchedules() {
                 }
                 Object.assign(tariffSetting, schedule.changes);
                 await tariffSetting.save();
+                // Auditoria de cache (2026-08-08, A4): mesmo motivo do branch acima.
+                invalidateTariffSettingCache();
             }
 
             schedule.status = 'applied';

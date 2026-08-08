@@ -3,6 +3,9 @@ const VehicleCategory = require('../../models/vehicleCategory.model');
 const GlobalSetting = require('../../models/globalSetting.model');
 const Coupon = require('../../models/coupon.model');
 const GlobalTariff = require('../../models/globalTariff.model');
+// Auditoria de cache (2026-08-08, A3): ver comentário equivalente em
+// tests/unit/getFare.freshness.test.js.
+const { invalidateVehicleCategoryCache } = require('../../services/vehicleCategoryCache.service');
 
 async function seedCategory(overrides = {}) {
     const pricing = {
@@ -189,6 +192,7 @@ describe('Pricing Engine', () => {
             { name: 'car' },
             { $set: { 'pricing.parcelAdjustment.isActive': false } }
         );
+        invalidateVehicleCategoryCache();
 
         const off = await PricingEngine.calculateFare({
             distance: 5000,

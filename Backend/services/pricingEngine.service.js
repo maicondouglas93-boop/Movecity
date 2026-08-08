@@ -1,8 +1,8 @@
 const TariffSetting = require('../models/tariffSetting.model');
-const VehicleCategory = require('../models/vehicleCategory.model');
-const GlobalSetting = require('../models/globalSetting.model');
 const Coupon = require('../models/coupon.model');
 const globalTariffService = require('./globalTariff.service');
+const { getCachedVehicleCategoryByName } = require('./vehicleCategoryCache.service');
+const { getCachedGlobalSetting } = require('./globalSettingCache.service');
 
 class PricingEngine {
     
@@ -11,13 +11,23 @@ class PricingEngine {
      * Fonte: VehicleCategory + tarifas globais ativas (congeladas no momento).
      */
     static async buildConfigSnapshot({ vehicleType, serviceKind = 'ride' }) {
-        const category = await VehicleCategory.findOne({ name: vehicleType, isActive: true });
+        // Auditoria de cache (2026-08-08, A3): antes fazia findOne({name, isActive:true})
+        // direto no Mongo — agora usa o cache compartilhado (600s), e o filtro de
+        // isActive vira uma checagem aqui, mantendo o mesmo resultado observável
+        // (não encontrada OU inativa => mesmo erro de antes).
+        const category = await getCachedVehicleCategoryByName(vehicleType);
 
-        if (!category) {
+        if (!category || !category.isActive) {
             throw new Error(`Categoria de veículo '${vehicleType}' não encontrada ou inativa.`);
         }
 
-        const globalSetting = await GlobalSetting.findOne();
+        // Auditoria de cache (2026-08-08, A5): GlobalSetting é lido aqui (cardFee%/fixo)
+        // e de novo dentro do fluxo de wallet — singleton, só muda quando o admin salva
+        // "Tarifas Globais". TTL mais curto (120s) que VehicleCategory/TariffSetting de
+        // propósito: este documento também gateia regra de bloqueio de saldo negativo em
+        // wallet.service.js, então uma janela menor limita quanto tempo uma mudança de
+        // regra pelo admin demora pra valer.
+        const globalSetting = await getCachedGlobalSetting();
         const gsPlain = globalSetting ? (typeof globalSetting.toObject === 'function' ? globalSetting.toObject() : { ...globalSetting }) : {
             cardFeePercent: 0,
             cardFeeFixed: 0,
@@ -57,8 +67,9 @@ class PricingEngine {
         // Se a chamada não passar configSnapshot, precisamos de um veículo. Como o cancelamento
         // geralmente vem do ride, quem chamar (ride.service) DEVE passar o snapshot para ter precisão.
         if (!category && configSnapshot && configSnapshot.vehicleType) {
-            const catDoc = await VehicleCategory.findOne({ name: configSnapshot.vehicleType, isActive: true });
-            category = catDoc ? catDoc.toObject() : null;
+            // Auditoria de cache (2026-08-08, A3): mesmo helper cacheado de buildConfigSnapshot.
+            const catDoc = await getCachedVehicleCategoryByName(configSnapshot.vehicleType);
+            category = (catDoc && catDoc.isActive) ? catDoc.toObject() : null;
         }
 
         if (category && category.pricing && category.pricing.surcharges?.cancellation?.active) {

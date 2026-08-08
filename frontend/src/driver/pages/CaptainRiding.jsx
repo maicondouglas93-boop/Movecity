@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import FinishRide from '@/driver/components/FinishRide'
+import Button from '@/shared/components/ui/Button'
 import BottomSheet from '@/shared/components/ui/BottomSheet'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import LiveTracking from '@/shared/components/LiveTracking'
@@ -16,10 +17,14 @@ import { joinWithRetry } from '@/shared/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/shared/services/maps/navigationMath'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
+import api from '@/shared/services/axios'
+import { getAccessToken } from '@/shared/services/session'
 
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
+    const [ cancelPanel, setCancelPanel ] = useState(false)
+    const [ cancelling, setCancelling ] = useState(false)
     const [ elapsedSec, setElapsedSec ] = useState(0)
     const [ liveDistance, setLiveDistance ] = useState(0)
     const location = useLocation()
@@ -43,22 +48,19 @@ const CaptainRiding = () => {
     const [ unreadCount, setUnreadCount ] = useState(0)
 
     // Fase D da experiência de corrida ativa (2026-08-03): navegação estilo Waze.
-    // Começa ligada — o motorista chegou aqui justamente para dirigir até o destino —
-    // mas dá para desligar e ver a rota inteira de cima quando ele quiser se situar.
-    // Sem destino (presencial pending) navegação turn-by-turn não tem rota — começa desligada.
+    // Começa ligada — o motorista chegou aqui justamente para dirigir. Sem destino
+    // definido (presencial pending) não há manobra pra mostrar no banner, mas a
+    // câmera ainda segue o motorista normalmente (LiveTracking não exige rota pra
+    // rodar o loop de câmera) — por isso começa ativada mesmo nesse caso (pedido
+    // explícito: o botão de navegação deve começar ativado numa corrida presencial
+    // iniciada pelo GO).
     // Painel inferior sempre aberto com as infos essenciais (sem expandir/recolher).
-    const [ navigationMode, setNavigationMode ] = useState(
-        () => !(location.state?.ride?.destinationPending || captainRide?.destinationPending)
-    )
+    const [ navigationMode, setNavigationMode ] = useState(true)
     const [ navInfo, setNavInfo ] = useState(null)
 
     const handleNavigationUpdate = useCallback((info) => setNavInfo(info), [])
 
     const isPresential = rideData?.source === 'driver_initiated'
-
-    useEffect(() => {
-        if (rideData?.destinationPending) setNavigationMode(false)
-    }, [rideData?._id, rideData?.destinationPending])
 
     useEffect(() => {
         if (!rideData || rideData.status !== 'started') return undefined
@@ -274,6 +276,33 @@ const CaptainRiding = () => {
     const vehicleLabel = vehicleLabels[vType] || 'MoveGo'
     const vehicleImg = vehicleImages[vType] || vehicleImages.car
 
+    // Cancelamento de corrida presencial (2026-08-08): o backend já suportava isto
+    // (rideService.cancelRideByCaptain, ramo source==='driver_initiated', permite
+    // cancelar mesmo em 'started' — "engano do motorista", sem redespacho, sem
+    // cobrança) e já era usado em CaptainPresentialRide.jsx (antes de iniciar) — só
+    // faltava o botão aqui, na tela "em andamento". Só aparece para presencial: uma
+    // corrida normal com passageiro já embarcado não deve poder ser cancelada por
+    // aqui (só finalizada), regra que já era garantida no backend antes disso.
+    async function handleCancelPresential() {
+        if (!rideData?._id || cancelling) return
+        setCancelling(true)
+        try {
+            await api.post(
+                `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
+                { rideId: rideData._id, reason: 'Cancelamento de corrida presencial' },
+                { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+            )
+            setCaptainRide(null)
+            addToast('Corrida presencial cancelada.', 'info')
+            navigate('/captain-home', { replace: true })
+        } catch (err) {
+            addToast(err.response?.data?.message || 'Não foi possível cancelar a corrida.', 'error')
+        } finally {
+            setCancelling(false)
+            setCancelPanel(false)
+        }
+    }
+
     if (rehydrating) {
         return (
             <div className='h-screen flex items-center justify-center bg-surface-alt'>
@@ -471,8 +500,48 @@ const CaptainRiding = () => {
                             </p>
                         </div>
                     </div>
+
+                    {isPresential && (
+                        <button
+                            type="button"
+                            onClick={() => setCancelPanel(true)}
+                            className='mt-2.5 w-full text-center text-xs font-semibold text-danger-600 py-1'
+                        >
+                            Cancelar corrida
+                        </button>
+                    )}
                 </div>
             </div>
+
+            <BottomSheet open={cancelPanel} onClose={() => setCancelPanel(false)}>
+                <div className="pb-1">
+                    <h3 className="text-base font-semibold mb-2 text-ink-900">Cancelar corrida presencial?</h3>
+                    <p className="text-sm text-ink-600 mb-4">
+                        A corrida será encerrada sem cobrança. Use isso só em caso de engano —
+                        se o serviço já foi feito, use "Finalizar corrida" em vez de cancelar.
+                    </p>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            fullWidth={false}
+                            className="flex-1 !min-h-[44px] !text-sm"
+                            onClick={() => setCancelPanel(false)}
+                            disabled={cancelling}
+                        >
+                            Voltar
+                        </Button>
+                        <Button
+                            variant="danger"
+                            fullWidth={false}
+                            className="flex-1 !min-h-[44px] !text-sm"
+                            onClick={handleCancelPresential}
+                            loading={cancelling}
+                        >
+                            Sim, cancelar
+                        </Button>
+                    </div>
+                </div>
+            </BottomSheet>
 
             <BottomSheet open={finishRidePanel} onClose={() => setFinishRidePanel(false)}>
                 <FinishRide

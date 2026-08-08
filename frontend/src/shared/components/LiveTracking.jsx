@@ -41,11 +41,11 @@ const REROUTE_DISTANCE_M = 70;
 // Intervalo mínimo entre recálculos de rota — o endpoint tem custo por chamada e um
 // GPS instável não pode disparar uma rota nova por segundo.
 const REROUTE_MIN_INTERVAL_MS = 20000;
-// Zoom da Home (passageiro/motorista) ao obter o GPS: visão de bairro/cidade (~2–4 km),
+// Zoom da Home (passageiro/motorista) ao obter o GPS: visão de bairro (~1–2 km),
 // não rua. Antes o fitBounds com 1 ponto ia ao zoom máximo e “grudava” no pino.
-const IDLE_MAP_ZOOM = 14;
+const IDLE_MAP_ZOOM = 16;
 // Teto ao enquadrar rota/pickup/destino — evita zoom de rua em trajetos curtos.
-const FIT_BOUNDS_MAX_ZOOM = 15;
+const FIT_BOUNDS_MAX_ZOOM = 16;
 
 const focusMapOnCoords = (provider, coords, { padding = [50, 50], animate = true } = {}) => {
     if (!provider || !coords?.length) return false;
@@ -128,7 +128,13 @@ const LiveTracking = (props) => {
 
     // Use ref for current position to avoid destroying the map
     const currentPositionRef = useRef(null);
-    const [hasPosition, setHasPosition] = useState(false);
+    // Piscar do mapa ao voltar pra Home (2026-08-08): sair da tela e voltar remonta
+    // este componente do zero (rotas sem layout persistente — ver LocationContext,
+    // que já tem o GPS rodando contínuo a nível de app). Antes hasPosition sempre
+    // começava false, então toda remontagem mostrava "Obtendo localização..." por
+    // um instante mesmo já tendo posição válida no contexto. Init lazy resolve isso
+    // sem mexer no fluxo do primeiro carregamento real (sem posição ainda).
+    const [hasPosition, setHasPosition] = useState(() => Boolean(userLocation));
 
     const [ captainPosition, setCaptainPosition ] = useState(null);
     const [ pickupCoords, setPickupCoords ] = useState(null);
@@ -1070,7 +1076,16 @@ const LiveTracking = (props) => {
 
     return (
         <div className='relative w-full h-full'>
-            <div ref={mapRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
+            {/* Piscar do mapa ao voltar pra Home (2026-08-08): mapReady já existia (sinaliza
+                que o provider terminou de inicializar) mas não controlava nada visual — o
+                container aparecia opaco desde o primeiro frame, expondo o corte seco entre
+                div em branco e o mapa/tiles recém-criados a cada remontagem. Fade em vez de
+                corte não elimina a reconstrução do mapa, só suaviza a transição. */}
+            <div
+                ref={mapRef}
+                style={{ width: '100%', height: '100%', zIndex: 0 }}
+                className={`transition-opacity duration-300 ease-out ${mapReady ? 'opacity-100' : 'opacity-0'}`}
+            />
 
             {/* Chip de status/progresso da corrida no topo do mapa. Em navegação ele dá
                 lugar ao banner de próxima manobra, que a tela do motorista renderiza. */}

@@ -118,6 +118,7 @@ router.post('/update-status',
 router.post('/end-ride',
     authMiddleware.authCaptain,
     body('rideId').isMongoId().withMessage('Invalid ride id'),
+    body('destination').optional().isString().isLength({ min: 3, max: 300 }).withMessage('Invalid destination'),
     rideController.endRide
 )
 

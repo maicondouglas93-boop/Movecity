@@ -585,6 +585,107 @@ function resolveCaptainOrigin(captainDoc, clientLat, clientLng) {
     return null;
 }
 
+// Função central de cálculo de tarifa (auditoria "definir destino ao finalizar",
+// 2026-08-10): resolve a rota real (distância/duração) entre origem e destino e
+// calcula o preço via PricingEngine — num único lugar. Antes disso, a resolução de
+// rota (mapService.getDistanceTime) e o cálculo de preço (PricingEngine.calculateFare)
+// eram repetidos em estimatePresentialFare, createPresentialRide e endRide, cada um
+// com sua própria lógica de "o que fazer se a rota falhar" — o ponto exato onde o
+// bug do "definir destino ao finalizar" caindo pra tarifa mínima (R$12,50) se
+// escondia. Agora os três chamam esta função; a única diferença entre eles é QUANDO
+// o destino é conhecido.
+//
+// Nunca retorna preço sem uma rota real calculada — se a rota falhar, lança
+// ROUTE_CALCULATION_FAILED (o chamador decide se isso vira erro pro usuário ou não;
+// nunca deve virar tarifa mínima silenciosa).
+async function calculateRideFare({
+    originLat,
+    originLng,
+    destination = null,
+    destinationLat = null,
+    destinationLng = null,
+    vehicleType,
+    paymentMethod = 'cash',
+    configSnapshot = null,
+    serviceKind = 'presential',
+    waitTimeSeconds = 0,
+    optionals = {},
+}) {
+    if (!isValidGpsCoord(originLat, originLng)) {
+        const err = new Error('INVALID_ORIGIN');
+        err.code = 'INVALID_ORIGIN';
+        throw err;
+    }
+    if (!vehicleType) {
+        throw new Error('vehicleType is required');
+    }
+
+    const hasDestCoords = isValidGpsCoord(destinationLat, destinationLng);
+    const hasDestText = destination && String(destination).trim().length >= 3;
+    if (!hasDestCoords && !hasDestText) {
+        const err = new Error('DESTINATION_REQUIRED');
+        err.code = 'DESTINATION_REQUIRED';
+        throw err;
+    }
+
+    const originStr = `${originLat},${originLng}`;
+    const destinationStr = hasDestCoords ? `${destinationLat},${destinationLng}` : String(destination).trim();
+
+    let route;
+    try {
+        route = await mapService.getDistanceTime(originStr, destinationStr);
+    } catch (e) {
+        const err = new Error('ROUTE_CALCULATION_FAILED');
+        err.code = 'ROUTE_CALCULATION_FAILED';
+        err.cause = e;
+        throw err;
+    }
+
+    const distanceMeters = route?.distance?.value;
+    const durationSeconds = route?.duration?.value;
+    // Rota calculada mas com distância 0/ausente não é uma corrida válida — nunca
+    // silenciosamente vira tarifa mínima daqui pra frente (era exatamente esse o bug).
+    if (!(distanceMeters > 0)) {
+        const err = new Error('ROUTE_CALCULATION_FAILED');
+        err.code = 'ROUTE_CALCULATION_FAILED';
+        throw err;
+    }
+
+    let destCoords = hasDestCoords ? { lat: destinationLat, lng: destinationLng } : null;
+    if (!destCoords) {
+        try {
+            const resolved = await mapService.getAddressCoordinate(destinationStr);
+            if (resolved && isValidGpsCoord(resolved.ltd, resolved.lng)) {
+                destCoords = { lat: resolved.ltd, lng: resolved.lng };
+            }
+        } catch {
+            // Coordenadas do destino são só metadado de auditoria aqui — a rota (e o
+            // preço) já foram calculados acima a partir do texto/coords originais.
+        }
+    }
+
+    const pricing = await PricingEngine.calculateFare({
+        distance: distanceMeters,
+        time: durationSeconds,
+        vehicleType,
+        paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod,
+        configSnapshot,
+        serviceKind,
+        waitTimeSeconds,
+        optionals,
+    });
+
+    return {
+        ...pricing,
+        distance: distanceMeters,
+        duration: durationSeconds,
+        destinationCoords: destCoords,
+    };
+}
+
+// Exportada para reuso (admin recálculo) e testes unitários.
+module.exports.calculateRideFare = calculateRideFare;
+
 // Corrida presencial iniciada pelo motorista — reutiliza PricingEngine/OTP/busyLock/
 // índice de corrida ativa. Nunca despacha (source=driver_initiated + status=accepted).
 module.exports.createPresentialRide = async ({
@@ -747,39 +848,30 @@ module.exports.createPresentialRide = async ({
         let destinationValue = undefined;
 
         if (!destinationPending) {
-            const distanceTime = await mapService.getDistanceTime(
-                `${origin.lat},${origin.lng}`,
-                destination
-            );
-            estimatedDistance = distanceTime.distance.value;
-            estimatedTime = distanceTime.duration.value;
-
-            const pricing = await PricingEngine.calculateFare({
-                distance: estimatedDistance,
-                time: estimatedTime,
+            const result = await calculateRideFare({
+                originLat: origin.lat,
+                originLng: origin.lng,
+                destination,
                 vehicleType,
-                paymentMethod: paymentMethod === 'carteira' ? 'pix' : paymentMethod,
+                paymentMethod,
                 configSnapshot: pricingSnapshot,
                 serviceKind: 'presential',
             });
-            fare = pricing.finalFare;
-            finalPrice = pricing.finalFare;
-            fareBreakdown = pricing.fareBreakdown;
-            commissionAmount = pricing.commissionAmount;
-            commissionPercent = pricing.commissionPercent ?? 0;
+            estimatedDistance = result.distance;
+            estimatedTime = result.duration;
+            fare = result.finalFare;
+            finalPrice = result.finalFare;
+            fareBreakdown = result.fareBreakdown;
+            commissionAmount = result.commissionAmount;
+            commissionPercent = result.commissionPercent ?? 0;
 
-            try {
-                const dest = await mapService.getAddressCoordinate(destination);
-                if (dest && isValidGpsCoord(dest.ltd, dest.lng)) {
-                    destinationCoords = { lat: dest.ltd, lng: dest.lng };
-                    destinationMeta = {
-                        coordinates: [ dest.lng, dest.ltd ],
-                        timestamp: originTimestamp,
-                        source: 'user_provided',
-                    };
-                }
-            } catch {
-                // Destino textual ainda é válido; coords opcionais.
+            if (result.destinationCoords) {
+                destinationCoords = result.destinationCoords;
+                destinationMeta = {
+                    coordinates: [ result.destinationCoords.lng, result.destinationCoords.lat ],
+                    timestamp: originTimestamp,
+                    source: 'user_provided',
+                };
             }
             destinationValue = String(destination).trim();
         } else {
@@ -896,17 +988,14 @@ module.exports.estimatePresentialFare = async ({ captain, destination, clientLat
     const vehicleType = freshCaptain.vehicle?.vehicleType;
     if (!vehicleType) throw new Error('Captain vehicle category is required');
 
-    const distanceTime = await mapService.getDistanceTime(
-        `${origin.lat},${origin.lng}`,
-        destination
-    );
     const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
         vehicleType,
         serviceKind: 'presential',
     });
-    const pricing = await PricingEngine.calculateFare({
-        distance: distanceTime.distance.value,
-        time: distanceTime.duration.value,
+    const result = await calculateRideFare({
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destination,
         vehicleType,
         paymentMethod: 'cash',
         configSnapshot: pricingSnapshot,
@@ -915,10 +1004,10 @@ module.exports.estimatePresentialFare = async ({ captain, destination, clientLat
 
     return {
         pickupCoordinates: { lat: origin.lat, lng: origin.lng },
-        estimatedDistance: distanceTime.distance.value,
-        estimatedTime: distanceTime.duration.value,
-        fare: pricing.finalFare,
-        fareBreakdown: pricing.fareBreakdown,
+        estimatedDistance: result.distance,
+        estimatedTime: result.duration,
+        fare: result.finalFare,
+        fareBreakdown: result.fareBreakdown,
         vehicleType,
     };
 };
@@ -1088,7 +1177,7 @@ module.exports.updateRideStatus = async ({ rideId, captain, status }) => {
     return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
 }
 
-module.exports.endRide = async ({ rideId, captain }) => {
+module.exports.endRide = async ({ rideId, captain, destination = null }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
@@ -1110,9 +1199,58 @@ module.exports.endRide = async ({ rideId, captain }) => {
 
     const finishExtras = {};
     const isPresentialPendingDest = !!(ride.destinationPending || (ride.source === 'driver_initiated' && !ride.destination));
+    // Motorista digitou o destino real ao finalizar ("Definir destino ao finalizar").
+    // Este texto passa a ser o destino OFICIAL da corrida — a origem continua sendo a
+    // origem real registrada na criação (pickupCoordinates), nunca a localização atual
+    // do motorista. Correção do bug em que a corrida caía pra tarifa mínima (R$12,50)
+    // porque o preço final era resolvido só a partir do rastro de GPS acumulado
+    // durante a corrida (frágil: app em segundo plano, poucos pontos, jump filtrado),
+    // em vez de recalcular a rota real origem→destino com o mesmo motor de tarifação
+    // usado em "Informar destino agora".
+    const typedDestination = (isPresentialPendingDest && destination && String(destination).trim().length >= 3)
+        ? String(destination).trim()
+        : null;
 
-    // Corrida presencial sem destino: destino = última GPS válida do motorista.
-    if (isPresentialPendingDest) {
+    if (typedDestination) {
+        const originLat = ride.pickupCoordinates?.lat ?? ride.origin?.coordinates?.[1];
+        const originLng = ride.pickupCoordinates?.lng ?? ride.origin?.coordinates?.[0];
+        if (!isValidGpsCoord(originLat, originLng)) {
+            const err = new Error('INVALID_FINISH_LOCATION');
+            err.code = 'INVALID_FINISH_LOCATION';
+            throw err;
+        }
+
+        // calculateRideFare já lança ROUTE_CALCULATION_FAILED se a rota não puder ser
+        // calculada ou vier com distância 0 — nunca mascarado com tarifa mínima.
+        const routeResult = await calculateRideFare({
+            originLat,
+            originLng,
+            destination: typedDestination,
+            vehicleType: ride.vehicleType,
+            paymentMethod: ride.paymentMethod === 'carteira' ? 'pix' : (ride.paymentMethod || 'cash'),
+            configSnapshot: ride.pricingSnapshot || null,
+            serviceKind: 'presential',
+        });
+
+        finishExtras.destination = typedDestination;
+        finishExtras.destinationPending = false;
+        if (routeResult.destinationCoords) {
+            finishExtras.destinationCoordinates = routeResult.destinationCoords;
+        }
+        finishExtras.destinationMeta = {
+            ...(routeResult.destinationCoords
+                ? { coordinates: [ routeResult.destinationCoords.lng, routeResult.destinationCoords.lat ] }
+                : {}),
+            timestamp: new Date(),
+            source: 'user_provided_at_finish',
+        };
+        // Distância REAL da rota origem→destino informado — não a acumulada (e
+        // possivelmente incompleta) via rastreamento de GPS durante a corrida.
+        finishExtras.actualDistance = routeResult.distance;
+        ride.actualDistance = routeResult.distance;
+    } else if (isPresentialPendingDest) {
+        // Sem destino digitado ao finalizar: destino = última GPS válida do motorista
+        // (comportamento legado, mantido para compatibilidade com apps antigos).
         const captainModel = require('../models/captain.model');
         const freshCaptain = await captainModel.findById(captain._id).select('location lastSeenAt');
         const gpsLat = ride.lastLocation?.lat ?? freshCaptain?.location?.ltd;

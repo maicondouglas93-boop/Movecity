@@ -41,7 +41,7 @@ const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpen
         </div>
       </td>
       <td className="px-4 py-4">
-        <p className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</p>
+        <p className="font-medium text-text">R$ {(ride.finalPrice ?? ride.fare)?.toFixed(2)}</p>
         <p className="text-xs text-text-muted">Comis: R$ {ride.commissionAmount ? ride.commissionAmount.toFixed(2) : '-'}</p>
       </td>
       <td className="px-4 py-4">

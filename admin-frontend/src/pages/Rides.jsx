@@ -258,7 +258,7 @@ export default function Rides() {
 
     const csvUri = buildCsv(
       ['ID', 'Passageiro', 'Motorista', 'Status', 'Valor', 'Data'],
-      items.map(r => [r._id, r.user?.fullname?.firstname, r.captain?.fullname?.firstname || '-', r.status, r.fare, new Date(r.createdAt).toISOString()])
+      items.map(r => [r._id, r.user?.fullname?.firstname, r.captain?.fullname?.firstname || '-', r.status, r.finalPrice ?? r.fare, new Date(r.createdAt).toISOString()])
     );
     downloadCsv(csvUri, `corridas_${new Date().getTime()}.csv`);
   };

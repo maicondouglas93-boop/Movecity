@@ -1532,14 +1532,17 @@ module.exports.getCaptainFinancialHistory = async (captainId) => {
     // Simulated financial history
     // We fetch recent rides and recent payouts to interleave them
     const rides = await rideModel.find({ captain: captainId, status: 'finished' })
-        .sort({ createdAt: -1 }).limit(10).select('createdAt fare commissionAmount');
-        
+        .sort({ createdAt: -1 }).limit(10).select('createdAt fare finalPrice commissionAmount');
+
     const payouts = await payoutModel.find({ captainId, status: 'paid' })
         .sort({ createdAt: -1 }).limit(10).select('paidAt amount');
-        
+
     const history = [];
     rides.forEach(r => {
-        history.push({ type: 'ride', date: r.createdAt, amount: r.fare, commission: r.commissionAmount, label: 'Corrida' });
+        // Corrida finalizada: valor real cobrado é finalPrice (recalculado no fim da
+        // corrida), nunca a estimativa congelada em `fare` na criação — mesmo bug do
+        // histórico do passageiro, aqui no ledger financeiro do motorista no admin.
+        history.push({ type: 'ride', date: r.createdAt, amount: r.finalPrice ?? r.fare, commission: r.commissionAmount, label: 'Corrida' });
     });
     payouts.forEach(p => {
         history.push({ type: 'payout', date: p.paidAt, amount: -p.amount, label: 'Saque/Repasse' });

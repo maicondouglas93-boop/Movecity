@@ -155,8 +155,8 @@ export default function RideDrawer({ ride, onClose, onAction }) {
           <div className="space-y-2 bg-background p-4 rounded-xl border border-border">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-3">Financeiro</h3>
             <div className="flex justify-between text-sm">
-              <span className="text-text-muted">Valor da Corrida</span>
-              <span className="font-medium text-text">R$ {ride.fare?.toFixed(2)}</span>
+              <span className="text-text-muted">{ride.status === 'finished' ? 'Valor Final' : 'Valor da Corrida (estimativa)'}</span>
+              <span className="font-medium text-text">R$ {(ride.finalPrice ?? ride.fare)?.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-text-muted">Comissão Plataforma</span>

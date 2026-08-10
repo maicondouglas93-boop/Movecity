@@ -171,7 +171,7 @@ const Activity = () => {
                                         </div>
                                     </div>
                                     <div className="text-right ml-4 flex flex-col items-end gap-1">
-                                        <h4 className="font-semibold text-ink-900">R$ {ride.fare}</h4>
+                                        <h4 className="font-semibold text-ink-900">R$ {ride.finalPrice ?? ride.fare}</h4>
                                         <StatusBadge tone={statusInfo.tone}>{statusInfo.text}</StatusBadge>
                                     </div>
                                 </button>
@@ -212,7 +212,7 @@ const Activity = () => {
                         <div className='flex-1 overflow-y-auto p-4 pb-6'>
                             <div className="flex items-center justify-between mb-6">
                                 <div>
-                                    <h1 className="text-4xl font-bold text-ink-900">R$ {selectedRide.fare}</h1>
+                                    <h1 className="text-4xl font-bold text-ink-900">R$ {selectedRide.finalPrice ?? selectedRide.fare}</h1>
                                     <p className="text-ink-400 text-sm mt-1">{formatDate(selectedRide.createdAt)}</p>
                                 </div>
                                 <img src={vehicleImages[selectedRide.vehicleType || 'car']} className="h-16 object-contain" alt="" width="1024" height="1024" loading="lazy" />

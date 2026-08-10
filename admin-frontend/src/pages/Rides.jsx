@@ -348,7 +348,7 @@ export default function Rides() {
               value={filters.status} onChange={e => { setFilters(f => ({ ...f, status: e.target.value })); setPage(1); }}>
               <option value="">Status (Todos)</option>
               <option value="requested">Procurando</option>
-              <option value="accepted">Em andamento</option>
+              <option value="ongoing">Em andamento</option>
               <option value="finished">Finalizada</option>
               <option value="cancelled">Cancelada</option>
             </select>

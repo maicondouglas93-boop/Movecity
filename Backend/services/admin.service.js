@@ -902,6 +902,8 @@ module.exports.getCaptainTimeline = async (captainId) => {
     return logs.logs;
 };
 
+const ONGOING_RIDE_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'started', 'waiting_passenger'];
+
 module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}) => {
     const skip = (page - 1) * limit;
     const query = {};
@@ -917,7 +919,15 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
         ];
     }
 
-    if (filters.status) query.status = filters.status;
+    if (filters.status === 'ongoing') {
+        // "Em andamento" cobre toda corrida em curso, não só o status
+        // literal "accepted" — senão ela some da lista filtrada assim que
+        // o motorista avança pra going_to_pickup/arrived/started, mesmo
+        // ainda contando como "em andamento" no card de estatística.
+        query.status = { $in: ONGOING_RIDE_STATUSES };
+    } else if (filters.status) {
+        query.status = filters.status;
+    }
     if (filters.vehicleType) query.vehicleType = filters.vehicleType;
     if (filters.paymentMethod) query.paymentMethod = filters.paymentMethod;
     
@@ -948,7 +958,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
     // Totalizers for the summary block
     const baseDateQuery = query.createdAt ? { createdAt: query.createdAt } : {};
     const requested = await rideModel.countDocuments({ ...baseDateQuery, status: 'requested' });
-    const ongoing = await rideModel.countDocuments({ ...baseDateQuery, status: { $in: ['accepted', 'going_to_pickup', 'arrived', 'started', 'waiting_passenger'] } });
+    const ongoing = await rideModel.countDocuments({ ...baseDateQuery, status: { $in: ONGOING_RIDE_STATUSES } });
     const finished = await rideModel.countDocuments({ ...baseDateQuery, status: 'finished' });
     const cancelled = await rideModel.countDocuments({ ...baseDateQuery, status: 'cancelled' });
 

@@ -15,6 +15,9 @@ import { submitCaptainReview } from '@/shared/services/reviewApi'
 import { useToast } from '@/shared/contexts/ToastContext'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { openWhatsApp } from '@/shared/utils/whatsapp'
+import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
+
+const PARCEL_PICKUP_STATUSES = ['provider_accepted', 'going_to_pickup', 'arrived_pickup']
 
 const NEXT_STATUS = {
   provider_accepted: 'going_to_pickup',
@@ -52,6 +55,7 @@ const CaptainParcelRiding = () => {
   const [loading, setLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [step, setStep] = useState('active') // active | payment | rating
+  const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [ratingValue, setRatingValue] = useState(0)
   const [submittingRating, setSubmittingRating] = useState(false)
 
@@ -185,6 +189,14 @@ const CaptainParcelRiding = () => {
 
   const canChat = CHAT_STATUSES.includes(parcel.status)
 
+  // Etapa atual pra "Abrir no Google Maps": retirada enquanto o motorista
+  // ainda não coletou o objeto, destino a partir de 'collected'.
+  const onPickupLeg = PARCEL_PICKUP_STATUSES.includes(parcel.status)
+  const mapsTarget = onPickupLeg
+    ? { lat: parcel.pickupCoordinates?.lat, lng: parcel.pickupCoordinates?.lng, address: parcel.pickup }
+    : { lat: parcel.destinationCoordinates?.lat, lng: parcel.destinationCoordinates?.lng, address: parcel.destination }
+  const mapsUrl = buildGoogleMapsUrl(mapsTarget)
+
   return (
     <div className="h-screen flex flex-col bg-surface">
       <div className="flex-1 relative">
@@ -195,19 +207,46 @@ const CaptainParcelRiding = () => {
           status={parcel.status}
           navigationMode={step === 'active'}
         />
-        {canChat && step === 'active' && (
-          <button
-            type="button"
-            onClick={() => setIsChatOpen(true)}
-            className="absolute top-4 right-4 z-10 bg-white shadow-md rounded-full w-12 h-12 flex items-center justify-center"
-            aria-label="Abrir chat"
-          >
-            <i className="ri-chat-3-line text-xl text-ink-800" />
-          </button>
+        {step === 'active' && (
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+            {mapsUrl && (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-brand-500 text-white shadow-md rounded-full w-12 h-12 flex items-center justify-center"
+                aria-label={onPickupLeg ? 'Navegar até a retirada' : 'Navegar até o destino'}
+              >
+                <i className="ri-navigation-fill text-xl" />
+              </a>
+            )}
+            {canChat && (
+              <button
+                type="button"
+                onClick={() => setIsChatOpen(true)}
+                className="bg-white shadow-md rounded-full w-12 h-12 flex items-center justify-center"
+                aria-label="Abrir chat"
+              >
+                <i className="ri-chat-3-line text-xl text-ink-800" />
+              </button>
+            )}
+          </div>
         )}
       </div>
-      <div className="px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating">
-        <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+      <div className={`px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating transition-[max-height] duration-300 ease-in-out ${step === 'active' && detailsExpanded ? 'max-h-[70vh] overflow-y-auto' : 'max-h-[60vh]'}`}>
+        {step === 'active' ? (
+          <button
+            type="button"
+            onClick={() => setDetailsExpanded((v) => !v)}
+            aria-expanded={detailsExpanded}
+            aria-label={detailsExpanded ? 'Recolher detalhes da encomenda' : 'Expandir detalhes da encomenda'}
+            className="mx-auto mb-1 flex items-center justify-center w-full py-1"
+          >
+            <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+          </button>
+        ) : (
+          <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+        )}
         {step === 'payment' ? (
           <div className="space-y-2.5">
             <p className="text-base font-semibold text-ink-900">Confirmar pagamento</p>
@@ -320,20 +359,74 @@ const CaptainParcelRiding = () => {
               </div>
             )}
 
+            {detailsExpanded && (
+              <div className="pt-2 border-t border-line space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <i className="ri-map-pin-user-fill text-brand-500 text-sm mt-0.5 flex-shrink-0" aria-hidden="true"></i>
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-ink-400 uppercase tracking-wide">Retirada</p>
+                    <p className="text-xs text-ink-900">{parcel.pickup || '—'}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <i className="ri-map-pin-2-fill text-danger-500 text-sm mt-0.5 flex-shrink-0" aria-hidden="true"></i>
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-ink-400 uppercase tracking-wide">Destino</p>
+                    <p className="text-xs text-ink-900">{parcel.destination || '—'}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <p className="text-[10px] text-ink-400 uppercase tracking-wide">Pagamento</p>
+                    <p className="text-ink-900 font-medium">{payLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-ink-400 uppercase tracking-wide">Valor</p>
+                    <p className="text-ink-900 font-medium">R$ {passengerAmount.toFixed(2)}</p>
+                  </div>
+                  {parcel.weightKg != null && (
+                    <div>
+                      <p className="text-[10px] text-ink-400 uppercase tracking-wide">Peso</p>
+                      <p className="text-ink-900 font-medium">{parcel.weightKg} kg</p>
+                    </div>
+                  )}
+                  {parcel.size && (
+                    <div>
+                      <p className="text-[10px] text-ink-400 uppercase tracking-wide">Tamanho</p>
+                      <p className="text-ink-900 font-medium capitalize">{parcel.size}</p>
+                    </div>
+                  )}
+                </div>
+                {parcel.sender?.name && (
+                  <div>
+                    <p className="text-[10px] text-ink-400 uppercase tracking-wide">Remetente</p>
+                    <p className="text-xs text-ink-900">
+                      {parcel.sender.name}
+                      {parcel.sender.phone ? ` · ${parcel.sender.phone}` : ''}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {parcel.status === 'arrived_destination' ? (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-ink-700">PIN do destinatário</p>
-                <input
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="w-full text-center text-xl tracking-widest border border-line rounded-panel py-2.5"
-                  placeholder="••••"
-                />
+                {parcel.requireDeliveryPin !== false && (
+                  <>
+                    <p className="text-xs font-medium text-ink-700">PIN do destinatário</p>
+                    <input
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      className="w-full text-center text-xl tracking-widest border border-line rounded-panel py-2.5"
+                      placeholder="••••"
+                    />
+                  </>
+                )}
                 <button
                   type="button"
-                  disabled={loading || pin.length < 4}
+                  disabled={loading || (parcel.requireDeliveryPin !== false && pin.length < 4)}
                   onClick={confirmPin}
                   className="w-full min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold disabled:opacity-50 text-sm"
                 >

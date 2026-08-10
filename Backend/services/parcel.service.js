@@ -283,6 +283,17 @@ async function getSettings() {
 module.exports.resolveVehiclePricing = resolveVehiclePricing;
 module.exports.DEFAULT_VEHICLE_PRICING = DEFAULT_VEHICLE_PRICING;
 
+/** Valor AO VIVO (não o congelado em pricingSnapshot na criação) — usado pra
+ * decidir se a UI de PIN aparece pro passageiro/motorista. Precisa ser o
+ * mesmo valor que confirmDelivery vai checar de fato, senão um admin
+ * desligando o PIN depois da encomenda criada (mas antes da entrega) deixa
+ * a UI e a validação real dessincronizadas. */
+async function getRequireDeliveryPin(vehicleType) {
+    const settings = await getSettings();
+    return resolveVehiclePricing(settings, vehicleType).requireDeliveryPin;
+}
+module.exports.getRequireDeliveryPin = getRequireDeliveryPin;
+
 function generateDeliveryPin() {
     return String(crypto.randomInt(0, 10000)).padStart(4, '0');
 }
@@ -980,9 +991,9 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     ]);
 
     return {
-        activeParcel: activeParcel ? module.exports.toParcelCaptainDTO(activeParcel) : null,
+        activeParcel: activeParcel ? await module.exports.toParcelCaptainDTO(activeParcel) : null,
         pendingOffers,
-        parcels: (parcels || []).map((p) => module.exports.toParcelCaptainDTO(p)),
+        parcels: await Promise.all((parcels || []).map((p) => module.exports.toParcelCaptainDTO(p))),
         page: safePage,
         limit: safeLimit,
         total,
@@ -1074,10 +1085,11 @@ module.exports.toParcelOfferDTO = (parcel) => {
     };
 };
 
-module.exports.toParcelCaptainDTO = (parcel) => {
+module.exports.toParcelCaptainDTO = async (parcel) => {
     const { sanitizeCaptainFinance } = require('../utils/financePrivacy');
     const raw = sanitizeCaptainFinance(parcel);
     delete raw.deliveryPin;
+    raw.requireDeliveryPin = await getRequireDeliveryPin(parcel.vehicleType || 'moto');
     return raw;
 };
 

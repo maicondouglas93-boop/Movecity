@@ -334,7 +334,13 @@ const ParcelActive = () => {
   const searching = parcel.status === 'awaiting_provider'
   const canChat = CHAT_STATUSES.includes(parcel.status) && !!captain
   const showRating = parcel.status === 'finished' && !rated
-  const showPin = Boolean(parcel.deliveryPin) && PIN_VISIBLE_STATUSES.includes(parcel.status)
+  // requireDeliveryPin === false (config admin, por tipo de veículo) esconde
+  // o PIN inteiro — não faz sentido mostrar/pedir pra enviar um código que o
+  // motorista nem vai precisar digitar. undefined (resposta antiga sem o
+  // campo) cai no lado seguro e mostra, igual sempre foi.
+  const showPin = Boolean(parcel.deliveryPin)
+    && parcel.requireDeliveryPin !== false
+    && PIN_VISIBLE_STATUSES.includes(parcel.status)
   const pinEmphasized = PIN_EMPHASIS.includes(parcel.status)
 
   const sendPinViaChat = async () => {
@@ -591,7 +597,7 @@ const ParcelActive = () => {
           isOpen={isChatOpen}
           onClose={() => setIsChatOpen(false)}
           currentUserType="user"
-          deliveryPin={parcel.deliveryPin}
+          deliveryPin={parcel.requireDeliveryPin !== false ? parcel.deliveryPin : undefined}
         />
       )}
     </div>

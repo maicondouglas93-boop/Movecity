@@ -163,7 +163,9 @@ module.exports.createParcel = async (req, res) => {
 module.exports.getCurrent = async (req, res) => {
     try {
         const parcel = await parcelService.getCurrentParcelForUser(req.user._id);
-        return res.status(200).json(parcel);
+        if (!parcel) return res.status(200).json(parcel);
+        const requireDeliveryPin = await parcelService.getRequireDeliveryPin(parcel.vehicleType || 'moto');
+        return res.status(200).json({ ...parcel.toObject(), requireDeliveryPin });
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -172,7 +174,7 @@ module.exports.getCurrent = async (req, res) => {
 module.exports.getCurrentForCaptain = async (req, res) => {
     try {
         const parcel = await parcelService.getCurrentParcelForCaptain(req.captain._id);
-        return res.status(200).json(parcel ? parcelService.toParcelCaptainDTO(parcel) : null);
+        return res.status(200).json(parcel ? await parcelService.toParcelCaptainDTO(parcel) : null);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -235,7 +237,7 @@ module.exports.acceptParcel = async (req, res) => {
             }).catch(() => {});
         }
 
-        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
+        return res.status(200).json(await parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         console.error(`[AUDIT][${TRACE_ID}] accept fail:`, err.message);
         if (err.message === 'PARCEL_ALREADY_ACCEPTED') {
@@ -279,14 +281,16 @@ module.exports.updateStatus = async (req, res) => {
             status: req.body.status,
         });
 
+        const requireDeliveryPin = await parcelService.getRequireDeliveryPin(parcel.vehicleType || 'moto');
+
         if (parcel.user?.socketId) {
             sendMessageToSocketId(parcel.user.socketId, {
                 event: 'parcel-status-updated',
-                data: parcel,
+                data: { ...(parcel.toObject ? parcel.toObject() : parcel), requireDeliveryPin },
             });
         }
 
-        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
+        return res.status(200).json({ ...(await parcelService.toParcelCaptainDTO(parcel)), requireDeliveryPin });
     } catch (err) {
         if (err.message === 'INVALID_STATUS_TRANSITION') {
             return res.status(400).json({ message: 'Transição de status inválida' });
@@ -318,7 +322,7 @@ module.exports.confirmDelivery = async (req, res) => {
         }
 
         emitDriverMapUpdate(req.captain._id, { busy: false });
-        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
+        return res.status(200).json(await parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         if (err.message === 'INVALID_PIN') {
             return res.status(400).json({ message: 'PIN inválido' });
@@ -339,7 +343,7 @@ module.exports.confirmPayment = async (req, res) => {
             parcelId: req.params.id,
             captain: req.captain,
         });
-        return res.status(200).json(parcelService.toParcelCaptainDTO(parcel));
+        return res.status(200).json(await parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         if (err.message === 'PARCEL_NOT_FOUND') {
             return res.status(404).json({ message: 'Encomenda não encontrada' });

@@ -19,11 +19,15 @@ import { showBrowserNotification } from '@/shared/services/browserNotify'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import api from '@/shared/services/axios'
 import { getAccessToken } from '@/shared/services/session'
+import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
+
+const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
     const [ cancelPanel, setCancelPanel ] = useState(false)
+    const [ detailsExpanded, setDetailsExpanded ] = useState(false)
     const [ cancelling, setCancelling ] = useState(false)
     const [ elapsedSec, setElapsedSec ] = useState(0)
     const [ liveDistance, setLiveDistance ] = useState(0)
@@ -276,6 +280,15 @@ const CaptainRiding = () => {
     const vehicleLabel = vehicleLabels[vType] || 'MoveGo'
     const vehicleImg = vehicleImages[vType] || vehicleImages.car
 
+    // Etapa atual pra "Abrir no Google Maps": coleta enquanto o motorista ainda
+    // não pegou o passageiro, destino a partir de 'started'. Usa coordenada
+    // (mais precisa) e cai pro endereço em texto quando não há coordenada.
+    const onPickupLeg = RIDE_PICKUP_STATUSES.includes(rideData?.status)
+    const mapsTarget = onPickupLeg
+        ? { lat: rideData?.pickupCoordinates?.lat, lng: rideData?.pickupCoordinates?.lng, address: rideData?.pickup }
+        : { lat: rideData?.destinationCoordinates?.lat, lng: rideData?.destinationCoordinates?.lng, address: rideData?.destination }
+    const mapsUrl = buildGoogleMapsUrl(mapsTarget)
+
     // Cancelamento de corrida presencial (2026-08-08): o backend já suportava isto
     // (rideService.cancelRideByCaptain, ramo source==='driver_initiated', permite
     // cancelar mesmo em 'started' — "engano do motorista", sem redespacho, sem
@@ -377,12 +390,12 @@ const CaptainRiding = () => {
                         navegação desligada e, principalmente, quando o mapa não suporta
                         câmera de navegação (sem Map ID vetorial), que é justamente o
                         caso em que o motorista precisa de um app externo. */}
-                    {rideData?.destination && (!navigationMode || navInfo?.supportsCamera === false) && (
+                    {mapsUrl && (!navigationMode || navInfo?.supportsCamera === false) && (
                         <a
-                            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(rideData.destination)}&travelmode=driving`}
+                            href={mapsUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            aria-label="Navegar até o destino"
+                            aria-label={onPickupLeg ? 'Navegar até a coleta' : 'Navegar até o destino'}
                             className='h-11 w-11 bg-brand-500 text-white flex items-center justify-center rounded-full shadow-raised pointer-events-auto'
                         >
                             <i className="text-lg ri-navigation-fill"></i>
@@ -415,10 +428,20 @@ const CaptainRiding = () => {
                 </div>
             </div>
 
-            {/* Bottom HUD — sempre aberto, altura pelo conteúdo; mapa ocupa o restante. */}
+            {/* Bottom HUD — altura pelo conteúdo por padrão; a alça expande até
+                70vh (com scroll interno) pra mostrar os detalhes completos,
+                sem nunca cobrir o mapa inteiro. */}
             <div className='absolute bottom-0 left-0 right-0 z-overlay'>
-                <div className='bg-surface border-t border-line rounded-t-3xl shadow-floating select-none px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]'>
-                    <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+                <div className={`bg-surface border-t border-line rounded-t-3xl shadow-floating select-none px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-[max-height] duration-300 ease-in-out ${detailsExpanded ? 'max-h-[70vh] overflow-y-auto' : 'max-h-[60vh]'}`}>
+                    <button
+                        type="button"
+                        onClick={() => setDetailsExpanded(v => !v)}
+                        aria-expanded={detailsExpanded}
+                        aria-label={detailsExpanded ? 'Recolher detalhes da corrida' : 'Expandir detalhes da corrida'}
+                        className="mx-auto mb-2 flex items-center justify-center w-full py-1"
+                    >
+                        <span className="h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+                    </button>
 
                     <div className='flex items-center justify-between gap-3 mb-2.5'>
                         <div className='min-w-0'>
@@ -500,6 +523,49 @@ const CaptainRiding = () => {
                             </p>
                         </div>
                     </div>
+
+                    {detailsExpanded && (
+                        <div className='mt-3 pt-3 border-t border-line space-y-2.5'>
+                            <div className='flex items-start gap-2'>
+                                <i className="ri-map-pin-user-fill text-brand-500 text-sm mt-0.5 flex-shrink-0" aria-hidden="true"></i>
+                                <div className='min-w-0'>
+                                    <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Coleta</p>
+                                    <p className='text-xs text-ink-900'>{rideData?.pickup || '—'}</p>
+                                </div>
+                            </div>
+                            <div className='flex items-start gap-2'>
+                                <i className="ri-map-pin-2-fill text-danger-500 text-sm mt-0.5 flex-shrink-0" aria-hidden="true"></i>
+                                <div className='min-w-0'>
+                                    <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Destino</p>
+                                    <p className='text-xs text-ink-900'>
+                                        {rideData?.destinationPending ? 'Definido ao finalizar' : (rideData?.destination || '—')}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className='grid grid-cols-2 gap-2 text-xs'>
+                                <div>
+                                    <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Veículo</p>
+                                    <p className='text-ink-900 font-medium'>{vehicleLabel}</p>
+                                </div>
+                                <div>
+                                    <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Pagamento</p>
+                                    <p className='text-ink-900 font-medium capitalize'>{rideData?.paymentMethod || '—'}</p>
+                                </div>
+                                {rideData?.actualDistance != null && (
+                                    <div>
+                                        <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Distância</p>
+                                        <p className='text-ink-900 font-medium'>{(rideData.actualDistance / 1000).toFixed(1)} km</p>
+                                    </div>
+                                )}
+                                {rideData?.fare != null && (
+                                    <div>
+                                        <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Valor</p>
+                                        <p className='text-ink-900 font-medium'>R$ {rideData.fare}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {isPresential && (
                         <button

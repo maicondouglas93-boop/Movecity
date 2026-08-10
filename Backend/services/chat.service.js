@@ -79,13 +79,31 @@ module.exports.getOrCreateChat = async ({ subjectType, subjectId, rideId } = {})
     }
 
     if (!chat) {
-        chat = await chatModel.create({
-            subjectType: subject.subjectType,
-            subjectId: subject.subjectId,
-            rideId: subject.subjectType === 'ride' ? subject.subjectId : undefined,
-            passengerId: subject.userId,
-            captainId: subject.captainId,
-        });
+        // Upsert atômico em vez de find-then-create: duas requisições concorrentes
+        // pro mesmo subject (ex.: abrir o chat e mandar uma mensagem ao mesmo
+        // tempo) não colidem mais no índice único subjectType+subjectId. O
+        // catch cobre a janela residual que upsert ainda pode deixar sob
+        // corrida real — sem isso a 2ª chamada lançava E11000 sem tratamento,
+        // virando 500 pro cliente (reproduzido isoladamente, 2026-08-10).
+        try {
+            chat = await chatModel.findOneAndUpdate(
+                { subjectType: subject.subjectType, subjectId: subject.subjectId },
+                {
+                    $setOnInsert: {
+                        rideId: subject.subjectType === 'ride' ? subject.subjectId : undefined,
+                        passengerId: subject.userId,
+                        captainId: subject.captainId,
+                    },
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true },
+            );
+        } catch (err) {
+            if (err.code !== 11000) throw err;
+            chat = await chatModel.findOne({
+                subjectType: subject.subjectType,
+                subjectId: subject.subjectId,
+            }).populate('lastMessage');
+        }
     } else if (
         chat.passengerId?.toString() !== subject.userId?.toString()
         || chat.captainId?.toString() !== subject.captainId?.toString()

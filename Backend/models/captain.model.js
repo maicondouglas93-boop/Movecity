@@ -98,11 +98,13 @@ const captainSchema = new mongoose.Schema({
         // de rejeição de um documento só existia no log de auditoria do admin — o
         // motorista via "não verificado" sem nenhuma pista de por quê. Setado pelo admin
         // em admin.service.js: updateCaptainDocument (limpo automaticamente ao aprovar).
-        cnhFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
-        cnhBack: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
-        crlv: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
-        vehicleFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } },
-        selfie: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' } }
+        // `uploadedAt` adicionado pra suportar upload direto pelo admin (2026-08-10) —
+        // até então só o próprio motorista enviava, e não havia data de envio registrada.
+        cnhFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' }, uploadedAt: { type: Date, default: null } },
+        cnhBack: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' }, uploadedAt: { type: Date, default: null } },
+        crlv: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' }, uploadedAt: { type: Date, default: null } },
+        vehicleFront: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' }, uploadedAt: { type: Date, default: null } },
+        selfie: { url: { type: String, default: '' }, verified: { type: Boolean, default: false }, reason: { type: String, default: '' }, uploadedAt: { type: Date, default: null } }
     },
     cnh: {
         number: { type: String },

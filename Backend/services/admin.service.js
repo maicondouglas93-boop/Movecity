@@ -674,6 +674,39 @@ module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, 
     return captain;
 };
 
+// Redefinição de senha pelo admin (2026-08-10) — não existia nenhum jeito de ajudar
+// um motorista que esqueceu a senha a não ser ele mesmo recuperar por conta própria.
+// Mesmo hash usado no cadastro (captainModel.hashPassword). Revoga todas as sessões
+// ativas depois de trocar — mesmo motivo do bloqueio: se a senha antiga vazou, um
+// token de refresh já emitido não deveria continuar valendo.
+module.exports.resetCaptainPassword = async (captainId, newPassword, admin, ip) => {
+    const captain = await captainModel.findById(captainId);
+    if (!captain) {
+        throw Object.assign(new Error('Motorista não encontrado'), { statusCode: 404 });
+    }
+
+    captain.password = await captainModel.hashPassword(newPassword);
+    await captain.save();
+
+    deleteByPrefix(`profile:captain:${captainId}`);
+
+    const authService = require('./auth.service');
+    await authService.revokeAllForUser({ userId: captainId, userType: 'captain', reason: 'password_reset' });
+
+    // Nunca logar a senha em si — só o fato de que foi redefinida.
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'reset_captain_password',
+        targetId: captain._id.toString(),
+        targetModel: 'Captain',
+        reason: 'Redefinição de senha pelo admin',
+        ipAddress: ip || '0.0.0.0',
+    });
+
+    return { message: 'Senha redefinida com sucesso.' };
+};
+
 const PLATE_REGEX = /^[A-Z]{3}\d[A-Z0-9]\d{2}$/;
 const normalizePlate = (value) =>
     typeof value === 'string' ? value.toUpperCase().replace(/[\s-]/g, '') : value;
@@ -818,6 +851,49 @@ module.exports.updateCaptainDocument = async (captainId, docType, verified, reas
         reason: reason || `Verificação de documento: ${docType}`,
         newValue: { document: docType, verified },
         ipAddress: ip || '0.0.0.0'
+    });
+
+    return captain.documents;
+};
+
+// Upload de documento pelo admin (2026-08-10) — até então só o próprio motorista
+// podia enviar (POST /upload/document, authCaptain). Precisa pra casos onde o
+// motorista manda o documento por fora (WhatsApp, presencial) e o admin cadastra.
+// Reaproveita o mesmo uploadService.uploadDocument (ImageKit, privado) do fluxo do
+// motorista — mesma pasta captains/documents/<docType>, mesmas URLs assinadas.
+// Reenviar sempre volta pra "pendente" (verified:false) — um documento novo precisa
+// ser revisado de novo, mesmo que o anterior já tivesse sido aprovado.
+module.exports.uploadCaptainDocument = async (captainId, docType, fileBuffer, admin, ip) => {
+    if (!(docType in DOCUMENT_LABELS)) {
+        throw Object.assign(new Error('Tipo de documento inválido'), { statusCode: 400 });
+    }
+    const captain = await captainModel.findById(captainId);
+    if (!captain) {
+        throw Object.assign(new Error('Motorista não encontrado'), { statusCode: 404 });
+    }
+
+    const url = await uploadService.uploadDocument(fileBuffer, docType);
+
+    const previousUrl = captain.documents[docType].url;
+    captain.documents[docType] = { url, verified: false, reason: '', uploadedAt: new Date() };
+    await captain.save();
+
+    if (previousUrl) {
+        uploadService.deleteImage(previousUrl).catch(() => {});
+    }
+
+    deleteByPrefix(`profile:captain:${captainId}`);
+
+    const docLabel = DOCUMENT_LABELS[docType] || docType;
+    await module.exports.logAction({
+        adminId: admin._id,
+        adminName: admin.name,
+        action: 'upload_captain_document',
+        targetId: captain._id.toString(),
+        targetModel: 'Captain',
+        reason: `Documento enviado pelo admin: ${docLabel}`,
+        newValue: { document: docType, url },
+        ipAddress: ip || '0.0.0.0',
     });
 
     return captain.documents;

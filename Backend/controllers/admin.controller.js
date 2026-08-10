@@ -532,6 +532,39 @@ module.exports.toggleCaptainBlock = async (req, res, next) => {
     }
 };
 
+module.exports.resetCaptainPassword = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { newPassword } = req.body;
+        if (typeof newPassword !== 'string' || newPassword.length < 6) {
+            return res.status(400).json({ message: 'A nova senha deve ter pelo menos 6 caracteres' });
+        }
+        const result = await adminService.resetCaptainPassword(id, newPassword, req.admin, req.ip);
+        res.status(200).json(result);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        next(error);
+    }
+};
+
+module.exports.uploadCaptainDocument = async (req, res, next) => {
+    try {
+        const { id, docType } = req.params;
+        if (!req.file) {
+            return res.status(400).json({ message: 'Nenhum arquivo enviado' });
+        }
+        const result = await adminService.uploadCaptainDocument(id, docType, req.file.buffer, req.admin, req.ip);
+        res.status(200).json(result);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        next(error);
+    }
+};
+
 module.exports.updateCaptainVehicle = async (req, res, next) => {
     try {
         const { id } = req.params;

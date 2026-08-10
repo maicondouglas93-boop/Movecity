@@ -10,7 +10,7 @@ import {
   Search, MapPin, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
   CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, 
   RotateCcw, ShieldAlert, CheckCircle, XCircle, Lock, Unlock, FileText, FileSearch, Star, 
-  Battery, AlertTriangle, Briefcase, ChevronDown, Check, ArrowRight, History, Pencil
+  Battery, AlertTriangle, Briefcase, ChevronDown, Check, ArrowRight, History, Pencil, KeyRound, Upload
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -506,6 +506,7 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [editVehicleOpen, setEditVehicleOpen] = useState(false);
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
   const isLive = liveDrivers[captain._id] || captain.isOnline;
   const liveData = liveDrivers[captain._id]; // Might have ltd/lng from socket
 
@@ -519,6 +520,15 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
       toast.success('Dados do veículo atualizados.');
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar veículo'),
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: (payload) => api.put(`/admin/captains/${captain._id}/reset-password`, payload),
+    onSuccess: () => {
+      setResetPasswordOpen(false);
+      toast.success('Senha redefinida. O motorista foi desconectado de todas as sessões.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao redefinir senha'),
   });
 
   return (
@@ -559,6 +569,23 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
               <div><p className="text-xs text-text-muted">Cor / Ano</p><p className="font-medium text-sm capitalize">{captain.vehicle?.color || '—'} / {captain.vehicle?.ano || '—'}</p></div>
               <div><p className="text-xs text-text-muted">Capacidade</p><p className="font-medium text-sm">{captain.vehicle?.capacity ?? '—'} pessoa(s)</p></div>
            </div>
+         </div>
+
+         {/* Segurança */}
+         <div className="bg-surface p-5 rounded-xl border border-border">
+           <div className="flex items-center justify-between mb-4">
+             <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted flex items-center gap-2"><KeyRound className="w-4 h-4"/> Segurança</h3>
+           </div>
+           <p className="text-xs text-text-muted mb-3">
+             Redefina a senha caso o motorista tenha perdido acesso à conta. Todas as sessões ativas dele serão encerradas.
+           </p>
+           <button
+             type="button"
+             onClick={() => setResetPasswordOpen(true)}
+             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-primary hover:text-primary transition-colors"
+           >
+             <KeyRound className="w-3.5 h-3.5" /> Redefinir senha
+           </button>
          </div>
 
          {/* KPIs */}
@@ -622,6 +649,104 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
           onSave={(payload) => vehicleMutation.mutate(payload)}
         />
       )}
+
+      {resetPasswordOpen && (
+        <ResetPasswordModal
+          captain={captain}
+          saving={resetPasswordMutation.isPending}
+          onClose={() => !resetPasswordMutation.isPending && setResetPasswordOpen(false)}
+          onSave={(payload) => resetPasswordMutation.mutate(payload)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ResetPasswordModal({ captain, onClose, onSave, saving }) {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setError('A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('As senhas não coincidem.');
+      return;
+    }
+    setError('');
+    onSave({ newPassword });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[3500] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-surface rounded-xl border border-border w-full max-w-sm shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-lg text-text">Redefinir senha</h2>
+            <p className="text-xs text-text-muted mt-0.5">
+              {captain.fullname?.firstname} {captain.fullname?.lastname}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 hover:bg-background rounded-full text-text-muted">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Nova senha</label>
+            <input
+              required
+              type="password"
+              minLength={6}
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Confirmar nova senha</label>
+            <input
+              required
+              type="password"
+              minLength={6}
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+
+          {error && <p className="text-xs text-danger">{error}</p>}
+
+          <p className="text-xs text-text-muted">
+            O motorista precisará usar a nova senha no próximo login. Todas as sessões ativas dele serão encerradas.
+          </p>
+
+          <div className="pt-2 flex justify-end gap-3 border-t border-border">
+            <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-text-muted hover:text-text">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-40"
+            >
+              {saving ? 'Salvando…' : 'Redefinir senha'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -809,6 +934,25 @@ function TabDocuments({ captainId }) {
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao verificar documento')
   });
 
+  // Upload direto pelo admin (2026-08-10) — pro caso do motorista mandar o documento
+  // por fora (WhatsApp, presencial) e o admin cadastrar em nome dele. Reenviar sempre
+  // volta o documento pra "pendente", mesmo que já estivesse aprovado antes.
+  const uploadMutation = useMutation({
+    mutationFn: ({ docType, file }) => {
+      const formData = new FormData();
+      formData.append('image', file);
+      return api.post(`/admin/captains/${captainId}/documents/${docType}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['captain-documents', captainId] });
+      queryClient.invalidateQueries({ queryKey: ['captain-document-url', captainId] });
+      toast.success('Documento enviado. Fica pendente de verificação novamente.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao enviar documento'),
+  });
+
   if (isLoading) return <div className="p-6 text-center text-text-muted">Carregando documentos...</div>;
   if (!docs) return <div className="p-6 text-center text-text-muted">Nenhum documento encontrado.</div>;
 
@@ -823,14 +967,18 @@ function TabDocuments({ captainId }) {
     verifyMutation.mutate({ docType, verified: isVerified, reason });
   }
 
+  const handleUpload = (docType, file) => {
+    uploadMutation.mutate({ docType, file });
+  }
+
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Checklist Operacional</h3>
-      <DocumentRow captainId={captainId} title="CNH Frente" docKey="cnhFront" docData={docs.cnhFront} onVerify={handleVerify} />
-      <DocumentRow captainId={captainId} title="CNH Verso" docKey="cnhBack" docData={docs.cnhBack} onVerify={handleVerify} />
-      <DocumentRow captainId={captainId} title="CRLV (Documento Veículo)" docKey="crlv" docData={docs.crlv} onVerify={handleVerify} />
-      <DocumentRow captainId={captainId} title="Foto do Veículo (Frente)" docKey="vehicleFront" docData={docs.vehicleFront} onVerify={handleVerify} />
-      <DocumentRow captainId={captainId} title="Selfie de Segurança" docKey="selfie" docData={docs.selfie} onVerify={handleVerify} />
+      <DocumentRow captainId={captainId} title="CNH Frente" docKey="cnhFront" docData={docs.cnhFront} onVerify={handleVerify} onUpload={handleUpload} uploading={uploadMutation.isPending} />
+      <DocumentRow captainId={captainId} title="CNH Verso" docKey="cnhBack" docData={docs.cnhBack} onVerify={handleVerify} onUpload={handleUpload} uploading={uploadMutation.isPending} />
+      <DocumentRow captainId={captainId} title="CRLV (Documento Veículo)" docKey="crlv" docData={docs.crlv} onVerify={handleVerify} onUpload={handleUpload} uploading={uploadMutation.isPending} />
+      <DocumentRow captainId={captainId} title="Foto do Veículo (Frente)" docKey="vehicleFront" docData={docs.vehicleFront} onVerify={handleVerify} onUpload={handleUpload} uploading={uploadMutation.isPending} />
+      <DocumentRow captainId={captainId} title="Selfie de Segurança" docKey="selfie" docData={docs.selfie} onVerify={handleVerify} onUpload={handleUpload} uploading={uploadMutation.isPending} />
     </div>
   )
 }
@@ -839,7 +987,8 @@ function TabDocuments({ captainId }) {
 // URL pública, então cada linha busca sua própria URL assinada (expira em 5min) em vez
 // de usar docData.url direto. Componente de nível superior (não mais aninhado em
 // TabDocuments) para não perder o cache da query a cada render do pai.
-function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
+function DocumentRow({ captainId, title, docKey, docData, onVerify, onUpload, uploading }) {
+  const fileInputRef = React.useRef(null);
   const { data: signedUrl, isLoading: loadingUrl } = useQuery({
     queryKey: ['captain-document-url', captainId, docKey],
     queryFn: async () => {
@@ -850,9 +999,30 @@ function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
     staleTime: 4 * 60 * 1000 // URL assinada expira em 5min no backend
   });
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite reenviar o mesmo arquivo depois, se precisar
+    if (file) onUpload(docKey, file);
+  };
+
+  const uploadButton = (
+    <>
+      <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFileChange} />
+      <button
+        type="button"
+        disabled={uploading}
+        onClick={() => fileInputRef.current?.click()}
+        className="flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-background text-text text-xs font-medium rounded hover:border-primary hover:text-primary transition-colors border border-border disabled:opacity-50"
+      >
+        <Upload className="w-3.5 h-3.5" /> {uploading ? 'Enviando…' : docData?.url ? 'Reenviar' : 'Enviar'}
+      </button>
+    </>
+  );
+
   if (!docData || !docData.url) return (
-    <div className="flex items-center justify-between p-4 bg-surface rounded-xl border border-border">
+    <div className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 bg-surface rounded-xl border border-border gap-4">
        <div className="flex items-center gap-3"><FileText className="w-5 h-5 text-border" /><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-border">Não enviado</p></div></div>
+       <div className="flex gap-2 w-full md:w-auto">{uploadButton}</div>
     </div>
   );
   return (
@@ -876,6 +1046,9 @@ function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
              <span className={`text-xs inline-flex items-center gap-1 font-medium mt-1 ${docData.verified ? 'text-primary' : docData.reason ? 'text-danger' : 'text-warning'}`}>
                {docData.verified ? <><Check className="w-3 h-3"/> Aprovado</> : docData.reason ? <><X className="w-3 h-3"/> Rejeitado</> : <><Clock className="w-3 h-3"/> Pendente Verificação</>}
              </span>
+             {docData.uploadedAt && (
+               <p className="text-xs text-text-muted mt-1">Enviado em {formatDate(docData.uploadedAt)}</p>
+             )}
              {/* Motivo salvo em captain.documents.<doc>.reason (2026-08-04) — mesmo texto
                  que o motorista vê no app, evita ter que abrir a aba Auditoria pra conferir. */}
              {!docData.verified && docData.reason && (
@@ -883,9 +1056,10 @@ function DocumentRow({ captainId, title, docKey, docData, onVerify }) {
              )}
           </div>
        </div>
-       <div className="flex gap-2 w-full md:w-auto">
+       <div className="flex flex-wrap gap-2 w-full md:w-auto">
           <button onClick={() => onVerify(docKey, true)} className="flex-1 md:flex-none px-3 py-1.5 bg-primary/10 text-primary text-xs font-medium rounded hover:bg-primary/20 transition-colors border border-primary/20">Aprovar</button>
           <button onClick={() => onVerify(docKey, false)} className="flex-1 md:flex-none px-3 py-1.5 bg-danger/10 text-danger text-xs font-medium rounded hover:bg-danger/20 transition-colors border border-danger/20">Rejeitar</button>
+          {uploadButton}
        </div>
     </div>
   )

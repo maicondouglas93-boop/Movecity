@@ -504,27 +504,34 @@ export default function Rides() {
           >
             <X className="w-4 h-4" />
           </button>
-          <div className="absolute top-4 left-4 right-4 flex flex-col gap-2 z-[1000] pointer-events-none">
-            <div className="bg-background/90 backdrop-blur border border-border p-3 rounded-lg shadow-xl pointer-events-auto">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  {liveDriversList.length} online
-                </div>
-                <div className="flex items-center gap-3 text-xs text-text-muted">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-green-500" /> {availableCount} livres
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" /> {inRideCount} em corrida
-                  </span>
-                </div>
-              </div>
+          <div className="absolute top-3 left-3 z-[1000] pointer-events-none max-w-[calc(100%-1.5rem)]">
+            <div
+              className="bg-background/90 backdrop-blur border border-border px-2.5 py-1.5 rounded-md shadow-lg pointer-events-auto inline-flex flex-wrap items-center gap-x-2.5 gap-y-1"
+              title={
+                !mapBootstrapped
+                  ? 'Carregando frota…'
+                  : liveDriversList.length === 0
+                    ? 'Nenhum motorista online com GPS no momento'
+                    : undefined
+              }
+            >
+              <span className="inline-flex items-center gap-1 text-xs font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                {liveDriversList.length} online
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                {availableCount} livres
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                {inRideCount} em corrida
+              </span>
               {!mapBootstrapped && (
-                <p className="text-xs text-text-muted mt-2">Carregando frota...</p>
+                <span className="text-[10px] text-text-muted">Carregando…</span>
               )}
               {mapBootstrapped && liveDriversList.length === 0 && (
-                <p className="text-xs text-text-muted mt-2">Nenhum motorista online com GPS no momento.</p>
+                <span className="text-[10px] text-text-muted">Sem GPS</span>
               )}
             </div>
           </div>

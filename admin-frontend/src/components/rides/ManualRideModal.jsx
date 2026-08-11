@@ -393,8 +393,9 @@ export default function ManualRideModal({ onClose, onCreated }) {
 }
 
 function Shell({ children, onClose, closeDisabled = false }) {
-  // Portal para document.body: React 19 + react-leaflet no /rides causa
-  // NotFoundError (insertBefore/removeChild) se o modal viver na mesma árvore do MapContainer.
+  // Contêiner exclusivo: evita disputar document.body com o mapa, extensões e outros
+  // portais enquanto o React insere os ícones e campos do formulário.
+  const portalTarget = document.getElementById('admin-modal-root') || document.body;
   return createPortal(
     <div className="fixed inset-0 z-[4000] bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Lançar corrida">
       <div className="bg-surface border border-border rounded-xl w-full max-w-3xl p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -404,7 +405,7 @@ function Shell({ children, onClose, closeDisabled = false }) {
         {children}
       </div>
     </div>,
-    document.body,
+    portalTarget,
   );
 }
 

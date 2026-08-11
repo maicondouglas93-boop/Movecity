@@ -270,7 +270,7 @@ export default function AdminAddressAutocomplete({
             );
           })}
         </ul>,
-        document.body,
+        document.getElementById('admin-popover-root') || document.body,
       )}
     </div>
   );

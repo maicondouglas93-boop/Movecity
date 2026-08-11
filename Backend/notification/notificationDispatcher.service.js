@@ -742,37 +742,49 @@ module.exports.sendPaymentProblemAlert = async (description) => {
 
 // CAMPAIGNS LOGIC
 
-const buildTargetQuery = (targetRules) => {
+// Auditoria de UX/produção (2026-08-10) — duas falhas reais de segmentação aqui:
+// 1) isVIP/noRidesDays só entravam dentro do branch `audienceType === 'passengers'`.
+//    Com público "Todos" + checkbox "Apenas VIP" marcado (o checkbox aparece pra
+//    'all' também, Notifications.jsx), o filtro era silenciosamente ignorado e o
+//    push saía pra base inteira mesmo assim.
+// 2) `targetRules.isOnline ? 'active' : 'inactive'` — como o formulário inicializa
+//    isOnline:false (não undefined), por padrão, sem o admin tocar em nada,
+//    escolher "Motoristas" filtrava status:'inactive' (só OFFLINE), o oposto do
+//    que qualquer admin esperaria como comportamento padrão.
+// Fix: queries separadas por modelo, aplicadas pelo campo em si (não mais
+// aninhadas num único audienceType), e isOnline só filtra quando explicitamente
+// true — desmarcado/ausente não filtra por conexão nenhuma.
+const buildUserQuery = (targetRules) => {
     const query = {};
     if (targetRules.isBlocked !== undefined) query.isBlocked = targetRules.isBlocked;
     if (targetRules.city) query.city = { $regex: targetRules.city, $options: 'i' };
     if (targetRules.state) query.state = { $regex: targetRules.state, $options: 'i' };
-
-    if (targetRules.audienceType === 'passengers') {
-        if (targetRules.isVIP !== undefined && targetRules.isVIP) query.tags = 'VIP';
-        if (targetRules.noRidesDays) {
-            const date = new Date();
-            date.setDate(date.getDate() - targetRules.noRidesDays);
-            query.lastRideAt = { $lt: date };
-        }
-    } else if (targetRules.audienceType === 'drivers') {
-        if (targetRules.isOnline !== undefined) query.status = targetRules.isOnline ? 'active' : 'inactive';
-        if (targetRules.vehicleType) query['vehicle.vehicleType'] = targetRules.vehicleType;
+    if (targetRules.isVIP) query.tags = 'VIP';
+    if (targetRules.noRidesDays) {
+        const date = new Date();
+        date.setDate(date.getDate() - targetRules.noRidesDays);
+        query.lastRideAt = { $lt: date };
     }
     return query;
 };
 
-module.exports.calculateAudience = async (targetRules) => {
-    const query = buildTargetQuery(targetRules);
-    let count = 0;
+const buildCaptainQuery = (targetRules) => {
+    const query = {};
+    if (targetRules.isBlocked !== undefined) query.isBlocked = targetRules.isBlocked;
+    if (targetRules.city) query.city = { $regex: targetRules.city, $options: 'i' };
+    if (targetRules.state) query.state = { $regex: targetRules.state, $options: 'i' };
+    if (targetRules.isOnline) query.status = 'active';
+    if (targetRules.vehicleType) query['vehicle.vehicleType'] = targetRules.vehicleType;
+    return query;
+};
 
-    if (targetRules.audienceType === 'all') {
-        count += await userModel.countDocuments(query);
-        count += await captainModel.countDocuments(query);
-    } else if (targetRules.audienceType === 'passengers') {
-        count = await userModel.countDocuments(query);
-    } else if (targetRules.audienceType === 'drivers') {
-        count = await captainModel.countDocuments(query);
+module.exports.calculateAudience = async (targetRules) => {
+    let count = 0;
+    if (targetRules.audienceType === 'all' || targetRules.audienceType === 'passengers') {
+        count += await userModel.countDocuments(buildUserQuery(targetRules));
+    }
+    if (targetRules.audienceType === 'all' || targetRules.audienceType === 'drivers') {
+        count += await captainModel.countDocuments(buildCaptainQuery(targetRules));
     }
     return count;
 };
@@ -792,16 +804,15 @@ module.exports.processCampaign = async (campaignId) => {
     if (!campaign) return;
 
     try {
-        const query = buildTargetQuery(campaign.targetRules);
         let tokens = [];
 
         if (campaign.targetRules.audienceType === 'all' || campaign.targetRules.audienceType === 'passengers') {
-            const users = await userModel.find(query).select('_id');
+            const users = await userModel.find(buildUserQuery(campaign.targetRules)).select('_id');
             tokens.push(...await tokenRegistry.getTokensForUsers(users.map(u => u._id)));
         }
 
         if (campaign.targetRules.audienceType === 'all' || campaign.targetRules.audienceType === 'drivers') {
-            const captains = await captainModel.find(query).select('_id');
+            const captains = await captainModel.find(buildCaptainQuery(campaign.targetRules)).select('_id');
             tokens.push(...await tokenRegistry.getTokensForCaptains(captains.map(c => c._id)));
         }
 

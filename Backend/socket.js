@@ -7,6 +7,7 @@ const parcelModel = require('./models/parcel.model');
 const adminUserModel = require('./models/adminUser.model');
 const mapService = require('./services/maps.service');
 const notificationDispatcher = require('./notification/notificationDispatcher.service');
+const { normalizeCaptainLocation, isPlausibleTravel } = require('./utils/captainLocationValidation');
 
 let io;
 
@@ -262,23 +263,25 @@ function initializeSocket(server) {
                 return socket.emit('unauthorized', { message: 'Não autenticado' });
             }
             const userId = socket.data.identity.id;
-            const { location } = data;
-
-            if (!location || location.ltd == null || location.lng == null) {
-                return socket.emit('error', { message: 'Invalid location data' });
+            const { location } = data || {};
+            const locationValidation = normalizeCaptainLocation(location);
+            if (!locationValidation.valid) {
+                return socket.emit('error', { message: 'Invalid location data', code: locationValidation.code });
             }
+            const captainLocation = locationValidation.location;
+            const receivedAt = new Date();
 
             // Fase C (2026-08-03): `{ new: true }` pra ter o doc atualizado em mãos —
             // o broadcast pro mapa do passageiro (abaixo) precisa de vehicle/isOnline
             // sem uma segunda query.
             const captainDoc = await captainModel.findByIdAndUpdate(userId, {
                 location: {
-                    ltd: location.ltd,
-                    lng: location.lng
+                    ltd: captainLocation.lat,
+                    lng: captainLocation.lng
                 },
                 locationGeoJSON: {
                     type: 'Point',
-                    coordinates: [location.lng, location.ltd]
+                    coordinates: [captainLocation.lng, captainLocation.lat]
                 },
                 // Heartbeat da separação disponibilidade x conexão (2026-08-03): o app
                 // do motorista já emite este evento periodicamente, então ele é o
@@ -304,14 +307,23 @@ function initializeSocket(server) {
                 let currentDistance = ride.actualDistance || 0;
 
                 if (ride.status === 'started' || ride.status === 'ongoing') {
-                    if (ride.lastLocation && ride.lastLocation.lat && ride.lastLocation.lng) {
-                        const distKm = mapService.haversineKm(ride.lastLocation.lat, ride.lastLocation.lng, location.ltd, location.lng);
+                    if (ride.lastLocation && ride.lastLocation.lat != null && ride.lastLocation.lng != null) {
+                        const distKm = mapService.haversineKm(
+                            ride.lastLocation.lat,
+                            ride.lastLocation.lng,
+                            captainLocation.lat,
+                            captainLocation.lng
+                        );
                         const distMeters = distKm * 1000;
+                        const previousAt = ride.lastLocationAt ? new Date(ride.lastLocationAt).getTime() : null;
+                        const elapsedMs = previousAt ? Math.max(0, receivedAt.getTime() - previousAt) : null;
+                        const plausibleTravel = elapsedMs == null || isPlausibleTravel(distMeters, elapsedMs);
+                        const canCountForFare = locationValidation.isAccurateForFare && plausibleTravel;
 
-                        // Filtro de Precisão (GPS accuracy filter)
-                        // Ignore jumps > 2000m (2km) - likely a glitch
-                        // Ignore jumps < 5m - likely standing still and GPS drifting
-                        if (distMeters > 5 && distMeters < 2000) {
+                        // Só pontos precisos e fisicamente plausíveis entram no preço.
+                        // O ponto ainda é salvo abaixo quando rejeitado para que o GPS
+                        // possa se recuperar sem reaproveitar o salto no próximo ciclo.
+                        if (distMeters > 5 && distMeters < 2000 && canCountForFare) {
                             // Compare-and-swap (auditoria de integração, 2026-08-06): antes
                             // era findOne acima + findByIdAndUpdate aqui, sem atomicidade.
                             // Dois updates de localização quase simultâneos liam o MESMO
@@ -329,41 +341,59 @@ function initializeSocket(server) {
                                 },
                                 {
                                     $inc: { actualDistance: distMeters },
-                                    $set: { lastLocation: { lat: location.ltd, lng: location.lng } },
+                                    $set: {
+                                        lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
+                                        lastLocationAt: receivedAt,
+                                    },
                                 },
                                 { new: true, projection: { actualDistance: 1 } }
                             );
                             if (applied) {
                                 currentDistance = applied.actualDistance;
                             }
+                        } else {
+                            await rideModel.findOneAndUpdate(
+                                {
+                                    _id: ride._id,
+                                    'lastLocation.lat': ride.lastLocation.lat,
+                                    'lastLocation.lng': ride.lastLocation.lng,
+                                },
+                                {
+                                    $set: {
+                                        lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
+                                        lastLocationAt: receivedAt,
+                                    },
+                                }
+                            );
                         }
                     } else {
                         // First time saving location after ride started
                         await rideModel.findByIdAndUpdate(ride._id, {
-                            lastLocation: { lat: location.ltd, lng: location.lng }
+                            lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
+                            lastLocationAt: receivedAt,
                         });
                     }
                 }
 
                 if (ride.user && ride.user.socketId) {
                     io.to(ride.user.socketId).emit('captain-location-updated', {
-                        ltd: location.ltd,
-                        lng: location.lng,
+                        ltd: captainLocation.lat,
+                        lng: captainLocation.lng,
                         actualDistance: currentDistance,
                         rideId: ride._id.toString(),
                     });
                 }
                 // Also send back to the captain's socket to update their local map in real time
                 socket.emit('captain-location-updated', {
-                    ltd: location.ltd,
-                    lng: location.lng,
+                    ltd: captainLocation.lat,
+                    lng: captainLocation.lng,
                     actualDistance: currentDistance,
                     rideId: ride._id.toString(),
                 });
             } else if (parcel) {
                 const locPayload = {
-                    ltd: location.ltd,
-                    lng: location.lng,
+                    ltd: captainLocation.lat,
+                    lng: captainLocation.lng,
                     parcelId: parcel._id.toString(),
                     subjectType: 'parcel',
                 };
@@ -381,8 +411,8 @@ function initializeSocket(server) {
             const adminLast = captainDoc?.fullname?.lastname || '';
             io.to('admin_room').emit('admin-captain-location-updated', {
                 captainId: userId,
-                ltd: location.ltd,
-                lng: location.lng,
+                ltd: captainLocation.lat,
+                lng: captainLocation.lng,
                 name: `${adminFirst} ${adminLast}`.trim() || 'Motorista',
                 status: adminInRide ? 'in_ride' : 'available',
                 vehicle: captainDoc?.vehicle ? {
@@ -413,7 +443,7 @@ function initializeSocket(server) {
                 emitDriverMapUpdate(userId, {
                     busy: false,
                     vehicleType: captainDoc.vehicle?.vehicleType || 'car',
-                    location: { ltd: location.ltd, lng: location.lng }
+                    location: { ltd: captainLocation.lat, lng: captainLocation.lng }
                 });
             }
         });

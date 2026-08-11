@@ -8,6 +8,7 @@ const userModel = require('../models/user.model');
 const transactionModel = require('../models/transaction.model');
 const payoutModel = require('../models/payout.model');
 const walletModel = require('../models/wallet.model');
+const parcelModel = require('../models/parcel.model');
 const { deleteByPrefix } = require('../cache/cache');
 const { disconnectSocket } = require('../socket');
 const uploadService = require('./upload.service');
@@ -135,9 +136,27 @@ module.exports.getDashboardStats = async (period = 'today') => {
         prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate());
     }
 
-    // --- REVENUE ---
+    // --- OPERAÇÃO AGORA (auditoria de UX, 2026-08-10) — snapshot em tempo real,
+    // deliberadamente NÃO filtrado pelo período selecionado (mesmo raciocínio que já
+    // valia só pra motoristas: "corridas em andamento agora" não é uma métrica de
+    // "hoje" nem de "últimos 7 dias", é o estado atual do sistema).
+    const captainService = require('./captain.service');
+    const availability = captainService.availabilityFilter();
+    const { canReceiveRides, ...availabilityBase } = availability;
+
+    const totalCaptains = await captainModel.countDocuments();
+    const onlineCaptains = await captainModel.countDocuments(availabilityBase);
+    const availableCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: true });
+    const inRideCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: false });
+    const offlineCaptains = totalCaptains - onlineCaptains;
+
+    const ridesOngoing = await rideModel.countDocuments({ status: { $in: ONGOING_RIDE_STATUSES } });
+    const parcelsOngoing = await parcelModel.countDocuments({ status: { $in: ONGOING_PARCEL_STATUSES } });
+
+    // --- HOJE (respeitando o período selecionado) — receita e comissão agora somam
+    // corrida + encomenda; antes o dashboard não consultava encomenda nenhuma vez.
     const getRevenueStats = async (start, end) => {
-        const agg = await rideModel.aggregate([
+        const [rideAgg] = await rideModel.aggregate([
             { $match: { createdAt: { $gte: start, $lte: end }, status: 'finished' } },
             { $group: {
                 _id: null,
@@ -147,21 +166,28 @@ module.exports.getDashboardStats = async (period = 'today') => {
                 totalDistance: { $sum: '$distance' }
             }}
         ]);
-        const data = agg[0] || { gross: 0, commission: 0, count: 0, totalDistance: 0 };
+        const [parcelAgg] = await parcelModel.aggregate([
+            { $match: { createdAt: { $gte: start, $lte: end }, status: 'finished' } },
+            { $group: { _id: null, gross: { $sum: '$fare' }, commission: { $sum: '$commissionAmount' }, count: { $sum: 1 } } }
+        ]);
+        const ride = rideAgg || { gross: 0, commission: 0, count: 0, totalDistance: 0 };
+        const parcel = parcelAgg || { gross: 0, commission: 0, count: 0 };
+        const gross = (ride.gross || 0) + (parcel.gross || 0);
+        const commission = (ride.commission || 0) + (parcel.commission || 0);
         return {
-            gross: data.gross,
-            commission: data.commission,
-            payout: data.gross - data.commission,
-            avgTicket: data.count > 0 ? data.gross / data.count : 0,
-            avgPerKm: data.totalDistance > 0 ? data.gross / (data.totalDistance / 1000) : 0,
-            ridesCount: data.count
+            gross,
+            commission,
+            payout: gross - commission,
+            avgTicket: ride.count > 0 ? ride.gross / ride.count : 0,
+            avgPerKm: ride.totalDistance > 0 ? ride.gross / (ride.totalDistance / 1000) : 0,
+            ridesCount: ride.count,
+            parcelsCount: parcel.count
         };
     };
 
     const currentRevenue = await getRevenueStats(currentStart, currentEnd);
     const prevRevenue = await getRevenueStats(prevStart, prevEnd);
 
-    // --- RIDES ---
     const getRidesStats = async (start, end) => {
         const total = await rideModel.countDocuments({ createdAt: { $gte: start, $lte: end } });
         const finished = await rideModel.countDocuments({ createdAt: { $gte: start, $lte: end }, status: 'finished' });
@@ -172,21 +198,15 @@ module.exports.getDashboardStats = async (period = 'today') => {
     const currentRides = await getRidesStats(currentStart, currentEnd);
     const prevRides = await getRidesStats(prevStart, prevEnd);
 
-    // --- CAPTAINS (Snapshot current state) ---
-    // Separação disponibilidade x conexão (2026-08-03): "online" aqui usa a MESMA
-    // definição do despacho (captainService.availabilityFilter) — inclusive o TTL de
-    // lastSeenAt. Sem isso, um motorista que ficou online e fechou o app há dias
-    // apareceria como online no painel para sempre, já que `isOnline` não é mais
-    // zerado no disconnect.
-    const captainService = require('./captain.service');
-    const availability = captainService.availabilityFilter();
-    const { canReceiveRides, ...availabilityBase } = availability;
+    const getParcelsStats = async (start, end) => {
+        const total = await parcelModel.countDocuments({ createdAt: { $gte: start, $lte: end } });
+        const finished = await parcelModel.countDocuments({ createdAt: { $gte: start, $lte: end }, status: 'finished' });
+        const cancelled = await parcelModel.countDocuments({ createdAt: { $gte: start, $lte: end }, status: 'cancelled' });
+        return { total, finished, cancelled };
+    };
 
-    const totalCaptains = await captainModel.countDocuments();
-    const onlineCaptains = await captainModel.countDocuments(availabilityBase);
-    const availableCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: true });
-    const inRideCaptains = await captainModel.countDocuments({ ...availabilityBase, canReceiveRides: false });
-    const offlineCaptains = totalCaptains - onlineCaptains;
+    const currentParcels = await getParcelsStats(currentStart, currentEnd);
+    const prevParcels = await getParcelsStats(prevStart, prevEnd);
 
     // --- QUALITY ---
     const getQualityStats = async (start, end) => {
@@ -206,23 +226,43 @@ module.exports.getDashboardStats = async (period = 'today') => {
     const currentQuality = await getQualityStats(currentStart, currentEnd);
     const prevQuality = await getQualityStats(prevStart, prevEnd);
 
-    // --- ALERTS ---
-    const alerts = [];
+    // --- ATENÇÃO (auditoria de UX, 2026-08-10) — antes era um array de strings soltas
+    // sem link nem severidade; o card não tinha CTA nenhum, os 3 sinais tinham urgência
+    // diferente mas apareciam idênticos. Estrutura objeto = clicável e ordenável.
+    const attention = [];
     const pendingApprovalCaptains = await captainModel.countDocuments({ approvalStatus: 'em_analise' });
     if (pendingApprovalCaptains > 0) {
-        alerts.push(`🔴 ${pendingApprovalCaptains} motoristas aguardando aprovação`);
+        attention.push({
+            id: 'pending_approval',
+            severity: 'critical',
+            count: pendingApprovalCaptains,
+            message: `${pendingApprovalCaptains} motorista(s) aguardando aprovação`,
+            link: '/captains?approvalStatus=em_analise',
+        });
     }
 
     const pendingPayouts = await payoutModel.countDocuments({ status: 'processing' });
     if (pendingPayouts > 0) {
-        alerts.push(`🔴 ${pendingPayouts} pagamentos pendentes para motoristas`);
+        attention.push({
+            id: 'pending_payouts',
+            severity: 'critical',
+            count: pendingPayouts,
+            message: `${pendingPayouts} repasse(s) aguardando confirmação de pagamento`,
+            link: '/finance?status=processing',
+        });
     }
 
     // Rides waiting for driver for more than 3 minutes
     const threeMinsAgo = new Date(Date.now() - 3 * 60000);
     const stuckRides = await rideModel.countDocuments({ status: 'requested', createdAt: { $lte: threeMinsAgo } });
     if (stuckRides > 0) {
-        alerts.push(`🟡 ${stuckRides} corridas aguardando motorista há mais de 3 minutos`);
+        attention.push({
+            id: 'stuck_rides',
+            severity: 'warning',
+            count: stuckRides,
+            message: `${stuckRides} corrida(s) aguardando motorista há mais de 3 minutos`,
+            link: '/rides?status=requested',
+        });
     }
 
     // --- RANKING ---
@@ -254,26 +294,36 @@ module.exports.getDashboardStats = async (period = 'today') => {
             current: { start: currentStart, end: currentEnd },
             prev: { start: prevStart, end: prevEnd }
         },
-        summary: {},
+        // "Como está a operação agora?" — snapshot, ignora o período selecionado.
+        operation: {
+            captainsTotal: totalCaptains,
+            captainsOnline: onlineCaptains,
+            captainsAvailable: availableCaptains,
+            captainsInRide: inRideCaptains,
+            captainsOffline: offlineCaptains,
+            ridesOngoing,
+            parcelsOngoing,
+        },
         revenue: {
             current: currentRevenue,
             prev: prevRevenue
-        },
-        captains: {
-            current: { total: totalCaptains, online: onlineCaptains, available: availableCaptains, inRide: inRideCaptains, offline: offlineCaptains }
         },
         rides: {
             current: currentRides,
             prev: prevRides
         },
+        parcels: {
+            current: currentParcels,
+            prev: prevParcels
+        },
         quality: {
             current: currentQuality,
             prev: prevQuality
         },
-        alerts: alerts,
-        ranking: ranking,
-        system: {},
-        charts: {}
+        // "O que precisa da minha atenção?"
+        attention,
+        // "Como foi o desempenho?" (top motoristas do período)
+        ranking,
     };
 };
 
@@ -414,6 +464,12 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
 
     let updatedCount = 0;
     
+    // Auditoria de UX/produção (2026-08-10): o log era gravado UMA vez pra ação
+    // inteira, sem targetId (diferente do toggleUserBlock individual, que grava
+    // targetId: user._id). getUserDetails filtra o histórico de um usuário por
+    // targetId (admin.service.js, ~linha 402) — um usuário bloqueado em lote nunca
+    // aparecia no próprio histórico de auditoria. Agora grava um log por usuário,
+    // igual ao fluxo individual, mantendo o mesmo motivo pra todos.
     if (actionType === 'block') {
         const result = await userModel.updateMany(
             { _id: { $in: userIds } },
@@ -424,14 +480,15 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
         // sem isso, cada usuário bloqueado em lote continuaria autenticando por até 10min.
         userIds.forEach(id => deleteByPrefix(`profile:user:${id}`));
 
-        await module.exports.logAction({
+        await Promise.all(userIds.map((id) => module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
             action: 'bulk_block_users',
+            targetId: id.toString(),
             targetModel: 'User',
-            reason: `Bloqueio em lote de ${updatedCount} passageiros. Motivo: ${reason}`,
+            reason: `Bloqueio em lote (${updatedCount} passageiros). Motivo: ${reason}`,
             ipAddress: ip || '0.0.0.0'
-        });
+        })));
     } else if (actionType === 'unblock') {
         const result = await userModel.updateMany(
             { _id: { $in: userIds } },
@@ -440,14 +497,15 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
         updatedCount = result.modifiedCount;
         userIds.forEach(id => deleteByPrefix(`profile:user:${id}`));
 
-        await module.exports.logAction({
+        await Promise.all(userIds.map((id) => module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
             action: 'bulk_unblock_users',
+            targetId: id.toString(),
             targetModel: 'User',
-            reason: `Desbloqueio em lote de ${updatedCount} passageiros. Motivo: ${reason}`,
+            reason: `Desbloqueio em lote (${updatedCount} passageiros). Motivo: ${reason}`,
             ipAddress: ip || '0.0.0.0'
-        });
+        })));
     }
 
     return { success: true, updatedCount };
@@ -503,13 +561,18 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
     const skip = (page - 1) * limit;
     const query = {};
 
-    if (search) {
-        query.$or = [
-            { 'fullname.firstname': { $regex: search, $options: 'i' } },
-            { email: { $regex: search, $options: 'i' } },
-            { 'vehicle.plate': { $regex: search, $options: 'i' } }
-        ];
-    }
+    // Auditoria de UX (2026-08-10): busca só cobria firstname/email/placa — sobrenome e
+    // telefone nunca batiam, apesar do placeholder "Buscar (Nome, Email, Placa)" sugerir
+    // que cobriam qualquer campo de nome. Guardado à parte (searchOr) porque o filtro de
+    // disponibilidade "offline" abaixo também precisa de um $or — dois $or no mesmo
+    // objeto de query se sobrescreveriam; combinados via $and quando os dois existem.
+    const searchOr = search ? [
+        { 'fullname.firstname': { $regex: search, $options: 'i' } },
+        { 'fullname.lastname': { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { 'vehicle.plate': { $regex: search, $options: 'i' } }
+    ] : null;
 
     if (filters.status) query.status = filters.status;
     if (filters.approvalStatus) query.approvalStatus = filters.approvalStatus;
@@ -518,30 +581,64 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
     if (filters.isOnline === 'false') query.isOnline = false;
     if (filters.isBlocked === 'true') query.isBlocked = true;
     if (filters.isBlocked === 'false') query.isBlocked = false;
-    
+
+    // Mesma definição de disponibilidade usada pelo despacho — ver comentário em
+    // getDashboardStats acima. Filtro por disponibilidade não existia antes (auditoria
+    // de UX, 2026-08-10) — o card "Em Corrida" da tela não tinha nenhum jeito de
+    // efetivamente filtrar a lista.
+    const captainServiceForFilter = require('./captain.service');
+    const { canReceiveRides: _ignoredForFilter, ...availabilityBaseForFilter } = captainServiceForFilter.availabilityFilter();
+    let offlineOr = null;
+    if (filters.operationalStatus === 'available') {
+        Object.assign(query, availabilityBaseForFilter, { canReceiveRides: { $ne: false } });
+    } else if (filters.operationalStatus === 'in_ride') {
+        Object.assign(query, availabilityBaseForFilter, { canReceiveRides: false });
+    } else if (filters.operationalStatus === 'offline') {
+        const ttlCutoff = new Date(Date.now() - captainServiceForFilter.AVAILABILITY_TTL_MINUTES * 60 * 1000);
+        offlineOr = [{ isOnline: false }, { lastSeenAt: { $lt: ttlCutoff } }];
+    }
+
+    if (searchOr && offlineOr) {
+        query.$and = [{ $or: searchOr }, { $or: offlineOr }];
+    } else if (searchOr) {
+        query.$or = searchOr;
+    } else if (offlineOr) {
+        query.$or = offlineOr;
+    }
+
     // Don't select the heavy 'documents' object
-    const captains = await captainModel.find(query)
+    const captainsRaw = await captainModel.find(query)
         .select('-documents')
         .skip(skip).limit(limit).sort({ createdAt: -1 });
-        
-    const total = await captainModel.countDocuments(query);
-    
-    // Summary aggregation
-    // Mesma definição de disponibilidade usada pelo despacho — ver comentário em
-    // getDashboardStats acima.
-    const captainServiceForCounts = require('./captain.service');
-    const { canReceiveRides: _ignored, ...availabilityForCounts } = captainServiceForCounts.availabilityFilter();
 
+    const total = await captainModel.countDocuments(query);
+
+    // Status OPERACIONAL por linha (online/disponível/em corrida/offline) — antes só
+    // existia um pontinho verde/cinza sem rótulo, sem distinguir "disponível" de "em
+    // corrida" (os dois são "online"). Não confundir com approvalStatus (status DA
+    // CONTA), que é outro campo.
+    const ttlMs = captainServiceForFilter.AVAILABILITY_TTL_MINUTES * 60 * 1000;
+    const captains = captainsRaw.map((c) => {
+        const obj = c.toObject();
+        const isFresh = obj.lastSeenAt && (Date.now() - new Date(obj.lastSeenAt).getTime()) <= ttlMs;
+        let operationalStatus = 'offline';
+        if (obj.isOnline && isFresh) {
+            operationalStatus = obj.canReceiveRides === false ? 'in_ride' : 'available';
+        }
+        return { ...obj, operationalStatus };
+    });
+
+    // Summary aggregation
     const totalCaptains = await captainModel.countDocuments();
-    const online = await captainModel.countDocuments(availabilityForCounts);
-    const inRide = await captainModel.countDocuments({ ...availabilityForCounts, canReceiveRides: false });
+    const online = await captainModel.countDocuments(availabilityBaseForFilter);
+    const inRide = await captainModel.countDocuments({ ...availabilityBaseForFilter, canReceiveRides: false });
     const blocked = await captainModel.countDocuments({ isBlocked: true });
     const inAnalysis = await captainModel.countDocuments({ approvalStatus: 'em_analise' });
     const offline = totalCaptains - online;
 
-    return { 
-        captains, 
-        total, 
+    return {
+        captains,
+        total,
         pages: Math.ceil(total / limit),
         summary: { total: totalCaptains, online, inRide, blocked, inAnalysis, offline }
     };
@@ -679,7 +776,14 @@ module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, 
 // Mesmo hash usado no cadastro (captainModel.hashPassword). Revoga todas as sessões
 // ativas depois de trocar — mesmo motivo do bloqueio: se a senha antiga vazou, um
 // token de refresh já emitido não deveria continuar valendo.
-module.exports.resetCaptainPassword = async (captainId, newPassword, admin, ip) => {
+module.exports.resetCaptainPassword = async (captainId, newPassword, admin, reason, ip) => {
+    // Auditoria de UX (2026-08-10): bloqueio já exige motivo obrigatório, mas o reset de
+    // senha — ação tão ou mais sensível — só gravava um texto fixo no log, sem contexto
+    // real de por que foi feito. Alinhado ao mesmo padrão de toggleCaptainBlock.
+    if (!reason?.trim()) {
+        throw Object.assign(new Error('O motivo é obrigatório'), { statusCode: 400 });
+    }
+
     const captain = await captainModel.findById(captainId);
     if (!captain) {
         throw Object.assign(new Error('Motorista não encontrado'), { statusCode: 404 });
@@ -693,14 +797,14 @@ module.exports.resetCaptainPassword = async (captainId, newPassword, admin, ip) 
     const authService = require('./auth.service');
     await authService.revokeAllForUser({ userId: captainId, userType: 'captain', reason: 'password_reset' });
 
-    // Nunca logar a senha em si — só o fato de que foi redefinida.
+    // Nunca logar a senha em si — só o fato de que foi redefinida, e o motivo real.
     await module.exports.logAction({
         adminId: admin._id,
         adminName: admin.name,
         action: 'reset_captain_password',
         targetId: captain._id.toString(),
         targetModel: 'Captain',
-        reason: 'Redefinição de senha pelo admin',
+        reason: reason.trim(),
         ipAddress: ip || '0.0.0.0',
     });
 
@@ -908,21 +1012,28 @@ module.exports.getCaptainRecentRides = async (captainId) => {
 };
 
 module.exports.getCaptainWallet = async (captainId) => {
-    const captain = await captainModel.findById(captainId).select('earnings');
-    
-    // Fetch last 10 transactions
+    // Bug de UX (auditoria 2026-08-10): esta leitura usava captain.earnings (contador
+    // vitalício de faturamento) e devolvia pending/commissions/lastRecharge fixos —
+    // sempre zero/data de hoje. adjustCaptainWallet já grava no lugar certo
+    // (wallet.creditBalance, via walletService), mas essa função nunca lia de lá: o
+    // card "Saldo Atual" mostrava um número, e depois de um ajuste manual mostrava
+    // outro, pra mesma pessoa. Agora lê a mesma fonte real usada no ajuste e nos
+    // detalhes de repasse (getPayoutDetails).
+    const wallet = await walletModel.findOne({ captainId });
+
     const transactions = await transactionModel.find({ captainId })
         .sort({ createdAt: -1 })
         .limit(10);
-        
-    const wallet = {
-        balance: captain.earnings || 0,
-        pending: 0,
-        commissions: 0,
-        lastRecharge: new Date().toISOString(),
+
+    const lastRechargeTx = await transactionModel.findOne({ captainId, type: 'recharge' }).sort({ createdAt: -1 });
+
+    return {
+        balance: wallet?.creditBalance || 0,
+        pending: wallet?.pendingBalance || 0,
+        commissions: wallet?.totalCommissionPaid || 0,
+        lastRecharge: lastRechargeTx?.createdAt || null,
         transactions
     };
-    return wallet;
 };
 
 module.exports.adjustCaptainWallet = async (captainId, amount, type, reason, admin, ip) => {
@@ -979,34 +1090,126 @@ module.exports.getCaptainTimeline = async (captainId) => {
 };
 
 const ONGOING_RIDE_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'started', 'waiting_passenger'];
+// Mesmo agrupamento, mas pro model de encomenda (parcel.model.js:89-104) — usado no
+// dashboard pra "Encomendas em andamento" (auditoria de UX, 2026-08-10).
+const ONGOING_PARCEL_STATUSES = ['provider_accepted', 'going_to_pickup', 'arrived_pickup', 'collected', 'in_transit', 'arrived_destination'];
+
+// Tradução do filtro de status unificado (Todos/Aguardando/Em andamento/Concluída/
+// Cancelada) pros dois enums reais — corrida e encomenda têm valores literais
+// diferentes pro mesmo conceito (ex.: "aguardando" é 'requested' numa e
+// 'awaiting_provider' na outra). Rótulo exibido fica em statusDictionary.js no front.
+const RIDE_STATUS_FILTER_MAP = {
+    requested: 'requested',
+    ongoing: { $in: ONGOING_RIDE_STATUSES },
+    finished: 'finished',
+    cancelled: 'cancelled',
+    scheduled: 'scheduled',
+};
+const PARCEL_STATUS_FILTER_MAP = {
+    requested: 'awaiting_provider',
+    ongoing: { $in: ONGOING_PARCEL_STATUSES },
+    finished: 'finished',
+    cancelled: 'cancelled',
+    scheduled: 'scheduled',
+};
+
+// Formato comum pra lista unificada de /rides (auditoria de UX, 2026-08-10) — antes a
+// tela só listava corridas; encomendas ficavam isoladas em /parcels sem visão
+// conjunta. Campos que não existem num dos dois tipos ficam null/undefined, não
+// inventados.
+function normalizeRideForList(r) {
+    const obj = r.toObject ? r.toObject() : r;
+    return {
+        _id: obj._id,
+        serviceType: 'ride',
+        status: obj.status,
+        createdAt: obj.createdAt,
+        updatedAt: obj.updatedAt,
+        pickup: obj.pickup,
+        destination: obj.destination,
+        pickupCoordinates: obj.pickupCoordinates,
+        destinationCoordinates: obj.destinationCoordinates,
+        vehicleType: obj.vehicleType,
+        fare: obj.fare,
+        finalPrice: obj.finalPrice,
+        commissionAmount: obj.commissionAmount,
+        paymentMethod: obj.paymentMethod,
+        paymentStatus: obj.paymentStatus,
+        user: obj.user,
+        captain: obj.captain,
+        cancellationReason: obj.cancellationReason,
+        cancelledBy: obj.cancelledBy,
+        cancelledAt: obj.cancelledAt,
+        adminFinalization: obj.adminFinalization,
+        statusHistory: obj.statusHistory,
+    };
+}
+
+function normalizeParcelForList(p) {
+    const obj = p.toObject ? p.toObject() : p;
+    return {
+        _id: obj._id,
+        serviceType: 'parcel',
+        status: obj.status,
+        createdAt: obj.createdAt,
+        updatedAt: obj.updatedAt,
+        pickup: obj.pickup,
+        destination: obj.destination,
+        pickupCoordinates: obj.pickupCoordinates,
+        destinationCoordinates: obj.destinationCoordinates,
+        vehicleType: obj.vehicleType,
+        fare: obj.fare,
+        finalPrice: null,
+        commissionAmount: obj.commissionAmount,
+        paymentMethod: obj.paymentMethod,
+        paymentStatus: obj.paymentStatus,
+        user: obj.user,
+        captain: obj.captain,
+        cancellationReason: obj.cancellationReason,
+        cancelledBy: obj.cancelledBy,
+        cancelledAt: obj.cancelledAt,
+        statusHistory: obj.statusHistory,
+        itemName: obj.itemName,
+        category: obj.category,
+        weightKg: obj.weightKg,
+        size: obj.size,
+        sender: obj.sender,
+        recipient: obj.recipient,
+        deliveryPin: undefined, // nunca expor o PIN pro painel admin
+    };
+}
 
 module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}) => {
-    const skip = (page - 1) * limit;
-    const query = {};
+    const type = filters.type === 'ride' || filters.type === 'parcel' ? filters.type : undefined;
 
-    // Search by text (passenger or driver name, or status)
-    if (search) {
-        // To search by user/captain name in MongoDB we'd typically need aggregation or text search.
-        // For simplicity in find(), we can search string fields or status.
-        // A more advanced approach would use $lookup in aggregation.
-        // For now, we search by status or orderId if available.
-        query.$or = [
-            { status: { $regex: search, $options: 'i' } }
-        ];
+    const rideQuery = {};
+    const parcelQuery = {};
+
+    // Busca por ID exato, ou por nome de passageiro/motorista (auditoria de UX,
+    // 2026-08-10) — antes só filtrava por status; o placeholder prometia "ID, Status,
+    // Nome" mas nome e ID nunca batiam de fato.
+    const searchIsObjectId = !!search && mongoose.Types.ObjectId.isValid(search) && String(new mongoose.Types.ObjectId(search)) === search;
+    if (search && searchIsObjectId) {
+        rideQuery._id = search;
+        parcelQuery._id = search;
+    } else if (search) {
+        const [matchedUsers, matchedCaptains] = await Promise.all([
+            userModel.find({ 'fullname.firstname': { $regex: search, $options: 'i' } }).select('_id').limit(50),
+            captainModel.find({ 'fullname.firstname': { $regex: search, $options: 'i' } }).select('_id').limit(50),
+        ]);
+        const or = [{ status: { $regex: search, $options: 'i' } }];
+        if (matchedUsers.length) or.push({ user: { $in: matchedUsers.map((u) => u._id) } });
+        if (matchedCaptains.length) or.push({ captain: { $in: matchedCaptains.map((c) => c._id) } });
+        rideQuery.$or = or;
+        parcelQuery.$or = or;
     }
 
-    if (filters.status === 'ongoing') {
-        // "Em andamento" cobre toda corrida em curso, não só o status
-        // literal "accepted" — senão ela some da lista filtrada assim que
-        // o motorista avança pra going_to_pickup/arrived/started, mesmo
-        // ainda contando como "em andamento" no card de estatística.
-        query.status = { $in: ONGOING_RIDE_STATUSES };
-    } else if (filters.status) {
-        query.status = filters.status;
-    }
-    if (filters.vehicleType) query.vehicleType = filters.vehicleType;
-    if (filters.paymentMethod) query.paymentMethod = filters.paymentMethod;
-    
+    if (filters.status && RIDE_STATUS_FILTER_MAP[filters.status] !== undefined) rideQuery.status = RIDE_STATUS_FILTER_MAP[filters.status];
+    if (filters.status && PARCEL_STATUS_FILTER_MAP[filters.status] !== undefined) parcelQuery.status = PARCEL_STATUS_FILTER_MAP[filters.status];
+
+    if (filters.vehicleType) { rideQuery.vehicleType = filters.vehicleType; parcelQuery.vehicleType = filters.vehicleType; }
+    if (filters.paymentMethod) { rideQuery.paymentMethod = filters.paymentMethod; parcelQuery.paymentMethod = filters.paymentMethod; }
+
     if (filters.period && filters.period !== 'all') {
         const now = new Date();
         let startDate;
@@ -1020,27 +1223,67 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
             startDate.setDate(now.getDate() - 30);
         }
         if (startDate) {
-            query.createdAt = { $gte: startDate };
+            rideQuery.createdAt = { $gte: startDate };
+            parcelQuery.createdAt = { $gte: startDate };
         }
     }
 
-    const rides = await rideModel.find(query)
-        .populate('user', 'fullname email phone')
-        .populate('captain', 'fullname email phone vehicle rating')
-        .skip(skip).limit(limit).sort({ createdAt: -1 });
-    
-    const total = await rideModel.countDocuments(query);
-    
-    // Totalizers for the summary block
-    const baseDateQuery = query.createdAt ? { createdAt: query.createdAt } : {};
-    const requested = await rideModel.countDocuments({ ...baseDateQuery, status: 'requested' });
-    const ongoing = await rideModel.countDocuments({ ...baseDateQuery, status: { $in: ONGOING_RIDE_STATUSES } });
-    const finished = await rideModel.countDocuments({ ...baseDateQuery, status: 'finished' });
-    const cancelled = await rideModel.countDocuments({ ...baseDateQuery, status: 'cancelled' });
+    // Busca o topo (page*limit) de cada fonte e faz o merge em memória — garante a
+    // página correta mesmo com volumes bem diferentes de corrida vs. encomenda
+    // (k-way merge do "top N" de cada lado), sem a complexidade de harmonizar os dois
+    // schemas num único $unionWith.
+    const fetchCount = page * limit;
+    const [rawRides, rawParcels] = await Promise.all([
+        type === 'parcel' ? Promise.resolve([]) : rideModel.find(rideQuery)
+            .populate('user', 'fullname email phone')
+            .populate('captain', 'fullname email phone vehicle rating')
+            .sort({ createdAt: -1 }).limit(fetchCount),
+        type === 'ride' ? Promise.resolve([]) : parcelModel.find(parcelQuery)
+            .populate('user', 'fullname email phone')
+            .populate('captain', 'fullname email phone vehicle rating')
+            .sort({ createdAt: -1 }).limit(fetchCount),
+    ]);
 
-    return { 
-        rides, 
-        total, 
+    const merged = [
+        ...rawRides.map(normalizeRideForList),
+        ...rawParcels.map(normalizeParcelForList),
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const skip = (page - 1) * limit;
+    const rides = merged.slice(skip, skip + limit);
+
+    const [totalRides, totalParcels] = await Promise.all([
+        type === 'parcel' ? 0 : rideModel.countDocuments(rideQuery),
+        type === 'ride' ? 0 : parcelModel.countDocuments(parcelQuery),
+    ]);
+    const total = totalRides + totalParcels;
+
+    // Totalizers for the summary block — mesmos filtros de busca/data/veículo/
+    // pagamento, mas SEM o de status (senão o resumo bateria 100% com o filtro ativo
+    // e perderia utilidade como visão geral).
+    const baseRideQuery = { ...rideQuery };
+    delete baseRideQuery.status;
+    const baseParcelQuery = { ...parcelQuery };
+    delete baseParcelQuery.status;
+
+    const [reqR, reqP, ongR, ongP, finR, finP, canR, canP] = await Promise.all([
+        type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'requested' }),
+        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'awaiting_provider' }),
+        type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: { $in: ONGOING_RIDE_STATUSES } }),
+        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: { $in: ONGOING_PARCEL_STATUSES } }),
+        type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'finished' }),
+        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'finished' }),
+        type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'cancelled' }),
+        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'cancelled' }),
+    ]);
+    const requested = reqR + reqP;
+    const ongoing = ongR + ongP;
+    const finished = finR + finP;
+    const cancelled = canR + canP;
+
+    return {
+        rides,
+        total,
         pages: Math.ceil(total / limit),
         summary: {
             requested,
@@ -1136,15 +1379,28 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) 
     let updatedCount = 0;
     
     if (actionType === 'cancel') {
-        const affectedCaptainIds = await rideModel.distinct('captain', {
+        const affectedRideIds = await rideModel.distinct('_id', {
             _id: { $in: rideIds },
-            status: { $nin: ['finished', 'cancelled'] },
+            status: { $nin: ['finished', 'cancelled'] }
+        });
+        const affectedCaptainIds = await rideModel.distinct('captain', {
+            _id: { $in: affectedRideIds },
             captain: { $ne: null }
         });
 
+        // Auditoria de UX/produção (2026-08-10): alinhado ao cancelamento individual
+        // (cancelRide, acima) — antes só setava status+observation; sem
+        // cancellationReason/cancelledBy/cancelledAt, o bloco RESUMO/STATUS do drawer
+        // de corrida não mostrava motivo nenhum pras corridas canceladas em lote.
         const result = await rideModel.updateMany(
-            { _id: { $in: rideIds }, status: { $nin: ['finished', 'cancelled'] } },
-            { $set: { status: 'cancelled', observation: reason } }
+            { _id: { $in: affectedRideIds } },
+            { $set: {
+                status: 'cancelled',
+                observation: reason,
+                cancelledBy: 'admin',
+                cancelledAt: new Date(),
+                cancellationReason: reason || 'Cancelada pelo painel admin (lote)',
+            } }
         );
         updatedCount = result.modifiedCount;
 
@@ -1155,14 +1411,18 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) 
             dispatchService.releaseCaptainBusyLockIfIdle(captainId).catch(console.error);
         });
 
-        await module.exports.logAction({
+        // Mesmo motivo do bulkActionUsers, acima: log por corrida (com targetId), não
+        // um único log solto sem alvo — senão a corrida nunca aparece no seu próprio
+        // bloco de Auditoria (getRideTimeline).
+        await Promise.all(affectedRideIds.map((id) => module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
             action: 'bulk_cancel_rides',
+            targetId: id.toString(),
             targetModel: 'Ride',
-            reason: `Cancelamento em lote de ${updatedCount} corridas. Motivo: ${reason}`,
+            reason: `Cancelamento em lote (${updatedCount} corridas). Motivo: ${reason}`,
             ipAddress: ip || '0.0.0.0'
-        });
+        })));
     }
 
     return { success: true, updatedCount };
@@ -1528,29 +1788,23 @@ module.exports.bulkApprovePayouts = async (payoutIds, admin, ip) => {
     return { success: true, approvedCount, totalRequested: payoutIds.length };
 };
 
-module.exports.getCaptainFinancialHistory = async (captainId) => {
-    // Simulated financial history
-    // We fetch recent rides and recent payouts to interleave them
-    const rides = await rideModel.find({ captain: captainId, status: 'finished' })
-        .sort({ createdAt: -1 }).limit(10).select('createdAt fare finalPrice commissionAmount');
-
-    const payouts = await payoutModel.find({ captainId, status: 'paid' })
-        .sort({ createdAt: -1 }).limit(10).select('paidAt amount');
-
-    const history = [];
-    rides.forEach(r => {
-        // Corrida finalizada: valor real cobrado é finalPrice (recalculado no fim da
-        // corrida), nunca a estimativa congelada em `fare` na criação — mesmo bug do
-        // histórico do passageiro, aqui no ledger financeiro do motorista no admin.
-        history.push({ type: 'ride', date: r.createdAt, amount: r.finalPrice ?? r.fare, commission: r.commissionAmount, label: 'Corrida' });
-    });
-    payouts.forEach(p => {
-        history.push({ type: 'payout', date: p.paidAt, amount: -p.amount, label: 'Saque/Repasse' });
-    });
-    
-    history.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-    return history.slice(0, 20);
+// Auditoria de UX (2026-08-10): comentário original era "Simulated financial
+// history" — interlaçava rideModel/payoutModel direto, nunca consultava
+// transactionModel (fonte real de todo movimento de saldo, incluindo recarga,
+// ajuste manual, bônus, que simplesmente não apareciam aqui). Ledger real, com o
+// mesmo campo balanceBefore/balanceAfter já gravado em cada lançamento. Já reflete
+// o valor final da corrida (não a estimativa): o lançamento 'ride_payment' é criado
+// em confirmRidePayment com finalFare = claimed.finalPrice || claimed.fare
+// (ride.service.js), então não sofre do bug "histórico mostra estimativa" que a
+// versão anterior (baseada direto em rideModel.fare) tinha.
+module.exports.getCaptainFinancialHistory = async (captainId, page = 1, limit = 20) => {
+    const skip = (page - 1) * limit;
+    const query = { captainId };
+    const [transactions, total] = await Promise.all([
+        transactionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+        transactionModel.countDocuments(query),
+    ]);
+    return { transactions, total, pages: Math.ceil(total / limit) };
 };
 
 const tariffSettingModel = require('../models/tariffSetting.model');
@@ -1743,11 +1997,31 @@ module.exports.updateVehicleCategory = async (id, data) => {
 
     const nextPricing = data.pricing !== undefined ? data.pricing : oldCategory.pricing;
     const nextIsActive = data.isActive !== undefined ? data.isActive : oldCategory.isActive;
+
+    // Bug de integridade de dado (auditoria de UX/produção, 2026-08-10): baseFare/
+    // perKmRate/perMinuteRate/minFare no nível raiz e pricing.{baseFare,perKm,
+    // perMinute,minimumFare} são dois lugares pro MESMO valor. O formulário do painel
+    // só edita pricing.* (Tariffs.jsx registra só campos pricing.*); os campos de
+    // topo nunca vinham no payload, então ficavam CONGELADOS no valor antigo a cada
+    // edição pela tela, enquanto pricing.* seguia mudando — a partir da primeira
+    // edição, os dois se descolavam pra sempre. Isso também fazia a validação abaixo
+    // (assertCategoryTariffValid) checar o valor ANTIGO em vez do valor novo
+    // realmente submetido. O motor de cobrança real já lê pricing.* com fallback pro
+    // campo de topo (pricingEngine.service.js), então a cobrança nunca esteve
+    // errada — mas qualquer leitura direta do campo de topo (ex.:
+    // TariffComparisonTable.jsx) via dado desatualizado. Agora os campos de topo são
+    // sempre sincronizados a partir de pricing.*, nunca mais congelam, e a validação
+    // usa o valor sincronizado (o que está sendo salvo de verdade).
+    const syncedBaseFare = nextPricing?.baseFare ?? (data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare);
+    const syncedPerKmRate = nextPricing?.perKm ?? (data.perKmRate !== undefined ? data.perKmRate : oldCategory.perKmRate);
+    const syncedPerMinuteRate = nextPricing?.perMinute ?? (data.perMinuteRate !== undefined ? data.perMinuteRate : oldCategory.perMinuteRate);
+    const syncedMinFare = nextPricing?.minimumFare ?? (data.minFare !== undefined ? data.minFare : oldCategory.minFare);
+
     assertCategoryTariffValid(nextPricing, {
-        baseFare: data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare,
-        perKmRate: data.perKmRate !== undefined ? data.perKmRate : oldCategory.perKmRate,
-        perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : oldCategory.perMinuteRate,
-        minFare: data.minFare !== undefined ? data.minFare : oldCategory.minFare,
+        baseFare: syncedBaseFare,
+        perKmRate: syncedPerKmRate,
+        perMinuteRate: syncedPerMinuteRate,
+        minFare: syncedMinFare,
     }, { activating: Boolean(nextIsActive) });
 
     // extrair campos permitidos
@@ -1758,10 +2032,10 @@ module.exports.updateVehicleCategory = async (id, data) => {
         luggageCapacity: data.luggageCapacity !== undefined ? data.luggageCapacity : oldCategory.luggageCapacity,
         iconKey: data.iconKey !== undefined ? data.iconKey : oldCategory.iconKey,
         sortOrder: data.sortOrder !== undefined ? data.sortOrder : oldCategory.sortOrder,
-        baseFare: data.baseFare !== undefined ? data.baseFare : oldCategory.baseFare,
-        perKmRate: data.perKmRate !== undefined ? data.perKmRate : oldCategory.perKmRate,
-        perMinuteRate: data.perMinuteRate !== undefined ? data.perMinuteRate : oldCategory.perMinuteRate,
-        minFare: data.minFare !== undefined ? data.minFare : oldCategory.minFare,
+        baseFare: syncedBaseFare,
+        perKmRate: syncedPerKmRate,
+        perMinuteRate: syncedPerMinuteRate,
+        minFare: syncedMinFare,
         dynamicMultiplier: data.dynamicMultiplier !== undefined ? data.dynamicMultiplier : oldCategory.dynamicMultiplier,
         rainFeeMultiplier: data.rainFeeMultiplier !== undefined ? data.rainFeeMultiplier : oldCategory.rainFeeMultiplier,
         isActive: nextIsActive,
@@ -1858,7 +2132,11 @@ module.exports.getLogs = async (page = 1, limit = 15, filters = {}) => {
     const query = {};
 
     if (filters.adminName) query.adminName = { $regex: filters.adminName, $options: 'i' };
-    if (filters.action) query.action = filters.action;
+    // Auditoria de UX/produção (2026-08-10): exact-match case-sensitive, diferente de
+    // adminName acima — os nomes de ação misturam convenções (snake_case minúsculo e
+    // SCREAMING_SNAKE_CASE, ex. MANUAL_WALLET_ADJUSTMENT), então digitar com a caixa
+    // errada não retornava nada, sem nenhum feedback de "por quê".
+    if (filters.action) query.action = { $regex: `^${filters.action}$`, $options: 'i' };
     if (filters.targetModel) query.targetModel = filters.targetModel;
     if (filters.targetId) query.targetId = filters.targetId;
     if (filters.startDate || filters.endDate) {
@@ -1870,6 +2148,15 @@ module.exports.getLogs = async (page = 1, limit = 15, filters = {}) => {
     const logs = await adminLogModel.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
     const total = await adminLogModel.countDocuments(query);
     return { logs, total, pages: Math.ceil(total / limit) };
+};
+
+// Bloco AUDITORIA do drawer de corrida (auditoria de UX, 2026-08-10) — mesmo padrão
+// de getCaptainTimeline: getLogs já suporta filtro por targetId+targetModel, só
+// faltava um endpoint expondo isso pra corrida (cancelamento/reatribuição/
+// finalização administrativa já geravam log, mas o admin não tinha como ver).
+module.exports.getRideTimeline = async (rideId) => {
+    const logs = await module.exports.getLogs(1, 50, { targetId: rideId.toString(), targetModel: 'Ride' });
+    return logs.logs;
 };
 
 

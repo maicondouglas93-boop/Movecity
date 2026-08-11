@@ -508,6 +508,23 @@ module.exports.endRide = async (req, res) => {
         }
         if (ride.user?._id) {
             notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+            if (ride.paymentStatus === 'paid') {
+                notificationService.sendToUser(
+                    ride.user._id,
+                    'Pagamento confirmado',
+                    'O pagamento pela carteira foi conciliado com sucesso.',
+                    'ADMIN',
+                    { rideId: ride._id.toString() }
+                ).catch(console.error);
+            } else if (ride.walletSettlementStatus === 'shortfall') {
+                notificationService.sendToUser(
+                    ride.user._id,
+                    'Saldo insuficiente na carteira',
+                    'O valor final da corrida excedeu o saldo reservado. Regularize o pagamento no app para concluir a corrida.',
+                    'ADMIN',
+                    { rideId: ride._id.toString(), amountDue: String(ride.walletShortfallAmount || 0) }
+                ).catch(console.error);
+            }
         }
 
         announceCaptainAvailable(req.captain, ride);
@@ -620,6 +637,9 @@ module.exports.confirmPaymentReceived = async (req, res) => {
         }
         if (err.message === 'Ride not finished yet') {
             return res.status(409).json({ message: 'Corrida ainda não foi finalizada.' });
+        }
+        if (err.code === 'WALLET_PAYMENT_IS_AUTOMATIC') {
+            return res.status(409).json({ message: 'Pagamento por carteira é confirmado automaticamente pela plataforma.' });
         }
         return res.status(500).json({ message: err.message });
     }

@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import {
-  X, User, MapPin, Calendar, CreditCard, Clock, Map,
-  AlertTriangle, Shield, CheckCircle, Ticket, Plus, Tag
+  X, User, MapPin, Calendar, CreditCard,
+  AlertTriangle, Shield, Plus, Tag
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import StatusBadge from './StatusBadge';
+import { RIDE_STATUS_COLORS, RIDE_STATUS_LABELS, statusColor, statusLabel } from '../utils/statusDictionary';
 
 export default function UserDrawer({ userId, isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -193,12 +195,11 @@ export default function UserDrawer({ userId, isOpen, onClose }) {
                     <div key={ride._id} className="bg-background rounded-lg p-4 border border-border space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-text-muted">{new Date(ride.createdAt).toLocaleString()}</span>
-                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-                          ride.status === 'finished' ? 'bg-success/20 text-success' :
-                          ride.status === 'cancelled' ? 'bg-danger/20 text-danger' : 'bg-warning/20 text-warning'
-                        }`}>
-                          {ride.status}
-                        </span>
+                        {/* Auditoria de UX/produção (2026-08-10): só tratava finished/
+                            cancelled; os outros 7 status do enum (ride.model.js:53)
+                            caíam no mesmo badge amarelo genérico com o texto cru em
+                            inglês. Dicionário compartilhado cobre os 9. */}
+                        <StatusBadge colorClass={statusColor(RIDE_STATUS_COLORS, ride.status)} label={statusLabel(RIDE_STATUS_LABELS, ride.status)} className="normal-case" />
                       </div>
                       
                       <div className="space-y-2 relative before:absolute before:inset-y-3 before:left-[7px] before:w-0.5 before:bg-border">

@@ -1,4 +1,5 @@
 const DriverAppVersion = require('../models/driverAppVersion.model');
+const DriverAppVersionHistory = require('../models/driverAppVersionHistory.model');
 
 const DEFAULTS = {
     version: '1.1.0',
@@ -81,9 +82,28 @@ module.exports.getPublic = async () => {
     return toPublicDTO(doc);
 };
 
-module.exports.update = async (payload = {}) => {
+module.exports.update = async (payload = {}, admin = null) => {
     const doc = await module.exports.getOrCreate();
     const next = { ...payload };
+
+    // Auditoria de UX/produção (2026-08-10): versionCode não era comparado com o
+    // valor atual — um admin podia publicar por engano um versionCode MENOR (ex.:
+    // copiar e colar valores de uma release antiga), o que quebra a lógica de
+    // comparação "há atualização?" do app motorista (appUpdate.logic.js compara
+    // versionCode instalado x publicado). Downgrade continua possível de propósito
+    // (reverter uma versão ruim), mas precisa ser um valor MAIOR que o já publicado,
+    // nunca menor — reverter republica a versão anterior com um versionCode novo.
+    if (next.versionCode !== undefined) {
+        const nextCode = Number(next.versionCode);
+        if (Number.isFinite(nextCode) && nextCode < doc.versionCode) {
+            const err = new Error(
+                `versionCode (${nextCode}) não pode ser menor que o já publicado (${doc.versionCode}). ` +
+                `Pra reverter uma versão com problema, publique a versão anterior com um versionCode maior que ${doc.versionCode}.`
+            );
+            err.statusCode = 400;
+            throw err;
+        }
+    }
 
     if (next.apkUrl !== undefined) {
         next.apkUrl = String(next.apkUrl || '').trim();
@@ -144,7 +164,29 @@ module.exports.update = async (payload = {}) => {
     });
 
     await doc.save();
+
+    // Snapshot do estado recém-publicado (não do anterior) — é o que "quem publicou
+    // essa versão" precisa responder; a versão anterior já está no snapshot de quando
+    // ELA foi publicada.
+    await DriverAppVersionHistory.create({
+        version: doc.version,
+        versionCode: doc.versionCode,
+        minimumVersion: doc.minimumVersion,
+        minimumVersionCode: doc.minimumVersionCode,
+        apkUrl: doc.apkUrl,
+        sha256: doc.sha256,
+        fileSize: doc.fileSize,
+        mandatory: doc.mandatory,
+        isActive: doc.isActive,
+        adminId: admin?._id,
+        adminName: admin?.name,
+    });
+
     return toPublicDTO(doc);
+};
+
+module.exports.getHistory = async (limit = 10) => {
+    return DriverAppVersionHistory.find().sort({ createdAt: -1 }).limit(limit).lean();
 };
 
 module.exports.toPublicDTO = toPublicDTO;

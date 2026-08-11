@@ -22,6 +22,19 @@ async function applyDueSchedules() {
                     throw new Error('Categoria não encontrada (pode ter sido removida)');
                 }
                 Object.assign(category, schedule.changes);
+                // Auditoria de UX/produção (2026-08-10): mesmo bug de integridade corrigido em
+                // admin.service.updateVehicleCategory (baseFare/perKmRate/perMinuteRate/minFare
+                // no nível raiz vs. os equivalentes em pricing.*), mas neste caminho — agendamentos
+                // criados pelo TariffSchedulerModal, ligado à página em 2026-08-10, sempre mandam
+                // só `pricing.*`. Sem isto, aplicar o agendamento descolaria os campos de topo pra
+                // sempre, do mesmo jeito que uma edição direta fazia antes do fix.
+                if (schedule.changes.pricing) {
+                    const p = category.pricing || {};
+                    if (p.baseFare !== undefined) category.baseFare = p.baseFare;
+                    if (p.perKm !== undefined) category.perKmRate = p.perKm;
+                    if (p.perMinute !== undefined) category.perMinuteRate = p.perMinute;
+                    if (p.minimumFare !== undefined) category.minFare = p.minimumFare;
+                }
                 await category.save();
                 // Auditoria de cache (2026-08-08, A3): sem isto, uma alteração agendada
                 // aplicada por este cron só valeria depois de até 10min de cache velho —

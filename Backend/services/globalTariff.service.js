@@ -57,6 +57,11 @@ module.exports.list = async () => {
     return items.map(toDTO);
 };
 
+module.exports.getById = async (id) => {
+    const doc = await GlobalTariff.findById(id);
+    return doc ? toDTO(doc) : null;
+};
+
 /** Lista leve para o PricingEngine (só ativas). */
 module.exports.listActiveForPricing = async () => {
     const items = await GlobalTariff.find({ active: true })

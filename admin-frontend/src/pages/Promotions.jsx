@@ -3,11 +3,35 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import api from '../services/api';
 import {
-  Gift, Tag, DollarSign, Users, MapPin, Clock, Calendar,
-  CheckCircle2, XCircle, Calculator, MoreVertical, Copy,
-  PauseCircle, PlayCircle, BarChart3, TrendingUp, Wallet
+  Gift, Tag, DollarSign, MapPin, Calculator, Copy,
+  PauseCircle, PlayCircle, BarChart3, Wallet, CheckCircle2
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { formatMoney } from '../utils/format';
+
+// Auditoria de UX/produção (2026-08-10) — status "efetivo" calculado pelo backend
+// (getPromotions) cobre também expired/exhausted, que não existem no enum
+// persistido (promotion.model.js:57) mas refletem a regra real de resgate.
+const PROMO_STATUS_LABELS = {
+  active: 'Ativa',
+  paused: 'Pausada',
+  draft: 'Rascunho',
+  scheduled: 'Agendada',
+  finished: 'Finalizada',
+  cancelled: 'Cancelada',
+  expired: 'Expirada',
+  exhausted: 'Orçamento esgotado',
+};
+const PROMO_STATUS_COLORS = {
+  active: 'bg-primary/10 text-primary border-primary/20',
+  paused: 'bg-warning/10 text-warning border-warning/20',
+  draft: 'bg-background text-text-muted border-border',
+  scheduled: 'bg-info/10 text-info border-info/20',
+  finished: 'bg-background text-text-muted border-border',
+  cancelled: 'bg-danger/10 text-danger border-danger/20',
+  expired: 'bg-danger/10 text-danger border-danger/20',
+  exhausted: 'bg-warning/10 text-warning border-warning/20',
+};
 
 export default function Promotions() {
   const [activeTab, setActiveTab] = useState('new');
@@ -324,27 +348,23 @@ export default function Promotions() {
 
       {activeTab === 'list' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          {/* Auditoria de UX/produção (2026-08-10): removido o card "Receita Estimada" —
+              somava metrics.revenueGenerated, campo que existe no schema mas nenhum
+              lugar do backend jamais escreve (sempre R$ 0,00, dado fantasma). */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-surface p-5 rounded-xl border border-border flex items-center gap-4">
               <div className="p-3 bg-primary/20 text-primary rounded-lg"><Tag className="w-6 h-6" /></div>
-              <div><p className="text-xs text-text-muted uppercase font-bold">Ativas</p><p className="text-2xl font-black">{promosData?.promotions?.filter(p => p.status === 'active').length || 0}</p></div>
+              <div><p className="text-xs text-text-muted uppercase font-bold">Ativas agora</p><p className="text-2xl font-black">{promosData?.promotions?.filter(p => p.effectiveStatus === 'active').length || 0}</p></div>
             </div>
             <div className="bg-surface p-5 rounded-xl border border-border flex items-center gap-4">
-              <div className="p-3 bg-success/20 text-success rounded-lg"><CheckCircle2 className="w-6 h-6" /></div>
+              <div className="p-3 bg-primary/20 text-primary rounded-lg"><CheckCircle2 className="w-6 h-6" /></div>
               <div><p className="text-xs text-text-muted uppercase font-bold">Resgates Totais</p><p className="text-2xl font-black">{promosData?.promotions?.reduce((acc, p) => acc + (p.metrics?.uses || 0), 0) || 0}</p></div>
             </div>
             <div className="bg-surface p-5 rounded-xl border border-border flex items-center gap-4">
               <div className="p-3 bg-danger/20 text-danger rounded-lg"><Wallet className="w-6 h-6" /></div>
               <div>
                 <p className="text-xs text-text-muted uppercase font-bold">Subsídio Gasto</p>
-                <p className="text-xl font-black">R$ {promosData?.promotions?.reduce((acc, p) => acc + (p.metrics?.totalDiscountGiven || 0), 0).toFixed(2) || '0.00'}</p>
-              </div>
-            </div>
-            <div className="bg-surface p-5 rounded-xl border border-border flex items-center gap-4">
-              <div className="p-3 bg-info/20 text-info rounded-lg"><TrendingUp className="w-6 h-6" /></div>
-              <div>
-                <p className="text-xs text-text-muted uppercase font-bold">Receita Estimada</p>
-                <p className="text-xl font-black">R$ {promosData?.promotions?.reduce((acc, p) => acc + (p.metrics?.revenueGenerated || 0), 0).toFixed(2) || '0.00'}</p>
+                <p className="text-xl font-black">{formatMoney(promosData?.promotions?.reduce((acc, p) => acc + (p.metrics?.totalDiscountGiven || 0), 0))}</p>
               </div>
             </div>
           </div>
@@ -388,8 +408,12 @@ export default function Promotions() {
                         <td className="p-4">
                           <p className="font-bold text-primary">
                             {promo.discountType === 'percentage' && `${promo.value}% OFF`}
-                            {promo.discountType === 'fixed' && `R$ ${promo.value} OFF`}
-                            {promo.discountType === 'cashback' && `${promo.value}% Cashback`}
+                            {/* Cashback é tratado como valor fixo em R$ no motor real
+                                (promotion.service.js: "cashback tratado como desconto
+                                imediato na tarifa"), nunca porcentagem — mostrar "%"
+                                aqui enganava o admin sobre o valor real do benefício. */}
+                            {promo.discountType === 'fixed' && `${formatMoney(promo.value)} OFF`}
+                            {promo.discountType === 'cashback' && `${formatMoney(promo.value)} Cashback`}
                             {promo.discountType === 'free_ride' && `Corrida Grátis`}
                           </p>
                           {promo.maxDiscountLimit && <p className="text-[10px] text-text-muted">Máximo R$ {promo.maxDiscountLimit}</p>}
@@ -410,14 +434,13 @@ export default function Promotions() {
                           )}
                         </td>
                         <td className="p-4">
-                          <div className={`px-2 py-1 rounded-md text-[11px] font-bold w-max uppercase tracking-wider border ${
-                            promo.status === 'active' ? 'bg-success/10 text-success border-success/20' :
-                            promo.status === 'paused' ? 'bg-warning/10 text-warning border-warning/20' :
-                            promo.status === 'draft' ? 'bg-background text-text-muted border-border' :
-                            promo.status === 'scheduled' ? 'bg-info/10 text-info border-info/20' :
-                            'bg-danger/10 text-danger border-danger/20'
-                          }`}>
-                            {promo.status}
+                          {/* Auditoria de UX/produção (2026-08-10): status persistido nunca
+                              transicionava sozinho quando orçamento acabava ou a data
+                              passava — uma promoção esgotada ou vencida continuava com
+                              badge verde "active" pra sempre. effectiveStatus (calculado
+                              no backend a cada listagem, sem gravar nada) cobre isso. */}
+                          <div className={`px-2 py-1 rounded-md text-[11px] font-bold w-max uppercase tracking-wider border ${PROMO_STATUS_COLORS[promo.effectiveStatus] || PROMO_STATUS_COLORS[promo.status] || 'bg-background text-text-muted border-border'}`}>
+                            {PROMO_STATUS_LABELS[promo.effectiveStatus] || PROMO_STATUS_LABELS[promo.status] || promo.status}
                           </div>
                         </td>
                         <td className="p-4 text-right relative">

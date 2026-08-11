@@ -14,6 +14,10 @@ const serviceMonitorAlertSchema = new mongoose.Schema({
     value: { type: Number },
     acknowledged: { type: Boolean, default: false },
     acknowledgedAt: { type: Date },
+    // Auditoria de UX/produção (2026-08-10): ack não registrava quem reconheceu o
+    // alerta, só quando — sem autoria, impossível saber quem já viu/está cuidando.
+    acknowledgedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser' },
+    acknowledgedByName: { type: String },
     resolved: { type: Boolean, default: false },
     resolvedAt: { type: Date },
     fingerprint: { type: String, required: true, unique: true },

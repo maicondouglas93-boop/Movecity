@@ -16,6 +16,11 @@ const RANGES = [
     { value: 'month', label: 'Mês' },
 ];
 
+const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+}).format(Number(amount) || 0);
+
 const CaptainEarnings = () => {
     const { captain } = useContext(CaptainDataContext);
     // Auditoria de UX do motorista (2026-08-02, Etapa 8): a tela só mostrava o total
@@ -93,7 +98,7 @@ const CaptainEarnings = () => {
 
                 <Card shadow="raised" padding="p-5" className="mb-4">
                     <p className="text-xs text-ink-600 font-bold uppercase tracking-wider mb-1">
-                        Ganhos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
+                        Ganhos líquidos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
                     </p>
                     <h2 className="text-3xl font-black text-ink-900 tracking-tight">
                         {isLoading ? '...' : formatBRL(data?.totalEarnings)}

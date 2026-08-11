@@ -49,7 +49,7 @@ module.exports.getMonitorAlerts = async (req, res, next) => {
 
 module.exports.acknowledgeMonitorAlert = async (req, res, next) => {
     try {
-        const alert = await monitorService.acknowledgeAlert(req.params.id);
+        const alert = await monitorService.acknowledgeAlert(req.params.id, req.admin);
         if (!alert) return res.status(404).json({ message: 'Alerta não encontrado' });
         res.status(200).json(alert);
     } catch (err) {

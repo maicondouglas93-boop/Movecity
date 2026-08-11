@@ -56,21 +56,21 @@ describe('Activity — histórico do passageiro mostra o valor final, não a est
     it('Teste 1: estimativa == valor final -> mostra o mesmo valor', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 44.74 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 44.74')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s44,74/)).toBeInTheDocument());
     });
 
     it('Teste 2: valor final MENOR que a estimativa -> mostra o valor final', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 38.2 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 38.2')).toBeInTheDocument());
-        expect(screen.queryByText('R$ 44.74')).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.getByText(/R\$\s38,20/)).toBeInTheDocument());
+        expect(screen.queryByText(/R\$\s44,74/)).not.toBeInTheDocument();
     });
 
     it('Teste 3: valor final MAIOR que a estimativa -> mostra o valor final', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 52.8 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 52.8')).toBeInTheDocument());
-        expect(screen.queryByText('R$ 44.74')).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.getByText(/R\$\s52,80/)).toBeInTheDocument());
+        expect(screen.queryByText(/R\$\s44,74/)).not.toBeInTheDocument();
     });
 
     it('Teste 4: corrida iniciada sem destino, destino definido ao finalizar -> mostra o valor final recalculado', async () => {
@@ -85,44 +85,44 @@ describe('Activity — histórico do passageiro mostra o valor final, não a est
             finalPrice: 44.74,
         }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 44.74')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s44,74/)).toBeInTheDocument());
     });
 
     it('Teste 5: passageiro encerrou antes do destino estimado -> mostra o valor referente ao trajeto real', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 60, finalPrice: 21.5 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 21.5')).toBeInTheDocument());
-        expect(screen.queryByText('R$ 60')).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.getByText(/R\$\s21,50/)).toBeInTheDocument());
+        expect(screen.queryByText(/R\$\s60,00/)).not.toBeInTheDocument();
     });
 
     it('Teste 6: reabrir o histórico (reload) -> continua mostrando o valor final persistido', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 38.2 }]);
         const { unmount } = renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 38.2')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s38,20/)).toBeInTheDocument());
         unmount();
 
         // "Reload": novo mount buscando o histórico de novo no backend.
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 38.2 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 38.2')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s38,20/)).toBeInTheDocument());
     });
 
     it('Teste 7: detalhe da corrida concluída mostra o valor final, não a estimativa', async () => {
         mockHistoryResponse([{ ...baseRide, fare: 44.74, finalPrice: 38.2 }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 38.2')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s38,20/)).toBeInTheDocument());
 
         fireEvent.click(screen.getByText('Rua B'));
 
         expect(await screen.findByText('Detalhes da Viagem')).toBeInTheDocument();
         // R$ 38.2 aparece duas vezes agora: no card da lista e no detalhe.
-        expect(screen.getAllByText('R$ 38.2')).toHaveLength(2);
-        expect(screen.queryByText('R$ 44.74')).not.toBeInTheDocument();
+        expect(screen.getAllByText(/R\$\s38,20/)).toHaveLength(2);
+        expect(screen.queryByText(/R\$\s44,74/)).not.toBeInTheDocument();
     });
 
     it('corrida ainda em andamento (sem finalPrice) mostra a estimativa', async () => {
         mockHistoryResponse([{ ...baseRide, status: 'started', fare: 44.74, finalPrice: undefined }]);
         renderActivity();
-        await waitFor(() => expect(screen.getByText('R$ 44.74')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/R\$\s44,74/)).toBeInTheDocument());
     });
 });

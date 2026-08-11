@@ -138,6 +138,19 @@ const rideSchema = new mongoose.Schema({
         type: Date,
         description: 'Quando a corrida entrou em started — base preferencial do actualTime',
     },
+    // SLA real do painel admin/reports (2026-08-10) — antes só arrivedAt/startedAt
+    // existiam; sem acceptedAt/finishedAt não dava pra calcular tempo de espera até
+    // aceite nem tempo total da corrida sem cair em updatedAt (que muda por outros
+    // motivos, ex.: paymentStatus). Preenchidos em transitionRide para 'accepted' e
+    // 'finished' — ausentes em corridas anteriores a esta mudança.
+    acceptedAt: {
+        type: Date,
+        description: "Quando o status virou 'accepted'",
+    },
+    finishedAt: {
+        type: Date,
+        description: "Quando o status virou 'finished'",
+    },
     estimatedTime: {
         type: Number, // seconds
     },
@@ -154,6 +167,11 @@ const rideSchema = new mongoose.Schema({
     lastLocation: {
         lat: Number,
         lng: Number
+    },
+    // Horário de recebimento do último ponto no servidor. Nunca vem do relógio do
+    // aparelho e serve para descartar deslocamentos impossíveis da distância tarifável.
+    lastLocationAt: {
+        type: Date,
     },
     actualTime: {
         type: Number,
@@ -206,6 +224,14 @@ const rideSchema = new mongoose.Schema({
         atStatus: { type: String },
         cancelledAt: { type: Date, default: Date.now },
     }],
+    // Histórico real de status (2026-08-10, painel admin) — preenchido centralmente em
+    // transitionRide a cada transição, mesmo padrão de parcel.model.js. Antes o drawer
+    // do admin simulava horários por offset fixo sobre createdAt; agora há timestamp
+    // real por transição. Ausente em corridas anteriores a esta mudança.
+    statusHistory: [{
+        status: { type: String },
+        at: { type: Date, default: Date.now },
+    }],
     waitTimeSeconds: {
         type: Number,
         default: 0,
@@ -245,6 +271,22 @@ const rideSchema = new mongoose.Schema({
         default: 'cash',
     },
     walletAmountUsed: {
+        type: Number,
+        default: 0
+    },
+    // Valor efetivamente debitado da carteira no momento da solicitação. É preservado
+    // para que o encerramento consiga devolver excedente ou tentar cobrar somente a
+    // diferença quando o preço final divergir da estimativa.
+    walletAmountDebited: {
+        type: Number,
+        default: 0
+    },
+    walletSettlementStatus: {
+        type: String,
+        enum: [ 'not_applicable', 'settled', 'shortfall' ],
+        default: 'not_applicable'
+    },
+    walletShortfallAmount: {
         type: Number,
         default: 0
     },

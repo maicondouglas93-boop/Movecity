@@ -418,21 +418,31 @@ export default function ServicesMonitoring() {
           <ul className="space-y-3">
             {data.alerts.map((a) => {
               const t = statusTone(a.severity === 'critical' ? 'critical' : a.severity === 'warning' ? 'attention' : 'healthy');
+              const SeverityIcon = a.severity === 'critical' ? XCircle : a.severity === 'warning' ? AlertTriangle : CheckCircle2;
               return (
                 <li key={a._id || a.fingerprint} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-border rounded-lg p-3 ${t.bg}`}>
-                  <div>
-                    <p className={`text-sm font-semibold ${t.text}`}>{a.title}</p>
-                    <p className="text-xs text-text-muted mt-0.5">{a.message}</p>
-                    <p className="text-[11px] text-text-muted mt-1">{a.service} · {formatTime(a.updatedAt || a.createdAt)}</p>
+                  <div className="flex items-start gap-2">
+                    <SeverityIcon className={`w-4 h-4 shrink-0 mt-0.5 ${t.text}`} />
+                    <div>
+                      <p className={`text-sm font-semibold ${t.text}`}>{a.title}</p>
+                      <p className="text-xs text-text-muted mt-0.5">{a.message}</p>
+                      <p className="text-[11px] text-text-muted mt-1">{a.service} · {formatTime(a.updatedAt || a.createdAt)}</p>
+                    </div>
                   </div>
-                  {!a.acknowledged && (
+                  {/* Auditoria de UX/produção (2026-08-10): ack não mostrava quem/quando
+                      reconheceu — o backend agora grava acknowledgedBy/acknowledgedByName. */}
+                  {!a.acknowledged ? (
                     <button
                       type="button"
                       onClick={() => ackMutation.mutate(a._id)}
-                      className="text-xs font-medium px-3 py-2 rounded-lg border border-border hover:bg-background"
+                      className="text-xs font-medium px-3 py-2 rounded-lg border border-border hover:bg-background shrink-0"
                     >
                       Reconhecer
                     </button>
+                  ) : (
+                    <span className="text-[11px] text-text-muted shrink-0">
+                      Reconhecido{a.acknowledgedByName ? ` por ${a.acknowledgedByName}` : ''}{a.acknowledgedAt ? ` · ${formatTime(a.acknowledgedAt)}` : ''}
+                    </span>
                   )}
                 </li>
               );

@@ -1,23 +1,23 @@
-// Bug: histórico financeiro do motorista no painel admin (Finance.jsx) somava `fare`
-// (estimativa congelada na criação) em vez de `finalPrice` (valor real recalculado no
-// fim da corrida) — mesma classe de bug do histórico do passageiro, só que no ledger
-// financeiro. getCaptainFinancialHistory já filtra status:'finished', então toda
-// corrida aqui tem um finalPrice válido; ele precisa ser a fonte do `amount`.
+// Bug original: histórico financeiro do motorista no painel admin (Finance.jsx) somava
+// `fare` (estimativa congelada na criação) em vez de `finalPrice` (valor real
+// recalculado no fim da corrida). getCaptainFinancialHistory foi reescrita (auditoria de
+// UX, 2026-08-10) pra ler do ledger real (transactionModel) em vez de interlaçar
+// rideModel+payoutModel — o lançamento 'ride_payment' já é criado com
+// finalFare = claimed.finalPrice || claimed.fare em ride.service.js#confirmRidePayment,
+// então o ledger nunca sofreu desse bug; a leitura direta de rideModel.fare que sofria
+// não existe mais nesta função.
 
-function selectChain(resolvedValue) {
+function paginatedQuery(resolvedValue) {
     return {
         sort: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        select: jest.fn().mockResolvedValue(resolvedValue),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue(resolvedValue),
     };
 }
 
-jest.mock('../../models/ride.model', () => ({
+jest.mock('../../models/transaction.model', () => ({
     find: jest.fn(),
-}));
-
-jest.mock('../../models/payout.model', () => ({
-    find: jest.fn(),
+    countDocuments: jest.fn(),
 }));
 
 // admin.service.js importa notification.service.js, que puxa notificationDispatcher
@@ -27,43 +27,37 @@ jest.mock('../../services/notification.service', () => ({}));
 jest.mock('../../services/wallet.service', () => ({}));
 jest.mock('../../socket', () => ({ disconnectSocket: jest.fn() }));
 
-const rideModel = require('../../models/ride.model');
-const payoutModel = require('../../models/payout.model');
+const transactionModel = require('../../models/transaction.model');
 const adminService = require('../../services/admin.service');
 
-describe('getCaptainFinancialHistory — usa finalPrice, não fare', () => {
+describe('getCaptainFinancialHistory — ledger real (transactionModel), paginado', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        payoutModel.find.mockReturnValue(selectChain([]));
     });
 
-    test('corrida finalizada com valor final diferente da estimativa usa finalPrice no ledger', async () => {
-        rideModel.find.mockReturnValue(selectChain([
-            { createdAt: new Date(), fare: 44.74, finalPrice: 38.2, commissionAmount: 7.64 },
+    test('devolve os lançamentos do motorista já com o amount gravado no ledger (sem recalcular fare/finalPrice aqui)', async () => {
+        transactionModel.find.mockReturnValue(paginatedQuery([
+            { type: 'ride_payment', amount: 38.2, captainId: 'captain1' },
         ]));
+        transactionModel.countDocuments.mockResolvedValue(1);
 
-        const history = await adminService.getCaptainFinancialHistory('captain1');
+        const result = await adminService.getCaptainFinancialHistory('captain1');
 
-        expect(history).toHaveLength(1);
-        expect(history[0]).toMatchObject({ type: 'ride', amount: 38.2, commission: 7.64 });
+        expect(result.transactions).toHaveLength(1);
+        expect(result.transactions[0]).toMatchObject({ type: 'ride_payment', amount: 38.2 });
+        expect(result.total).toBe(1);
+        expect(transactionModel.find).toHaveBeenCalledWith({ captainId: 'captain1' });
     });
 
-    test('corrida sem finalPrice persistido (legado) cai pra fare como último recurso', async () => {
-        rideModel.find.mockReturnValue(selectChain([
-            { createdAt: new Date(), fare: 20, finalPrice: undefined, commissionAmount: 4 },
-        ]));
+    test('pagina com skip/limit derivados de page/limit', async () => {
+        transactionModel.find.mockReturnValue(paginatedQuery([]));
+        transactionModel.countDocuments.mockResolvedValue(45);
 
-        const history = await adminService.getCaptainFinancialHistory('captain1');
+        const result = await adminService.getCaptainFinancialHistory('captain1', 2, 20);
 
-        expect(history[0].amount).toBe(20);
-    });
-
-    test('seleciona finalPrice explicitamente na query (não só fare/commissionAmount)', async () => {
-        rideModel.find.mockReturnValue(selectChain([]));
-
-        await adminService.getCaptainFinancialHistory('captain1');
-
-        const selectCall = rideModel.find.mock.results[0].value.select;
-        expect(selectCall).toHaveBeenCalledWith(expect.stringContaining('finalPrice'));
+        const query = transactionModel.find.mock.results[0].value;
+        expect(query.skip).toHaveBeenCalledWith(20);
+        expect(query.limit).toHaveBeenCalledWith(20);
+        expect(result.pages).toBe(3);
     });
 });

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, memo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
@@ -6,11 +7,18 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
-import { 
-  Search, MapPin, MoreVertical, X, Clock, CreditCard, User, Car, Download, 
-  CheckSquare, Square, Filter, ChevronRight, Activity, Map as MapIcon, 
-  RotateCcw, ShieldAlert, CheckCircle, XCircle, Lock, Unlock, FileText, FileSearch, Star, 
-  Battery, AlertTriangle, Briefcase, ChevronDown, Check, ArrowRight, History, Pencil, KeyRound, Upload
+import { formatMoney, formatDate } from '../utils/format';
+import {
+  CAPTAIN_APPROVAL_LABELS, CAPTAIN_APPROVAL_COLORS,
+  RIDE_STATUS_LABELS, RIDE_STATUS_COLORS,
+  statusLabel, statusColor,
+} from '../utils/statusDictionary';
+import StatusBadge from '../components/StatusBadge';
+import {
+  Search, MapPin, MoreVertical, X, Clock, User, Car, Download,
+  CheckSquare, Square, Activity, Map as MapIcon,
+  CheckCircle, Lock, Unlock, FileText, FileSearch, Star,
+  AlertTriangle, Check, ArrowRight, History, Pencil, KeyRound, Upload
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -40,42 +48,45 @@ function timeAgo(date) {
   return "Agora mesmo";
 }
 
-const statusColors = {
-  iniciado: 'bg-border text-text',
-  documentos_enviados: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-  em_analise: 'bg-warning/10 text-warning border-warning/20',
-  aprovado: 'bg-primary/10 text-primary border-primary/20',
-  reprovado: 'bg-danger/10 text-danger border-danger/20',
-  suspenso: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-  bloqueado: 'bg-red-500/10 text-red-500 border-red-500/20',
-  // Simplificação do cadastro do motorista (2026-08-04): motorista que não enviou a
-  // documentação dentro do prazo de 5 dias — ver Backend/services/captainDeadline.service.js.
-  expirado: 'bg-red-500/10 text-red-500 border-red-500/20',
-};
+// Auditoria de UX (2026-08-10): statusColors/statusNames locais (só approvalStatus)
+// foram promovidos pro dicionário compartilhado (utils/statusDictionary.js) — estavam
+// sendo reaproveitados por engano em status de CORRIDA (TabRides), que tem um enum
+// totalmente diferente e sempre caía no fallback cinza com o texto cru em inglês.
 
-const statusNames = {
-  iniciado: 'Iniciado',
-  documentos_enviados: 'Docs Enviados',
-  em_analise: 'Em Análise',
-  aprovado: 'Aprovado',
-  reprovado: 'Reprovado',
-  suspenso: 'Suspenso',
-  bloqueado: 'Bloqueado',
-  expirado: 'Prazo Expirado',
+// "Disponível"/"Em corrida"/"Offline" — status OPERACIONAL, não confundir com
+// approvalStatus (status DA CONTA, acima). Ver captain.operationalStatus (calculado no
+// backend, getCaptains).
+const OPERATIONAL_STATUS_LABELS = {
+  available: 'Disponível',
+  in_ride: 'Em corrida',
+  offline: 'Offline',
 };
-
-function formatDate(date) {
-  if (!date) return '—';
-  return new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
+const OPERATIONAL_STATUS_COLORS = {
+  available: 'bg-primary/10 text-primary border-primary/20',
+  in_ride: 'bg-warning/10 text-warning border-warning/20',
+  offline: 'bg-background text-text-muted border-border',
+};
 
 export default function Captains() {
   const queryClient = useQueryClient();
   const { socket } = useSocket();
 
+  // Estado inicial lido da URL (auditoria de UX, 2026-08-10) — o Dashboard linka pra
+  // cá com filtro pronto (ex.: /captains?approvalStatus=em_analise); sem isso o link
+  // abria a tela sem filtrar nada.
+  const [searchParams] = useSearchParams();
+
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ search: '', status: '', approvalStatus: '', vehicleType: '', isOnline: '', isBlocked: '' });
-  const [searchInput, setSearchInput] = useState('');
+  const [filters, setFilters] = useState({
+    search: searchParams.get('search') || '',
+    status: '',
+    approvalStatus: searchParams.get('approvalStatus') || '',
+    vehicleType: '',
+    isOnline: searchParams.get('isOnline') || '',
+    isBlocked: searchParams.get('isBlocked') || '',
+    operationalStatus: searchParams.get('operationalStatus') || '',
+  });
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [selectedCaptains, setSelectedCaptains] = useState([]);
   const [activeCaptainDrawer, setActiveCaptainDrawer] = useState(null);
   
@@ -126,8 +137,13 @@ export default function Captains() {
     const items = selectedCaptains.length > 0 ? data.captains.filter(c => selectedCaptains.includes(c._id)) : data.captains;
 
     const csvUri = buildCsv(
-      ['ID', 'Nome', 'Email', 'Placa', 'Status', 'Online', 'Avaliacao', 'Corridas'],
-      items.map(c => [c._id, c.fullname?.firstname, c.email, c.vehicle?.plate, c.approvalStatus, c.isOnline ? 'Sim' : 'Nao', c.rating, c.totalRides])
+      ['ID', 'Nome', 'Sobrenome', 'Email', 'Telefone', 'Placa', 'Status da Conta', 'Disponibilidade', 'Avaliacao', 'Corridas'],
+      items.map(c => [
+        c._id, c.fullname?.firstname, c.fullname?.lastname, c.email, c.phone, c.vehicle?.plate,
+        statusLabel(CAPTAIN_APPROVAL_LABELS, c.approvalStatus),
+        OPERATIONAL_STATUS_LABELS[c.operationalStatus] || c.operationalStatus,
+        c.rating, c.totalRides,
+      ])
     );
     downloadCsv(csvUri, `frota_${new Date().getTime()}.csv`);
   };
@@ -148,12 +164,12 @@ export default function Captains() {
           {/* Quick Stats Summary */}
           {data?.summary && (
             <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] flex flex-col cursor-pointer hover:border-primary/50" onClick={() => { setFilters(f => ({ ...f, isOnline: 'true' })); setPage(1); }}>
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] flex flex-col cursor-pointer hover:border-primary/50" onClick={() => { setFilters(f => ({ ...f, isOnline: 'true', operationalStatus: '' })); setPage(1); }} title="Motoristas com o app conectado agora (disponíveis + em corrida)">
                 <div className="flex items-center gap-2 mb-1 text-primary"><div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div><p className="text-xs font-medium">Online</p></div>
                 <p className="text-2xl font-bold">{data.summary.online}</p>
               </div>
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] flex flex-col">
-                <div className="flex items-center gap-2 mb-1 text-purple-500"><Car className="w-3 h-3"/><p className="text-xs font-medium">Em Corrida</p></div>
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] flex flex-col cursor-pointer hover:border-warning" onClick={() => { setFilters(f => ({ ...f, isOnline: '', operationalStatus: 'in_ride' })); setPage(1); }} title="Online, mas ocupados numa corrida ou encomenda agora">
+                <div className="flex items-center gap-2 mb-1 text-warning"><Car className="w-3 h-3"/><p className="text-xs font-medium">Em Corrida</p></div>
                 <p className="text-2xl font-bold">{data.summary.inRide}</p>
               </div>
               <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] flex flex-col cursor-pointer hover:border-warning" onClick={() => { setFilters(f => ({ ...f, approvalStatus: 'em_analise' })); setPage(1); }}>
@@ -185,12 +201,22 @@ export default function Captains() {
             </form>
             
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
-              value={filters.isOnline} onChange={e => { setFilters(f => ({ ...f, isOnline: e.target.value })); setPage(1); }}>
+              value={filters.isOnline} onChange={e => { setFilters(f => ({ ...f, isOnline: e.target.value, operationalStatus: '' })); setPage(1); }}
+              title="Se o app do motorista está conectado, independente de estar livre ou ocupado">
               <option value="">Conexão (Todas)</option>
               <option value="true">Online</option>
               <option value="false">Offline</option>
             </select>
-            
+
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.operationalStatus} onChange={e => { setFilters(f => ({ ...f, operationalStatus: e.target.value, isOnline: '' })); setPage(1); }}
+              title="Se o motorista pode receber uma corrida agora">
+              <option value="">Disponibilidade (Todas)</option>
+              <option value="available">Disponível</option>
+              <option value="in_ride">Em corrida</option>
+              <option value="offline">Offline</option>
+            </select>
+
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.approvalStatus} onChange={e => { setFilters(f => ({ ...f, approvalStatus: e.target.value })); setPage(1); }}>
               <option value="">Status Cadastro (Todos)</option>
@@ -238,15 +264,16 @@ export default function Captains() {
                 <th className="px-4 py-3 font-medium">Veículo / Placa</th>
                 <th className="px-4 py-3 font-medium">Avaliação / Corridas</th>
                 <th className="px-4 py-3 font-medium">Carteira</th>
-                <th className="px-4 py-3 font-medium">Status / Cadastro</th>
+                <th className="px-4 py-3 font-medium">Conexão</th>
+                <th className="px-4 py-3 font-medium">Status da conta</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {isLoading ? (
-                <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Carregando...</td></tr>
+                <tr><td colSpan="8" className="px-6 py-8 text-center text-text-muted">Carregando...</td></tr>
               ) : data?.captains?.length === 0 ? (
-                <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Nenhum motorista encontrado.</td></tr>
+                <tr><td colSpan="8" className="px-6 py-8 text-center text-text-muted">Nenhum motorista encontrado.</td></tr>
               ) : (
                 data?.captains?.map((captain) => (
                   <CaptainRow
@@ -301,6 +328,10 @@ export default function Captains() {
 // não, só a posição, que esta linha nem exibe — não recalcula nada aqui.
 const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onToggleSelect, onOpenDrawer }) {
   const walletColor = captain.earnings < 0 ? 'text-danger' : captain.earnings > 0 ? 'text-primary' : 'text-text-muted';
+  // operationalStatus vem calculado do backend (getCaptains) — online+fresco+livre =
+  // disponível; online+fresco+ocupado = em corrida; senão offline. Não confundir com
+  // approvalStatus (status DA CONTA), mostrado na outra coluna.
+  const opStatus = captain.operationalStatus || (isLive ? 'available' : 'offline');
   return (
     <tr onClick={() => onOpenDrawer(captain)} className={`cursor-pointer hover:bg-surface/50 transition-colors ${isSelected ? 'bg-primary/5' : ''} ${captain.isBlocked ? 'opacity-70' : ''}`}>
       <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
@@ -311,11 +342,9 @@ const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onTog
       <td className="px-4 py-4">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-10 h-10 rounded-full bg-background border border-border flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-full bg-background border border-border flex items-center justify-center shrink-0">
               <User className="w-5 h-5 text-text-muted" />
             </div>
-            {isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-surface rounded-full"></div>}
-            {!isLive && <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-border border-2 border-surface rounded-full"></div>}
           </div>
           <div>
             <p className="font-medium text-text">{captain.fullname?.firstname} {captain.fullname?.lastname}</p>
@@ -339,15 +368,16 @@ const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onTog
         <p className="text-xs text-text-muted">{captain.totalRides || 0} corridas</p>
       </td>
       <td className="px-4 py-4">
-        <p className={`font-medium ${walletColor}`}>R$ {captain.earnings?.toFixed(2) || '0.00'}</p>
+        <p className={`font-medium ${walletColor}`}>{formatMoney(captain.earnings)}</p>
+      </td>
+      <td className="px-4 py-4" title={OPERATIONAL_STATUS_LABELS[opStatus]}>
+        <StatusBadge colorClass={OPERATIONAL_STATUS_COLORS[opStatus]} label={OPERATIONAL_STATUS_LABELS[opStatus]} />
       </td>
       <td className="px-4 py-4">
         <div className="flex flex-col gap-2 items-start">
-           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[captain.approvalStatus] || 'bg-background'}`}>
-             {statusNames[captain.approvalStatus] || captain.approvalStatus}
-           </span>
+           <StatusBadge colorClass={statusColor(CAPTAIN_APPROVAL_COLORS, captain.approvalStatus)} label={statusLabel(CAPTAIN_APPROVAL_LABELS, captain.approvalStatus)} />
            {captain.isBlocked && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border bg-danger/10 text-danger border-danger/20`}>
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border bg-danger/10 text-danger border-danger/20">
                 <Lock className="w-2.5 h-2.5 mr-1"/> Bloqueado
               </span>
            )}
@@ -609,9 +639,7 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
            <div><p className="text-xs text-text-muted">Prazo para envio</p><p className="font-medium text-sm">{formatDate(captain.documentDeadline)}</p></div>
            <div>
              <p className="text-xs text-text-muted">Situação</p>
-             <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[captain.approvalStatus] || 'bg-background'}`}>
-               {statusNames[captain.approvalStatus] || captain.approvalStatus}
-             </span>
+             <StatusBadge className="mt-1" colorClass={statusColor(CAPTAIN_APPROVAL_COLORS, captain.approvalStatus)} label={statusLabel(CAPTAIN_APPROVAL_LABELS, captain.approvalStatus)} />
            </div>
         </div>
       </div>
@@ -665,6 +693,7 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
 function ResetPasswordModal({ captain, onClose, onSave, saving }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [reason, setReason] = useState('');
   const [error, setError] = useState('');
 
   const submit = (e) => {
@@ -677,8 +706,12 @@ function ResetPasswordModal({ captain, onClose, onSave, saving }) {
       setError('As senhas não coincidem.');
       return;
     }
+    if (!reason.trim()) {
+      setError('Informe o motivo da redefinição.');
+      return;
+    }
     setError('');
-    onSave({ newPassword });
+    onSave({ newPassword, reason: reason.trim() });
   };
 
   return (
@@ -726,11 +759,22 @@ function ResetPasswordModal({ captain, onClose, onSave, saving }) {
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Motivo da redefinição</label>
+            <input
+              required
+              type="text"
+              placeholder="Ex.: motorista perdeu acesso, solicitou por WhatsApp"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
 
           {error && <p className="text-xs text-danger">{error}</p>}
 
-          <p className="text-xs text-text-muted">
-            O motorista precisará usar a nova senha no próximo login. Todas as sessões ativas dele serão encerradas.
+          <p className="text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg px-3 py-2">
+            Ação administrativa sensível: o motorista precisará usar a nova senha no próximo login e todas as sessões ativas dele serão encerradas imediatamente.
           </p>
 
           <div className="pt-2 flex justify-end gap-3 border-t border-border">
@@ -920,6 +964,7 @@ function TabDocuments({ captainId }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const prompt = usePrompt();
+  const confirm = useConfirm();
   const { data: docs, isLoading } = useQuery({
     queryKey: ['captain-documents', captainId],
     queryFn: async () => { const { data } = await api.get(`/admin/captains/${captainId}/documents`); return data; }
@@ -967,7 +1012,19 @@ function TabDocuments({ captainId }) {
     verifyMutation.mutate({ docType, verified: isVerified, reason });
   }
 
-  const handleUpload = (docType, file) => {
+  // Auditoria de UX (2026-08-10): upload disparava direto no clique, mas é uma ação
+  // destrutiva — apaga o arquivo anterior e derruba a aprovação já concedida, mesmo se
+  // o documento já estivesse aprovado. Antes só bloqueio/aprovação pediam confirmação.
+  const handleUpload = async (docType, file, hasExisting) => {
+    const ok = await confirm({
+      title: 'Enviar documento em nome do motorista',
+      message: hasExisting
+        ? 'Isso substitui o documento atual (o arquivo anterior será apagado) e volta o status para "pendente de verificação", mesmo que já estivesse aprovado. Continuar?'
+        : 'O documento ficará pendente de verificação após o envio. Continuar?',
+      tone: hasExisting ? 'danger' : 'default',
+      confirmLabel: 'Enviar documento',
+    });
+    if (!ok) return;
     uploadMutation.mutate({ docType, file });
   }
 
@@ -1002,7 +1059,7 @@ function DocumentRow({ captainId, title, docKey, docData, onVerify, onUpload, up
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // permite reenviar o mesmo arquivo depois, se precisar
-    if (file) onUpload(docKey, file);
+    if (file) onUpload(docKey, file, !!docData?.url);
   };
 
   const uploadButton = (
@@ -1083,9 +1140,7 @@ function TabRides({ captainId }) {
               <div>
                  <p className="text-sm font-medium flex items-center gap-2">
                    {new Date(ride.createdAt).toLocaleDateString()} às {new Date(ride.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                   <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${statusColors[ride.status] || 'bg-background'}`}>
-                     {statusNames[ride.status] || ride.status}
-                   </span>
+                   <StatusBadge colorClass={statusColor(RIDE_STATUS_COLORS, ride.status)} label={statusLabel(RIDE_STATUS_LABELS, ride.status)} />
                  </p>
                  <div className="flex items-center gap-2 mt-2 text-sm text-text-muted">
                     <span>{ride.pickup?.split(',')[0]}</span> <ArrowRight className="w-3 h-3"/> <span>{ride.destination?.split(',')[0]}</span>

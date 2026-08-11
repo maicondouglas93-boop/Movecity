@@ -20,8 +20,8 @@ export default function TariffComparisonTable({ categories }) {
               <th className="p-4 font-medium">Por Km (R$)</th>
               <th className="p-4 font-medium">Por Min (R$)</th>
               <th className="p-4 font-medium">Mínima (R$)</th>
-              <th className="p-4 font-medium">Chuva</th>
-              <th className="p-4 font-medium">Demanda</th>
+              <th className="p-4 font-medium" title="Valor configurado — ainda não é aplicado automaticamente ao cálculo real da corrida.">Chuva (config.)</th>
+              <th className="p-4 font-medium" title="Valor configurado — ainda não é aplicado automaticamente ao cálculo real da corrida.">Demanda (config.)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">

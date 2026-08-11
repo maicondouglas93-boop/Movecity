@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { 
-  Users as UsersIcon, Ban, UserCheck, TrendingUp, Search, 
-  Filter, MoreVertical, ShieldAlert, Download, CheckSquare, Square
+import {
+  Users as UsersIcon, Ban, UserCheck, TrendingUp, Search,
+  MoreVertical, ShieldAlert, Download
 } from 'lucide-react';
 import UserDrawer from '../components/UserDrawer';
 import { useToast } from '../contexts/ToastContext';
+import { buildCsv, downloadCsv } from '../utils/csv';
+import { formatMoney } from '../utils/format';
 
 export default function Users() {
   const [page, setPage] = useState(1);
@@ -88,9 +90,24 @@ export default function Users() {
     }));
   };
 
+  // Auditoria de UX/produção (2026-08-10): este botão sempre disparava um toast de
+  // erro dizendo "ainda não implementado" — visualmente idêntico a um botão real,
+  // mas fingindo funcionalidade que não existe. Não há endpoint de export dedicado
+  // (diferente de /reports/export/:type), então exporta o que já está carregado na
+  // tela (página atual ou seleção), mesmo padrão usado em Captains/Rides/Finance.
   const handleExport = () => {
-    toast.error('Exportação de CSV ainda não implementada nesta lista.');
-    // Real implementation would trigger download from backend or generate CSV blob
+    if (!data?.users?.length) return toast.error('Nenhum passageiro pra exportar.');
+    const items = selectedUsers.length > 0 ? data.users.filter(u => selectedUsers.includes(u._id)) : data.users;
+    const csvUri = buildCsv(
+      ['ID', 'Nome', 'Sobrenome', 'Email', 'Telefone', 'Cidade', 'Status', 'Corridas', 'Gasto Total', 'Cadastro'],
+      items.map(u => [
+        u._id, u.fullname?.firstname, u.fullname?.lastname, u.email, u.phone, u.city || '',
+        u.isBlocked ? 'Bloqueado' : 'Ativo', u.totalRides || 0, u.totalSpent || 0,
+        new Date(u.createdAt).toISOString(),
+      ])
+    );
+    downloadCsv(csvUri, `passageiros_${new Date().getTime()}.csv`);
+    toast.success(`${items.length} passageiro(s) exportado(s) — só a página atual${selectedUsers.length ? '/seleção' : ''}, não a base inteira.`);
   };
 
   return (
@@ -108,7 +125,10 @@ export default function Users() {
         </div>
         <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
           <div className="p-3 bg-success/20 text-success rounded-lg"><UserCheck className="w-5 h-5" /></div>
-          <div><p className="text-sm text-text-muted">Ativos</p><p className="text-xl font-bold">{data?.summary?.active || 0}</p></div>
+          {/* Auditoria de UX/produção (2026-08-10): rotulado "Ativos", mas mede
+              isBlocked:false (admin.service.js) — não engajamento/atividade recente.
+              Renomeado pra não sugerir algo que o dado não mede. */}
+          <div><p className="text-sm text-text-muted">Não bloqueados</p><p className="text-xl font-bold">{data?.summary?.active || 0}</p></div>
         </div>
         <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
           <div className="p-3 bg-danger/20 text-danger rounded-lg"><Ban className="w-5 h-5" /></div>
@@ -258,7 +278,7 @@ export default function Users() {
                       <p className="font-medium text-text">{user.totalRides || 0}</p>
                       {user.lastRideAt && <p className="text-xs text-text-muted">Últ: {new Date(user.lastRideAt).toLocaleDateString()}</p>}
                     </td>
-                    <td className="p-4 font-medium text-success">R$ {(user.totalSpent || 0).toFixed(2)}</td>
+                    <td className="p-4 font-medium text-success">{formatMoney(user.totalSpent)}</td>
                     <td className="p-4">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-medium border flex items-center w-max gap-1.5 ${
                         user.isBlocked ? 'bg-danger/10 border-danger/20 text-danger' : 'bg-success/10 border-success/20 text-success'
@@ -267,19 +287,13 @@ export default function Users() {
                         {user.isBlocked ? 'Bloqueado' : 'Ativo'}
                       </span>
                     </td>
-                    <td className="p-4 relative group">
-                      <button className="p-1.5 text-text-muted hover:text-text hover:bg-background rounded-md transition-colors">
-                        <MoreVertical className="w-5 h-5" />
-                      </button>
-                      <div className="absolute right-8 top-4 w-48 bg-surface border border-border rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 flex flex-col overflow-hidden">
-                        <button onClick={() => setDrawerUserId(user._id)} className="px-4 py-2.5 text-left text-sm hover:bg-background transition-colors">Abrir Perfil (CRM)</button>
-                        <button onClick={() => setDrawerUserId(user._id)} className="px-4 py-2.5 text-left text-sm hover:bg-background transition-colors">Histórico Financeiro</button>
-                        {user.isBlocked ? (
-                          <button onClick={() => setBlockModal({ isOpen: true, type: 'unblock', userId: user._id, reason: '' })} className="px-4 py-2.5 text-left text-sm text-success hover:bg-success/10 transition-colors">Desbloquear Passageiro</button>
-                        ) : (
-                          <button onClick={() => setBlockModal({ isOpen: true, type: 'block', userId: user._id, reason: '' })} className="px-4 py-2.5 text-left text-sm text-danger hover:bg-danger/10 transition-colors">Bloquear Passageiro</button>
-                        )}
-                      </div>
+                    <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                      <UserActionMenu
+                        user={user}
+                        onOpenProfile={() => setDrawerUserId(user._id)}
+                        onBlock={() => setBlockModal({ isOpen: true, type: 'block', userId: user._id, reason: '' })}
+                        onUnblock={() => setBlockModal({ isOpen: true, type: 'unblock', userId: user._id, reason: '' })}
+                      />
                     </td>
                   </tr>
                 ))
@@ -372,6 +386,43 @@ export default function Users() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Auditoria de UX/produção (2026-08-10): menu só abria em hover (group-hover) —
+// inutilizável em touch/tablet, comum em operação de suporte. Também tinha um item
+// "Histórico Financeiro" que chamava exatamente a mesma função que "Abrir Perfil"
+// (mesma tela não tem aba financeira nenhuma) — removido em vez de prometer uma
+// funcionalidade que não existe.
+function UserActionMenu({ user, onOpenProfile, onBlock, onUnblock }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = () => setOpen(false);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, [open]);
+
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="p-1.5 text-text-muted hover:text-text hover:bg-background rounded-md transition-colors"
+      >
+        <MoreVertical className="w-5 h-5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-48 bg-surface border border-border rounded-lg shadow-xl z-10 flex flex-col overflow-hidden">
+          <button onClick={onOpenProfile} className="px-4 py-2.5 text-left text-sm hover:bg-background transition-colors">Abrir Perfil (CRM)</button>
+          {user.isBlocked ? (
+            <button onClick={onUnblock} className="px-4 py-2.5 text-left text-sm text-success hover:bg-success/10 transition-colors">Desbloquear Passageiro</button>
+          ) : (
+            <button onClick={onBlock} className="px-4 py-2.5 text-left text-sm text-danger hover:bg-danger/10 transition-colors">Bloquear Passageiro</button>
+          )}
         </div>
       )}
     </div>

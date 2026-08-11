@@ -2,6 +2,17 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '../services/api';
 import { Clock, User } from 'lucide-react';
+import { formatDateTime } from '../utils/format';
+
+// Auditoria de UX/produção (2026-08-10): String(val) num campo objeto (ex.: "pricing",
+// que é um objeto aninhado com base/km/minuto/comissão/adicionais) produz literalmente
+// o texto "[object Object]" — o campo mais importante pra auditar (o que mudou na
+// precificação) renderizava ilegível. JSON formatado em vez de String().
+function formatDiffValue(val) {
+  if (val === undefined || val === null) return '0';
+  if (typeof val === 'object') return JSON.stringify(val, null, 2);
+  return String(val);
+}
 
 export default function TariffHistory({ categoryId, categoryName }) {
   const { data: history, isLoading } = useQuery({
@@ -37,12 +48,22 @@ export default function TariffHistory({ categoryId, categoryName }) {
                     const oldVal = log.oldValue?.[key];
                     // Só mostra o que mudou
                     if (JSON.stringify(oldVal) !== JSON.stringify(val) && key !== '_id' && key !== 'updatedAt') {
+                      const isObj = typeof val === 'object' && val !== null;
                       return (
-                        <div key={key} className="text-sm flex items-center gap-2">
+                        <div key={key} className={isObj ? 'text-sm space-y-1' : 'text-sm flex items-center gap-2'}>
                           <span className="font-medium capitalize text-text-muted">{key.replace(/([A-Z])/g, ' $1').trim()}:</span>
-                          <span className="line-through text-danger opacity-70">{String(oldVal || 0)}</span>
-                          <span className="text-text-muted">→</span>
-                          <span className="text-success font-medium">{String(val)}</span>
+                          {isObj ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+                              <pre className="bg-background border border-border rounded-lg p-2 text-xs overflow-x-auto whitespace-pre-wrap text-danger/80 line-through decoration-danger/40">{formatDiffValue(oldVal)}</pre>
+                              <pre className="bg-background border border-border rounded-lg p-2 text-xs overflow-x-auto whitespace-pre-wrap text-primary">{formatDiffValue(val)}</pre>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="line-through text-danger opacity-70">{formatDiffValue(oldVal)}</span>
+                              <span className="text-text-muted">→</span>
+                              <span className="text-primary font-medium">{formatDiffValue(val)}</span>
+                            </>
+                          )}
                         </div>
                       );
                     }
@@ -57,7 +78,7 @@ export default function TariffHistory({ categoryId, categoryName }) {
                 <User className="w-3.5 h-3.5" />
                 <span>{log.admin}</span>
               </div>
-              <div>{new Date(log.createdAt).toLocaleString()}</div>
+              <div>{formatDateTime(log.createdAt)}</div>
             </div>
           </div>
         ))}

@@ -90,17 +90,32 @@ async function evaluateResourceAlert(service, metric, percent, label) {
     }
 }
 
+// Auditoria de UX/produção (2026-08-10): `severity` é string ('info'|'warning'|
+// 'critical'), e `.sort({ severity: -1 })` ordena alfabeticamente — "warning" > "info"
+// > "critical" em ordem alfabética descendente, então alertas críticos apareciam por
+// ÚLTIMO na lista, não primeiro. Ordenação por peso numérico explícito em vez de
+// depender da ordem alfabética do enum.
+const SEVERITY_WEIGHT = { critical: 3, warning: 2, info: 1 };
+
 async function listActiveAlerts(limit = 50) {
-    return ServiceMonitorAlert.find({ resolved: false })
-        .sort({ severity: -1, updatedAt: -1 })
-        .limit(limit)
-        .lean();
+    const alerts = await ServiceMonitorAlert.find({ resolved: false }).lean();
+    alerts.sort((a, b) => {
+        const diff = (SEVERITY_WEIGHT[b.severity] || 0) - (SEVERITY_WEIGHT[a.severity] || 0);
+        if (diff !== 0) return diff;
+        return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+    return alerts.slice(0, limit);
 }
 
-async function acknowledgeAlert(id) {
+async function acknowledgeAlert(id, admin) {
     return ServiceMonitorAlert.findByIdAndUpdate(
         id,
-        { acknowledged: true, acknowledgedAt: new Date() },
+        {
+            acknowledged: true,
+            acknowledgedAt: new Date(),
+            acknowledgedBy: admin?._id,
+            acknowledgedByName: admin?.name,
+        },
         { new: true }
     ).lean();
 }

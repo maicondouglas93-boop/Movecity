@@ -85,7 +85,14 @@ export async function flushQueuedLocations(socket) {
     const locations = await db.driverLocations.toArray()
     if (locations.length === 0) return
     const lastLoc = locations[locations.length - 1]
-    socket.emit('update-location-captain', { location: { ltd: lastLoc.lat, lng: lastLoc.lng } })
+    socket.emit('update-location-captain', {
+        location: {
+            ltd: lastLoc.lat,
+            lng: lastLoc.lng,
+            ...(Number.isFinite(lastLoc.accuracy) ? { accuracy: lastLoc.accuracy } : {}),
+            ...(lastLoc.timestamp ? { timestamp: lastLoc.timestamp } : {}),
+        }
+    })
     await db.driverLocations.clear()
 }
 

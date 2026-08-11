@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
@@ -63,6 +63,40 @@ function FitDriversBounds({ drivers }) {
   return null;
 }
 
+const DriversLayer = React.memo(function DriversLayer({ drivers }) {
+  return (
+    <>
+      <FitDriversBounds drivers={drivers} />
+      {drivers.map((driver) => (
+        <Marker
+          key={driver.captainId}
+          position={[driver.ltd, driver.lng]}
+          icon={driverMarkerIcon(driver.status)}
+        >
+          <Popup>
+            <div className="text-sm space-y-1 min-w-[140px]">
+              <p className="font-semibold">{driver.name || 'Motorista'}</p>
+              <p className="text-xs">
+                {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
+              </p>
+              {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
+                <p className="text-xs opacity-80">
+                  {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              )}
+              {driver.lastSeenAt && (
+                <p className="text-[11px] opacity-60">GPS {timeAgo(driver.lastSeenAt)}</p>
+              )}
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
+});
+
 const fetchLiveMap = async () => {
   const { data } = await api.get('/admin/captains/live-map');
   return data;
@@ -110,6 +144,8 @@ export default function Rides() {
   const [finalizeRide, setFinalizeRide] = useState(null);
   const [showMap, setShowMap] = useState(true); // Split view toggle
   const [showManualRide, setShowManualRide] = useState(false);
+  const [frozenMapDrivers, setFrozenMapDrivers] = useState(null);
+  const mapResumeFrameRef = useRef(null);
 
   // Query
   const { data, isLoading, isError } = useQuery({
@@ -207,6 +243,35 @@ export default function Rides() {
     () => liveDriversList.filter((d) => d.status === 'in_ride').length,
     [liveDriversList]
   );
+  const mapDriversList = frozenMapDrivers ?? liveDriversList;
+
+  useEffect(() => () => {
+    if (mapResumeFrameRef.current != null) {
+      cancelAnimationFrame(mapResumeFrameRef.current);
+    }
+  }, []);
+
+  const openManualRide = () => {
+    if (mapResumeFrameRef.current != null) {
+      cancelAnimationFrame(mapResumeFrameRef.current);
+      mapResumeFrameRef.current = null;
+    }
+    // Mantém exatamente os mesmos elementos Leaflet montados enquanto o modal
+    // atualiza. Remover/recriar Marker/Popup junto de um portal React 19 pode fazer
+    // o Leaflet remover o nó de referência antes do insertBefore do React.
+    setFrozenMapDrivers(liveDriversList);
+    setShowManualRide(true);
+  };
+
+  const closeManualRide = () => {
+    setShowManualRide(false);
+    // Primeiro desmonta somente o portal. A frota ao vivo volta ao mapa no frame
+    // seguinte, evitando que React e Leaflet alterem document.body no mesmo commit.
+    mapResumeFrameRef.current = requestAnimationFrame(() => {
+      setFrozenMapDrivers(null);
+      mapResumeFrameRef.current = null;
+    });
+  };
 
   // Actions
   // Corrida e encomenda têm endpoints de cancelamento diferentes (auditoria de UX,
@@ -330,7 +395,7 @@ export default function Rides() {
               <p className="text-sm text-text-muted mt-1">Monitoramento e operação de corridas em tempo real.</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setShowManualRide(true)} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold flex items-center gap-2"><Plus className="w-4 h-4" /> Lançar corrida</button>
+              <button onClick={openManualRide} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold flex items-center gap-2"><Plus className="w-4 h-4" /> Lançar corrida</button>
               <button onClick={() => setShowMap(!showMap)} className="px-3 py-2 bg-background border border-border rounded-lg text-sm flex items-center gap-2 hover:bg-background/80 lg:hidden">
                 <MapIcon className="w-4 h-4" /> Mapa
               </button>
@@ -544,40 +609,9 @@ export default function Rides() {
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
-            {/* Congela markers enquanto o modal de corrida manual está aberto —
-                React 19 + react-leaflet quebram o DOM (insertBefore) com updates
-                de GPS + autocomplete no mesmo commit. */}
-            {!showManualRide && (
-              <>
-                <FitDriversBounds drivers={liveDriversList} />
-                {liveDriversList.map((driver) => (
-                  <Marker
-                    key={driver.captainId}
-                    position={[driver.ltd, driver.lng]}
-                    icon={driverMarkerIcon(driver.status)}
-                  >
-                    <Popup>
-                      <div className="text-sm space-y-1 min-w-[140px]">
-                        <p className="font-semibold">{driver.name || 'Motorista'}</p>
-                        <p className="text-xs">
-                          {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
-                        </p>
-                        {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
-                          <p className="text-xs opacity-80">
-                            {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </p>
-                        )}
-                        {driver.lastSeenAt && (
-                          <p className="text-[11px] opacity-60">GPS {timeAgo(driver.lastSeenAt)}</p>
-                        )}
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
-              </>
-            )}
+            {/* Durante a corrida manual a lista fica congelada, mas permanece
+                montada. Desmontar Marker/Popup era o gatilho do insertBefore. */}
+            <DriversLayer drivers={mapDriversList} />
           </MapContainer>
       </div>
 
@@ -597,7 +631,7 @@ export default function Rides() {
 
       {showManualRide && (
         <ManualRideModal
-          onClose={() => setShowManualRide(false)}
+          onClose={closeManualRide}
           onCreated={() => queryClient.invalidateQueries({ queryKey: ['rides'] })}
         />
       )}

@@ -3,6 +3,7 @@ import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
+import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel } from '@/shared/utils/formatters'
 
 const ConfirmRide = (props) => {
     const extractTitle = (addressStr) => {
@@ -11,10 +12,18 @@ const ConfirmRide = (props) => {
         return addressStr.split(',')[0] || '';
     };
 
-    const paymentLabel = props.paymentMethod === 'pix' ? 'Pix' : props.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro';
+    const paymentLabel = paymentMethodLabel(props.paymentMethod);
     const paymentIconClass = props.paymentMethod === 'pix' ? 'ri-qr-code-line' : props.paymentMethod === 'card' ? 'ri-bank-card-fill' : 'ri-money-dollar-box-fill';
     const paymentIconColor = props.paymentMethod === 'pix' ? 'text-teal-500' : props.paymentMethod === 'card' ? 'text-blue-500' : 'text-brand-500'
     const fareValue = props.fare?.fare?.[props.vehicleType]
+    const fareLabel = formatCurrencyBRL(fareValue)
+    const distanceLabel = formatDistanceLabel(props.fare?.distance)
+    const durationLabel = formatDurationLabel(props.fare?.time)
+    const isEstimate = props.fare?.showAsEstimate !== false
+    const breakdown = props.fare?.breakdown?.[props.vehicleType] || {}
+    const subtotal = breakdown.subtotalBeforeCommission ?? breakdown.subtotal ?? breakdown.baseFare
+    const discount = props.fare?.discountAmount
+    const hasBreakdown = subtotal != null || discount > 0 || distanceLabel || durationLabel
 
     return (
         <div className='pb-2'>
@@ -73,11 +82,31 @@ const ConfirmRide = (props) => {
                     <DetailRow
                         compact
                         icon="ri-currency-line"
-                        title={fareValue != null ? `R$${fareValue}` : ''}
-                        subtitle={props.fare?.showAsEstimate !== false ? 'Estimativa' : 'Valor'}
+                        title={fareValue != null ? fareLabel : 'Preço indisponível'}
+                        subtitle={isEstimate ? 'Estimativa da corrida' : 'Valor da corrida'}
                         className='px-2'
                     />
                 </Card>
+
+                {hasBreakdown && (
+                    <Card padding='p-3' className='space-y-2'>
+                        <div className='flex items-center justify-between gap-3'>
+                            <p className='text-sm font-semibold text-ink-900'>Resumo do preço</p>
+                            <p className='text-sm font-bold text-ink-900'>{fareLabel}</p>
+                        </div>
+                        <div className='grid grid-cols-2 gap-2 text-xs text-ink-500'>
+                            {distanceLabel && <p><span className='font-medium text-ink-700'>Distância:</span> {distanceLabel}</p>}
+                            {durationLabel && <p><span className='font-medium text-ink-700'>Tempo:</span> {durationLabel}</p>}
+                            {subtotal != null && <p><span className='font-medium text-ink-700'>Corrida:</span> {formatCurrencyBRL(subtotal)}</p>}
+                            {discount > 0 && <p><span className='font-medium text-ink-700'>Desconto:</span> - {formatCurrencyBRL(discount)}</p>}
+                        </div>
+                        <p className='text-xs text-ink-400'>
+                            {isEstimate
+                                ? 'Valor estimado antes da corrida; o valor final pode variar conforme rota, tempo real, espera e adicionais.'
+                                : 'Valor calculado para esta solicitação antes de chamar o motorista.'}
+                        </p>
+                    </Card>
+                )}
 
                 {/* Bloco H (2026-08-02): cupom é opcional — o código só é enviado junto
                     com a criação da corrida (sem endpoint de validação separado); um
@@ -102,7 +131,9 @@ const ConfirmRide = (props) => {
                 }}
                 className='mt-3 !min-h-[44px] !text-sm'
             >
-                Confirmar corrida
+                {fareValue != null
+                    ? `Solicitar corrida — ${isEstimate ? 'estimativa ' : ''}${fareLabel}`
+                    : 'Solicitar corrida'}
             </Button>
         </div>
     )

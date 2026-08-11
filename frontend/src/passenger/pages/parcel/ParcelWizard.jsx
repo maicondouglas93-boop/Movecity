@@ -13,6 +13,7 @@ import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import { LocationContext } from '@/shared/contexts/LocationContext'
+import { formatCurrencyBRL } from '@/shared/utils/formatters'
 
 const SIZE_OPTIONS = [
   { id: 'small', label: 'Pequeno', hint: 'Envelope, documentos' },
@@ -82,7 +83,9 @@ const ParcelWizard = () => {
     getVehicleCategories(vehicleService)
       .then((data) => {
         if (cancelled) return
-        const list = Array.isArray(data) ? data : []
+        // O backend de encomendas valida vehicleType como moto/car; filtra aqui para a
+        // UI nunca oferecer categoria dinâmica que a API recusaria depois do cálculo.
+        const list = (Array.isArray(data) ? data : []).filter((cat) => ['moto', 'car'].includes(cat.name))
         setVehicleCategories(list)
         setForm((f) => {
           if (f.vehicleType && list.some((c) => c.name === f.vehicleType)) return f
@@ -549,7 +552,7 @@ const ParcelWizard = () => {
                 </p>
               ) : fareInfo?.fare != null ? (
                 <p className="text-2xl font-bold text-ink-900">
-                  R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}
+                  {formatCurrencyBRL(fareInfo.fare)}
                 </p>
               ) : (
                 <p className="text-lg font-semibold text-ink-400">—</p>
@@ -580,7 +583,7 @@ const ParcelWizard = () => {
             {scheduleMode ? 'Confirmar agendamento' : 'Solicitar entrega'}
             {fareInfo?.fare != null && !fareLoading ? (
               <span className="opacity-90 font-medium">
-                · R$ {Number(fareInfo.fare).toFixed(2).replace('.', ',')}
+                · {formatCurrencyBRL(fareInfo.fare)}
               </span>
             ) : null}
           </Button>

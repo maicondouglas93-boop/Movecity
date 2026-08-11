@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatCurrencyBRL } from '@/shared/utils/formatters'
 
 const METHODS = [
     { id: 'pix', label: 'Pix', icon: 'ri-instance-line', iconColor: 'text-teal-500' },
@@ -32,7 +33,7 @@ const PaymentOptionsPanel = (props) => {
             <div className='bg-surface-alt rounded-panel p-4 mb-4 flex items-center justify-between'>
                 <div>
                     <p className='text-sm text-ink-400 mb-1'>Saldo da carteira</p>
-                    <h2 className='text-3xl font-bold text-ink-900'>R$ {(props.walletBalance || 0).toFixed(2).replace('.', ',')}</h2>
+                    <h2 className='text-3xl font-bold text-ink-900'>{formatCurrencyBRL(props.walletBalance || 0)}</h2>
                 </div>
             </div>
 

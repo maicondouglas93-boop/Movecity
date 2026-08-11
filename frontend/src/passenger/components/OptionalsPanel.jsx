@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Button from '@/shared/components/ui/Button';
+import { formatCurrencyBRL } from '@/shared/utils/formatters';
 
 const OPTIONS = [
     { id: 'porta_malas', label: 'Porta-malas grande' },
@@ -56,7 +57,7 @@ const OptionalsPanel = (props) => {
                 {OPTIONS.map((opt) => {
                     const price = Number(props.optionalPrices?.[opt.id]);
                     const priceLabel = Number.isFinite(price)
-                        ? (price > 0 ? `+ R$ ${price.toFixed(2)}` : 'Grátis')
+                        ? (price > 0 ? `+ ${formatCurrencyBRL(price)}` : 'Grátis')
                         : null;
                     return (
                     <label

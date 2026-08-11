@@ -19,34 +19,7 @@ import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
-
-const paymentLabel = (method) => {
-    if (method === 'pix') return 'Pix'
-    if (method === 'carteira') return 'Carteira'
-    if (method === 'card' || method === 'cartao') return 'Cartão'
-    if (method === 'cash' || method === 'dinheiro') return 'Dinheiro'
-    return method || '—'
-}
-
-const formatMoney = (value) => {
-    if (value == null || Number.isNaN(Number(value))) return '—'
-    return `R$${Number(value).toFixed(2)}`
-}
-
-const formatDistance = (meters) => {
-    if (meters == null || meters <= 0) return null
-    if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
-    return `${Math.round(meters)} m`
-}
-
-const formatDuration = (seconds) => {
-    if (seconds == null || seconds <= 0) return null
-    const mins = Math.round(seconds / 60)
-    if (mins < 60) return `${mins} min`
-    const h = Math.floor(mins / 60)
-    const m = mins % 60
-    return m ? `${h} h ${m} min` : `${h} h`
-}
+import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel as getPaymentStatusLabel } from '@/shared/utils/formatters'
 
 const shortAddress = (address) => {
     if (!address || typeof address !== 'string') return '—'
@@ -116,13 +89,9 @@ const Riding = () => {
     const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
 
     const rideAmount = ride?.finalPrice ?? ride?.fare
+    const rideAmountLabel = ride?.finalPrice != null ? 'Valor final' : 'Estimativa original'
     const isFinished = ride?.status === 'finished'
-    const paymentStatusLabel = (() => {
-        if (ride?.paymentMethod === 'carteira') return 'Pago pela carteira'
-        if (ride?.paymentStatus === 'paid') return 'Pagamento confirmado'
-        if (ride?.paymentStatus === 'pending') return 'Pagamento em processamento'
-        return null
-    })()
+    const paymentStatusLabel = getPaymentStatusLabel(ride?.paymentStatus, ride?.paymentMethod)
 
     const goHomeClean = useCallback(() => {
         clearUserRide?.()
@@ -167,7 +136,7 @@ const Riding = () => {
             if (endedRide?.paymentMethod === 'carteira' || ride?.paymentMethod === 'carteira') {
                 addToast('Viagem concluída! Que tal avaliar o motorista?', 'money', 6000)
             } else if (amount != null) {
-                addToast(`Viagem concluída! Valor: ${formatMoney(amount)}`, 'money', 6000)
+                addToast(`Viagem concluída! Valor: ${formatCurrencyBRL(amount)}`, 'money', 6000)
             }
         }
 
@@ -178,7 +147,7 @@ const Riding = () => {
                 try {
                     const audio = new Audio('/sounds/new-ride.wav');
                     audio.play().catch(() => {});
-                } catch (_) { /* ignore */ }
+                } catch { /* ignore */ }
             }
         }
 
@@ -222,7 +191,7 @@ const Riding = () => {
                 if (response.data.chat) {
                     setUnreadCount(response.data.chat.unreadUser || 0);
                 }
-            } catch (_) { /* ignore */ }
+            } catch { /* ignore */ }
         };
         if (ride?._id && !isFinished) fetchUnread();
     }, [ride?._id, isFinished])
@@ -293,8 +262,8 @@ const Riding = () => {
         )
     }
 
-    const distanceLabel = formatDistance(ride?.actualDistance)
-    const durationLabel = formatDuration(ride?.actualTime)
+    const distanceLabel = formatDistanceLabel(ride?.actualDistance)
+    const durationLabel = formatDurationLabel(ride?.actualTime)
     const captainName = personName(ride?.captain) || null
 
     return (
@@ -336,7 +305,7 @@ const Riding = () => {
                 <DriverIdentityCard
                     captain={ride?.captain}
                     vehicleTypeFallback={ride?.vehicleType}
-                    fareLabel={formatMoney(rideAmount)}
+                    fareLabel={formatCurrencyBRL(rideAmount)}
                     compact
                 />
 
@@ -406,13 +375,13 @@ const Riding = () => {
                                     />
                                     <DetailRow
                                         icon="ri-currency-line"
-                                        title={formatMoney(rideAmount)}
-                                        subtitle="Valor"
+                                        title={formatCurrencyBRL(rideAmount)}
+                                        subtitle={rideAmountLabel}
                                         className='px-3'
                                     />
                                     <DetailRow
                                         icon="ri-bank-card-line"
-                                        title={paymentLabel(ride?.paymentMethod)}
+                                        title={paymentMethodLabel(ride?.paymentMethod)}
                                         subtitle={paymentStatusLabel || 'Forma de pagamento'}
                                         className='px-3'
                                     />
@@ -446,13 +415,13 @@ const Riding = () => {
                         {modalStep === 'payment' && (
                             <>
                                 <h2 className='text-2xl font-bold text-ink-900 mb-6'>
-                                    Acertar {formatMoney(rideAmount)}
+                                    Acertar {formatCurrencyBRL(rideAmount)}
                                 </h2>
 
                                 <div className='bg-amber-50 border border-amber-300 rounded-panel p-4 mb-6 flex gap-3 items-center'>
                                     <i className="ri-information-line text-amber-500 text-xl flex-shrink-0" aria-hidden="true"></i>
                                     <p className='text-sm text-amber-700'>
-                                        Pague <strong>{formatMoney(rideAmount)}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
+                                        Pague <strong>{formatCurrencyBRL(rideAmount)}</strong> {ride?.paymentMethod === 'pix' ? 'via Pix' : 'em dinheiro'} diretamente ao motorista. O app não processa este pagamento.
                                     </p>
                                 </div>
 

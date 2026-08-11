@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import Button from '@/shared/components/ui/Button'
 import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
+import { formatCurrencyBRL, paymentMethodLabel } from '@/shared/utils/formatters'
 
-const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira' ? 'Carteira' : method === 'card' ? 'Cartão' : 'Dinheiro'
+const paymentLabel = paymentMethodLabel
 
 // Painel sempre aberto: identidade + PIN + trajeto + cancelar — sem expandir/rolar.
 const WaitingForDriver = (props) => {
@@ -39,8 +40,12 @@ const WaitingForDriver = (props) => {
     if (!props.ride) return null
 
     const fareLabel = props.ride?.fare != null
-        ? `R$${props.ride.fare} · ${paymentLabel(props.ride?.paymentMethod)}`
+        ? `${formatCurrencyBRL(props.ride.fare)} · ${paymentLabel(props.ride?.paymentMethod)}`
         : null
+    const cancellationFee = Number(props.ride?.cancellationFeePreview ?? props.ride?.cancellationFeeCharged ?? 0)
+    const cancellationText = cancellationFee > 0
+        ? `Taxa prevista de cancelamento: ${formatCurrencyBRL(cancellationFee)}.`
+        : 'Regra de taxa de cancelamento: cancelar antes do início normalmente não cobra taxa; se houver regra local aplicada, ela será informada na confirmação.'
 
     return (
         <div className="pb-1">
@@ -84,7 +89,7 @@ const WaitingForDriver = (props) => {
                     </Button>
                     {confirmingCancel && !cancelling && (
                         <p className="text-[11px] text-center text-ink-400 mt-1.5">
-                            Pode haver taxa de cancelamento.
+                            {cancellationText}
                         </p>
                     )}
                 </>

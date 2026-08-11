@@ -7,7 +7,7 @@ export async function getPlaceDetails(placeId, sessionToken) {
   return response.data;
 }
 
-export async function getAddressSuggestions({ input, lat, lng, sessionToken } = {}) {
+export async function getAddressSuggestions({ input, lat, lng, sessionToken, signal } = {}) {
   const params = { input };
   if (lat != null && lng != null) {
     params.lat = lat;
@@ -15,7 +15,7 @@ export async function getAddressSuggestions({ input, lat, lng, sessionToken } = 
   }
   if (sessionToken) params.sessionToken = sessionToken;
 
-  const response = await api.get('/admin/maps/suggestions', { params });
+  const response = await api.get('/admin/maps/suggestions', { params, signal });
   const suggestions = Array.isArray(response.data) ? response.data : [];
   const nextSession = response.headers?.['x-maps-session-token'] || sessionToken || null;
   return { suggestions, sessionToken: nextSession };

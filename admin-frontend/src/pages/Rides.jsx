@@ -283,7 +283,7 @@ export default function Rides() {
       items.map(r => [
         r._id,
         r.serviceType === 'parcel' ? 'Encomenda' : 'Corrida',
-        r.user?.fullname?.firstname,
+        r.user?.fullname?.firstname || r.adminPassenger?.name || '',
         r.captain?.fullname?.firstname || '-',
         itemStatusLabel(r),
         r.fare,

@@ -136,11 +136,20 @@ async function findCaptainsNearPickup(pickup, vehicleType, {
     excludeActiveRide = false,
     excludeActiveParcel = false,
     serviceKind = 'ride',
+    pickupCoordinates,
 } = {}) {
-    const pickupCoordinates = await mapService.getAddressCoordinate(pickup);
+    const suppliedLat = Number(pickupCoordinates?.lat);
+    const suppliedLng = Number(pickupCoordinates?.lng);
+    const hasSuppliedCoordinates = pickupCoordinates?.lat !== '' && pickupCoordinates?.lat != null
+        && pickupCoordinates?.lng !== '' && pickupCoordinates?.lng != null
+        && Number.isFinite(suppliedLat) && suppliedLat >= -90 && suppliedLat <= 90
+        && Number.isFinite(suppliedLng) && suppliedLng >= -180 && suppliedLng <= 180;
+    const resolvedPickupCoordinates = hasSuppliedCoordinates
+        ? { ltd: suppliedLat, lng: suppliedLng }
+        : await mapService.getAddressCoordinate(pickup);
     const captainsInRadius = await mapService.getCaptainsInTheRadius(
-        pickupCoordinates.ltd,
-        pickupCoordinates.lng,
+        resolvedPickupCoordinates.ltd,
+        resolvedPickupCoordinates.lng,
         CAPTAIN_SEARCH_RADIUS_KM,
         TRACE_ID
     );
@@ -158,7 +167,7 @@ async function findCaptainsNearPickup(pickup, vehicleType, {
     });
 
     return {
-        pickupCoordinates: { lat: pickupCoordinates.ltd, lng: pickupCoordinates.lng },
+        pickupCoordinates: { lat: resolvedPickupCoordinates.ltd, lng: resolvedPickupCoordinates.lng },
         captains: matching,
     };
 }

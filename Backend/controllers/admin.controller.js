@@ -1,4 +1,5 @@
 ﻿const adminService = require('../services/admin.service');
+const { validationResult } = require('express-validator');
 
 module.exports.login = async (req, res, next) => {
     try {
@@ -705,56 +706,290 @@ module.exports.getRides = async (req, res, next) => {
     }
 };
 
-module.exports.estimateManualRide = async (req, res, next) => {
+module.exports.getManualRideAccessCode = async (req, res, next) => {
+    if (manualRideValidationError(req, res)) return;
     try {
-        const quote = await require('../services/ride.service').getFare(req.body.pickup, req.body.destination);
+        const Ride = require('../models/ride.model');
+        const ride = await Ride.findOne({ _id: req.params.id, source: 'admin' })
+            .select('+otp status')
+            .lean();
+        if (!ride) {
+            return res.status(404).json({ message: 'Corrida lançada pelo painel não encontrada.' });
+        }
+        if (['finished', 'cancelled'].includes(ride.status)) {
+            return res.status(409).json({ message: 'O PIN não fica disponível depois do encerramento da corrida.' });
+        }
+        return res.status(200).json({ otp: ride.otp });
+    } catch (error) {
+        next(error);
+    }
+};
+
+function manualRideValidationError(req, res) {
+    const errors = validationResult(req);
+    if (errors.isEmpty()) return false;
+    res.status(400).json({
+        message: errors.array()[0]?.msg || 'Revise os dados informados.',
+        errors: errors.array(),
+    });
+    return true;
+}
+
+function normalizePassengerPhone(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (String(value || '').trim().startsWith('+') && /^\d{10,15}$/.test(digits)) return `+${digits}`;
+    if (/^\d{10,11}$/.test(digits)) return `+55${digits}`;
+    if (/^55\d{10,11}$/.test(digits)) return `+${digits}`;
+    if (/^\d{10,15}$/.test(digits)) return `+${digits}`;
+    return null;
+}
+
+function manualRideCancellationWasDispatchFailure(ride) {
+    return ride?.status === 'cancelled'
+        && ride?.cancellationReason === 'Motorista selecionado ficou indisponível antes do despacho';
+}
+
+async function findManualRideForAdmin(Ride, adminId, idempotencyKey) {
+    return Ride.findOne({ createdBy: adminId, idempotencyKey, source: 'admin' })
+        .select('+otp')
+        .populate('user captain createdBy', 'fullname phone name');
+}
+
+module.exports.estimateManualRide = async (req, res) => {
+    if (manualRideValidationError(req, res)) return;
+    try {
+        const routePoint = (address, coordinates) => {
+            const lat = Number(coordinates?.lat);
+            const lng = Number(coordinates?.lng);
+            return coordinates?.lat !== '' && coordinates?.lat != null
+                && coordinates?.lng !== '' && coordinates?.lng != null
+                && Number.isFinite(lat) && Number.isFinite(lng)
+                ? `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+                : address;
+        };
+        const quote = await require('../services/ride.service').getFare(
+            routePoint(req.body.pickup, req.body.pickupCoordinates),
+            routePoint(req.body.destination, req.body.destinationCoordinates)
+        );
         const vehicleType = req.body.vehicleType;
-        if (!quote.fare?.[vehicleType]) return res.status(400).json({ message: 'Categoria indisponível para corrida' });
-        res.json({ distance: quote.distance, time: quote.time, fare: quote.fare[vehicleType], fareCard: quote.fareCard?.[vehicleType], breakdown: quote.breakdown?.[vehicleType] });
-    } catch (error) { next(error); }
+        if (!Number.isFinite(Number(quote.fare?.[vehicleType]))) {
+            return res.status(400).json({ message: 'Categoria indisponível para corrida.' });
+        }
+        return res.status(200).json({
+            distance: quote.distance,
+            time: quote.time,
+            fare: quote.fare[vehicleType],
+            breakdown: quote.breakdown?.[vehicleType],
+            showAsEstimate: quote.showAsEstimate,
+        });
+    } catch (error) {
+        console.error('[admin/manual-ride] Falha na estimativa:', error.message);
+        return res.status(422).json({ message: 'Não foi possível calcular essa rota. Confirme os endereços e tente novamente.' });
+    }
+};
+
+module.exports.getManualRideAvailableCaptains = async (req, res) => {
+    if (manualRideValidationError(req, res)) return;
+    try {
+        const dispatchService = require('../services/dispatch.service');
+        const { pickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
+            req.body.pickup,
+            req.body.vehicleType,
+            {
+                TRACE_ID: `AdminRideCandidates:${req.admin._id}`,
+                pickupCoordinates: req.body.pickupCoordinates,
+                excludeActiveRide: true,
+                excludeActiveParcel: true,
+                serviceKind: 'ride',
+            }
+        );
+        const { haversineKm } = require('../services/maps/geo.util');
+        const options = captains.map((captain) => ({
+            _id: captain._id,
+            fullname: captain.fullname,
+            vehicleType: captain.vehicle?.vehicleType,
+            rating: captain.rating,
+            distanceKm: captain.location?.ltd != null && captain.location?.lng != null
+                ? Math.round(haversineKm(
+                    pickupCoordinates.lat,
+                    pickupCoordinates.lng,
+                    captain.location.ltd,
+                    captain.location.lng
+                ) * 10) / 10
+                : null,
+        })).sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+        return res.status(200).json({ captains: options, pickupCoordinates });
+    } catch (error) {
+        console.error('[admin/manual-ride] Falha ao listar motoristas:', error.message);
+        return res.status(422).json({ message: 'Não foi possível verificar os motoristas disponíveis para essa partida.' });
+    }
 };
 
 module.exports.createManualRide = async (req, res, next) => {
+    if (manualRideValidationError(req, res)) return;
+    const Ride = require('../models/ride.model');
+    const User = require('../models/user.model');
+    const Payment = require('../models/payment.model');
+    const rideService = require('../services/ride.service');
+    const dispatchService = require('../services/dispatch.service');
+    const { dispatchRideToCaptains } = require('./ride.controller');
+    const { passenger, pickup, destination, vehicleType, paymentMethod, observation, captainId, idempotencyKey } = req.body;
+
     try {
-        const Ride = require('../models/ride.model');
-        const User = require('../models/user.model');
-        const AdminLog = require('../models/adminLog.model');
-        const rideService = require('../services/ride.service');
-        const { dispatchRideToCaptains } = require('./ride.controller');
-        const { passenger, pickup, destination, vehicleType, paymentMethod, observation, captainId, idempotencyKey } = req.body;
-        if (!idempotencyKey || !passenger?.name || !passenger?.phone || !pickup?.address || !destination?.address
-            || !Number.isFinite(Number(pickup.lat)) || !Number.isFinite(Number(pickup.lng))
-            || !Number.isFinite(Number(destination.lat)) || !Number.isFinite(Number(destination.lng))) {
-            return res.status(400).json({ message: 'Dados obrigatórios ou coordenadas inválidas' });
+        const existing = await findManualRideForAdmin(Ride, req.admin._id, idempotencyKey);
+        if (manualRideCancellationWasDispatchFailure(existing)) {
+            return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
         }
-        if (!['cash', 'pix', 'card'].includes(paymentMethod)) return res.status(400).json({ message: 'Método de pagamento inválido' });
-        const existing = await Ride.findOne({ createdBy: req.admin._id, idempotencyKey });
-        if (existing) return res.status(200).json(existing);
+        if (existing) {
+            return res.status(200).json({
+                ...existing.toObject(),
+                manualDispatch: { reused: true },
+            });
+        }
+
+        let passengerPhone = normalizePassengerPhone(passenger.phone);
+        let passengerName = passenger.name.trim();
+        if (!passengerPhone) {
+            return res.status(400).json({ message: 'Informe um telefone válido com DDD.' });
+        }
+
+        const { getCachedVehicleCategoryByName } = require('../services/vehicleCategoryCache.service');
+        const category = await getCachedVehicleCategoryByName(vehicleType);
+        const passengerCount = Number(passenger.passengerCount);
+        if (category?.capacity && passengerCount > Number(category.capacity)) {
+            return res.status(400).json({
+                message: `${category.displayName || vehicleType} aceita no máximo ${category.capacity} passageiro(s).`,
+            });
+        }
+
         let user = null;
         if (passenger.userId) {
             user = await User.findById(passenger.userId);
-            if (!user) return res.status(400).json({ message: 'Passageiro cadastrado não encontrado' });
+            if (!user) return res.status(400).json({ message: 'Passageiro cadastrado não encontrado.' });
+            if (user.isBlocked) return res.status(409).json({ message: 'Esse passageiro está bloqueado e não pode iniciar corridas.' });
+            const hasActiveRide = await Ride.exists({
+                user: user._id,
+                status: { $in: ['requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'] },
+            });
+            if (hasActiveRide) {
+                return res.status(409).json({ message: 'Esse passageiro já possui uma corrida em andamento.' });
+            }
+            passengerName = [user.fullname?.firstname, user.fullname?.lastname].filter(Boolean).join(' ').trim() || passengerName;
+            passengerPhone = normalizePassengerPhone(user.phone) || passengerPhone;
         }
+
+        // O dropdown usa exatamente esta mesma regra. Revalidar no backend evita que um
+        // motorista fique ocupado, saia do raio ou troque de categoria entre a seleção
+        // e o clique em “Lançar corrida”.
+        if (captainId) {
+            const { captains } = await dispatchService.findCaptainsNearPickup(
+                pickup.address,
+                vehicleType,
+                {
+                    TRACE_ID: `AdminRidePreflight:${req.admin._id}`,
+                    pickupCoordinates: pickup,
+                    excludeActiveRide: true,
+                    excludeActiveParcel: true,
+                    serviceKind: 'ride',
+                }
+            );
+            if (!captains.some((captain) => String(captain._id) === String(captainId))) {
+                return res.status(409).json({ message: 'Motorista indisponível, ocupado, incompatível ou fora do raio.' });
+            }
+        }
+
         const { ride } = await rideService.createRide({
-            user: user?._id, pickup: pickup.address, destination: destination.address, vehicleType, paymentMethod,
-            observation, source: 'admin', createdBy: req.admin._id, createdByRole: 'admin', idempotencyKey,
-            adminPassenger: { name: passenger.name, phone: passenger.phone, passengerCount: passenger.passengerCount || 1, note: passenger.note },
+            user: user?._id,
+            pickup: pickup.address.trim(),
+            destination: destination.address.trim(),
+            vehicleType,
+            paymentMethod,
+            observation: observation?.trim(),
+            source: 'admin',
+            createdBy: req.admin._id,
+            createdByRole: 'admin',
+            idempotencyKey,
+            adminPassenger: {
+                name: passengerName,
+                phone: passengerPhone,
+                passengerCount,
+                note: passenger.note?.trim(),
+            },
             pickupCoordinates: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
             destinationCoordinates: { lat: Number(destination.lat), lng: Number(destination.lng) },
         });
-        const offered = await dispatchRideToCaptains(ride, { pickup: pickup.address, vehicleType, TRACE_ID: `AdminRide:${ride._id}`, targetCaptainId: captainId });
-        if (captainId && offered !== 1) {
-            await Ride.deleteOne({ _id: ride._id });
-            return res.status(409).json({ message: 'Motorista indisponível, ocupado, incompatível ou fora do raio' });
+
+        const offeredCount = await dispatchRideToCaptains(ride, {
+            pickup: pickup.address,
+            vehicleType,
+            TRACE_ID: `AdminRide:${ride._id}`,
+            targetCaptainId: captainId || undefined,
+            pickupCoordinates: pickup,
+        });
+
+        if (captainId && offeredCount !== 1) {
+            const reason = 'Motorista selecionado ficou indisponível antes do despacho';
+            await Ride.updateOne(
+                { _id: ride._id, status: 'requested' },
+                {
+                    $set: { status: 'cancelled', cancelledBy: 'admin', cancellationReason: reason, cancelledAt: new Date() },
+                    $push: { statusHistory: { status: 'cancelled', at: new Date() } },
+                }
+            );
+            await Payment.deleteMany({ rideId: ride._id });
+            await adminService.logAction({
+                adminId: req.admin._id,
+                adminName: req.admin.name,
+                action: 'create_manual_ride_dispatch_failed',
+                targetId: ride._id.toString(),
+                targetModel: 'Ride',
+                reason,
+                ipAddress: req.ip,
+            });
+            return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
         }
-        await AdminLog.create({ adminId: req.admin._id, adminName: req.admin.name, action: 'create_manual_ride', targetId: ride._id.toString(), targetModel: 'Ride', ipAddress: req.ip,
-            newValue: { passenger: passenger.name, captainId: captainId || null, vehicleType, pickup: pickup.address, destination: destination.address, paymentMethod } });
-        const result = await Ride.findById(ride._id).populate('user captain createdBy', 'fullname phone name');
-        res.status(201).json(result);
+
+        await adminService.logAction({
+            adminId: req.admin._id,
+            adminName: req.admin.name,
+            action: 'create_manual_ride',
+            targetId: ride._id.toString(),
+            targetModel: 'Ride',
+            ipAddress: req.ip,
+            newValue: {
+                passenger: passengerName,
+                captainId: captainId || null,
+                vehicleType,
+                pickup: pickup.address,
+                destination: destination.address,
+                paymentMethod,
+                offeredCount,
+            },
+        });
+
+        const result = await Ride.findById(ride._id)
+            .select('+otp')
+            .populate('user captain createdBy', 'fullname phone name');
+        return res.status(201).json({
+            ...result.toObject(),
+            manualDispatch: {
+                mode: captainId ? 'selected' : 'automatic',
+                offeredCount,
+            },
+        });
     } catch (error) {
-        if (error?.code === 11000 && req.body.idempotencyKey) {
-            const ride = await require('../models/ride.model').findOne({ createdBy: req.admin._id, idempotencyKey: req.body.idempotencyKey });
-            return res.status(200).json(ride);
+        if (error?.code === 11000 && idempotencyKey) {
+            const ride = await findManualRideForAdmin(Ride, req.admin._id, idempotencyKey);
+            if (manualRideCancellationWasDispatchFailure(ride)) {
+                return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
+            }
+            if (ride) return res.status(200).json({ ...ride.toObject(), manualDispatch: { reused: true } });
+        }
+        if (error?.code === 'USER_HAS_ACTIVE_PARCEL') {
+            return res.status(409).json({ message: 'Esse passageiro já possui uma encomenda em andamento.' });
+        }
+        if (error?.code === 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE') {
+            return res.status(400).json({ message: 'A categoria selecionada não está habilitada para corridas.' });
         }
         next(error);
     }

@@ -315,7 +315,9 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
     if (!isGoogle) {
         console.log("No Google Maps API Key found. Fetching suggestions from Photon (OSM).");
         try {
-            let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input)}&format=json&limit=15&addressdetails=1`;
+            const country = String(process.env.MAPS_COUNTRY_CODE || 'br').toLowerCase();
+            const language = process.env.MAPS_LANGUAGE_CODE || 'pt-BR';
+            let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input)}&format=json&limit=15&addressdetails=1&countrycodes=${encodeURIComponent(country)}&accept-language=${encodeURIComponent(language)}`;
             if (lat && lng) {
                 const flat = parseFloat(lat);
                 const flng = parseFloat(lng);
@@ -387,7 +389,9 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
         return mockSuggestions;
     }
 
-    let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${apiKey}`;
+    const country = String(process.env.MAPS_COUNTRY_CODE || 'br').toLowerCase();
+    const language = process.env.MAPS_LANGUAGE_CODE || 'pt-BR';
+    let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${apiKey}&components=country:${encodeURIComponent(country)}&language=${encodeURIComponent(language)}`;
     if (lat && lng) {
         url += `&location=${lat},${lng}&radius=20000`;
     }
@@ -410,7 +414,8 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
                 return {
                     text: prediction.description,
                     title: title,
-                    subtitle: subtitle
+                    subtitle: subtitle,
+                    placeId: prediction.place_id,
                 };
             }).filter(value => value.title);
 
@@ -425,3 +430,57 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng) => {
         return mockSuggestions;
     }
 }
+
+// MAPS_PROVIDER=osm ainda pode usar a chave do Google como fallback. Nesse modo o
+// autocomplete legado devolve place_id, mas antes não existia resolução do item
+// escolhido — o painel recebia endereço sem coordenadas e bloqueava a corrida.
+module.exports.getPlaceDetails = async (placeId) => {
+    if (!placeId) throw new Error('placeId is required');
+    const apiKey = process.env.GOOGLE_MAPS_API;
+    const isGoogle = apiKey && apiKey !== 'dummy-google-maps-api-key';
+    if (!isGoogle) throw new Error('Place details is only available with Google Maps configured');
+
+    const cacheKey = `google-place-details:${placeId}`;
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
+    const started = Date.now();
+    try {
+        const response = await axios.get('https://maps.googleapis.com/maps/api/place/details/json', {
+            params: {
+                place_id: placeId,
+                fields: 'formatted_address,geometry',
+                language: process.env.MAPS_LANGUAGE_CODE || 'pt-BR',
+                key: apiKey,
+            },
+            timeout: 3000,
+        });
+        const location = response.data?.result?.geometry?.location;
+        if (response.data?.status !== 'OK' || location?.lat == null || location?.lng == null) {
+            throw new Error(`Place Details retornou status "${response.data?.status || 'UNKNOWN'}"`);
+        }
+        trackUsageSafe({
+            service: 'google_maps',
+            sku: 'place_details',
+            latencyMs: Date.now() - started,
+            ok: true,
+            statusCode: 200,
+        });
+        const result = {
+            ltd: Number(location.lat),
+            lng: Number(location.lng),
+            address: response.data.result.formatted_address || '',
+        };
+        setCache(cacheKey, result, 86400);
+        return result;
+    } catch (error) {
+        trackUsageSafe({
+            service: 'google_maps',
+            sku: 'place_details',
+            latencyMs: Date.now() - started,
+            ok: false,
+            statusCode: error.response?.status || 500,
+        });
+        throw error;
+    }
+};

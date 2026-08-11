@@ -127,6 +127,14 @@ const captainSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    // Quais famílias de corrida o ADM autorizou. É independente do veículo cadastrado,
+    // do status online e da disponibilidade operacional.
+    vehicleAuthorization: {
+        type: String,
+        enum: [ 'car', 'motorcycle', 'car_motorcycle' ],
+        default: undefined,
+        index: true,
+    },
     status: {
         type: String,
         enum: [ 'active', 'inactive' ],

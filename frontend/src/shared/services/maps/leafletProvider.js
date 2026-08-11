@@ -42,6 +42,7 @@ const vehicleIcons = {
     car: vehicleIcon('ri-car-fill', 'bg-black text-white'),
     moto: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
     motorcycle: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
+    car_motorcycle: vehicleIcon('ri-user-location-fill', 'bg-violet-700 text-white'),
     auto: vehicleIcon('ri-taxi-fill', 'bg-black text-yellow-400'),
 };
 

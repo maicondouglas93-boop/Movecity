@@ -19,6 +19,7 @@ export async function presentNativeRideOffer(payload = {}) {
             fare: payload.fare != null ? String(payload.fare) : undefined,
             pickup: payload.pickup || undefined,
             destination: payload.destination || undefined,
+            vehicleType: payload.vehicleType || undefined,
             deepLink: payload.deepLink || undefined,
         }
         Object.keys(data).forEach((k) => {

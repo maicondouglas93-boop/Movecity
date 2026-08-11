@@ -209,13 +209,21 @@ module.exports.sendNewRide = async (captainId, data, traceId = '[AUDIT]') => {
     const passengerLabel = data.passengerName
         ? String(data.passengerName).trim().split(/\s+/)[0]
         : null;
-    const vehicleLabel = data.vehicleType
-        ? String(data.vehicleType)
-        : null;
+    const normalizedVehicleType = String(data.vehicleType || '').toLowerCase();
+    const isMotorcycle = ['moto', 'motorcycle'].includes(normalizedVehicleType);
+    const isCar = normalizedVehicleType === 'car';
+    const vehicleLabel = isMotorcycle
+        ? '🏍️ Corrida de moto'
+        : (isCar ? '🚗 Corrida de carro' : (data.vehicleType ? String(data.vehicleType) : null));
+    const rideTypeTitle = isMotorcycle
+        ? '🏍️ CORRIDA DE MOTO'
+        : (isCar ? '🚗 CORRIDA DE CARRO' : null);
 
     const title = data.isScheduled
-        ? 'Novo agendamento disponível'
-        : (fareLabel ? `Nova corrida · ${fareLabel}` : 'Nova corrida disponível');
+        ? (rideTypeTitle ? `${rideTypeTitle} AGENDADA` : 'Novo agendamento disponível')
+        : (rideTypeTitle
+            ? (fareLabel ? `${rideTypeTitle} · ${fareLabel}` : rideTypeTitle)
+            : (fareLabel ? `Nova corrida · ${fareLabel}` : 'Nova corrida disponível'));
     const message = data.isScheduled
         ? 'Uma nova corrida agendada está disponível para aceite.'
         : ([

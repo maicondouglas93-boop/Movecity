@@ -1055,8 +1055,20 @@ module.exports.acceptRideAtomic = async ({
         throw new Error('Ride id is required');
     }
 
-    // Exclusão mútua ride↔parcel: busyLock atômico + recheck dentro da seção crítica.
+    // Revalidação no backend: uma chamada direta ao endpoint não pode aceitar uma
+    // categoria que o ADM não autorizou, mesmo que o frontend nunca a tenha exibido.
     const dispatchService = require('./dispatch.service');
+    const [rideToAccept, freshCaptain] = await Promise.all([
+        rideModel.findById(rideId).select('vehicleType status'),
+        require('../models/captain.model').findById(captain._id)
+            .select('vehicle vehicleAuthorization'),
+    ]);
+    if (!rideToAccept) throw new Error('RIDE_NOT_FOUND');
+    if (!(await dispatchService.isCaptainAuthorizedForVehicleType(freshCaptain, rideToAccept.vehicleType))) {
+        throw new Error('VEHICLE_MISMATCH');
+    }
+
+    // Exclusão mútua ride↔parcel: busyLock atômico + recheck dentro da seção crítica.
     const locked = await dispatchService.acquireCaptainBusyLock(captain._id);
     if (!locked) {
         throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
@@ -1984,7 +1996,7 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
     // erradas para um motorista em movimento.
     const captainModel = require('../models/captain.model');
     const freshCaptain = await captainModel.findById(captain._id)
-        .select('location vehicle isOnline isBlocked canReceiveRides approvalStatus');
+        .select('location vehicle vehicleAuthorization isOnline isBlocked canReceiveRides approvalStatus');
     if (!freshCaptain) return [];
 
     // Espelho de captainService.availabilityFilter(): quem não seria candidato no
@@ -1996,9 +2008,9 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         && freshCaptain.approvalStatus === 'aprovado';
     if (!isAvailable) return [];
 
-    const vehicleType = freshCaptain.vehicle?.vehicleType;
-    if (!vehicleType) return [];
-    if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, 'ride'))) return [];
+    const vehicleTypes = await require('./vehicleAuthorization.service')
+        .getAuthorizedVehicleTypesForCaptain(freshCaptain, 'ride');
+    if (!vehicleTypes.length) return [];
 
     const position = freshCaptain.location;
     if (!position || position.ltd == null || position.lng == null) return [];
@@ -2008,7 +2020,7 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         status: 'requested',
         // Presencial nunca fica em requested, mas o filtro evita vazamento futuro.
         source: { $ne: 'driver_initiated' },
-        vehicleType,
+        vehicleType: { $in: vehicleTypes },
         // SCH-C1: agendada ativada → activatedAt; imediata (activatedAt null) → createdAt.
         $or: [
             { activatedAt: { $gte: cutoff } },

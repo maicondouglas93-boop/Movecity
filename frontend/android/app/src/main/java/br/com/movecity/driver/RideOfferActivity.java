@@ -40,6 +40,7 @@ public class RideOfferActivity extends AppCompatActivity {
     public static final String EXTRA_FARE = "fare";
     public static final String EXTRA_PICKUP = "pickup";
     public static final String EXTRA_DESTINATION = "destination";
+    public static final String EXTRA_VEHICLE_TYPE = "vehicleType";
     public static final String EXTRA_DEEP_LINK = "deepLink";
 
     private static final long AUTO_DISMISS_MS = 45_000L;
@@ -89,6 +90,7 @@ public class RideOfferActivity extends AppCompatActivity {
         String fare = intent.getStringExtra(EXTRA_FARE);
         String pickup = intent.getStringExtra(EXTRA_PICKUP);
         String destination = intent.getStringExtra(EXTRA_DESTINATION);
+        String vehicleType = intent.getStringExtra(EXTRA_VEHICLE_TYPE);
         String message = intent.getStringExtra(EXTRA_MESSAGE);
         boolean isParcel = RideOfferAcceptHelper.KIND_PARCEL.equals(kind);
 
@@ -109,7 +111,7 @@ public class RideOfferActivity extends AppCompatActivity {
             btnReject.setBackgroundTintList(null);
         }
 
-        badgeView.setText(isParcel ? "Nova encomenda" : "Nova corrida");
+        badgeView.setText(isParcel ? "Nova encomenda" : rideTypeLabel(vehicleType));
         fareView.setText(formatFare(fare, title));
         pickupView.setText(shortAddress(pickup));
         destView.setText(shortAddress(destination));
@@ -200,6 +202,14 @@ public class RideOfferActivity extends AppCompatActivity {
 
         RideOfferNotifier.cancelNotification(this, offerId);
         RideOfferNotifier.cancelLaunchAlarm(this, offerId);
+    }
+
+    private static String rideTypeLabel(String vehicleType) {
+        if ("moto".equalsIgnoreCase(vehicleType) || "motorcycle".equalsIgnoreCase(vehicleType)) {
+            return "🏍 CORRIDA DE MOTO";
+        }
+        if ("car".equalsIgnoreCase(vehicleType)) return "🚗 CORRIDA DE CARRO";
+        return "NOVA CORRIDA";
     }
 
     private void startAlertFeedback() {

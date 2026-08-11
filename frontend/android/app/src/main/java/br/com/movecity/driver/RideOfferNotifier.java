@@ -234,7 +234,16 @@ public final class RideOfferNotifier {
         if (isParcel) {
             return fare != null ? "Nova encomenda · " + fare : "Nova encomenda disponível";
         }
-        return fare != null ? "Nova corrida · " + fare : "Nova corrida disponível";
+        String vehicleType = data.get("vehicleType");
+        String rideType;
+        if ("moto".equalsIgnoreCase(vehicleType) || "motorcycle".equalsIgnoreCase(vehicleType)) {
+            rideType = "🏍 CORRIDA DE MOTO";
+        } else if ("car".equalsIgnoreCase(vehicleType)) {
+            rideType = "🚗 CORRIDA DE CARRO";
+        } else {
+            rideType = "Nova corrida";
+        }
+        return fare != null ? rideType + " · " + fare : rideType;
     }
 
     /** Monta um resumo legível para o fallback de notificação. */
@@ -493,6 +502,7 @@ public final class RideOfferNotifier {
         fullScreen.putExtra(RideOfferActivity.EXTRA_FARE, data.get("fare"));
         fullScreen.putExtra(RideOfferActivity.EXTRA_PICKUP, data.get("pickup"));
         fullScreen.putExtra(RideOfferActivity.EXTRA_DESTINATION, data.get("destination"));
+        fullScreen.putExtra(RideOfferActivity.EXTRA_VEHICLE_TYPE, data.get("vehicleType"));
         String defaultDeep = isParcel
             ? "/captain-home?parcelOffer=" + offerId
             : "/captain-home?rideOffer=" + offerId;
@@ -511,6 +521,7 @@ public final class RideOfferNotifier {
         to.putExtra(RideOfferActivity.EXTRA_FARE, from.getStringExtra(RideOfferActivity.EXTRA_FARE));
         to.putExtra(RideOfferActivity.EXTRA_PICKUP, from.getStringExtra(RideOfferActivity.EXTRA_PICKUP));
         to.putExtra(RideOfferActivity.EXTRA_DESTINATION, from.getStringExtra(RideOfferActivity.EXTRA_DESTINATION));
+        to.putExtra(RideOfferActivity.EXTRA_VEHICLE_TYPE, from.getStringExtra(RideOfferActivity.EXTRA_VEHICLE_TYPE));
         to.putExtra(RideOfferActivity.EXTRA_DEEP_LINK, from.getStringExtra(RideOfferActivity.EXTRA_DEEP_LINK));
     }
 

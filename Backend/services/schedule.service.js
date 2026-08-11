@@ -376,7 +376,7 @@ module.exports.listCaptainUpcoming = async (captainId) => {
     if (!captainId) return [];
 
     const captain = await captainModel.findById(captainId)
-        .select('location vehicle isOnline isBlocked canReceiveRides approvalStatus')
+        .select('location vehicle vehicleAuthorization isOnline isBlocked canReceiveRides approvalStatus')
         .lean();
 
     if (!captain) return [];
@@ -385,8 +385,12 @@ module.exports.listCaptainUpcoming = async (captainId) => {
     if (captain.canReceiveRides === false) return [];
     if (captain.approvalStatus !== 'aprovado') return [];
 
-    const vehicleType = captain.vehicle?.vehicleType;
-    if (!vehicleType || !['moto', 'car'].includes(vehicleType)) return [];
+    const vehicleAuthorizationService = require('./vehicleAuthorization.service');
+    const [rideVehicleTypes, parcelVehicleTypes] = await Promise.all([
+        vehicleAuthorizationService.getAuthorizedVehicleTypesForCaptain(captain, 'scheduledRide'),
+        vehicleAuthorizationService.getAuthorizedVehicleTypesForCaptain(captain, 'scheduledParcel'),
+    ]);
+    if (!rideVehicleTypes.length && !parcelVehicleTypes.length) return [];
 
     const pos = captain.location;
     if (pos?.ltd == null || pos?.lng == null) return [];
@@ -398,14 +402,14 @@ module.exports.listCaptainUpcoming = async (captainId) => {
     const [rides, parcels] = await Promise.all([
         rideModel.find({
             status: 'scheduled',
-            vehicleType,
+            vehicleType: { $in: rideVehicleTypes },
             scheduledAt: { $gte: from, $lte: until },
             'pickupCoordinates.lat': { $exists: true, $ne: null },
             'pickupCoordinates.lng': { $exists: true, $ne: null },
         }).sort({ scheduledAt: 1 }).limit(60).lean(),
         parcelModel.find({
             status: 'scheduled',
-            vehicleType,
+            vehicleType: { $in: parcelVehicleTypes },
             scheduledAt: { $gte: from, $lte: until },
             'pickupCoordinates.lat': { $exists: true, $ne: null },
             'pickupCoordinates.lng': { $exists: true, $ne: null },

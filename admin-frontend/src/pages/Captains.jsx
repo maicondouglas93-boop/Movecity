@@ -67,6 +67,20 @@ const OPERATIONAL_STATUS_COLORS = {
   offline: 'bg-background text-text-muted border-border',
 };
 
+const VEHICLE_AUTHORIZATION_OPTIONS = [
+  { value: 'car', label: '🚗 Carro' },
+  { value: 'motorcycle', label: '🏍️ Moto' },
+  { value: 'car_motorcycle', label: '🚗🏍️ Carro e Moto' },
+];
+const VEHICLE_AUTHORIZATION_LABELS = Object.fromEntries(
+  VEHICLE_AUTHORIZATION_OPTIONS.map((option) => [option.value, option.label])
+);
+const effectiveVehicleAuthorization = (captain) => captain?.vehicleAuthorization
+  || (['moto', 'motorcycle'].includes(captain?.vehicle?.vehicleType) ? 'motorcycle' : null)
+  || (captain?.vehicle?.vehicleType === 'car' ? 'car' : null);
+const vehicleAuthorizationLabel = (captain) =>
+  VEHICLE_AUTHORIZATION_LABELS[effectiveVehicleAuthorization(captain)] || 'Definir no ADM';
+
 export default function Captains() {
   const queryClient = useQueryClient();
   const { socket } = useSocket();
@@ -82,6 +96,7 @@ export default function Captains() {
     status: '',
     approvalStatus: searchParams.get('approvalStatus') || '',
     vehicleType: '',
+    vehicleAuthorization: '',
     isOnline: searchParams.get('isOnline') || '',
     isBlocked: searchParams.get('isBlocked') || '',
     operationalStatus: searchParams.get('operationalStatus') || '',
@@ -137,9 +152,10 @@ export default function Captains() {
     const items = selectedCaptains.length > 0 ? data.captains.filter(c => selectedCaptains.includes(c._id)) : data.captains;
 
     const csvUri = buildCsv(
-      ['ID', 'Nome', 'Sobrenome', 'Email', 'Telefone', 'Placa', 'Status da Conta', 'Disponibilidade', 'Avaliacao', 'Corridas'],
+      ['ID', 'Nome', 'Sobrenome', 'Email', 'Telefone', 'Placa', 'Tipo autorizado', 'Status da Conta', 'Disponibilidade', 'Avaliacao', 'Corridas'],
       items.map(c => [
         c._id, c.fullname?.firstname, c.fullname?.lastname, c.email, c.phone, c.vehicle?.plate,
+        vehicleAuthorizationLabel(c),
         statusLabel(CAPTAIN_APPROVAL_LABELS, c.approvalStatus),
         OPERATIONAL_STATUS_LABELS[c.operationalStatus] || c.operationalStatus,
         c.rating, c.totalRides,
@@ -234,6 +250,14 @@ export default function Captains() {
               <option value="">Categoria (Todas)</option>
               <option value="moto">Moto</option>
               <option value="car">Carro</option>
+            </select>
+
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.vehicleAuthorization} onChange={e => { setFilters(f => ({ ...f, vehicleAuthorization: e.target.value })); setPage(1); }}>
+              <option value="">Autorização (Todas)</option>
+              {VEHICLE_AUTHORIZATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </div>
 
@@ -358,6 +382,7 @@ const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onTog
             <Car className="w-3 h-3 text-text-muted" /> {captain.vehicle?.vehicleType || 'N/A'}
           </span>
           <span className="text-xs text-text uppercase font-medium">{captain.vehicle?.plate || 'S/ PLACA'}</span>
+          <span className="text-xs text-text-muted">Autorizado: {vehicleAuthorizationLabel(captain)}</span>
         </div>
       </td>
       <td className="px-4 py-4">
@@ -594,6 +619,7 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
            </div>
            <div className="space-y-3">
               <div><p className="text-xs text-text-muted">Categoria</p><p className="font-medium text-sm capitalize">{captain.vehicle?.vehicleType || '—'}</p></div>
+              <div><p className="text-xs text-text-muted">Tipo autorizado</p><p className="font-medium text-sm">{vehicleAuthorizationLabel(captain)}</p></div>
               <div><p className="text-xs text-text-muted">Marca / Modelo</p><p className="font-medium text-sm capitalize">{[captain.vehicle?.marca, captain.vehicle?.modelo].filter(Boolean).join(' ') || 'Não informado'}</p></div>
               <div><p className="text-xs text-text-muted">Placa</p><p className="font-bold text-lg uppercase bg-background border border-border px-3 py-1 rounded w-fit mt-1">{captain.vehicle?.plate || '---'}</p></div>
               <div><p className="text-xs text-text-muted">Cor / Ano</p><p className="font-medium text-sm capitalize">{captain.vehicle?.color || '—'} / {captain.vehicle?.ano || '—'}</p></div>
@@ -804,6 +830,7 @@ function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
     color: v.color || '',
     plate: v.plate || '',
     vehicleType: v.vehicleType || '',
+    vehicleAuthorization: effectiveVehicleAuthorization(captain) || '',
     reason: '',
   });
 
@@ -829,6 +856,7 @@ function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
         color: form.color.trim(),
         plate: form.plate.trim().toUpperCase().replace(/[\s-]/g, ''),
         vehicleType: form.vehicleType,
+        vehicleAuthorization: form.vehicleAuthorization,
       },
     });
   };
@@ -848,6 +876,7 @@ function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
               {captain.fullname?.firstname} {captain.fullname?.lastname}
             </p>
           </div>
+
           <button type="button" onClick={onClose} className="p-1.5 hover:bg-background rounded-full text-text-muted">
             <X className="w-5 h-5" />
           </button>
@@ -927,6 +956,24 @@ function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
             </div>
           </div>
 
+          <fieldset className="space-y-2">
+            <legend className="block text-xs font-medium text-text-muted mb-2">Tipo de veículo autorizado</legend>
+            {VEHICLE_AUTHORIZATION_OPTIONS.map((option) => (
+              <label key={option.value} className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 cursor-pointer hover:border-primary/50">
+                <input
+                  required
+                  type="radio"
+                  name="vehicleAuthorization"
+                  value={option.value}
+                  checked={form.vehicleAuthorization === option.value}
+                  onChange={(e) => set('vehicleAuthorization', e.target.value)}
+                  className="accent-primary"
+                />
+                <span className="text-sm font-medium">{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
+
           <div>
             <label className="block text-xs font-medium text-text-muted mb-1">Motivo da correção (opcional)</label>
             <textarea
@@ -948,7 +995,7 @@ function EditCaptainVehicleModal({ captain, onClose, onSave, saving }) {
             </button>
             <button
               type="submit"
-              disabled={saving || !form.vehicleType}
+              disabled={saving || !form.vehicleType || !form.vehicleAuthorization}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-40"
             >
               {saving ? 'Salvando…' : 'Salvar alterações'}

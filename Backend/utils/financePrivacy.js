@@ -127,10 +127,10 @@ function sanitizeCaptainTransactions(transactions, hints = {}) {
                     .replace(/\s+/g, ' ')
                     .trim();
             }
-            // Cartão já grava líquido; cash/pix grava bruto + lançamento commission.
+            // Cartão/carteira já gravam líquido; cash/pix gravam bruto + lançamento commission.
             if (
                 (copy.type === 'ride_payment' || copy.type === 'parcel_payment') &&
-                copy.paymentMethod !== 'card' &&
+                !['card', 'wallet'].includes(copy.paymentMethod) &&
                 Number.isFinite(Number(copy.amount))
             ) {
                 let commission = 0;

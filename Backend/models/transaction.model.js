@@ -17,7 +17,7 @@ const transactionSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
-        enum: ['commission', 'recharge', 'withdraw', 'payout', 'bonus', 'adjustment', 'ride_payment', 'parcel_payment']
+        enum: ['commission', 'recharge', 'withdraw', 'payout', 'bonus', 'adjustment', 'ride_payment', 'wallet_contribution', 'parcel_payment']
     },
     paymentMethod: {
         type: String,

@@ -2,6 +2,7 @@ const rideService = require('../../services/ride.service');
 const rideModel = require('../../models/ride.model');
 const walletModel = require('../../models/wallet.model');
 const transactionModel = require('../../models/transaction.model');
+const userModel = require('../../models/user.model');
 const VehicleCategory = require('../../models/vehicleCategory.model');
 const { createUser } = require('../factories/user.factory');
 const { createCaptain } = require('../factories/captain.factory');
@@ -195,6 +196,94 @@ describe('Ride Service — estimativa × valor final (endRide)', () => {
         // motorista); só a comissão debita -4.6 (20% de 23, o valor FINAL real).
         expect(wallet.creditBalance).toBeCloseTo(-4.6, 2);
         expect(wallet.totalEarned).toBe(23);
+    });
+
+    it('concilia carteira com preço final menor, devolve excedente e repassa sem confirmação do motorista', async () => {
+        // A carteira tinha R$50,00 e R$42,50 já foram reservados na solicitação.
+        user.walletBalance = 7.5;
+        await user.save();
+        const ride = await createRide({
+            user: user._id,
+            captain: captain._id,
+            status: 'started',
+            fare: 42.5,
+            estimatedDistance: 10000,
+            actualDistance: 4000,
+            estimatedTime: 600,
+            startedAt: new Date(),
+            paymentMethod: 'carteira',
+            walletAmountUsed: 42.5,
+            walletAmountDebited: 42.5,
+        });
+
+        const result = await rideService.endRide({ rideId: ride._id, captain });
+        const freshUser = await userModel.findById(user._id);
+        const wallet = await walletModel.findOne({ captainId: captain._id });
+        const paymentTx = await transactionModel.findOne({ rideId: ride._id, type: 'ride_payment' });
+
+        expect(result.finalPrice).toBe(23);
+        expect(result.paymentStatus).toBe('paid');
+        expect(result.walletSettlementStatus).toBe('settled');
+        expect(result.walletAmountUsed).toBe(23);
+        expect(freshUser.walletBalance).toBeCloseTo(27, 2); // R$19,50 devolvidos
+        expect(paymentTx.paymentMethod).toBe('wallet');
+        expect(paymentTx.amount).toBeCloseTo(18.4, 2); // líquido após 20% de comissão
+        expect(wallet.pendingBalance).toBeCloseTo(18.4, 2);
+    });
+
+    it('repasse a parcela de carteira quando o restante da corrida é pago em dinheiro', async () => {
+        const ride = await createRide({
+            user: user._id,
+            captain: captain._id,
+            status: 'started',
+            fare: 42.5,
+            estimatedDistance: 10000,
+            actualDistance: 4000,
+            estimatedTime: 600,
+            startedAt: new Date(),
+            paymentMethod: 'cash',
+            walletAmountUsed: 10,
+            walletAmountDebited: 10,
+        });
+
+        const finished = await rideService.endRide({ rideId: ride._id, captain });
+        await rideService.confirmPaymentReceived({ rideId: ride._id, captain });
+
+        const wallet = await walletModel.findOne({ captainId: captain._id });
+        const contribution = await transactionModel.findOne({ rideId: ride._id, type: 'wallet_contribution' });
+
+        expect(finished.finalPrice).toBe(23);
+        expect(finished.walletAmountUsed).toBe(10);
+        expect(finished.walletSettlementStatus).toBe('settled');
+        expect(contribution.amount).toBe(10);
+        expect(wallet.pendingBalance).toBe(10);
+        expect(wallet.totalEarned).toBe(23); // não duplica o repasse da carteira
+    });
+
+    it('não libera confirmação manual quando carteira não cobre o preço final', async () => {
+        const ride = await createRide({
+            user: user._id,
+            captain: captain._id,
+            status: 'started',
+            fare: 42.5,
+            estimatedDistance: 10000,
+            actualDistance: 15000,
+            estimatedTime: 2000,
+            startedAt: new Date(),
+            paymentMethod: 'carteira',
+            walletAmountUsed: 42.5,
+            walletAmountDebited: 42.5,
+        });
+
+        const result = await rideService.endRide({ rideId: ride._id, captain });
+
+        expect(result.paymentStatus).toBe('pending');
+        expect(result.walletSettlementStatus).toBe('shortfall');
+        expect(result.walletShortfallAmount).toBeCloseTo(14.17, 2);
+        await expect(
+            rideService.confirmPaymentReceived({ rideId: ride._id, captain })
+        ).rejects.toMatchObject({ code: 'WALLET_PAYMENT_IS_AUTOMATIC' });
+        expect(await transactionModel.countDocuments({ rideId: ride._id, type: 'ride_payment' })).toBe(0);
     });
 
     // TESTE 8 — auditoria: estimativa original preservada quando o destino real difere

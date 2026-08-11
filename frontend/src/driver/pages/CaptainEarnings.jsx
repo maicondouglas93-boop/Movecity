@@ -15,6 +15,11 @@ const RANGES = [
     { value: 'month', label: 'Mês' },
 ];
 
+const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+}).format(Number(amount) || 0);
+
 const CaptainEarnings = () => {
     const { captain } = useContext(CaptainDataContext);
     // Auditoria de UX do motorista (2026-08-02, Etapa 8): a tela só mostrava o total
@@ -39,9 +44,9 @@ const CaptainEarnings = () => {
 
             <div className="flex-1 overflow-y-auto p-4 pb-6">
                 <div className="bg-ink-900 text-white rounded-panel p-6 shadow-floating mb-6 text-center">
-                    <p className="text-white/70 text-sm mb-1">Ganhos Totais</p>
-                    <h2 className="text-4xl font-bold mb-2">R$ {captain?.earnings?.toFixed(2) || '0.00'}</h2>
-                    <p className="text-white/50 text-xs">Total acumulado na plataforma</p>
+                    <p className="text-white/70 text-sm mb-1">Faturamento bruto acumulado</p>
+                    <h2 className="text-4xl font-bold mb-2">{formatCurrency(captain?.earnings)}</h2>
+                    <p className="text-white/50 text-xs">Antes das comissões da plataforma</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -75,10 +80,10 @@ const CaptainEarnings = () => {
 
                 <Card shadow="raised" padding="p-5" className="mb-4">
                     <p className="text-xs text-ink-600 font-bold uppercase tracking-wider mb-1">
-                        Ganhos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
+                        Ganhos líquidos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
                     </p>
                     <h2 className="text-3xl font-black text-ink-900 tracking-tight">
-                        {isLoading ? '...' : `R$ ${data?.totalEarnings?.toFixed(2) || '0.00'}`}
+                        {isLoading ? '...' : formatCurrency(data?.totalEarnings)}
                     </h2>
                     <p className="text-xs text-ink-600 mt-1">
                         {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'}`}
@@ -124,8 +129,8 @@ const CaptainEarnings = () => {
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center text-xs border-t border-line pt-2 mt-1">
-                                    <span className="text-ink-600">Você recebeu</span>
-                                    <span className="font-bold text-brand-600">R$ {(ride.driverAmount ?? ride.netEarnings)?.toFixed?.(2) ?? '0.00'}</span>
+                                    <span className="text-ink-600">Líquido recebido</span>
+                                    <span className="font-bold text-brand-600">{formatCurrency(ride.driverAmount ?? ride.netEarnings)}</span>
                                 </div>
                             </Card>
                         ))}

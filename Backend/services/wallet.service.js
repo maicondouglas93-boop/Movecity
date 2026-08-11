@@ -18,7 +18,7 @@ const getWallet = async (captainId) => {
 // Qual campo do wallet representa o "saldo" movimentado por cada tipo de transação —
 // usado tanto pra montar o $inc quanto pra saber de qual campo tirar balanceBefore/After.
 function resolveLedgerField(type, paymentMethod) {
-    if ((type === 'ride_payment' && paymentMethod === 'card') || type === 'payout' || type === 'withdraw') {
+    if ((type === 'ride_payment' && ['card', 'wallet'].includes(paymentMethod)) || type === 'wallet_contribution' || type === 'payout' || type === 'withdraw') {
         return 'pendingBalance';
     }
     return 'creditBalance';
@@ -39,9 +39,15 @@ function buildIncFields(type, paymentMethod, amount) {
         case 'ride_payment':
         case 'parcel_payment':
             inc.totalEarned = amount;
-            if (paymentMethod === 'card') {
+            if (['card', 'wallet'].includes(paymentMethod)) {
                 inc.pendingBalance = amount;
             }
+            break;
+        case 'wallet_contribution':
+            // Parcela da corrida já paga pela carteira do passageiro. Não é um novo
+            // ganho: apenas torna sacável o valor que a plataforma deve repassar ao
+            // motorista, sem duplicar totalEarned.
+            inc.pendingBalance = amount;
             break;
         case 'payout':
         case 'withdraw':

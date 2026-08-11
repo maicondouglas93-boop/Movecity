@@ -403,6 +403,7 @@ module.exports.createRide = async ({
         promotionApplied,
         discountAmount,
         walletAmountUsed,
+        walletAmountDebited: walletAmountUsed,
         paymentMethod,
         optionals: processedOptionals,
         observation,
@@ -551,6 +552,7 @@ module.exports.settleScheduledRideFinance = async (rideId) => {
             $set: {
                 scheduleFinanceSettledAt: new Date(),
                 walletAmountUsed,
+                walletAmountDebited: walletAmountUsed,
                 paymentMethod,
             },
         },
@@ -1177,6 +1179,90 @@ module.exports.updateRideStatus = async ({ rideId, captain, status }) => {
     return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
 }
 
+const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+async function reconcileWalletAtRideEnd(rideId) {
+    const session = await mongoose.startSession();
+    let result = { settled: false, shortfallAmount: 0 };
+
+    try {
+        await session.withTransaction(async () => {
+            const current = await rideModel.findById(rideId).session(session);
+            if (!current || current.status !== 'finished') {
+                return;
+            }
+
+            const finalPrice = roundMoney(current.finalPrice ?? current.fare);
+            const recordedDebit = Number(current.walletAmountDebited);
+            const initiallyDebited = roundMoney(
+                Number.isFinite(recordedDebit) && recordedDebit > 0
+                    ? recordedDebit
+                    : current.walletAmountUsed
+            );
+            const isWalletOnly = current.paymentMethod === 'carteira';
+            if (!isWalletOnly && initiallyDebited <= 0) {
+                return;
+            }
+            let walletApplied = initiallyDebited;
+            let status = 'settled';
+            let shortfallAmount = 0;
+
+            if (isWalletOnly && finalPrice > initiallyDebited) {
+                const additionalAmount = roundMoney(finalPrice - initiallyDebited);
+                const user = await userModel.findOneAndUpdate(
+                    { _id: current.user, walletBalance: { $gte: additionalAmount } },
+                    { $inc: { walletBalance: -additionalAmount } },
+                    { new: true, session }
+                );
+
+                if (user) {
+                    walletApplied = finalPrice;
+                } else {
+                    status = 'shortfall';
+                    shortfallAmount = additionalAmount;
+                }
+            } else if (finalPrice < initiallyDebited) {
+                const refundAmount = roundMoney(initiallyDebited - finalPrice);
+                await userModel.findByIdAndUpdate(
+                    current.user,
+                    { $inc: { walletBalance: refundAmount } },
+                    { session }
+                );
+                walletApplied = finalPrice;
+            }
+
+            await rideModel.updateOne(
+                { _id: current._id },
+                {
+                    $set: {
+                        walletAmountUsed: walletApplied,
+                        walletSettlementStatus: status,
+                        walletShortfallAmount: shortfallAmount,
+                    }
+                },
+                { session }
+            );
+
+            await paymentModel.updateMany(
+                { rideId: current._id },
+                {
+                    $set: {
+                        amount: finalPrice,
+                        status: isWalletOnly && status === 'settled' ? 'approved' : 'pending',
+                    }
+                },
+                { session }
+            );
+
+            result = { settled: status === 'settled', shortfallAmount };
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    return result;
+}
+
 module.exports.endRide = async ({ rideId, captain, destination = null }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
@@ -1463,6 +1549,20 @@ module.exports.endRide = async ({ rideId, captain, destination = null }) => {
         }
     }
 
+    // Carteira é dinheiro já sob custódia da plataforma. Reconciliamos eventual
+    // diferença entre estimativa e preço final antes de liberar o repasse; o motorista
+    // nunca deve confirmar nem cobrar esse pagamento manualmente.
+    if (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0) {
+        const settlement = await reconcileWalletAtRideEnd(rideId);
+        if (ride.paymentMethod === 'carteira' && settlement.settled) {
+            await module.exports.confirmPaymentReceived({
+                rideId,
+                captain,
+                allowWalletAuto: true,
+            });
+        }
+    }
+
     const dispatchService = require('./dispatch.service');
     await dispatchService.releaseCaptainBusyLock(captain._id);
 
@@ -1478,7 +1578,7 @@ module.exports.endRide = async ({ rideId, captain, destination = null }) => {
 // automático de conflitos transitórios (duas transações disputando o mesmo documento),
 // então uma corrida perdida na gravação cai de volta na pré-checagem, que já vê o
 // resultado da outra transação após o commit dela.
-module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
+module.exports.confirmPaymentReceived = async ({ rideId, captain, allowWalletAuto = false }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
@@ -1508,6 +1608,11 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
             if (existing.paymentStatus === 'paid') {
                 throw new Error('Payment already confirmed');
             }
+            if (existing.paymentMethod === 'carteira' && !allowWalletAuto) {
+                const err = new Error('Wallet payment is settled automatically');
+                err.code = 'WALLET_PAYMENT_IS_AUTOMATIC';
+                throw err;
+            }
 
             // Guarda atômica: só segue se ainda ninguém marcou como paga entre a leitura
             // acima e este update. Em concorrência real isso normalmente nem dispara —
@@ -1523,18 +1628,18 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
 
             finalFare = claimed.finalPrice || claimed.fare;
 
-            if (claimed.paymentMethod === 'card') {
-                // Se for cartão, credita o valor líquido no pendingBalance do motorista.
-                // A plataforma processou via Asaas.
+            if (claimed.paymentMethod === 'card' || claimed.paymentMethod === 'carteira') {
+                // Cartão e carteira são valores sob custódia da plataforma: o motorista
+                // recebe o líquido no saldo pendente, nunca em dinheiro do passageiro.
                 const driverNetEarnings = finalFare - claimed.commissionAmount;
 
                 const result = await walletService.createTransaction({
                     captainId: captain._id,
                     rideId: claimed._id,
                     type: 'ride_payment',
-                    paymentMethod: 'card',
+                    paymentMethod: claimed.paymentMethod === 'carteira' ? 'wallet' : 'card',
                     amount: driverNetEarnings,
-                    description: `Repasse da Corrida #${claimed._id.toString().slice(-6)} (Cartão)`,
+                    description: `Repasse da Corrida #${claimed._id.toString().slice(-6)} (${claimed.paymentMethod === 'carteira' ? 'Carteira' : 'Cartão'})`,
                     session
                 });
                 sideEffectCallbacks.push(result.applySideEffects);
@@ -1561,6 +1666,23 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain }) => {
                     session
                 });
                 sideEffectCallbacks.push(result2.applySideEffects);
+
+                const walletContribution = Math.min(
+                    finalFare,
+                    Math.max(0, Number(claimed.walletAmountUsed) || 0)
+                );
+                if (walletContribution > 0) {
+                    const result3 = await walletService.createTransaction({
+                        captainId: captain._id,
+                        rideId: claimed._id,
+                        type: 'wallet_contribution',
+                        paymentMethod: 'wallet',
+                        amount: walletContribution,
+                        description: `Repasse da carteira — Corrida #${claimed._id.toString().slice(-6)}`,
+                        session
+                    });
+                    sideEffectCallbacks.push(result3.applySideEffects);
+                }
             }
 
             // Bloco H (2026-08-02, achados F3/F4): se um cupom do admin descontou esta

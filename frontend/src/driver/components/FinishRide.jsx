@@ -13,19 +13,23 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { reverseGeocode, formatAddressWithCoords } from '@/shared/services/mapsApi'
 
+const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+}).format(Number(amount) || 0)
+
+const isNetworkError = (error) => (
+    (typeof navigator !== 'undefined' && !navigator.onLine)
+    || error?.message === 'Network Error'
+)
+
 const FinishRide = (props) => {
-    const [loading, setLoading] = useState(false)
     const [ended, setEnded] = useState(false)
     const [paymentConfirmed, setPaymentConfirmed] = useState(false)
-    // true quando "pago"/"finalizado" é otimista (sem rede) — ainda não confirmado pelo
-    // servidor. A fila offline (P1.2 da auditoria de concorrência) avisa por toast quando
-    // sincronizar de verdade; aqui só evitamos comemorar "Pagamento Confirmado!" antes da hora.
-    const [pendingSync, setPendingSync] = useState(false)
-    // Auditoria de UX do motorista (2026-08-02, §2.3): a corrida devolvida pelo end-ride
-    // tem o valor FINAL (finalPrice + taxa de espera, recalculado com distância/tempo
-    // reais) — diferente de props.ride.fare, que é só a estimativa de antes da corrida
-    // começar. Cobrar do passageiro com base na estimativa fazia o motorista receber a
-    // menos sempre que a corrida real foi mais longa/demorada que a estimada.
+    // Finalização e pagamento têm confirmações independentes. Uma corrida finalizada
+    // offline não tem preço final e não pode seguir para cobrança.
+    const [pendingFinalizationSync, setPendingFinalizationSync] = useState(false)
+    const [pendingPaymentSync, setPendingPaymentSync] = useState(false)
     const [endedRide, setEndedRide] = useState(null)
     // Auditoria de UX do motorista (2026-08-02, Etapa 7): "o motorista nunca avalia o
     // passageiro, embora reviewApi.js exista no projeto" — o backend já suportava o tipo
@@ -89,14 +93,13 @@ const FinishRide = (props) => {
         timersRef.current.forEach(clearTimeout)
     }, [])
 
-    // Valor que o passageiro deve pagar (bruto operacional).
-    // driverAmount (líquido) fica para ganhos — não misturar na cobrança em espécie.
     const chargeRide = endedRide || props.ride
-    const passengerAmount = Number(
-        chargeRide?.finalPrice
-        ?? chargeRide?.fare
-        ?? 0
-    ) || 0
+    const hasFinalPrice = chargeRide?.finalPrice !== null && chargeRide?.finalPrice !== undefined
+    const finalGross = hasFinalPrice ? Number(chargeRide.finalPrice) || 0 : null
+    const walletAmountUsed = Math.max(0, Number(chargeRide?.walletAmountUsed) || 0)
+    const passengerAmount = finalGross === null ? null : Math.max(0, finalGross - walletAmountUsed)
+    const isWalletPayment = chargeRide?.paymentMethod === 'carteira'
+    const walletPaymentPending = isWalletPayment && chargeRide?.paymentStatus !== 'paid'
 
     const queryClient = useQueryClient();
 
@@ -114,6 +117,7 @@ const FinishRide = (props) => {
         },
         onSuccess: (data) => {
             setEnded(true)
+            setPendingFinalizationSync(false)
             setEndedRide(data)
             // Fase A da experiência de corrida ativa (2026-08-03): espelha a corrida
             // finalizada no RideContext — sem isso, ele ficava com status 'started'
@@ -122,23 +126,28 @@ const FinishRide = (props) => {
             setCaptainRide(data)
             queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
         },
-        onError: (err) => {
+        onError: async (err) => {
             console.error('End ride error:', err)
-            // Auditoria A5: presencial com destino pendente NÃO pode finalizar offline —
-            // o preço depende do GPS/rota no backend; otimismo com fare=0 seria fraude UX.
             const presentialPending = props.ride?.source === 'driver_initiated'
                 && (props.ride?.destinationPending || !props.ride?.destination)
-            if ((!navigator.onLine || err.message === 'Network Error') && !presentialPending) {
-                enqueueOfflineAction({
-                    type: 'end-ride',
-                    rideId: props.ride._id,
-                    payload: { rideId: props.ride._id }
-                }).catch(e => console.error(e));
-                setEnded(true); // Optimistic — sem valor final do servidor ainda, usa a estimativa
-                setEndedRide(props.ride);
+            if (isNetworkError(err) && !presentialPending) {
+                try {
+                    await enqueueOfflineAction({
+                        type: 'end-ride',
+                        rideId: props.ride._id,
+                        payload: { rideId: props.ride._id }
+                    })
+                    setEnded(true)
+                    setEndedRide(null)
+                    setPendingFinalizationSync(true)
+                    addToast('Finalização pendente. Aguarde o valor final antes de cobrar o passageiro.', 'warning')
+                } catch (queueError) {
+                    console.error('Could not queue end ride action:', queueError)
+                    addToast('Não foi possível guardar a finalização para sincronizar. Tente novamente com internet.', 'error')
+                }
             } else {
                 addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
-                if (navigator.onLine) {
+                if (typeof navigator === 'undefined' || navigator.onLine) {
                     Sentry.captureException(err, { tags: { issue: 'api_error' } });
                 }
             }
@@ -182,20 +191,26 @@ const FinishRide = (props) => {
                 }, 1500)
             }
         },
-        onError: (err) => {
+        onError: async (err) => {
             console.error('Confirm payment error:', err)
-            if (!navigator.onLine || err.message === 'Network Error') {
-                enqueueOfflineAction({
-                    type: 'confirm-payment',
-                    rideId: props.ride._id,
-                    payload: { rideId: props.ride._id }
-                }).catch(e => console.error(e));
-                setPaymentConfirmed(true)
-                setPendingSync(true)
-                setCaptainRide(null)
-                scheduleTimer(() => navigate('/captain-home'), 2500) // Optimistic
+            if (isNetworkError(err)) {
+                try {
+                    await enqueueOfflineAction({
+                        type: 'confirm-payment',
+                        rideId: props.ride._id,
+                        payload: { rideId: props.ride._id }
+                    })
+                    setPaymentConfirmed(true)
+                    setPendingPaymentSync(true)
+                    setCaptainRide(null)
+                    scheduleTimer(() => navigate('/captain-home'), 2500)
+                } catch (queueError) {
+                    console.error('Could not queue payment confirmation:', queueError)
+                    addToast('Não foi possível guardar a confirmação de pagamento. Tente novamente com internet.', 'error')
+                }
             } else {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
+                addToast(err.response?.data?.message || 'Não foi possível confirmar o pagamento.', 'error')
             }
         }
     })
@@ -268,7 +283,7 @@ const FinishRide = (props) => {
                             <span className="font-semibold text-ink-900">
                                 {props.ride?.destinationPending
                                     ? 'Preço ao finalizar'
-                                    : `R$ ${props.ride?.finalPrice ?? props.ride?.fare ?? '—'}`}
+                                    : `Estimativa: ${formatCurrency(props.ride?.fare)}`}
                             </span>
                             <span className="text-ink-500">
                                 · {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
@@ -314,6 +329,15 @@ const FinishRide = (props) => {
                         Finalizar corrida
                     </Button>
                 </>
+            ) : pendingFinalizationSync ? (
+                <div className='flex flex-col items-center justify-center py-10 gap-4'>
+                    <div className='bg-amber-100 rounded-full p-4'>
+                        <i className='ri-time-line text-amber-600 text-5xl'></i>
+                    </div>
+                    <h3 className='text-xl font-bold text-amber-700 text-center'>Finalização aguardando conexão</h3>
+                    <p className='text-ink-600 text-center'>A corrida foi guardada para sincronizar. O valor final será calculado pelo servidor quando a internet voltar.</p>
+                    <p className='text-sm font-semibold text-danger-600 text-center'>Não cobre o passageiro até receber o valor final.</p>
+                </div>
             ) : showRating ? (
                 <div className='flex flex-col items-center justify-center py-8 gap-4'>
                     <h3 className='text-xl font-bold text-ink-900 text-center'>
@@ -343,24 +367,38 @@ const FinishRide = (props) => {
                 </div>
             ) : paymentConfirmed ? (
                 <div className='flex flex-col items-center justify-center py-10 gap-4'>
-                    <div className={pendingSync ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
-                        <i className={pendingSync ? 'ri-time-line text-amber-600 text-5xl' : 'ri-checkbox-circle-fill text-brand-500 text-5xl'}></i>
+                    <div className={pendingPaymentSync ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
+                        <i className={pendingPaymentSync ? 'ri-time-line text-amber-600 text-5xl' : 'ri-checkbox-circle-fill text-brand-500 text-5xl'}></i>
                     </div>
-                    {pendingSync ? (
+                    {pendingPaymentSync ? (
                         <>
                             <h3 className='text-xl font-bold text-amber-700'>Serviço concluído</h3>
                             <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar.</p>
-                            <p className='text-2xl font-bold text-ink-900 mt-2'>Valor do passageiro</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
                             <p className='text-ink-600 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>
                             <h3 className='text-xl font-bold text-brand-700'>Serviço concluído</h3>
                             <p className='text-ink-600 text-center'>Pagamento confirmado</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
+                            <p className='text-3xl font-black text-brand-600'>{formatCurrency(passengerAmount)}</p>
                         </>
                     )}
+                </div>
+            ) : isWalletPayment ? (
+                <div className='flex flex-col items-center justify-center py-8 gap-4'>
+                    <div className={walletPaymentPending ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
+                        <i className={walletPaymentPending ? 'ri-time-line text-amber-600 text-5xl' : 'ri-wallet-3-fill text-brand-600 text-5xl'}></i>
+                    </div>
+                    <h3 className='text-xl font-bold text-ink-900 text-center'>
+                        {walletPaymentPending ? 'Pagamento pela carteira pendente' : 'Pagamento pela carteira confirmado'}
+                    </h3>
+                    <p className='text-ink-600 text-center'>Esta corrida é paga pela carteira do passageiro. Não solicite dinheiro ou Pix diretamente.</p>
+                    <p className='text-sm text-ink-500 text-center'>
+                        {walletPaymentPending
+                            ? 'O valor final excedeu o saldo disponível e o passageiro será avisado para regularizar no app.'
+                            : 'O repasse líquido foi conciliado pela plataforma.'}
+                    </p>
+                    <Button onClick={() => navigate('/captain-home')}>Voltar para o início</Button>
                 </div>
             ) : (
                 <>
@@ -370,7 +408,7 @@ const FinishRide = (props) => {
                     {/* Valor que o passageiro deve pagar (sem comissão/%). */}
                     <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
                         <p className='text-ink-600 text-sm mb-1'>Cliente deve pagar</p>
-                        <p className='text-brand-600 text-3xl font-black'>R$ {passengerAmount.toFixed(2)}</p>
+                        <p className='text-brand-600 text-3xl font-black'>{formatCurrency(passengerAmount)}</p>
                     </div>
 
                     <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>

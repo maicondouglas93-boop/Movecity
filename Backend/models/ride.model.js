@@ -168,6 +168,11 @@ const rideSchema = new mongoose.Schema({
         lat: Number,
         lng: Number
     },
+    // Horário de recebimento do último ponto no servidor. Nunca vem do relógio do
+    // aparelho e serve para descartar deslocamentos impossíveis da distância tarifável.
+    lastLocationAt: {
+        type: Date,
+    },
     actualTime: {
         type: Number,
     },
@@ -266,6 +271,22 @@ const rideSchema = new mongoose.Schema({
         default: 'cash',
     },
     walletAmountUsed: {
+        type: Number,
+        default: 0
+    },
+    // Valor efetivamente debitado da carteira no momento da solicitação. É preservado
+    // para que o encerramento consiga devolver excedente ou tentar cobrar somente a
+    // diferença quando o preço final divergir da estimativa.
+    walletAmountDebited: {
+        type: Number,
+        default: 0
+    },
+    walletSettlementStatus: {
+        type: String,
+        enum: [ 'not_applicable', 'settled', 'shortfall' ],
+        default: 'not_applicable'
+    },
+    walletShortfallAmount: {
         type: Number,
         default: 0
     },

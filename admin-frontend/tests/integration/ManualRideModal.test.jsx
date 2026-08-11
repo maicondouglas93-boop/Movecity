@@ -60,6 +60,9 @@ async function fillValidRide() {
 describe('Lançamento manual de corrida', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const portalRoot = document.createElement('div');
+    portalRoot.id = 'admin-modal-root';
+    document.body.appendChild(portalRoot);
     api.get.mockImplementation(async (url) => {
       if (url === '/admin/vehicle-categories') {
         return { data: { categories: [{ _id: 'cat-1', name: 'car', displayName: 'Carro', capacity: 4, isActive: true, allowedServices: { ride: true } }] } };
@@ -68,6 +71,17 @@ describe('Lançamento manual de corrida', () => {
       if (url === '/admin/users') return { data: { users: [] } };
       throw new Error(`GET inesperado: ${url}`);
     });
+  });
+
+  afterEach(() => {
+    document.getElementById('admin-modal-root')?.remove();
+  });
+
+  it('renderiza no contêiner exclusivo do modal', () => {
+    renderModal();
+
+    expect(screen.getByRole('dialog', { name: 'Lançar corrida' }).parentElement)
+      .toHaveAttribute('id', 'admin-modal-root');
   });
 
   it('exige endereço resolvido novamente quando o texto da partida é alterado', async () => {

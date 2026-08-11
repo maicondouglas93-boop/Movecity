@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
@@ -102,6 +102,29 @@ const fetchLiveMap = async () => {
   return data;
 };
 
+const ManualRideLauncher = React.memo(function ManualRideLauncher() {
+  const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold flex items-center gap-2"
+      >
+        <Plus className="w-4 h-4" /> Lançar corrida
+      </button>
+      {open && (
+        <ManualRideModal
+          onClose={() => setOpen(false)}
+          onCreated={() => queryClient.invalidateQueries({ queryKey: ['rides'] })}
+        />
+      )}
+    </>
+  );
+});
+
 // Fase 3 da auditoria de production readiness (M3, 2026-08-05): timeAgo, cores/nomes
 // de status e os subcomponentes RideRow/RideActionMenu/RideDrawer saíram deste
 // arquivo (passava de 780 linhas) para components/rides/ — sem mudança de comportamento.
@@ -143,12 +166,9 @@ export default function Rides() {
   const [activeRideDrawer, setActiveRideDrawer] = useState(null);
   const [finalizeRide, setFinalizeRide] = useState(null);
   const [showMap, setShowMap] = useState(true); // Split view toggle
-  const [showManualRide, setShowManualRide] = useState(false);
-  const [frozenMapDrivers, setFrozenMapDrivers] = useState(null);
-  const mapResumeFrameRef = useRef(null);
 
   // Query
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['rides', page, filters],
     queryFn: fetchRides,
     placeholderData: keepPreviousData,
@@ -243,36 +263,6 @@ export default function Rides() {
     () => liveDriversList.filter((d) => d.status === 'in_ride').length,
     [liveDriversList]
   );
-  const mapDriversList = frozenMapDrivers ?? liveDriversList;
-
-  useEffect(() => () => {
-    if (mapResumeFrameRef.current != null) {
-      cancelAnimationFrame(mapResumeFrameRef.current);
-    }
-  }, []);
-
-  const openManualRide = () => {
-    if (mapResumeFrameRef.current != null) {
-      cancelAnimationFrame(mapResumeFrameRef.current);
-      mapResumeFrameRef.current = null;
-    }
-    // Mantém exatamente os mesmos elementos Leaflet montados enquanto o modal
-    // atualiza. Remover/recriar Marker/Popup junto de um portal React 19 pode fazer
-    // o Leaflet remover o nó de referência antes do insertBefore do React.
-    setFrozenMapDrivers(liveDriversList);
-    setShowManualRide(true);
-  };
-
-  const closeManualRide = () => {
-    setShowManualRide(false);
-    // Primeiro desmonta somente o portal. A frota ao vivo volta ao mapa no frame
-    // seguinte, evitando que React e Leaflet alterem document.body no mesmo commit.
-    mapResumeFrameRef.current = requestAnimationFrame(() => {
-      setFrozenMapDrivers(null);
-      mapResumeFrameRef.current = null;
-    });
-  };
-
   // Actions
   // Corrida e encomenda têm endpoints de cancelamento diferentes (auditoria de UX,
   // 2026-08-10, unificação de /rides) — a lista mostra os dois tipos juntos, mas
@@ -395,7 +385,7 @@ export default function Rides() {
               <p className="text-sm text-text-muted mt-1">Monitoramento e operação de corridas em tempo real.</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={openManualRide} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold flex items-center gap-2"><Plus className="w-4 h-4" /> Lançar corrida</button>
+              <ManualRideLauncher />
               <button onClick={() => setShowMap(!showMap)} className="px-3 py-2 bg-background border border-border rounded-lg text-sm flex items-center gap-2 hover:bg-background/80 lg:hidden">
                 <MapIcon className="w-4 h-4" /> Mapa
               </button>
@@ -609,9 +599,7 @@ export default function Rides() {
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
-            {/* Durante a corrida manual a lista fica congelada, mas permanece
-                montada. Desmontar Marker/Popup era o gatilho do insertBefore. */}
-            <DriversLayer drivers={mapDriversList} />
+            <DriversLayer drivers={liveDriversList} />
           </MapContainer>
       </div>
 
@@ -626,13 +614,6 @@ export default function Rides() {
           onConfirm={({ reason, observation }) =>
             finalizeMutation.mutate({ id: finalizeRide._id, reason, observation })
           }
-        />
-      )}
-
-      {showManualRide && (
-        <ManualRideModal
-          onClose={closeManualRide}
-          onCreated={() => queryClient.invalidateQueries({ queryKey: ['rides'] })}
         />
       )}
 

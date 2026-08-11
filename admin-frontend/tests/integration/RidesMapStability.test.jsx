@@ -7,6 +7,7 @@ import Rides from '../../src/pages/Rides';
 import api from '../../src/services/api';
 
 const markerUnmounted = vi.hoisted(() => vi.fn());
+const mapRendered = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/services/api', () => ({
   default: { get: vi.fn(), put: vi.fn(), post: vi.fn() },
@@ -57,7 +58,10 @@ vi.mock('leaflet', () => ({
 }));
 
 vi.mock('react-leaflet', () => ({
-  MapContainer: ({ children }) => <div data-testid="map">{children}</div>,
+  MapContainer: ({ children }) => {
+    mapRendered();
+    return <div data-testid="map">{children}</div>;
+  },
   TileLayer: () => null,
   Marker: ({ children }) => {
     useEffect(() => () => markerUnmounted(), []);
@@ -115,10 +119,13 @@ describe('estabilidade do mapa ao lançar corrida', () => {
     renderRides();
 
     await waitFor(() => expect(screen.getByTestId('driver-marker')).toBeInTheDocument());
+    await screen.findByText('Nenhuma corrida ou encomenda encontrada.');
+    const rendersBeforeOpening = mapRendered.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Lançar corrida' }));
 
     expect(screen.getByRole('dialog', { name: 'Lançar corrida' })).toBeInTheDocument();
     expect(screen.getByTestId('driver-marker')).toBeInTheDocument();
     expect(markerUnmounted).not.toHaveBeenCalled();
+    expect(mapRendered).toHaveBeenCalledTimes(rendersBeforeOpening);
   });
 });

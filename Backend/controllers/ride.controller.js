@@ -47,14 +47,17 @@ function sanitizeCaptainRideHistoryPayload(data) {
 // Exportada além de usada internamente (Bloco E da auditoria administrativa, 2026-08-02):
 // a reatribuição de corrida pelo painel admin precisa do mesmo redespacho — sem isso,
 // a corrida voltava a 'requested' mas nenhum motorista era notificado, ficando travada.
-async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
+async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId, targetCaptainId } = {}) {
     const dispatchService = require('../services/dispatch.service');
     // Motorista com qualquer trabalho ativo não pode aceitar outra oferta.
-    const { pickupCoordinates, captains: matchingCaptains } = await dispatchService.findCaptainsNearPickup(
+    const { pickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
         pickup,
         vehicleType,
         { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true, serviceKind: ride.scheduledAt ? 'scheduledRide' : 'ride' }
     );
+    const matchingCaptains = targetCaptainId
+        ? captains.filter((captain) => captain._id.toString() === targetCaptainId.toString())
+        : captains;
 
     console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
     console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
@@ -214,12 +217,12 @@ async function performAcceptRide(rideId, captain, res) {
         const ride = await rideService.acceptRideAtomic({ rideId, captain });
         console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${captain._id}.`);
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-confirmed',
-            data: ride
-        });
-
-        notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        if (ride.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, { event: 'ride-confirmed', data: ride });
+        }
+        if (ride.user?._id) {
+            notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
+        }
 
         // Avisa os outros motoristas que estavam com essa corrida na tela que ela já foi
         // aceita por outro colega — fecha o popup deles (listener entra na Etapa P3.1).
@@ -445,10 +448,9 @@ module.exports.updateRideStatus = async (req, res) => {
     try {
         const ride = await rideService.updateRideStatus({ rideId, captain: req.captain, status });
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: 'ride-status-updated',
-            data: ride
-        })
+        if (ride.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, { event: 'ride-status-updated', data: ride });
+        }
 
         // A5 da auditoria de push (2026-08-02): "motorista chegou" é justamente o
         // momento em que o passageiro mais provavelmente NÃO está com o app aberto —

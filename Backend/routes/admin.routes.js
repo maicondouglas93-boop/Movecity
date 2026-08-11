@@ -96,6 +96,8 @@ router.get('/captains/:id/timeline', authAdmin, adminController.getCaptainTimeli
 
 // Rides
 router.get('/rides', authAdmin, adminController.getRides);
+router.post('/rides/manual/estimate', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.estimateManualRide);
+router.post('/rides/manual', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.createManualRide);
 router.get('/rides/:id/timeline', authAdmin, adminController.getRideTimeline);
 router.put('/rides/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.cancelRide);
 router.put('/rides/:id/reassign', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.reassignRide);

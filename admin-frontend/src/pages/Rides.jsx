@@ -7,13 +7,14 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
-import { Search, Download, CheckSquare, Square, Map as MapIcon, X } from 'lucide-react';
+import { Search, Download, CheckSquare, Square, Map as MapIcon, X, Plus } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import RideRow from '../components/rides/RideRow';
 import RideDrawer from '../components/rides/RideDrawer';
 import FinalizeRideModal from '../components/rides/FinalizeRideModal';
+import ManualRideModal from '../components/rides/ManualRideModal';
 import { timeAgo, itemStatusLabel } from '../components/rides/rideUi';
 
 // Fix leaflet icon
@@ -99,6 +100,7 @@ export default function Rides() {
     vehicleType: '',
     paymentMethod: '',
     type: searchParams.get('type') || '',
+    source: '',
   });
   const [searchInput, setSearchInput] = useState('');
   const [selectedRides, setSelectedRides] = useState([]);
@@ -107,6 +109,7 @@ export default function Rides() {
   const [activeRideDrawer, setActiveRideDrawer] = useState(null);
   const [finalizeRide, setFinalizeRide] = useState(null);
   const [showMap, setShowMap] = useState(true); // Split view toggle
+  const [showManualRide, setShowManualRide] = useState(false);
 
   // Query
   const { data, isLoading, isError } = useQuery({
@@ -327,6 +330,7 @@ export default function Rides() {
               <p className="text-sm text-text-muted mt-1">Monitoramento e operação de corridas em tempo real.</p>
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={() => setShowManualRide(true)} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold flex items-center gap-2"><Plus className="w-4 h-4" /> Lançar corrida</button>
               <button onClick={() => setShowMap(!showMap)} className="px-3 py-2 bg-background border border-border rounded-lg text-sm flex items-center gap-2 hover:bg-background/80 lg:hidden">
                 <MapIcon className="w-4 h-4" /> Mapa
               </button>
@@ -373,6 +377,11 @@ export default function Rides() {
               <option value="">Todos (corridas + encomendas)</option>
               <option value="ride">Só corridas</option>
               <option value="parcel">Só encomendas</option>
+            </select>
+
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.source} onChange={e => { setFilters(f => ({ ...f, source: e.target.value, type: e.target.value ? 'ride' : f.type })); setPage(1); }}>
+              <option value="">Origem (Todas)</option><option value="passenger">Passageiro</option><option value="admin">ADM</option>
             </select>
 
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
@@ -572,7 +581,13 @@ export default function Rides() {
         />
       )}
 
+      {showManualRide && (
+        <ManualRideModal
+          onClose={() => setShowManualRide(false)}
+          onCreated={() => queryClient.invalidateQueries({ queryKey: ['rides'] })}
+        />
+      )}
+
     </div>
   );
 }
-

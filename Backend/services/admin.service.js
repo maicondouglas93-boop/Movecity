@@ -1137,6 +1137,9 @@ function normalizeRideForList(r) {
         paymentStatus: obj.paymentStatus,
         user: obj.user,
         captain: obj.captain,
+        source: obj.source,
+        createdBy: obj.createdBy,
+        adminPassenger: obj.adminPassenger,
         cancellationReason: obj.cancellationReason,
         cancelledBy: obj.cancelledBy,
         cancelledAt: obj.cancelledAt,
@@ -1209,6 +1212,8 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
 
     if (filters.vehicleType) { rideQuery.vehicleType = filters.vehicleType; parcelQuery.vehicleType = filters.vehicleType; }
     if (filters.paymentMethod) { rideQuery.paymentMethod = filters.paymentMethod; parcelQuery.paymentMethod = filters.paymentMethod; }
+    if (filters.source === 'admin') rideQuery.source = 'admin';
+    if (filters.source === 'passenger') rideQuery.source = 'passenger_requested';
 
     if (filters.period && filters.period !== 'all') {
         const now = new Date();
@@ -1237,6 +1242,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
         type === 'parcel' ? Promise.resolve([]) : rideModel.find(rideQuery)
             .populate('user', 'fullname email phone')
             .populate('captain', 'fullname email phone vehicle rating')
+            .populate('createdBy', 'name')
             .sort({ createdAt: -1 }).limit(fetchCount),
         type === 'ride' ? Promise.resolve([]) : parcelModel.find(parcelQuery)
             .populate('user', 'fullname email phone')

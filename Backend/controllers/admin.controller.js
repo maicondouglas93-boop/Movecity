@@ -697,10 +697,65 @@ module.exports.getRideTimeline = async (req, res, next) => {
 
 module.exports.getRides = async (req, res, next) => {
     try {
-        const { page = 1, limit = 10, search = '', status, vehicleType, paymentMethod, period, type } = req.query;
-        const result = await adminService.getRides(Number(page), Number(limit), search, { status, vehicleType, paymentMethod, period, type });
+        const { page = 1, limit = 10, search = '', status, vehicleType, paymentMethod, period, type, source } = req.query;
+        const result = await adminService.getRides(Number(page), Number(limit), search, { status, vehicleType, paymentMethod, period, type, source });
         res.status(200).json(result);
     } catch (error) {
+        next(error);
+    }
+};
+
+module.exports.estimateManualRide = async (req, res, next) => {
+    try {
+        const quote = await require('../services/ride.service').getFare(req.body.pickup, req.body.destination);
+        const vehicleType = req.body.vehicleType;
+        if (!quote.fare?.[vehicleType]) return res.status(400).json({ message: 'Categoria indisponível para corrida' });
+        res.json({ distance: quote.distance, time: quote.time, fare: quote.fare[vehicleType], fareCard: quote.fareCard?.[vehicleType], breakdown: quote.breakdown?.[vehicleType] });
+    } catch (error) { next(error); }
+};
+
+module.exports.createManualRide = async (req, res, next) => {
+    try {
+        const Ride = require('../models/ride.model');
+        const User = require('../models/user.model');
+        const AdminLog = require('../models/adminLog.model');
+        const rideService = require('../services/ride.service');
+        const { dispatchRideToCaptains } = require('./ride.controller');
+        const { passenger, pickup, destination, vehicleType, paymentMethod, observation, captainId, idempotencyKey } = req.body;
+        if (!idempotencyKey || !passenger?.name || !passenger?.phone || !pickup?.address || !destination?.address
+            || !Number.isFinite(Number(pickup.lat)) || !Number.isFinite(Number(pickup.lng))
+            || !Number.isFinite(Number(destination.lat)) || !Number.isFinite(Number(destination.lng))) {
+            return res.status(400).json({ message: 'Dados obrigatórios ou coordenadas inválidas' });
+        }
+        if (!['cash', 'pix', 'card'].includes(paymentMethod)) return res.status(400).json({ message: 'Método de pagamento inválido' });
+        const existing = await Ride.findOne({ createdBy: req.admin._id, idempotencyKey });
+        if (existing) return res.status(200).json(existing);
+        let user = null;
+        if (passenger.userId) {
+            user = await User.findById(passenger.userId);
+            if (!user) return res.status(400).json({ message: 'Passageiro cadastrado não encontrado' });
+        }
+        const { ride } = await rideService.createRide({
+            user: user?._id, pickup: pickup.address, destination: destination.address, vehicleType, paymentMethod,
+            observation, source: 'admin', createdBy: req.admin._id, createdByRole: 'admin', idempotencyKey,
+            adminPassenger: { name: passenger.name, phone: passenger.phone, passengerCount: passenger.passengerCount || 1, note: passenger.note },
+            pickupCoordinates: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
+            destinationCoordinates: { lat: Number(destination.lat), lng: Number(destination.lng) },
+        });
+        const offered = await dispatchRideToCaptains(ride, { pickup: pickup.address, vehicleType, TRACE_ID: `AdminRide:${ride._id}`, targetCaptainId: captainId });
+        if (captainId && offered !== 1) {
+            await Ride.deleteOne({ _id: ride._id });
+            return res.status(409).json({ message: 'Motorista indisponível, ocupado, incompatível ou fora do raio' });
+        }
+        await AdminLog.create({ adminId: req.admin._id, adminName: req.admin.name, action: 'create_manual_ride', targetId: ride._id.toString(), targetModel: 'Ride', ipAddress: req.ip,
+            newValue: { passenger: passenger.name, captainId: captainId || null, vehicleType, pickup: pickup.address, destination: destination.address, paymentMethod } });
+        const result = await Ride.findById(ride._id).populate('user captain createdBy', 'fullname phone name');
+        res.status(201).json(result);
+    } catch (error) {
+        if (error?.code === 11000 && req.body.idempotencyKey) {
+            const ride = await require('../models/ride.model').findOne({ createdBy: req.admin._id, idempotencyKey: req.body.idempotencyKey });
+            return res.status(200).json(ride);
+        }
         next(error);
     }
 };

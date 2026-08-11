@@ -8,6 +8,12 @@ import { formatMoney } from '../../utils/format';
 
 const blankAddress = () => ({ address: '', lat: '', lng: '' });
 
+/** Select/input do modal — cores explícitas: a classe `.field` nunca existiu no CSS
+ *  e o dropdown nativo herdava texto claro sobre fundo claro do SO (opções invisíveis). */
+const FIELD_CLASS =
+  'w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text focus:border-primary outline-none disabled:opacity-60';
+const OPTION_CLASS = 'bg-background text-text';
+
 function newIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `admin-ride-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -290,7 +296,7 @@ export default function ManualRideModal({ onClose, onCreated }) {
         <Section title="4. Categoria">
           <select
             aria-label="Categoria do veículo"
-            className="field"
+            className={FIELD_CLASS}
             value={form.vehicleType}
             onChange={(event) => {
               const vehicleType = event.target.value;
@@ -299,9 +305,9 @@ export default function ManualRideModal({ onClose, onCreated }) {
               setEstimate(null);
             }}
           >
-            <option value="">Selecione a categoria</option>
+            <option value="" className={OPTION_CLASS}>Selecione a categoria</option>
             {activeCategories.map((category) => (
-              <option key={category._id || category.name} value={category.name}>
+              <option key={category._id || category.name} value={category.name} className={OPTION_CLASS}>
                 {category.displayName || category.name} · até {category.capacity || 4} passageiro(s)
               </option>
             ))}
@@ -311,14 +317,14 @@ export default function ManualRideModal({ onClose, onCreated }) {
         <Section title="5. Motorista">
           <select
             aria-label="Motorista"
-            className="field"
+            className={FIELD_CLASS}
             value={form.captainId}
             disabled={!addressIsResolved(form.pickup) || !form.vehicleType || availableCaptains.isFetching}
             onChange={(event) => patch('captainId', event.target.value)}
           >
-            <option value="">Distribuição automática</option>
+            <option value="" className={OPTION_CLASS}>Distribuição automática</option>
             {captains.map((captain) => (
-              <option key={captain._id} value={captain._id}>
+              <option key={captain._id} value={captain._id} className={OPTION_CLASS}>
                 {passengerDisplayName(captain)}{captain.distanceKm != null ? ` · ${captain.distanceKm} km da partida` : ''}
               </option>
             ))}
@@ -331,9 +337,9 @@ export default function ManualRideModal({ onClose, onCreated }) {
         </Section>
 
         <Section title="6. Pagamento e observação">
-          <select aria-label="Forma de pagamento" className="field" value={form.paymentMethod} onChange={(event) => patch('paymentMethod', event.target.value)}>
-            <option value="cash">Dinheiro</option>
-            <option value="pix">Pix recebido pelo motorista</option>
+          <select aria-label="Forma de pagamento" className={FIELD_CLASS} value={form.paymentMethod} onChange={(event) => patch('paymentMethod', event.target.value)}>
+            <option value="cash" className={OPTION_CLASS}>Dinheiro</option>
+            <option value="pix" className={OPTION_CLASS}>Pix recebido pelo motorista</option>
           </select>
           <p className="text-xs text-text-muted mt-2">Cartão não é oferecido aqui porque o painel ainda não captura o pagamento com segurança.</p>
           <div className="mt-3">
@@ -416,7 +422,7 @@ function Input({ label, value, onChange, type = 'text', min, max }) {
     <label className="text-xs text-text-muted block">
       {label}
       <input
-        className="field mt-1"
+        className={`${FIELD_CLASS} mt-1`}
         type={type}
         min={min}
         max={max}
@@ -450,7 +456,13 @@ function Address({ id, value, onTextChange, onResolved, label, biasLocation }) {
 
 function ModeButton({ active, onClick, children }) {
   return (
-    <button type="button" className={`chip ${active ? 'bg-primary text-white' : ''}`} onClick={onClick}>
+    <button
+      type="button"
+      className={`px-3 py-1.5 rounded-lg text-sm border border-border ${
+        active ? 'bg-primary text-white border-primary' : 'bg-background text-text hover:bg-surface'
+      }`}
+      onClick={onClick}
+    >
       {children}
     </button>
   );

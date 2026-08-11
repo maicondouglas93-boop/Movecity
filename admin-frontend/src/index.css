@@ -26,4 +26,12 @@
   body {
     @apply bg-background text-text antialiased;
   }
+
+  /* Dropdown nativo do SO: sem isso, options herdam texto claro do tema
+     sobre fundo claro do menu do Windows e ficam invisíveis. */
+  select,
+  select option {
+    background-color: var(--color-background);
+    color: var(--color-text);
+  }
 }

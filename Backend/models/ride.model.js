@@ -138,6 +138,19 @@ const rideSchema = new mongoose.Schema({
         type: Date,
         description: 'Quando a corrida entrou em started — base preferencial do actualTime',
     },
+    // SLA real do painel admin/reports (2026-08-10) — antes só arrivedAt/startedAt
+    // existiam; sem acceptedAt/finishedAt não dava pra calcular tempo de espera até
+    // aceite nem tempo total da corrida sem cair em updatedAt (que muda por outros
+    // motivos, ex.: paymentStatus). Preenchidos em transitionRide para 'accepted' e
+    // 'finished' — ausentes em corridas anteriores a esta mudança.
+    acceptedAt: {
+        type: Date,
+        description: "Quando o status virou 'accepted'",
+    },
+    finishedAt: {
+        type: Date,
+        description: "Quando o status virou 'finished'",
+    },
     estimatedTime: {
         type: Number, // seconds
     },
@@ -205,6 +218,14 @@ const rideSchema = new mongoose.Schema({
         reason: { type: String },
         atStatus: { type: String },
         cancelledAt: { type: Date, default: Date.now },
+    }],
+    // Histórico real de status (2026-08-10, painel admin) — preenchido centralmente em
+    // transitionRide a cada transição, mesmo padrão de parcel.model.js. Antes o drawer
+    // do admin simulava horários por offset fixo sobre createdAt; agora há timestamp
+    // real por transição. Ausente em corridas anteriores a esta mudança.
+    statusHistory: [{
+        status: { type: String },
+        at: { type: Date, default: Date.now },
     }],
     waitTimeSeconds: {
         type: Number,

@@ -23,29 +23,51 @@ module.exports.getExecutiveDashboard = async (startDate, endDate) => {
     };
 
     // Agregações principais
-    const [currentStats, prevStats, currentCancellations, prevCancellations] = await Promise.all([
+    const [currentStats, prevStats, currentCancellations, prevCancellations, currentRequested, prevRequested, slaStats] = await Promise.all([
         Ride.aggregate([
             { $match: matchCurrent },
-            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] } } } }
+            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] } }, totalDiscount: { $sum: { $ifNull: ['$discountAmount', 0] } } } }
         ]),
         Ride.aggregate([
             { $match: matchPrev },
-            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 } } }
+            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] } } } }
         ]),
         Ride.countDocuments({ createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) }, status: 'cancelled' }),
-        Ride.countDocuments({ createdAt: { $gte: prevStartDate, $lte: prevEndDate }, status: 'cancelled' })
+        Ride.countDocuments({ createdAt: { $gte: prevStartDate, $lte: prevEndDate }, status: 'cancelled' }),
+        // Total solicitado no período (todo status, não só finalizadas) — denominador
+        // correto da taxa de cancelamento. Antes dividia canceladas por finalizadas,
+        // o que não representa "% do que foi pedido que foi cancelado".
+        Ride.countDocuments({ createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) } }),
+        Ride.countDocuments({ createdAt: { $gte: prevStartDate, $lte: prevEndDate } }),
+        // SLA real (2026-08-10) — acceptedAt/arrivedAt/startedAt/finishedAt só existem em
+        // corridas transitadas após essa mudança; corridas antigas ficam de fora do
+        // $match e não distorcem a média com null/undefined.
+        Ride.aggregate([
+            { $match: { ...matchCurrent, acceptedAt: { $ne: null }, arrivedAt: { $ne: null }, startedAt: { $ne: null }, finishedAt: { $ne: null } } },
+            { $group: {
+                _id: null,
+                avgWaitToAccept: { $avg: { $divide: [{ $subtract: ['$acceptedAt', '$createdAt'] }, 1000] } },
+                avgWaitToArrive: { $avg: { $divide: [{ $subtract: ['$arrivedAt', '$acceptedAt'] }, 1000] } },
+                avgRideTime: { $avg: { $divide: [{ $subtract: ['$finishedAt', '$startedAt'] }, 1000] } },
+                sampleSize: { $sum: 1 },
+            } }
+        ]),
     ]);
 
-    const curr = currentStats[0] || { totalRevenue: 0, totalRides: 0, totalCommission: 0 };
-    const prev = prevStats[0] || { totalRevenue: 0, totalRides: 0 };
+    const curr = currentStats[0] || { totalRevenue: 0, totalRides: 0, totalCommission: 0, totalDiscount: 0 };
+    const prev = prevStats[0] || { totalRevenue: 0, totalRides: 0, totalCommission: 0 };
+    const slaRaw = slaStats[0];
 
     const getGrowth = (c, p) => (p === 0 ? (c > 0 ? 100 : 0) : ((c - p) / p) * 100);
 
-    // SLAs simulados para demonstração da V1 (Pois o Ride schema não guarda os timestamps finos ainda)
+    // sampleSize baixo (ride novo pra esse jeito de calcular) é sinalizado pro
+    // frontend não exibir uma média pouco confiável como se fosse definitiva.
     const sla = {
-        avgWaitToAccept: 135, // 2m 15s
-        avgWaitToArrive: 240, // 4m
-        avgRideTime: 780,     // 13m
+        hasData: !!slaRaw && slaRaw.sampleSize > 0,
+        sampleSize: slaRaw?.sampleSize || 0,
+        avgWaitToAccept: slaRaw ? Math.round(slaRaw.avgWaitToAccept) : null,
+        avgWaitToArrive: slaRaw ? Math.round(slaRaw.avgWaitToArrive) : null,
+        avgRideTime: slaRaw ? Math.round(slaRaw.avgRideTime) : null,
     };
 
     return {
@@ -55,7 +77,10 @@ module.exports.getExecutiveDashboard = async (startDate, endDate) => {
         },
         profit: {
             current: curr.totalCommission,
-            growth: getGrowth(curr.totalCommission, prev.totalRevenue * 0.15)
+            growth: getGrowth(curr.totalCommission, prev.totalCommission)
+        },
+        discount: {
+            current: curr.totalDiscount,
         },
         rides: {
             current: curr.totalRides,
@@ -67,7 +92,9 @@ module.exports.getExecutiveDashboard = async (startDate, endDate) => {
         },
         cancellations: {
             current: currentCancellations,
-            growth: getGrowth(currentCancellations, prevCancellations)
+            growth: getGrowth(currentCancellations, prevCancellations),
+            rate: currentRequested ? (currentCancellations / currentRequested) * 100 : 0,
+            ratePrev: prevRequested ? (prevCancellations / prevRequested) * 100 : 0,
         },
         sla
     };

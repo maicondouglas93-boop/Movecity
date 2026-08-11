@@ -55,9 +55,9 @@ async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {},
     // Implementação do sistema de cancelamento (2026-08-04): cancelRideByCaptain usa
     // isto pra registrar, em captainCancellations, quem desistiu e por quê — sem sair
     // do padrão atômico (mesmo findOneAndUpdate, nenhuma escrita separada).
-    if (Object.keys(extraPush).length > 0) {
-        update.$push = extraPush;
-    }
+    // statusHistory (2026-08-10): toda transição empurra {status, at} — mesmo padrão
+    // de parcel.model.js, base real pro timeline do painel admin (antes simulado).
+    update.$push = { statusHistory: { status: toStatus, at: new Date() }, ...extraPush };
     return rideModel.findOneAndUpdate(
         { _id: rideId, status: { $in: validOrigins }, ...extraFilter },
         update,
@@ -960,7 +960,7 @@ module.exports.acceptRideAtomic = async ({
             throw new Error('CAPTAIN_ALREADY_HAS_ACTIVE_RIDE');
         }
 
-        updatedRide = await transitionRide(rideId, 'accepted', {}, { captain: captain._id });
+        updatedRide = await transitionRide(rideId, 'accepted', {}, { captain: captain._id, acceptedAt: new Date() });
     } catch (err) {
         await dispatchService.releaseCaptainBusyLock(captain._id);
         // Índice único parcial em ride.model.js (C2 da auditoria de concorrência): este
@@ -1287,6 +1287,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
         finalPrice: finalPrice,
         paymentStatus: 'pending', // Awaiting driver to confirm cash received
         actualDistance,
+        finishedAt: new Date(),
         ...finishExtras,
         ...pricingUpdate,
     });

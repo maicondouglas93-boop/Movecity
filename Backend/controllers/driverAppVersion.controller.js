@@ -27,12 +27,22 @@ module.exports.getAdminDriverAppVersion = async (req, res, next) => {
 
 module.exports.updateAdminDriverAppVersion = async (req, res, next) => {
     try {
-        const data = await driverAppVersionService.update(req.body || {});
+        const data = await driverAppVersionService.update(req.body || {}, req.admin);
         return res.status(200).json(data);
     } catch (error) {
         if (error.statusCode) {
             return res.status(error.statusCode).json({ message: error.message });
         }
+        return next(error);
+    }
+};
+
+module.exports.getDriverAppVersionHistory = async (req, res, next) => {
+    try {
+        const limit = Number(req.query.limit) || 10;
+        const history = await driverAppVersionService.getHistory(limit);
+        return res.status(200).json({ history });
+    } catch (error) {
         return next(error);
     }
 };

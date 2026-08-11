@@ -171,6 +171,7 @@ const LiveTracking = (props) => {
     // movimento suave em vez de um salto por fix de GPS.
     const [ routeSteps, setRouteSteps ] = useState([]);
     const [ routeVersion, setRouteVersion ] = useState(0);
+    const [ isApproximateRoute, setIsApproximateRoute ] = useState(false);
     const routeSummaryRef = useRef(null); // { distanceValue, durationValue }
     const navStateRef = useRef({ position: null, heading: 0, zoom: 17 });
     const navTargetRef = useRef({ position: null, heading: 0, zoom: 17 });
@@ -237,8 +238,9 @@ const LiveTracking = (props) => {
 
         setPickupCoords(null);
         setDestinationCoords(null);
-        setRouteCoords([]);
-        setRouteSteps([]);
+	                setRouteCoords([]);
+	                setRouteSteps([]);
+	                setIsApproximateRoute(false);
         setCaptainPosition(null);
         prevCaptainPosRef.current = null;
         hasFitBoundsRef.current = false;
@@ -394,6 +396,7 @@ const LiveTracking = (props) => {
             const fallbackLine = [[startLat, startLng], [endLat, endLng]];
             if (!getAccessToken('user') && !getAccessToken('captain')) {
                 setRouteCoords(fallbackLine);
+                setIsApproximateRoute(true);
                 return;
             }
 
@@ -408,7 +411,9 @@ const LiveTracking = (props) => {
                     params: { origin, destination }
                 });
 
-                setRouteCoords(Array.isArray(data.polyline) && data.polyline.length > 0 ? data.polyline : fallbackLine);
+                const hasPolyline = Array.isArray(data.polyline) && data.polyline.length > 0;
+                setRouteCoords(hasPolyline ? data.polyline : fallbackLine);
+                setIsApproximateRoute(!hasPolyline);
                 setRouteSteps(Array.isArray(data.steps) ? data.steps : []);
                 routeSummaryRef.current = {
                     distanceValue: data.distance?.value ?? null,
@@ -423,6 +428,7 @@ const LiveTracking = (props) => {
                 console.error('Erro ao buscar rota:', err);
                 setRouteCoords(fallbackLine);
                 setRouteSteps([]);
+                setIsApproximateRoute(true);
             }
         };
 
@@ -1098,6 +1104,12 @@ const LiveTracking = (props) => {
                             <p className='text-sm font-bold text-ink-900 leading-tight'>{remainingKm} km restantes</p>
                         )}
                     </div>
+                </div>
+            )}
+
+            {isApproximateRoute && !props.isSelectingOnMap && !props.navigationMode && (
+                <div className='absolute top-20 left-1/2 -translate-x-1/2 z-panel max-w-[calc(100%-2rem)] rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800 shadow-raised'>
+                    Rota aproximada — recalcularemos quando a conexão melhorar.
                 </div>
             )}
 

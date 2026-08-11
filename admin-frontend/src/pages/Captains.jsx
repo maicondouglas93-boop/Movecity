@@ -1147,7 +1147,7 @@ function TabRides({ captainId }) {
                  </div>
               </div>
               <div className="text-left md:text-right">
-                 <p className="font-bold text-primary">R$ {ride.fare?.toFixed(2) || '0.00'}</p>
+                 <p className="font-bold text-primary">R$ {(ride.finalPrice ?? ride.fare)?.toFixed(2) || '0.00'}</p>
                  <p className="text-xs text-text-muted">Passageiro: {ride.user?.fullname?.firstname || 'N/A'}</p>
               </div>
            </div>

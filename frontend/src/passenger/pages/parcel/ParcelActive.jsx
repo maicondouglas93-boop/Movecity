@@ -11,6 +11,7 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import Button from '@/shared/components/ui/Button'
 import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
+import { formatCurrencyBRL } from '@/shared/utils/formatters'
 
 const STATUS_COPY = {
   awaiting_provider: {
@@ -421,7 +422,7 @@ const ParcelActive = () => {
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-sm font-bold text-ink-900">
-                  R$ {Number(parcel.fare || 0).toFixed(2).replace('.', ',')}
+	                  {formatCurrencyBRL(parcel.fare || 0)}
                 </p>
                 <p className="text-[10px] text-ink-400">
                   {parcel.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'}

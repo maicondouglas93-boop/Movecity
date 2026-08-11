@@ -30,6 +30,7 @@ import { getAccessToken } from '@/shared/services/session';
 import { joinWithRetry } from '@/shared/services/socketAuth';
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue';
 import { showBrowserNotification } from '@/shared/services/browserNotify';
+import { formatCurrencyBRL } from '@/shared/utils/formatters';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -468,9 +469,9 @@ const Home = () => {
                 setPickup({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
                 addToast('Usando coordenadas', 'info');
             }
-        } catch (err) {
+        } catch {
             setPickup({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
-            addToast('Endereço indisponível, usando coords' + err, 'info');
+            addToast('Não conseguimos identificar o endereço. Usaremos o ponto selecionado no mapa.', 'info');
         }
     }
 
@@ -687,7 +688,7 @@ const Home = () => {
             });
             if (response.data?.cancellationFeeCharged > 0) {
                 addToast(
-                    `Corrida cancelada. Como o motorista já estava a caminho, uma taxa de R$${response.data.cancellationFeeCharged.toFixed(2)} pode ser cobrada — acerte diretamente com ele.`,
+                    `Corrida cancelada. Como o motorista já estava a caminho, uma taxa de ${formatCurrencyBRL(response.data.cancellationFeeCharged)} pode ser cobrada — acerte diretamente com ele.`,
                     'info',
                     8000
                 );

@@ -348,6 +348,9 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.message === 'Destination is required when not pending') {
             return res.status(400).json({ message: 'Informe o destino ou escolha definir ao finalizar.' });
         }
+        if (err.code === 'ROUTE_CALCULATION_FAILED') {
+            return res.status(502).json({ message: 'Não foi possível calcular a rota até o destino. Tente novamente.' });
+        }
         console.error('[AUDIT] createPresentialRide error:', err);
         return res.status(500).json({ message: err.message });
     }
@@ -383,6 +386,9 @@ module.exports.estimatePresentialFare = async (req, res) => {
     } catch (err) {
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
+        }
+        if (err.code === 'ROUTE_CALCULATION_FAILED') {
+            return res.status(502).json({ message: 'Não foi possível calcular a rota até o destino. Tente novamente.' });
         }
         return res.status(500).json({ message: err.message });
     }
@@ -489,10 +495,10 @@ module.exports.endRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId } = req.body;
+    const { rideId, destination } = req.body;
 
     try {
-        const ride = await rideService.endRide({ rideId, captain: req.captain });
+        const ride = await rideService.endRide({ rideId, captain: req.captain, destination: destination || null });
 
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {

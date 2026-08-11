@@ -1792,7 +1792,11 @@ module.exports.bulkApprovePayouts = async (payoutIds, admin, ip) => {
 // history" — interlaçava rideModel/payoutModel direto, nunca consultava
 // transactionModel (fonte real de todo movimento de saldo, incluindo recarga,
 // ajuste manual, bônus, que simplesmente não apareciam aqui). Ledger real, com o
-// mesmo campo balanceBefore/balanceAfter já gravado em cada lançamento.
+// mesmo campo balanceBefore/balanceAfter já gravado em cada lançamento. Já reflete
+// o valor final da corrida (não a estimativa): o lançamento 'ride_payment' é criado
+// em confirmRidePayment com finalFare = claimed.finalPrice || claimed.fare
+// (ride.service.js), então não sofre do bug "histórico mostra estimativa" que a
+// versão anterior (baseada direto em rideModel.fare) tinha.
 module.exports.getCaptainFinancialHistory = async (captainId, page = 1, limit = 20) => {
     const skip = (page - 1) * limit;
     const query = { captainId };

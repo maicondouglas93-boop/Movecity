@@ -52,9 +52,9 @@ const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpen
         </div>
       </td>
       <td className="px-4 py-4">
-        <p className="font-medium text-text">{formatMoney(ride.fare)}</p>
+        <p className="font-medium text-text">{formatMoney(ride.finalPrice ?? ride.fare)}</p>
         {Number.isFinite(ride.finalPrice) && ride.finalPrice !== ride.fare && (
-          <p className="text-xs text-primary">Final: {formatMoney(ride.finalPrice)}</p>
+          <p className="text-xs text-text-muted">Estimativa: {formatMoney(ride.fare)}</p>
         )}
         <p className="text-xs text-text-muted">Comis: {ride.commissionAmount ? formatMoney(ride.commissionAmount) : '-'}</p>
       </td>

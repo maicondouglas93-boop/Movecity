@@ -6,9 +6,12 @@ import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '@/shared/components/ui/Button'
+import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
+import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
+import { reverseGeocode, formatAddressWithCoords } from '@/shared/services/mapsApi'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -33,6 +36,47 @@ const FinishRide = (props) => {
     const navigate = useNavigate()
     const { setCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
+    const { userLocation } = useContext(LocationContext)
+
+    // Corrida presencial "Definir destino ao finalizar": o backend não conhece o
+    // destino ainda (ride.destinationPending) — o motorista precisa digitá-lo aqui
+    // antes de finalizar, e o preço real é calculado no servidor a partir da rota
+    // origem→este destino (mesmo motor de tarifação de "Informar destino agora").
+    const needsDestination = !!(
+        props.ride?.destinationPending
+        || (props.ride?.source === 'driver_initiated' && !props.ride?.destination)
+    )
+    const [destinationInput, setDestinationInput] = useState('')
+    const [resolvingCurrentLocation, setResolvingCurrentLocation] = useState(false)
+
+    // "Usar minha localização atual": pega o GPS já compartilhado por LocationContext
+    // (mesmo watchPosition unificado usado no app inteiro — Capacitor Geolocation no
+    // Android, Geolocation API do navegador na PWA) e usa direto como destino, sem o
+    // motorista precisar digitar. Embute as coordenadas no texto (mesmo formato do
+    // AddressAutocomplete) pra o backend usar a posição exata em vez de geocodificar
+    // o endereço de novo.
+    async function useCurrentLocationAsDestination() {
+        if (userLocation?.lat == null || userLocation?.lng == null) {
+            addToast('Aguardando GPS. Ative a localização e tente novamente.', 'error')
+            return
+        }
+        setResolvingCurrentLocation(true)
+        try {
+            let address = ''
+            try {
+                const result = await reverseGeocode(userLocation.lat, userLocation.lng)
+                address = result?.address || ''
+            } catch (err) {
+                console.error('Reverse geocode error:', err)
+            }
+            if (!address) {
+                address = `${userLocation.lat.toFixed(5)}, ${userLocation.lng.toFixed(5)}`
+            }
+            setDestinationInput(formatAddressWithCoords({ address, lat: userLocation.lat, lng: userLocation.lng }))
+        } finally {
+            setResolvingCurrentLocation(false)
+        }
+    }
 
     // Fase 3 (M1, 2026-08-05): os setTimeout de navegação/avaliação pós-corrida eram
     // órfãos — desmontar este painel (ex.: corrida cancelada no meio) deixava um
@@ -59,7 +103,8 @@ const FinishRide = (props) => {
     const endRideMutation = useMutation({
         mutationFn: async () => {
             const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
-                rideId: props.ride._id
+                rideId: props.ride._id,
+                ...(needsDestination ? { destination: destinationInput.trim() } : {}),
             }, {
                 headers: {
                     Authorization: `Bearer ${getAccessToken('captain')}`
@@ -101,6 +146,10 @@ const FinishRide = (props) => {
     })
 
     async function endRide() {
+        if (needsDestination && destinationInput.trim().length < 3) {
+            addToast('Informe o endereço onde a corrida terminou.', 'error')
+            return
+        }
         endRideMutation.mutate();
     }
 
@@ -227,9 +276,39 @@ const FinishRide = (props) => {
                         </p>
                     </div>
 
+                    {needsDestination && (
+                        <div className="mt-3">
+                            <AddressAutocomplete
+                                id="finish-ride-destination"
+                                label="Onde a corrida terminou?"
+                                value={destinationInput}
+                                onChange={setDestinationInput}
+                                onResolved={setDestinationInput}
+                                placeholder="Digite o endereço de destino"
+                                biasLocation={userLocation}
+                                disabled={endRideMutation.isPending}
+                                icon="ri-map-pin-2-fill"
+                                inputClassName="w-full min-h-[44px] pl-10 pr-10 rounded-panel border border-line bg-surface text-sm text-ink-900 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                            />
+                            <button
+                                type="button"
+                                onClick={useCurrentLocationAsDestination}
+                                disabled={endRideMutation.isPending || resolvingCurrentLocation || userLocation?.lat == null}
+                                className="mt-2 w-full flex items-center justify-center gap-1.5 min-h-[40px] rounded-panel border border-line bg-surface-alt text-sm font-medium text-brand-700 active:scale-[0.99] transition-transform disabled:opacity-50"
+                            >
+                                <i className={resolvingCurrentLocation ? 'ri-loader-4-line animate-spin' : 'ri-crosshair-2-line'} aria-hidden="true" />
+                                {resolvingCurrentLocation ? 'Localizando…' : 'Usar minha localização atual'}
+                            </button>
+                            <p className="text-xs text-ink-400 mt-1">
+                                O preço é calculado pela rota real entre o embarque e este destino.
+                            </p>
+                        </div>
+                    )}
+
                     <Button
                         onClick={endRide}
                         loading={endRideMutation.isPending}
+                        disabled={needsDestination && destinationInput.trim().length < 3}
                         className="mt-3 !min-h-[44px] !text-sm"
                     >
                         Finalizar corrida

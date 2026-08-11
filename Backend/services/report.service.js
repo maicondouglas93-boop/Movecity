@@ -6,6 +6,15 @@ const Captain = require('../models/captain.model');
  * Funções de Agregação e Relatórios (Business Intelligence)
  */
 
+// Auditoria "histórico mostra estimativa" (2026-08-10): estes relatórios já filtram
+// status:'finished' — ou seja, toda corrida aqui já foi concluída e tem um valor FINAL
+// recalculado (finalPrice), que pode ser diferente do fare congelado na criação
+// (estimativa). Somar `$fare` direto inflava/deflava receita, ticket médio, comissão e
+// ranking de motoristas/passageiros sempre que o valor real divergia da estimativa.
+// Mesma regra do histórico do passageiro: valor final > estimativa para corrida
+// concluída, com fallback só para corridas antigas sem finalPrice persistido.
+const CHARGED_FARE_EXPR = { $ifNull: [ '$finalPrice', '$fare' ] };
+
 module.exports.getExecutiveDashboard = async (startDate, endDate) => {
     const matchCurrent = {
         createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) },
@@ -26,11 +35,11 @@ module.exports.getExecutiveDashboard = async (startDate, endDate) => {
     const [currentStats, prevStats, currentCancellations, prevCancellations, currentRequested, prevRequested, slaStats] = await Promise.all([
         Ride.aggregate([
             { $match: matchCurrent },
-            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] } }, totalDiscount: { $sum: { $ifNull: ['$discountAmount', 0] } } } }
+            { $group: { _id: null, totalRevenue: { $sum: CHARGED_FARE_EXPR }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: [ CHARGED_FARE_EXPR, 0.15 ] }] } }, totalDiscount: { $sum: { $ifNull: ['$discountAmount', 0] } } } }
         ]),
         Ride.aggregate([
             { $match: matchPrev },
-            { $group: { _id: null, totalRevenue: { $sum: '$fare' }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] } } } }
+            { $group: { _id: null, totalRevenue: { $sum: CHARGED_FARE_EXPR }, totalRides: { $sum: 1 }, totalCommission: { $sum: { $ifNull: ['$commissionAmount', { $multiply: [ CHARGED_FARE_EXPR, 0.15 ] }] } } } }
         ]),
         Ride.countDocuments({ createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) }, status: 'cancelled' }),
         Ride.countDocuments({ createdAt: { $gte: prevStartDate, $lte: prevEndDate }, status: 'cancelled' }),
@@ -106,10 +115,10 @@ module.exports.getChartsData = async (startDate, endDate) => {
     const [dailyRevenue, paymentMethods, categories, heatmap] = await Promise.all([
         Ride.aggregate([
             { $match: matchDate },
-            { $group: { 
-                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, 
-                revenue: { $sum: '$fare' }, 
-                rides: { $sum: 1 } 
+            { $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                revenue: { $sum: CHARGED_FARE_EXPR },
+                rides: { $sum: 1 }
             }},
             { $sort: { _id: 1 } }
         ]),
@@ -119,7 +128,7 @@ module.exports.getChartsData = async (startDate, endDate) => {
         ]),
         Ride.aggregate([
             { $match: matchDate },
-            { $group: { _id: "$vehicleType", count: { $sum: 1 }, revenue: { $sum: '$fare' } } }
+            { $group: { _id: "$vehicleType", count: { $sum: 1 }, revenue: { $sum: CHARGED_FARE_EXPR } } }
         ]),
         Ride.aggregate([
             { $match: matchDate },
@@ -147,7 +156,7 @@ module.exports.getRankings = async (startDate, endDate, limit = 10) => {
     const [topPassengers, topCaptains] = await Promise.all([
         Ride.aggregate([
             { $match: matchDate },
-            { $group: { _id: "$user", rides: { $sum: 1 }, spent: { $sum: '$fare' } } },
+            { $group: { _id: "$user", rides: { $sum: 1 }, spent: { $sum: CHARGED_FARE_EXPR } } },
             { $sort: { spent: -1 } },
             { $limit: Number(limit) },
             { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
@@ -155,7 +164,7 @@ module.exports.getRankings = async (startDate, endDate, limit = 10) => {
         ]),
         Ride.aggregate([
             { $match: matchDate },
-            { $group: { _id: "$captain", rides: { $sum: 1 }, earnings: { $sum: { $subtract: ['$fare', { $ifNull: ['$commissionAmount', { $multiply: ['$fare', 0.15] }] }] } } } },
+            { $group: { _id: "$captain", rides: { $sum: 1 }, earnings: { $sum: { $subtract: [ CHARGED_FARE_EXPR, { $ifNull: ['$commissionAmount', { $multiply: [ CHARGED_FARE_EXPR, 0.15 ] }] } ] } } } },
             { $sort: { earnings: -1 } },
             { $limit: Number(limit) },
             { $lookup: { from: 'captains', localField: '_id', foreignField: '_id', as: 'captain' } },

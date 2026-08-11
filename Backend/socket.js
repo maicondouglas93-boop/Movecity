@@ -7,7 +7,11 @@ const parcelModel = require('./models/parcel.model');
 const adminUserModel = require('./models/adminUser.model');
 const mapService = require('./services/maps.service');
 const notificationDispatcher = require('./notification/notificationDispatcher.service');
-const { normalizeCaptainLocation, isPlausibleTravel } = require('./utils/captainLocationValidation');
+const {
+    MAX_OFFLINE_LOCATION_AGE_MS,
+    normalizeCaptainLocation,
+} = require('./utils/captainLocationValidation');
+const { processRideTrackingPoint } = require('./services/rideTracking.service');
 
 let io;
 
@@ -251,7 +255,7 @@ function initializeSocket(server) {
         });
 
 
-        socket.on('update-location-captain', async (data) => {
+        socket.on('update-location-captain', async (data, ack) => {
             // Auditoria PWA (2026-08-03, C1): antes, `userId` vinha do payload do
             // cliente sem nenhuma verificação — qualquer socket conectado (nem
             // precisava ter feito join) podia falsificar a localização de QUALQUER
@@ -260,16 +264,24 @@ function initializeSocket(server) {
             // do motorista que passou pelo `join` autenticado nesta mesma conexão.
             if (!socket.data.identity || socket.data.identity.type !== 'captain') {
                 console.log(`[AUDIT] update-location-captain rejeitado (sem identidade de captain autenticada) no socket ${socket.id}`);
+                if (typeof ack === 'function') ack({ ok: false, code: 'UNAUTHORIZED' });
                 return socket.emit('unauthorized', { message: 'Não autenticado' });
             }
             const userId = socket.data.identity.id;
             const { location } = data || {};
-            const locationValidation = normalizeCaptainLocation(location);
+            const isQueuedRidePoint = Boolean(data?.rideId && data?.pointId);
+            const locationValidation = normalizeCaptainLocation(
+                location,
+                Date.now(),
+                isQueuedRidePoint ? { maxAgeMs: MAX_OFFLINE_LOCATION_AGE_MS } : undefined
+            );
             if (!locationValidation.valid) {
+                if (typeof ack === 'function') {
+                    ack({ ok: true, accepted: false, code: locationValidation.code, pointId: data?.pointId });
+                }
                 return socket.emit('error', { message: 'Invalid location data', code: locationValidation.code });
             }
             const captainLocation = locationValidation.location;
-            const receivedAt = new Date();
 
             // Fase C (2026-08-03): `{ new: true }` pra ter o doc atualizado em mãos —
             // o broadcast pro mapa do passageiro (abaixo) precisa de vehicle/isOnline
@@ -302,76 +314,40 @@ function initializeSocket(server) {
                     status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
                 }).populate('user')
                 : null;
+            let trackingAck = null;
 
             if (ride) {
                 let currentDistance = ride.actualDistance || 0;
 
                 if (ride.status === 'started' || ride.status === 'ongoing') {
-                    if (ride.lastLocation && ride.lastLocation.lat != null && ride.lastLocation.lng != null) {
-                        const distKm = mapService.haversineKm(
-                            ride.lastLocation.lat,
-                            ride.lastLocation.lng,
-                            captainLocation.lat,
-                            captainLocation.lng
-                        );
-                        const distMeters = distKm * 1000;
-                        const previousAt = ride.lastLocationAt ? new Date(ride.lastLocationAt).getTime() : null;
-                        const elapsedMs = previousAt ? Math.max(0, receivedAt.getTime() - previousAt) : null;
-                        const plausibleTravel = elapsedMs == null || isPlausibleTravel(distMeters, elapsedMs);
-                        const canCountForFare = locationValidation.isAccurateForFare && plausibleTravel;
-
-                        // Só pontos precisos e fisicamente plausíveis entram no preço.
-                        // O ponto ainda é salvo abaixo quando rejeitado para que o GPS
-                        // possa se recuperar sem reaproveitar o salto no próximo ciclo.
-                        if (distMeters > 5 && distMeters < 2000 && canCountForFare) {
-                            // Compare-and-swap (auditoria de integração, 2026-08-06): antes
-                            // era findOne acima + findByIdAndUpdate aqui, sem atomicidade.
-                            // Dois updates de localização quase simultâneos liam o MESMO
-                            // lastLocation e cada um somava seu delta — o mesmo trecho
-                            // entrava duas vezes em actualDistance, que é o número que
-                            // endRide usa pra recalcular o preço final da corrida.
-                            // Com o lastLocation lido dentro do filtro, só a primeira
-                            // escrita casa; a concorrente não encontra documento e é
-                            // descartada em vez de contar de novo.
-                            const applied = await rideModel.findOneAndUpdate(
-                                {
-                                    _id: ride._id,
-                                    'lastLocation.lat': ride.lastLocation.lat,
-                                    'lastLocation.lng': ride.lastLocation.lng,
-                                },
-                                {
-                                    $inc: { actualDistance: distMeters },
-                                    $set: {
-                                        lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
-                                        lastLocationAt: receivedAt,
-                                    },
-                                },
-                                { new: true, projection: { actualDistance: 1 } }
-                            );
-                            if (applied) {
-                                currentDistance = applied.actualDistance;
-                            }
-                        } else {
-                            await rideModel.findOneAndUpdate(
-                                {
-                                    _id: ride._id,
-                                    'lastLocation.lat': ride.lastLocation.lat,
-                                    'lastLocation.lng': ride.lastLocation.lng,
-                                },
-                                {
-                                    $set: {
-                                        lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
-                                        lastLocationAt: receivedAt,
-                                    },
-                                }
-                            );
-                        }
+                    // Registros antigos de disponibilidade não têm rideId. Se forem
+                    // drenados enquanto uma corrida está ativa, não podem virar km
+                    // financeiros da corrida por acidente. Eventos live legados (sem
+                    // pointId) continuam compatíveis e usam a corrida ativa.
+                    if (data?.pointId && !data?.rideId) {
+                        trackingAck = {
+                            confirmed: true,
+                            accepted: false,
+                            reason: 'RIDE_ID_REQUIRED',
+                            pointId: data.pointId,
+                            actualDistance: currentDistance,
+                        };
+                    } else if (String(data?.rideId || ride._id) !== ride._id.toString()) {
+                        trackingAck = {
+                            confirmed: true,
+                            accepted: false,
+                            reason: 'RIDE_MISMATCH',
+                            pointId: data?.pointId,
+                            actualDistance: currentDistance,
+                        };
                     } else {
-                        // First time saving location after ride started
-                        await rideModel.findByIdAndUpdate(ride._id, {
-                            lastLocation: { lat: captainLocation.lat, lng: captainLocation.lng },
-                            lastLocationAt: receivedAt,
+                        trackingAck = await processRideTrackingPoint({
+                            rideId: ride._id,
+                            captainId: userId,
+                            location,
+                            pointId: data?.pointId,
                         });
+                        currentDistance = trackingAck.actualDistance ?? currentDistance;
                     }
                 }
 
@@ -445,6 +421,24 @@ function initializeSocket(server) {
                     vehicleType: captainDoc.vehicle?.vehicleType || 'car',
                     location: { ltd: captainLocation.lat, lng: captainLocation.lng }
                 });
+            }
+
+            if (typeof ack === 'function') {
+                if (ride && (ride.status === 'started' || ride.status === 'ongoing')) {
+                    // Pontos rejeitados por precisão/outlier também são confirmados:
+                    // não contam km, mas saem da fila. Conflitos transitórios ficam na
+                    // fila porque `confirmed` é false.
+                    ack({
+                        ok: trackingAck?.confirmed === true,
+                        accepted: trackingAck?.accepted === true,
+                        duplicate: trackingAck?.duplicate === true,
+                        code: trackingAck?.reason,
+                        actualDistance: trackingAck?.actualDistance ?? ride.actualDistance ?? 0,
+                        pointId: trackingAck?.pointId || data?.pointId,
+                    });
+                } else {
+                    ack({ ok: true, accepted: true, pointId: data?.pointId });
+                }
             }
         });
 

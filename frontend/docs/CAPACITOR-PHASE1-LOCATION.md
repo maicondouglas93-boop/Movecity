@@ -1,6 +1,6 @@
 # Capacitor Fase 1 — GPS nativo + Foreground Service
 
-Data: 2026-08-05
+Data: 2026-08-11
 
 ## Regras preservadas
 
@@ -15,7 +15,26 @@ Data: 2026-08-05
    - Corrida / encomenda / presencial ativo: **5s**
    - OFFLINE sem serviço: **não emite** (FGS parado)
 3. Emit: socket `update-location-captain` (identidade pelo `join` autenticado).
-4. Sem internet: fila Dexie (máx. 20 pontos); no reconnect + join ack, `flushQueuedLocations` envia só o **último**.
+4. Em corrida ativa, cada ponto é gravado na fila Dexie antes do envio, associado à
+   corrida e com `pointId` estável. No reconnect + join ack,
+   `flushQueuedLocations` envia **todos** em ordem e só remove cada registro depois do
+   ack do backend. A fila sobrevive a reinício do app.
+
+## Limite conhecido: processo JavaScript encerrado
+
+O Foreground Service mantém a notificação e melhora a sobrevivência do app em
+background/tela bloqueada, mas o `watchPosition` e a gravação no Dexie continuam sendo
+executados pelo processo JavaScript do Capacitor. Não existe neste projeto um coletor
+Android nativo independente que grave pontos enquanto esse processo estiver morto.
+
+Portanto:
+
+- pontos que chegaram ao JavaScript ficam persistidos e são reenviados com segurança;
+- perda temporária de internet não descarta esses pontos;
+- se Android/OEM encerrar o processo JavaScript antes da coleta, o intervalo sem coleta
+  não pode ser reconstruído pela fila;
+- o cenário `background + tela bloqueada + offline + processo JS encerrado` permanece
+  **não garantido** até existir buffer nativo e teste em dispositivo físico.
 
 ## Foreground Service
 

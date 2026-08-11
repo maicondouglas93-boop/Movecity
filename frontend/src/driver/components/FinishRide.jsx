@@ -1,7 +1,7 @@
 import React, { useState, useContext, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
-import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
+import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,6 +9,7 @@ import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
+import { SocketContext } from '@/shared/contexts/SocketContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { formatBRL } from '@/shared/utils/currency'
 
@@ -40,6 +41,7 @@ const FinishRide = (props) => {
     const { setCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
     const { userLocation } = useContext(LocationContext)
+    const { socket } = useContext(SocketContext)
 
     // Fase 3 (M1, 2026-08-05): os setTimeout de navegação/avaliação pós-corrida eram
     // órfãos — desmontar este painel (ex.: corrida cancelada no meio) deixava um
@@ -67,6 +69,10 @@ const FinishRide = (props) => {
 
     const endRideMutation = useMutation({
         mutationFn: async () => {
+            // A finalização só pode congelar a distância depois que todos os pontos já
+            // coletados desta corrida receberam ack do backend. Se a rede oscilar aqui,
+            // o botão falha com segurança e os pontos permanecem para retry.
+            await flushQueuedLocations(socket, { rideId: props.ride._id })
             const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
                 rideId: props.ride._id,
                 ...(userLocation?.lat != null && userLocation?.lng != null ? {

@@ -17,3 +17,20 @@ db.version(2).stores({
     driverLocations: '++id, lat, lng, timestamp',
     failedActions: '++id, type, rideId, timestamp, failedAt'
 });
+
+// v3 (P0 GPS offline): cada ponto recebe identidade estável, vínculo com a corrida e
+// instante de captura. A chave primária numérica é preservada para migrar filas v1/v2
+// sem perda; pointId único impede duplicação local no reinício/replay.
+db.version(3).stores({
+    offlineActions: '++id, type, rideId, timestamp, attempts',
+    driverLocations: '++id, &pointId, rideId, capturedAt, queuedAt',
+    failedActions: '++id, type, rideId, timestamp, failedAt'
+}).upgrade(async (tx) => {
+    await tx.table('driverLocations').toCollection().modify((point) => {
+        const capturedAt = Number(point.capturedAt ?? point.timestamp ?? Date.now())
+        point.capturedAt = capturedAt
+        point.queuedAt = Number(point.queuedAt ?? point.timestamp ?? Date.now())
+        point.rideId = point.rideId || null
+        point.pointId = point.pointId || `legacy:${point.id}:${capturedAt}:${point.lat}:${point.lng}`
+    })
+});

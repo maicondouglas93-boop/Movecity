@@ -566,6 +566,9 @@ module.exports.endRide = async (req, res) => {
         if (err.message === 'Ride not started') {
             return res.status(409).json({ message: 'Corrida não está mais num estado que permita finalizar.' });
         }
+        if (err.code === 'FINALIZATION_IN_PROGRESS') {
+            return res.status(409).json({ message: 'A finalização desta corrida já está em processamento. Tente novamente em instantes.' });
+        }
         if (err.code === 'INVALID_FINISH_LOCATION' || err.message === 'INVALID_FINISH_LOCATION') {
             return res.status(400).json({
                 message: 'GPS inválido ao finalizar. Aguarde sinal de localização e tente novamente.',

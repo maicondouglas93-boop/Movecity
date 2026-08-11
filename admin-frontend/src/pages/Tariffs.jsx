@@ -7,6 +7,9 @@ import { useForm, useFieldArray } from 'react-hook-form';
 import TariffAdvancedSimulator from '../components/TariffAdvancedSimulator';
 import SimulatorErrorBoundary from '../components/SimulatorErrorBoundary';
 import GlobalTariffsSection from '../components/GlobalTariffsSection';
+import TariffHistory from '../components/TariffHistory';
+import TariffComparisonTable from '../components/TariffComparisonTable';
+import TariffSchedulerModal from '../components/TariffSchedulerModal';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 
@@ -168,6 +171,17 @@ export default function Tariffs() {
           <div className="text-text-muted mt-6">Nenhuma categoria selecionada.</div>
         )}
       </div>
+
+      {/* Auditoria de UX/produção (2026-08-10): TariffHistory e TariffComparisonTable
+          já existiam prontos, com endpoint funcional no backend, mas nenhum arquivo os
+          importava — nunca apareciam na tela. Conectados aqui. */}
+      {activeTab && (
+        <TariffHistory categoryId={activeTab} categoryName={categories?.find((c) => c._id === activeTab)?.displayName} />
+      )}
+
+      {categories && categories.length > 1 && (
+        <TariffComparisonTable categories={categories} />
+      )}
 
       {manageOpen && (
         <ManageCategoriesModal
@@ -453,6 +467,7 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [modalOptional, setModalOptional] = useState(null);
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
 
   const pricing = category.pricing || {};
   const defaultOptionals = pricing.optionals || [];
@@ -662,8 +677,32 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
             </div>
           </div>
 
+          {/* Auditoria de UX/produção (2026-08-10): "Modo Simulação" só desenhava um
+              anel amarelo ao redor do simulador — o botão "Salvar alterações" real
+              continuava funcionando normalmente com o toggle ligado ou desligado, sem
+              nenhuma diferença de comportamento. Numa tela financeira crítica, um
+              controle que sugere um modo seguro/sandbox mas não impede nada é
+              enganoso. Agora desabilita o salvamento real de verdade. */}
+          {testMode && (
+            <div className="mx-4 mt-4 mb-0 p-3 bg-warning/10 border border-warning/30 rounded-lg text-sm text-warning flex items-center gap-2">
+              <Beaker className="w-4 h-4 shrink-0" />
+              Modo simulação ativo — o formulário só alimenta o simulador ao lado, nada é salvo. Desligue "Modo Simulação" no topo da página pra salvar de verdade.
+            </div>
+          )}
           <div className="bg-background/50 border-t border-border p-4 flex justify-end gap-3">
-            <button type="submit" disabled={!isDirty || updateMutation.isPending} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-6 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-50">
+            {/* Auditoria de UX/produção (2026-08-10): agendamento de tarifa já existia
+                pronto no backend (rota + cron real, tariffScheduler.service.js) mas
+                não tinha botão nenhum na tela pra acioná-lo. */}
+            <button
+              type="button"
+              disabled={!isDirty}
+              onClick={() => setSchedulerOpen(true)}
+              title={!isDirty ? 'Altere algum valor antes de agendar' : undefined}
+              className="flex items-center gap-2 border border-border hover:border-primary text-text px-4 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+            >
+              Agendar para depois
+            </button>
+            <button type="submit" disabled={testMode || !isDirty || updateMutation.isPending} title={testMode ? 'Desligue o Modo Simulação para salvar' : undefined} className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-surface px-6 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-50">
               <Save className="w-4 h-4" />
               {updateMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
             </button>
@@ -688,6 +727,14 @@ function CategorySettingsCard({ category, queryClient, testMode }) {
           onSave={handleSaveOptional}
         />
       )}
+
+      <TariffSchedulerModal
+        isOpen={schedulerOpen}
+        onClose={() => setSchedulerOpen(false)}
+        categoryId={category._id}
+        categoryName={category.displayName}
+        pendingChanges={{ pricing: liveValues }}
+      />
     </div>
   );
 }

@@ -9,6 +9,17 @@
   --color-text: #fafafa;
   --color-text-muted: #a1a1aa;
   --color-danger: #ef4444;
+  /* Auditoria de UX (2026-08-10): "warning"/"info" já eram usados em várias telas
+     (ex.: Captains.jsx, badge de "Em Análise") mas nunca foram registrados aqui — no
+     Tailwind v4, uma cor não declarada em @theme não gera classe nenhuma. Os badges
+     ficavam sem nenhuma cor de fundo/texto/borda, silenciosamente. */
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+  /* Mesmo problema do warning/info acima: "success" é usado em Reports.jsx e em
+     Tariffs/Users/Notifications/Promotions (fora do escopo desta auditoria) sem
+     nunca ter sido registrado — mesmo verde de --color-primary, que já representa
+     "positivo/concluído" no resto do painel. */
+  --color-success: #22c55e;
 }
 
 @layer base {

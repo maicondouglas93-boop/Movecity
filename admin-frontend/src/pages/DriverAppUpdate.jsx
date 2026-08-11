@@ -1,13 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { Save, Smartphone, Link2, ShieldAlert } from 'lucide-react';
+import { Save, Smartphone, Link2, ShieldAlert, History } from 'lucide-react';
 import api from '../services/api';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
+import { formatDateTime } from '../utils/format';
 
 const fetchDriverAppVersion = async () => {
   const { data } = await api.get('/admin/driver-app-version');
   return data;
+};
+
+const fetchDriverAppVersionHistory = async () => {
+  const { data } = await api.get('/admin/driver-app-version/history');
+  return data.history || [];
 };
 
 function sanitizeSha256(value) {
@@ -16,6 +23,7 @@ function sanitizeSha256(value) {
 
 export default function DriverAppUpdate() {
   const toast = useToast();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [formError, setFormError] = useState('');
   const {
@@ -44,6 +52,11 @@ export default function DriverAppUpdate() {
     queryFn: fetchDriverAppVersion,
   });
 
+  const { data: history } = useQuery({
+    queryKey: ['driverAppVersionHistory'],
+    queryFn: fetchDriverAppVersionHistory,
+  });
+
   useEffect(() => {
     if (!data) return;
     reset({
@@ -69,6 +82,7 @@ export default function DriverAppUpdate() {
       setFormError('');
       toast.success('Configuração de atualização salva.');
       queryClient.invalidateQueries({ queryKey: ['driverAppVersion'] });
+      queryClient.invalidateQueries({ queryKey: ['driverAppVersionHistory'] });
     },
     onError: (err) => {
       const msg = err.response?.data?.message || err.message || 'Erro ao salvar configuração';
@@ -77,7 +91,7 @@ export default function DriverAppUpdate() {
     },
   });
 
-  const onSubmit = (form) => {
+  const onSubmit = async (form) => {
     setFormError('');
     const sha256 = sanitizeSha256(form.sha256);
     const apkUrl = String(form.apkUrl || '').trim();
@@ -87,6 +101,20 @@ export default function DriverAppUpdate() {
       setFormError(msg);
       toast.error(msg);
       return;
+    }
+
+    // Auditoria de UX/produção (2026-08-10): nenhuma confirmação existia antes de
+    // publicar — "obrigatória" força TODOS os motoristas com o app instalado a
+    // atualizar antes de continuar trabalhando; um clique errado tem esse impacto
+    // imediato em produção.
+    if (form.mandatory) {
+      const ok = await confirm({
+        title: 'Publicar atualização obrigatória',
+        message: `Isso força todo motorista com o app instalado numa versão anterior a atualizar para ${form.version} antes de continuar usando o aplicativo. Confirma?`,
+        tone: 'danger',
+        confirmLabel: 'Publicar como obrigatória',
+      });
+      if (!ok) return;
     }
 
     saveMutation.mutate({
@@ -126,6 +154,11 @@ export default function DriverAppUpdate() {
         <p className="text-text-muted mt-1">
           Publique a versão do APK distribuído fora da Play Store. O aplicativo consulta estes dados ao abrir.
         </p>
+        {data?.updatedAt && (
+          <p className="text-xs text-text-muted mt-2">
+            Versão atualmente publicada: <strong className="text-text">{data.version}</strong> (versionCode {data.versionCode}) · última publicação em {formatDateTime(data.updatedAt)}
+          </p>
+        )}
       </div>
 
       <form
@@ -270,17 +303,40 @@ export default function DriverAppUpdate() {
         </div>
       </form>
 
-      <div className="text-xs text-text-muted space-y-1 border border-border rounded-xl p-4 bg-surface">
-        <p className="font-semibold text-text">Valores v1.1.7 (copiar)</p>
-        <p>version: 1.1.7 · versionCode: 9 · minimumVersion: 1.1.5 · minimumVersionCode: 7</p>
-        <p className="break-all">
-          apkUrl: https://github.com/maicondouglas93-boop/Movecity/releases/download/v1.1.7/movecity-driver-1.1.7.apk
-        </p>
-        <p className="break-all">sha256: 96305d09fd2f75be67947a24ef0a81d5c6ab017d2f30b89aa4b4c605ee1f539c</p>
-        <p>fileSize: 6911676 · mandatory: desmarcado</p>
-        <p className="font-semibold text-text pt-2">Rollback</p>
-        <p>
-          Se uma versão apresentar problema, publique novamente a versão anterior (version, versionCode, apkUrl, minimumVersion).
+      {/* Auditoria de UX/produção (2026-08-10): antes havia um bloco de texto FIXO no
+          código com valores de exemplo de uma versão antiga (v1.1.7) "pra copiar" —
+          ficava desatualizado a cada release (produção já estava na 1.1.16 quando
+          isso foi corrigido) e podia levar o admin a publicar dados de uma versão
+          errada por engano. Histórico real, alimentado a cada publicação. */}
+      <div className="border border-border rounded-xl bg-surface overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center gap-2">
+          <History className="w-4 h-4 text-text-muted" />
+          <h2 className="text-sm font-bold uppercase tracking-wider text-text">Histórico de publicações</h2>
+        </div>
+        {!history || history.length === 0 ? (
+          <p className="text-xs text-text-muted p-4">Nenhuma publicação registrada ainda por este painel.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {history.map((h) => (
+              <div key={h._id} className="p-4 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text">
+                    {h.version} <span className="text-text-muted font-normal">(versionCode {h.versionCode})</span>
+                    {h.mandatory && <span className="ml-2 text-warning">· obrigatória</span>}
+                  </span>
+                  <span className="text-text-muted">{formatDateTime(h.createdAt)}</span>
+                </div>
+                <p className="text-text-muted">
+                  Publicado por {h.adminName || 'admin desconhecido'} · versão mínima {h.minimumVersion || '—'} (code {h.minimumVersionCode ?? '—'})
+                </p>
+                {h.apkUrl && <p className="text-text-muted break-all">{h.apkUrl}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-text-muted p-4 border-t border-border">
+          Pra reverter uma versão com problema: escolha uma entrada anterior neste histórico e publique os mesmos dados
+          novamente, com um <strong>versionCode maior</strong> que o atual (não é possível publicar um versionCode menor).
         </p>
       </div>
     </div>

@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
-import { 
-  Users, Car, Route, DollarSign, Activity, AlertTriangle, Medal, Star, Clock, Server, CheckCircle2, XCircle
+import {
+  Users, Route, DollarSign, AlertTriangle, Star, Clock, CheckCircle2, XCircle,
+  Package, Circle, ArrowUpRight
 } from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
-} from 'recharts';
+import { formatMoney, formatPercent } from '../utils/format';
 
 const fetchDashboardStats = async (period) => {
   const { data } = await api.get(`/admin/dashboard?period=${period}`);
@@ -19,13 +18,15 @@ const fetchHealthStats = async () => {
   return data;
 };
 
+const PERIOD_LABELS = { today: 'hoje', '7d': 'nos últimos 7 dias', '30d': 'nos últimos 30 dias' };
+
 export default function Dashboard() {
   const [period, setPeriod] = useState('today');
 
   const { data: stats, isLoading, isError } = useQuery({
     queryKey: ['dashboardStats', period],
     queryFn: () => fetchDashboardStats(period),
-    refetchInterval: 60000 
+    refetchInterval: 60000
   });
 
   const { data: health } = useQuery({
@@ -46,19 +47,22 @@ export default function Dashboard() {
     return <div className="text-danger">Erro ao carregar dados do dashboard.</div>;
   }
 
+  const op = stats.operation || {};
+  const periodLabel = PERIOD_LABELS[period] || period;
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-10">
-      
+    <div className="space-y-8 max-w-7xl mx-auto pb-10">
+
       {/* HEADER & FILTERS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Centro de Operações</h1>
-          <p className="text-sm text-text-muted">Métricas em tempo real e visão global do sistema.</p>
+          <p className="text-sm text-text-muted">O que está acontecendo agora, como foi o desempenho, e o que precisa da sua atenção.</p>
         </div>
-        
+
         <div className="flex items-center gap-4">
-          <select 
-            value={period} 
+          <select
+            value={period}
             onChange={(e) => setPeriod(e.target.value)}
             className="bg-surface border border-border rounded-lg px-4 py-2 text-text focus:border-primary outline-none"
           >
@@ -66,7 +70,7 @@ export default function Dashboard() {
             <option value="7d">Últimos 7 dias</option>
             <option value="30d">Últimos 30 dias</option>
           </select>
-          
+
           <div className="flex items-center gap-3 bg-surface border border-border px-4 py-2 rounded-lg text-sm">
             <span className="font-medium text-text-muted mr-2">Sistema:</span>
             <HealthIndicator label="API" status={health?.api} />
@@ -77,105 +81,161 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* METRIC CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        
-        {/* RECEITA */}
-        <Link to="/finance" className="block bg-surface p-6 rounded-xl border border-border hover:border-primary/50 transition-colors group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-primary" />
-            </div>
-            <div className="text-right">
-              <span className="text-sm text-text-muted block">Receita Bruta</span>
-              <span className="text-2xl font-bold text-text">R$ {stats.revenue?.current?.gross?.toFixed(2)}</span>
-            </div>
-          </div>
-          <ComparativeTrend current={stats.revenue?.current?.gross} prev={stats.revenue?.prev?.gross} prefix="R$" />
-          <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-text-muted">Comissão Plataforma</span><span className="font-medium text-primary">R$ {stats.revenue?.current?.commission?.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Repassado Motoristas</span><span className="font-medium text-text">R$ {stats.revenue?.current?.payout?.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Ticket Médio</span><span className="font-medium text-text">R$ {stats.revenue?.current?.avgTicket?.toFixed(2)}</span></div>
-          </div>
-        </Link>
+      {/* ===================== 1. OPERAÇÃO AGORA ===================== */}
+      <section>
+        <SectionHeader
+          title="Operação agora"
+          subtitle="Estado do sistema neste momento — não muda com o filtro de período acima."
+        />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <MiniStat
+            icon={<Circle className="w-2.5 h-2.5 fill-primary text-primary" />}
+            label="Motoristas online"
+            value={op.captainsOnline}
+            to="/captains?isOnline=true"
+          />
+          <MiniStat
+            icon={<Circle className="w-2.5 h-2.5 fill-primary text-primary" />}
+            label="Disponíveis"
+            value={op.captainsAvailable}
+            hint="Online e sem corrida ativa — podem receber uma nova agora."
+            to="/captains?isOnline=true"
+          />
+          <MiniStat
+            icon={<Circle className="w-2.5 h-2.5 fill-warning text-warning" />}
+            label="Em corrida"
+            value={op.captainsInRide}
+            hint="Online, mas ocupados numa corrida ou encomenda."
+          />
+          <MiniStat
+            icon={<Circle className="w-2.5 h-2.5 fill-text-muted text-text-muted" />}
+            label="Offline"
+            value={op.captainsOffline}
+          />
+          <MiniStat
+            icon={<Route className="w-4 h-4 text-info" />}
+            label="Corridas em andamento"
+            value={op.ridesOngoing}
+            to="/rides?status=ongoing"
+          />
+          <MiniStat
+            icon={<Package className="w-4 h-4 text-info" />}
+            label="Encomendas em andamento"
+            value={op.parcelsOngoing}
+            to="/rides?type=parcel&status=ongoing"
+          />
+          <MiniStat
+            icon={<Users className="w-4 h-4 text-text-muted" />}
+            label="Motoristas cadastrados"
+            value={op.captainsTotal}
+            hint="Total de contas de motorista, de qualquer status."
+            to="/captains"
+          />
+        </div>
+      </section>
 
-        {/* MOTORISTAS */}
-        <Link to="/captains" className="block bg-surface p-6 rounded-xl border border-border hover:border-primary/50 transition-colors group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center">
-              <Car className="w-5 h-5 text-blue-500" />
-            </div>
-            <div className="text-right">
-              <span className="text-sm text-text-muted block">Motoristas Totais</span>
-              <span className="text-2xl font-bold text-text">{stats.captains?.current?.total}</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-text-muted">Online (Agora)</span><span className="font-medium text-text">{stats.captains?.current?.online}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted text-primary flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary"></span> Disponíveis</span><span className="font-medium text-text">{stats.captains?.current?.available}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted text-warning flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-warning"></span> Em Corrida</span><span className="font-medium text-text">{stats.captains?.current?.inRide}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Offline</span><span className="font-medium text-text">{stats.captains?.current?.offline}</span></div>
-          </div>
-        </Link>
-
-        {/* CORRIDAS & QUALIDADE */}
-        <Link to="/rides" className="block bg-surface p-6 rounded-xl border border-border hover:border-primary/50 transition-colors group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
-              <Route className="w-5 h-5 text-purple-500" />
-            </div>
-            <div className="text-right">
-              <span className="text-sm text-text-muted block">Corridas ({period})</span>
-              <span className="text-2xl font-bold text-text">{stats.rides?.current?.total}</span>
-            </div>
-          </div>
-          <ComparativeTrend current={stats.rides?.current?.total} prev={stats.rides?.prev?.total} />
-          <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-text-muted">Concluídas</span><span className="font-medium text-primary">{stats.rides?.current?.finished}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Taxa de Cancelamento</span><span className="font-medium text-danger">{stats.quality?.current?.cancelRate?.toFixed(1)}%</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Avaliação Média</span><span className="font-medium text-text flex items-center gap-1">{stats.quality?.current?.avgRating != null ? (<>{stats.quality.current.avgRating} <Star className="w-3 h-3 text-warning fill-warning" /></>) : 'Sem avaliações'}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Tempo Busca Motorista</span><span className="font-medium text-text">{stats.quality?.current?.avgSearchTimeSeconds ? `${stats.quality.current.avgSearchTimeSeconds}s` : 'Não disp.'}</span></div>
-          </div>
-        </Link>
-
-        {/* ALERTAS DO SISTEMA */}
-        <div className="bg-surface p-6 rounded-xl border border-border flex flex-col">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-5 h-5 text-warning" />
-            <h2 className="text-lg font-semibold">Alertas do Sistema</h2>
-          </div>
-          <div className="flex-1 overflow-y-auto space-y-3">
-            {stats.alerts && stats.alerts.length > 0 ? (
-              stats.alerts.map((alert, idx) => (
-                <div key={idx} className="text-sm p-3 bg-background rounded-lg border border-border/50">
-                  {alert}
+      {/* ===================== 2. ATENÇÃO (logo após "agora", antes do desempenho — é o mais acionável) ===================== */}
+      {stats.attention && stats.attention.length > 0 && (
+        <section>
+          <SectionHeader title="Precisa da sua atenção" subtitle="Situações que pedem uma ação administrativa." />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {stats.attention.map((item) => (
+              <Link
+                key={item.id}
+                to={item.link || '#'}
+                className={`flex items-start gap-3 p-4 rounded-xl border transition-colors group ${
+                  item.severity === 'critical'
+                    ? 'bg-danger/5 border-danger/30 hover:border-danger'
+                    : 'bg-warning/5 border-warning/30 hover:border-warning'
+                }`}
+              >
+                <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${item.severity === 'critical' ? 'text-danger' : 'text-warning'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-text">{item.message}</p>
+                  <span className="text-xs text-text-muted inline-flex items-center gap-1 mt-1 group-hover:text-text">
+                    Resolver agora <ArrowUpRight className="w-3 h-3" />
+                  </span>
                 </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-text-muted space-y-2">
-                <CheckCircle2 className="w-8 h-8 text-primary/50" />
-                <span className="text-sm">Nenhum alerta crítico.</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ===================== 3. HOJE / DESEMPENHO ===================== */}
+      <section>
+        <SectionHeader title={`Desempenho`} subtitle={`Resultado ${periodLabel}, comparado ao período anterior de mesma duração.`} />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          {/* RECEITA */}
+          <div className="bg-surface p-6 rounded-xl border border-border">
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-primary" />
               </div>
-            )}
+              <div className="text-right">
+                <span className="text-sm text-text-muted block">Receita bruta</span>
+                <span className="text-2xl font-bold text-text">{formatMoney(stats.revenue?.current?.gross)}</span>
+              </div>
+            </div>
+            <ComparativeTrend current={stats.revenue?.current?.gross} prev={stats.revenue?.prev?.gross} money />
+            <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-text-muted">Comissão da plataforma</span><span className="font-medium text-primary">{formatMoney(stats.revenue?.current?.commission)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Repassado a motoristas</span><span className="font-medium text-text">{formatMoney(stats.revenue?.current?.payout)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Ticket médio (corrida)</span><span className="font-medium text-text">{formatMoney(stats.revenue?.current?.avgTicket)}</span></div>
+            </div>
+          </div>
+
+          {/* CORRIDAS */}
+          <div className="bg-surface p-6 rounded-xl border border-border">
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 bg-info/10 rounded-lg flex items-center justify-center">
+                <Route className="w-5 h-5 text-info" />
+              </div>
+              <div className="text-right">
+                <span className="text-sm text-text-muted block">Corridas</span>
+                <span className="text-2xl font-bold text-text">{stats.rides?.current?.total}</span>
+              </div>
+            </div>
+            <ComparativeTrend current={stats.rides?.current?.total} prev={stats.rides?.prev?.total} />
+            <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-text-muted">Concluídas</span><span className="font-medium text-primary">{stats.rides?.current?.finished}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Canceladas</span><span className="font-medium text-danger">{stats.rides?.current?.cancelled}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Taxa de cancelamento</span><span className="font-medium text-danger">{stats.quality?.current?.cancelRate?.toFixed(1)}%</span></div>
+            </div>
+          </div>
+
+          {/* ENCOMENDAS + QUALIDADE */}
+          <div className="bg-surface p-6 rounded-xl border border-border">
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                <Package className="w-5 h-5 text-purple-500" />
+              </div>
+              <div className="text-right">
+                <span className="text-sm text-text-muted block">Encomendas</span>
+                <span className="text-2xl font-bold text-text">{stats.parcels?.current?.total}</span>
+              </div>
+            </div>
+            <ComparativeTrend current={stats.parcels?.current?.total} prev={stats.parcels?.prev?.total} />
+            <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-text-muted">Concluídas</span><span className="font-medium text-primary">{stats.parcels?.current?.finished}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Canceladas</span><span className="font-medium text-danger">{stats.parcels?.current?.cancelled}</span></div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Avaliação média</span>
+                <span className="font-medium text-text flex items-center gap-1">
+                  {stats.quality?.current?.avgRating != null ? (<>{stats.quality.current.avgRating} <Star className="w-3 h-3 text-warning fill-warning" /></>) : 'Sem avaliações no período'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
 
-      </div>
-
-      {/* RANKING & CHARTS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* RANKING */}
-        <div className="lg:col-span-1 bg-surface p-6 rounded-xl border border-border">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Medal className="w-5 h-5 text-primary" />
-              Top Motoristas
-            </h2>
-            <span className="text-xs text-text-muted px-2 py-1 bg-background rounded-md">{period}</span>
-          </div>
-          
-          <div className="space-y-4">
+      {/* ===================== RANKING ===================== */}
+      <section>
+        <SectionHeader title="Top motoristas" subtitle={`Por número de corridas concluídas ${periodLabel}.`} />
+        <div className="bg-surface p-6 rounded-xl border border-border">
+          <div className="space-y-2">
             {stats.ranking && stats.ranking.length > 0 ? (
               stats.ranking.map((driver, idx) => (
                 <div key={driver._id} className="flex items-center justify-between p-3 rounded-lg hover:bg-background transition-colors border border-transparent hover:border-border/50 cursor-default">
@@ -192,7 +252,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-sm text-primary">R$ {driver.earnings?.toFixed(2)}</p>
+                    <p className="font-bold text-sm text-primary">{formatMoney(driver.earnings)}</p>
                     <p className="text-xs text-text-muted mt-0.5">{driver.hoursOnline?.toFixed(1)}h online</p>
                   </div>
                 </div>
@@ -202,29 +262,48 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-
-        {/* CHARTS / PLACEHOLDER PARA EVOLUÇÃO */}
-        <div className="lg:col-span-2 bg-surface p-6 rounded-xl border border-border flex flex-col items-center justify-center text-center">
-          <Activity className="w-12 h-12 text-primary/20 mb-4" />
-          <h2 className="text-lg font-semibold mb-2">Painel de Gráficos</h2>
-          <p className="text-text-muted text-sm max-w-md">
-            Esta área modular está pronta para receber gráficos detalhados de evolução de corridas e receita nos próximos ciclos de atualização, consumindo o nó <code>charts</code> da API.
-          </p>
-        </div>
-
-      </div>
+      </section>
     </div>
   );
 }
 
-// Subcomponents
+// ============ Subcomponents ============
 
-function ComparativeTrend({ current, prev, prefix = '' }) {
+function SectionHeader({ title, subtitle }) {
+  return (
+    <div className="mb-3">
+      <h2 className="text-base font-bold text-text uppercase tracking-wide">{title}</h2>
+      {subtitle && <p className="text-xs text-text-muted mt-0.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+function MiniStat({ icon, label, value, hint, to }) {
+  const content = (
+    <div className={`bg-surface p-4 rounded-xl border border-border h-full flex flex-col gap-2 ${to ? 'hover:border-primary/50 transition-colors' : ''}`} title={hint}>
+      <div className="flex items-center gap-2 text-text-muted">
+        {icon}
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <span className="text-2xl font-bold text-text">{value ?? '—'}</span>
+    </div>
+  );
+  return to ? <Link to={to} className="block">{content}</Link> : content;
+}
+
+// current/prev sempre em 0 não é "estável" — é ausência de atividade. Antes o cálculo
+// caía no ramo `prev === 0 && current === 0` sem tratamento e mostrava "↑ 0.0%" verde
+// (auditoria de UX, 2026-08-10).
+function ComparativeTrend({ current, prev, money = false }) {
   if (current === undefined || prev === undefined) return null;
-  
+
+  if (prev === 0 && current === 0) {
+    return <div className="text-xs text-text-muted">Sem atividade no período nem no anterior.</div>;
+  }
+
   const diff = current - prev;
   const isPositive = diff >= 0;
-  
+
   let percentage = 0;
   if (prev > 0) {
     percentage = (diff / prev) * 100;
@@ -232,17 +311,15 @@ function ComparativeTrend({ current, prev, prefix = '' }) {
     percentage = 100;
   }
 
-  const formatVal = (val) => {
-    return prefix ? `${prefix} ${val.toFixed(2)}` : val.toString();
-  }
+  const formatVal = (val) => (money ? formatMoney(val) : val.toString());
 
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className={`font-semibold ${isPositive ? 'text-primary' : 'text-danger'}`}>
-        {isPositive ? '↑' : '↓'} {Math.abs(percentage).toFixed(1)}%
+        {isPositive ? '↑' : '↓'} {formatPercent(percentage, { showSign: false })}
       </span>
       <span className="text-text-muted">
-        vs {formatVal(prev)} (período ant.)
+        vs {formatVal(prev)} (período anterior)
       </span>
     </div>
   );
@@ -251,7 +328,7 @@ function ComparativeTrend({ current, prev, prefix = '' }) {
 function HealthIndicator({ label, status }) {
   let color = 'text-text-muted';
   let icon = <Clock className="w-3 h-3" />;
-  
+
   if (status === true) {
     color = 'text-primary';
     icon = <CheckCircle2 className="w-3 h-3" />;

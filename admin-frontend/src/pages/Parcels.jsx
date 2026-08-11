@@ -1,19 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Package, ArrowUpRight } from 'lucide-react';
 import api from '../services/api';
-
-const STATUS_LABEL = {
-  awaiting_provider: 'Aguardando',
-  provider_accepted: 'Aceita',
-  going_to_pickup: 'Indo retirada',
-  arrived_pickup: 'Na retirada',
-  collected: 'Coletada',
-  in_transit: 'Em transporte',
-  arrived_destination: 'No destino',
-  delivered: 'Entregue',
-  finished: 'Finalizada',
-  cancelled: 'Cancelada',
-  scheduled: 'Agendada',
-};
 
 const EMPTY_OPS = {
   maxWeightKg: 10,
@@ -93,9 +81,19 @@ function VehicleOpsCard({ title, vehicleKey, pricing, onChange }) {
   );
 }
 
+// Auditoria de UX (2026-08-10, 2ª rodada — telas fora do escopo original) — esta tela
+// misturava duas coisas sem relação: regras operacionais (config global, o que
+// continua aqui) e uma listagem de encomendas individuais com cancelamento (removida).
+// A listagem tinha problemas reais que o /rides unificado (auditoria da 1ª rodada) já
+// resolve melhor: usava window.confirm() nativo em vez do useConfirm() do app, o
+// motivo do cancelamento era sempre a mesma string fixa "Cancelado pelo admin" (nunca
+// perguntava o motivo real — pior rastro de auditoria que o de corrida), sem paginação
+// visível (só os 50 primeiros registros, sem indicação de que havia mais) e sem
+// nenhum detalhe do cliente/motorista. Manter as duas versões divergentes da mesma
+// função — uma completa em /rides, outra rudimentar aqui — só criaria confusão sobre
+// qual usar. /rides?type=parcel já cobre isso com drawer completo, motivo real de
+// cancelamento e paginação.
 export default function Parcels() {
-  const [items, setItems] = useState([]);
-  const [status, setStatus] = useState('');
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -104,12 +102,8 @@ export default function Parcels() {
   const load = async () => {
     setLoading(true);
     try {
-      const [listRes, settingsRes] = await Promise.all([
-        api.get('/admin/parcels', { params: status ? { status } : {} }),
-        api.get('/admin/parcel-settings'),
-      ]);
-      setItems(listRes.data.items || []);
-      setSettings(normalizeSettings(settingsRes.data));
+      const { data } = await api.get('/admin/parcel-settings');
+      setSettings(normalizeSettings(data));
     } catch (err) {
       console.error(err);
       setSaveMsg(err.response?.data?.message || 'Falha ao carregar');
@@ -118,13 +112,7 @@ export default function Parcels() {
     }
   };
 
-  useEffect(() => { load(); }, [status]);
-
-  const cancel = async (id) => {
-    if (!window.confirm('Cancelar esta encomenda?')) return;
-    await api.put(`/admin/parcels/${id}/cancel`, { reason: 'Cancelado pelo admin' });
-    load();
-  };
+  useEffect(() => { load(); }, []);
 
   const patchVehicle = (vehicleKey, nextPricing) => {
     setSettings((prev) => ({
@@ -159,16 +147,34 @@ export default function Parcels() {
   };
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-6 space-y-8 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-bold text-text">Encomendas</h1>
+        <h1 className="text-2xl font-bold text-text">Encomendas — Regras Operacionais</h1>
         <p className="text-sm text-text-muted mt-1">
-          Listagem e regras operacionais (peso, tamanho, PIN). Tarifas ficam em{' '}
-          <a href="/tariffs" className="text-primary font-medium">Tarifas por categoria</a>.
+          Peso, tamanho e exigência de PIN por categoria de veículo. Tarifas ficam em{' '}
+          <Link to="/tariffs" className="text-primary font-medium hover:underline">Tarifas por categoria</Link>.
         </p>
       </div>
 
-      {settings?.deliveryPricing && (
+      <Link
+        to="/rides?type=parcel"
+        className="flex items-center justify-between gap-3 p-4 bg-surface border border-border rounded-xl hover:border-primary/50 transition-colors group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+            <Package className="w-5 h-5 text-purple-500" />
+          </div>
+          <div>
+            <p className="font-medium text-text">Ver e gerenciar encomendas individuais</p>
+            <p className="text-xs text-text-muted mt-0.5">Listagem completa, filtros, cancelamento e histórico ficam em Corridas — filtro "Só encomendas".</p>
+          </div>
+        </div>
+        <ArrowUpRight className="w-5 h-5 text-text-muted group-hover:text-primary transition-colors" />
+      </Link>
+
+      {loading ? (
+        <p className="text-text-muted text-sm">Carregando…</p>
+      ) : settings?.deliveryPricing && (
         <section className="space-y-3">
           <h2 className="font-semibold text-lg">Regras operacionais por veículo</h2>
           <div className="flex flex-wrap gap-4">
@@ -198,66 +204,6 @@ export default function Parcels() {
           </div>
         </section>
       )}
-
-      <section>
-        <div className="flex items-center gap-3 mb-3">
-          <select
-            className="border border-border rounded-lg px-3 py-2 text-sm"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">Todos os status</option>
-            {Object.entries(STATUS_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <button type="button" onClick={load} className="text-sm text-primary font-medium">Atualizar</button>
-        </div>
-
-        {loading ? (
-          <p className="text-text-muted text-sm">Carregando…</p>
-        ) : (
-          <div className="overflow-x-auto border border-border rounded-xl">
-            <table className="w-full text-sm">
-              <thead className="bg-border/40 text-left">
-                <tr>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Veículo</th>
-                  <th className="p-3">Item</th>
-                  <th className="p-3">Valor</th>
-                  <th className="p-3">Rota</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((p) => (
-                  <tr key={p._id} className="border-t border-border">
-                    <td className="p-3">{STATUS_LABEL[p.status] || p.status}</td>
-                    <td className="p-3">{p.vehicleType}</td>
-                    <td className="p-3">{p.itemName}</td>
-                    <td className="p-3">R$ {Number(p.fare || 0).toFixed(2)}</td>
-                    <td className="p-3 max-w-xs truncate" title={`${p.pickup} → ${p.destination}`}>
-                      {p.pickup} → {p.destination}
-                    </td>
-                    <td className="p-3">
-                      {!['finished', 'cancelled', 'delivered'].includes(p.status) && (
-                        <button type="button" onClick={() => cancel(p._id)} className="text-danger text-xs font-medium">
-                          Cancelar
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {!items.length && (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-text-muted">Nenhuma encomenda</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </div>
   );
 }

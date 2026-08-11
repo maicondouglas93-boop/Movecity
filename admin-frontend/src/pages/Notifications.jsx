@@ -38,6 +38,7 @@ const TEMPLATES = [
 
 function InboxQuickSend({ onSent }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [form, setForm] = useState({
     target: 'passengers',
     title: '',
@@ -52,6 +53,21 @@ function InboxQuickSend({ onSent }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    // Bug de produção (2026-08-10): este envio disparava imediatamente ao clicar,
+    // sem nenhuma confirmação — diferente da aba "Nova Campanha", que já tem modal
+    // de confirmação antes de qualquer disparo. É irreversível (não dá pra "desenviar"
+    // um push já entregue) e pode alcançar toda a base se target='all'.
+    const targetLabel = form.target === 'all' ? 'TODOS os passageiros e motoristas'
+      : form.target === 'passengers' ? 'todos os passageiros'
+      : form.target === 'drivers' ? 'todos os motoristas'
+      : 'os IDs específicos informados';
+    const ok = await confirm({
+      title: 'Enviar notificação agora',
+      message: `Isso envia "${form.title}" pra ${targetLabel} imediatamente, sem confirmação posterior — não é possível cancelar depois de enviado. Continuar?`,
+      tone: form.target === 'all' ? 'danger' : 'default',
+      confirmLabel: 'Enviar agora',
+    });
+    if (!ok) return;
     setSending(true);
     try {
       const payload = {
@@ -264,7 +280,14 @@ export default function Notifications() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border">
-                  {formValues.targetRules.audienceType !== 'drivers' && (
+                  {/* Bug de produção (2026-08-10): este checkbox também aparecia com
+                      público "Todos", mas o backend só respeitava isVIP dentro do
+                      filtro de passageiros — marcar "Apenas VIP" com "Todos" selecionado
+                      não tinha efeito nenhum, o push saía pra base inteira mesmo assim.
+                      Restrito a "Passageiros" (o único caso sem ambiguidade: motorista
+                      não tem esse conceito, e "Todos + só VIP" é uma combinação que não
+                      faz sentido de produto — se você quer só VIP, o público É os VIPs). */}
+                  {formValues.targetRules.audienceType === 'passengers' && (
                     <label className="flex items-center gap-3 p-3 border border-border rounded-lg bg-background cursor-pointer hover:border-primary/50 transition-colors">
                       <input type="checkbox" {...register('targetRules.isVIP')} className="w-4 h-4 text-primary bg-surface border-border rounded focus:ring-primary" />
                       <span className="text-sm font-medium">Apenas Passageiros VIP</span>

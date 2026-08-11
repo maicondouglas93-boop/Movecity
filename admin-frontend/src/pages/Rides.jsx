@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
@@ -6,14 +7,14 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
-import { Search, Download, CheckSquare, Square, Map as MapIcon } from 'lucide-react';
+import { Search, Download, CheckSquare, Square, Map as MapIcon, X } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import RideRow from '../components/rides/RideRow';
 import RideDrawer from '../components/rides/RideDrawer';
 import FinalizeRideModal from '../components/rides/FinalizeRideModal';
-import { timeAgo } from '../components/rides/rideUi';
+import { timeAgo, itemStatusLabel } from '../components/rides/rideUi';
 
 // Fix leaflet icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -84,9 +85,21 @@ export default function Rides() {
   const confirm = useConfirm();
   const prompt = usePrompt();
 
+  // Estado inicial lido da URL (auditoria de UX, 2026-08-10) — os cards de "Atenção"
+  // do Dashboard e os links de outras telas apontam pra cá com filtro pronto (ex.:
+  // /rides?status=ongoing); sem isso o link abria a tela mas não filtrava nada.
+  const [searchParams] = useSearchParams();
+
   // States
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ search: '', status: '', period: 'today', vehicleType: '', paymentMethod: '' });
+  const [filters, setFilters] = useState({
+    search: '',
+    status: searchParams.get('status') || '',
+    period: searchParams.get('status') ? 'all' : 'today',
+    vehicleType: '',
+    paymentMethod: '',
+    type: searchParams.get('type') || '',
+  });
   const [searchInput, setSearchInput] = useState('');
   const [selectedRides, setSelectedRides] = useState([]);
   const [liveDrivers, setLiveDrivers] = useState({});
@@ -193,13 +206,19 @@ export default function Rides() {
   );
 
   // Actions
+  // Corrida e encomenda têm endpoints de cancelamento diferentes (auditoria de UX,
+  // 2026-08-10, unificação de /rides) — a lista mostra os dois tipos juntos, mas
+  // cancelParcelAdmin já existe separado de cancelRide, não foi criado agora.
   const cancelMutation = useMutation({
-    mutationFn: (data) => api.put(`/admin/rides/${data.id}/cancel`, { reason: data.reason }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rides'] });
-      toast.success('Corrida cancelada.');
+    mutationFn: (data) => {
+      const url = data.serviceType === 'parcel' ? `/admin/parcels/${data.id}/cancel` : `/admin/rides/${data.id}/cancel`;
+      return api.put(url, { reason: data.reason });
     },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar corrida')
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
+      toast.success(variables.serviceType === 'parcel' ? 'Encomenda cancelada.' : 'Corrida cancelada.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao cancelar')
   });
 
   const reassignMutation = useMutation({
@@ -257,16 +276,29 @@ export default function Rides() {
     const items = selectedRides.length > 0 ? data.rides.filter(r => selectedRides.includes(r._id)) : data.rides;
 
     const csvUri = buildCsv(
-      ['ID', 'Passageiro', 'Motorista', 'Status', 'Valor', 'Data'],
-      items.map(r => [r._id, r.user?.fullname?.firstname, r.captain?.fullname?.firstname || '-', r.status, r.fare, new Date(r.createdAt).toISOString()])
+      ['ID', 'Tipo', 'Cliente', 'Motorista', 'Status', 'Valor Estimado', 'Valor Final', 'Forma de Pagamento', 'Data'],
+      items.map(r => [
+        r._id,
+        r.serviceType === 'parcel' ? 'Encomenda' : 'Corrida',
+        r.user?.fullname?.firstname,
+        r.captain?.fullname?.firstname || '-',
+        itemStatusLabel(r),
+        r.fare,
+        Number.isFinite(r.finalPrice) ? r.finalPrice : '',
+        r.paymentMethod,
+        new Date(r.createdAt).toISOString(),
+      ])
     );
     downloadCsv(csvUri, `corridas_${new Date().getTime()}.csv`);
   };
 
   const handleAction = async (ride, actionType) => {
     if (actionType === 'cancel') {
-      const reason = await prompt({ message: 'Motivo do cancelamento:', required: true });
-      if (reason !== null) cancelMutation.mutate({ id: ride._id, reason });
+      const reason = await prompt({
+        message: ride.serviceType === 'parcel' ? 'Motivo do cancelamento da encomenda:' : 'Motivo do cancelamento:',
+        required: true,
+      });
+      if (reason !== null) cancelMutation.mutate({ id: ride._id, reason, serviceType: ride.serviceType });
     } else if (actionType === 'reassign') {
       const ok = await confirm({
         message: 'Deseja voltar esta corrida para a fila de busca? O motorista atual será removido.',
@@ -301,24 +333,24 @@ export default function Rides() {
             </div>
           </div>
 
-          {/* Quick Stats Summary */}
+          {/* Quick Stats Summary — corrida + encomenda somadas (auditoria de UX, 2026-08-10) */}
           {data?.summary && (
             <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px]">
-                <p className="text-xs text-text-muted font-medium mb-1">Solicitadas</p>
-                <p className="text-2xl font-bold text-text">{data.summary.requested}</p>
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] cursor-pointer hover:border-warning" onClick={() => { setFilters(f => ({ ...f, status: 'requested' })); setPage(1); }}>
+                <p className="text-xs text-text-muted font-medium mb-1">Aguardando motorista</p>
+                <p className="text-2xl font-bold text-warning">{data.summary.requested}</p>
               </div>
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px]">
-                <p className="text-xs text-text-muted font-medium mb-1">Em Andamento</p>
-                <p className="text-2xl font-bold text-purple-500">{data.summary.ongoing}</p>
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] cursor-pointer hover:border-info" onClick={() => { setFilters(f => ({ ...f, status: 'ongoing' })); setPage(1); }}>
+                <p className="text-xs text-text-muted font-medium mb-1">Em andamento</p>
+                <p className="text-2xl font-bold text-info">{data.summary.ongoing}</p>
               </div>
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px]">
-                <p className="text-xs text-text-muted font-medium mb-1">Finalizadas</p>
-                <p className="text-2xl font-bold text-green-500">{data.summary.finished}</p>
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] cursor-pointer hover:border-primary" onClick={() => { setFilters(f => ({ ...f, status: 'finished' })); setPage(1); }}>
+                <p className="text-xs text-text-muted font-medium mb-1">Concluídas</p>
+                <p className="text-2xl font-bold text-primary">{data.summary.finished}</p>
               </div>
-              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px]">
+              <div className="bg-background border border-border px-4 py-3 rounded-xl min-w-[140px] cursor-pointer hover:border-danger" onClick={() => { setFilters(f => ({ ...f, status: 'cancelled' })); setPage(1); }}>
                 <p className="text-xs text-text-muted font-medium mb-1">Canceladas</p>
-                <p className="text-2xl font-bold text-red-500">{data.summary.cancelled}</p>
+                <p className="text-2xl font-bold text-danger">{data.summary.cancelled}</p>
               </div>
             </div>
           )}
@@ -328,14 +360,21 @@ export default function Rides() {
             <form onSubmit={handleSearch} className="relative flex-1 min-w-[200px]">
               <input
                 type="text"
-                placeholder="Buscar (ID, Status, Nome)..."
+                placeholder="Buscar por ID, status ou nome (cliente/motorista)..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2 text-sm focus:border-primary focus:outline-none"
               />
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-text-muted" />
             </form>
-            
+
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.type} onChange={e => { setFilters(f => ({ ...f, type: e.target.value })); setPage(1); }}>
+              <option value="">Todos (corridas + encomendas)</option>
+              <option value="ride">Só corridas</option>
+              <option value="parcel">Só encomendas</option>
+            </select>
+
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.period} onChange={e => { setFilters(f => ({ ...f, period: e.target.value })); setPage(1); }}>
               <option value="today">Hoje</option>
@@ -343,13 +382,13 @@ export default function Rides() {
               <option value="30d">Últimos 30 dias</option>
               <option value="all">Todo o período</option>
             </select>
-            
+
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.status} onChange={e => { setFilters(f => ({ ...f, status: e.target.value })); setPage(1); }}>
               <option value="">Status (Todos)</option>
-              <option value="requested">Procurando</option>
+              <option value="requested">Aguardando motorista</option>
               <option value="ongoing">Em andamento</option>
-              <option value="finished">Finalizada</option>
+              <option value="finished">Concluída</option>
               <option value="cancelled">Cancelada</option>
             </select>
 
@@ -358,6 +397,15 @@ export default function Rides() {
               <option value="">Categoria (Todas)</option>
               <option value="moto">Moto</option>
               <option value="car">Carro</option>
+            </select>
+
+            <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+              value={filters.paymentMethod} onChange={e => { setFilters(f => ({ ...f, paymentMethod: e.target.value })); setPage(1); }}>
+              <option value="">Pagamento (Todos)</option>
+              <option value="cash">Dinheiro</option>
+              <option value="pix">Pix</option>
+              <option value="card">Cartão</option>
+              <option value="carteira">Carteira MoveCity</option>
             </select>
           </div>
 
@@ -390,11 +438,11 @@ export default function Rides() {
                       <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
                   </button>
                 </th>
-                <th className="px-4 py-3 font-medium">Viagem</th>
-                <th className="px-4 py-3 font-medium">Categoria / PG</th>
-                <th className="px-4 py-3 font-medium">Valor / Comis.</th>
+                <th className="px-4 py-3 font-medium">Cliente / Motorista</th>
+                <th className="px-4 py-3 font-medium">Categoria / Pagamento</th>
+                <th className="px-4 py-3 font-medium">Valor / Comissão</th>
                 <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Tempo</th>
+                <th className="px-4 py-3 font-medium">Quando</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
@@ -402,7 +450,7 @@ export default function Rides() {
               {isLoading ? (
                 <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Carregando...</td></tr>
               ) : data?.rides?.length === 0 ? (
-                <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Nenhuma corrida encontrada.</td></tr>
+                <tr><td colSpan="7" className="px-6 py-8 text-center text-text-muted">Nenhuma corrida ou encomenda encontrada.</td></tr>
               ) : (
                 data?.rides?.map((ride) => (
                   <RideRow
@@ -431,9 +479,22 @@ export default function Rides() {
         )}
       </div>
 
-      {/* MAP VIEW (RIGHT) — motoristas online em tempo real */}
-      {showMap && (
-        <div className="hidden lg:flex w-1/3 flex-col bg-surface relative z-0 border-l border-border">
+      {/* MAP VIEW (RIGHT) — motoristas online em tempo real.
+          Bug de UX (auditoria 2026-08-10): o botão "Mapa" (lg:hidden, só aparece no
+          mobile) alternava showMap, mas o painel ficava sempre "hidden lg:flex" — ou
+          seja, sempre oculto abaixo do breakpoint desktop, com ou sem toggle. No
+          mobile o mapa vira overlay de tela cheia; no desktop fica sempre visível
+          como painel lateral, independente de showMap (que hoje só existe pro
+          mobile, já que não há botão de esconder no desktop). */}
+      <div className={`${showMap ? 'fixed inset-0 z-40 flex' : 'hidden'} lg:flex! lg:static lg:z-0 lg:w-1/3 flex-col bg-surface relative border-l border-border`}>
+          <button
+            type="button"
+            onClick={() => setShowMap(false)}
+            className="lg:hidden absolute top-4 right-4 z-[1001] p-2 bg-background/90 backdrop-blur border border-border rounded-full shadow-xl"
+            aria-label="Fechar mapa"
+          >
+            <X className="w-4 h-4" />
+          </button>
           <div className="absolute top-4 left-4 right-4 flex flex-col gap-2 z-[1000] pointer-events-none">
             <div className="bg-background/90 backdrop-blur border border-border p-3 rounded-lg shadow-xl pointer-events-auto">
               <div className="flex items-center justify-between gap-3">
@@ -495,8 +556,7 @@ export default function Rides() {
               </Marker>
             ))}
           </MapContainer>
-        </div>
-      )}
+      </div>
 
       {/* RIDE DRAWER */}
       <RideDrawer ride={activeRideDrawer} onClose={() => setActiveRideDrawer(null)} onAction={handleAction} />

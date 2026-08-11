@@ -1,40 +1,31 @@
 import React, { useState } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../services/api';
 import {
-  Search, CheckCircle, XCircle, MoreVertical, FileText, Lock, ShieldAlert,
-  Wallet, ArrowUpRight, ArrowDownRight, Clock, Building, Download, Square, CheckSquare, X, AlertTriangle
+  Search, CheckCircle, XCircle, MoreVertical, ShieldAlert,
+  Wallet, ArrowUpRight, Clock, Building, Download, Square, CheckSquare, X, AlertTriangle, Landmark, Users as UsersIcon
 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip, CartesianGrid } from 'recharts';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
+import { formatMoney, formatDateTime } from '../utils/format';
+import { PAYOUT_STATUS_LABELS, PAYOUT_STATUS_COLORS, TRANSACTION_TYPE_LABELS, statusLabel, statusColor } from '../utils/statusDictionary';
+import StatusBadge from '../components/StatusBadge';
 
-const statusColors = {
-  requested: 'bg-border text-text',
-  in_analysis: 'bg-warning/10 text-warning border-warning/20',
-  approved: 'bg-primary/10 text-primary border-primary/20',
-  processing: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-  paid: 'bg-green-500/10 text-green-500 border-green-500/20',
-  rejected: 'bg-danger/10 text-danger border-danger/20',
-};
-
-const statusNames = {
-  requested: 'Solicitado',
-  in_analysis: 'Em Análise',
-  approved: 'Aprovado',
-  processing: 'Processando',
-  paid: 'Pago',
-  rejected: 'Rejeitado',
-};
-
+// Auditoria de UX (2026-08-10): a tela misturava dinheiro da plataforma (comissão),
+// dinheiro do motorista (repasses/saldo) e contadores operacionais (rejeitados/
+// atrasados) numa grade única, sem indicar o que é o quê. Reorganizado em duas
+// seções visuais: Resumo Financeiro (plataforma) e Financeiro dos Motoristas.
 export default function Finance() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ period: 'all', status: '', search: '' });
+  const [filters, setFilters] = useState({ period: 'all', status: searchParams.get('status') || '', search: '' });
   const [searchInput, setSearchInput] = useState('');
   const [selectedPayouts, setSelectedPayouts] = useState([]);
   const [activePayoutDrawer, setActivePayoutDrawer] = useState(null);
@@ -48,9 +39,6 @@ export default function Finance() {
     },
     placeholderData: keepPreviousData
   });
-
-  const formatMoney = (value) =>
-    Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -91,7 +79,7 @@ export default function Finance() {
 
     const csvUri = buildCsv(
       ['ID', 'Motorista', 'Valor', 'ChavePix', 'Status', 'Data'],
-      items.map(p => [p._id, p.captainId?.fullname?.firstname, p.amount, p.captainId?.pixKey, p.status, new Date(p.createdAt).toISOString()])
+      items.map(p => [p._id, p.captainId?.fullname?.firstname, p.amount, p.captainId?.pixKey, statusLabel(PAYOUT_STATUS_LABELS, p.status), new Date(p.createdAt).toISOString()])
     );
     downloadCsv(csvUri, `financeiro_${new Date().getTime()}.csv`);
   };
@@ -111,13 +99,13 @@ export default function Finance() {
   return (
     <div className="flex h-[calc(100vh-6rem)] overflow-hidden bg-background">
       <div className="flex flex-col flex-1 w-full transition-all duration-300">
-        
+
         {/* Header & Dashboard Stats */}
-        <div className="p-6 border-b border-border space-y-6 flex-shrink-0 bg-surface overflow-y-auto max-h-[50vh]">
+        <div className="p-6 border-b border-border space-y-6 flex-shrink-0 bg-surface overflow-y-auto max-h-[60vh]">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Centro Financeiro</h1>
-              <p className="text-sm text-text-muted mt-1">Conciliação, auditoria e aprovação de saques.</p>
+              <p className="text-sm text-text-muted mt-1">Comissão da plataforma, repasses e saques dos motoristas.</p>
             </div>
           </div>
 
@@ -134,55 +122,65 @@ export default function Finance() {
             </div>
           )}
 
-          {/* Quick Stats Summary */}
           {data?.summary && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
-                <div className="flex items-center gap-2 mb-2 text-text-muted"><Wallet className="w-4 h-4"/><p className="text-sm font-medium">Saldo Plataforma</p></div>
-                <p className="text-2xl font-bold">{formatMoney(data.summary.platformBalance)}</p>
-                <p className="text-xs text-text-muted mt-1">
-                  Comissões totais · mês {formatMoney(data.summary.commissionMonth)} · hoje {formatMoney(data.summary.commissionToday)}
-                </p>
+            <div className="space-y-5">
+              {/* RESUMO FINANCEIRO — dinheiro da plataforma */}
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2 flex items-center gap-1.5"><Landmark className="w-3.5 h-3.5" /> Resumo financeiro (plataforma)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                    <div className="flex items-center gap-2 mb-2 text-text-muted"><Wallet className="w-4 h-4" /><p className="text-sm font-medium">Comissão acumulada (total)</p></div>
+                    <p className="text-2xl font-bold">{formatMoney(data.summary.platformBalance)}</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      Mês {formatMoney(data.summary.commissionMonth)} · hoje {formatMoney(data.summary.commissionToday)}
+                    </p>
+                  </div>
+                  <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                    <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4" /><p className="text-sm font-medium">Repassado hoje</p></div>
+                    <p className="text-2xl font-bold">{formatMoney(data.summary.paidToday)}</p>
+                    <p className="text-xs text-text-muted mt-1">Volume liberado hoje</p>
+                  </div>
+                  <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                    <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4" /><p className="text-sm font-medium">Repassado no mês</p></div>
+                    <p className="text-2xl font-bold">{formatMoney(data.summary.paidMonth)}</p>
+                    <p className="text-xs text-text-muted mt-1">Total do mês</p>
+                  </div>
+                </div>
               </div>
-              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
-                <div className="flex items-center gap-2 mb-2 text-warning"><Clock className="w-4 h-4"/><p className="text-sm font-medium">Saídas Previstas</p></div>
-                <p className="text-2xl font-bold">{formatMoney(data.summary.pendingAmount)}</p>
-                <p className="text-xs text-text-muted mt-1">Repasses pendentes</p>
-              </div>
-              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
-                <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos Hoje</p></div>
-                <p className="text-2xl font-bold">{formatMoney(data.summary.paidToday)}</p>
-                <p className="text-xs text-text-muted mt-1">Volume liberado hoje</p>
-              </div>
-              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
-                <div className="flex items-center gap-2 mb-2 text-primary"><ArrowUpRight className="w-4 h-4"/><p className="text-sm font-medium">Pagos no Mês</p></div>
-                <p className="text-2xl font-bold">{formatMoney(data.summary.paidMonth)}</p>
-                <p className="text-xs text-text-muted mt-1">Total do mês</p>
-              </div>
-              <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
-                <div className="flex items-center gap-2 mb-2 text-danger"><XCircle className="w-4 h-4"/><p className="text-sm font-medium">Rejeitados</p></div>
-                <p className="text-2xl font-bold">{data.summary.rejectedCount || 0}</p>
-                <p className="text-xs text-text-muted mt-1">Solicitações com erro</p>
-              </div>
-              {/* Bloco H (2026-08-02): payoutDeadlineDays era salvo em Configurações e
-                  nunca lido por nada — primeiro uso real. */}
-              <div className={`bg-background border px-4 py-4 rounded-xl flex flex-col ${data.summary.overdueCount > 0 ? 'border-warning/40' : 'border-border'}`}>
-                <div className={`flex items-center gap-2 mb-2 ${data.summary.overdueCount > 0 ? 'text-warning' : 'text-text-muted'}`}><AlertTriangle className="w-4 h-4"/><p className="text-sm font-medium">Atrasados</p></div>
-                <p className="text-2xl font-bold">{data.summary.overdueCount || 0}</p>
-                <p className="text-xs text-text-muted mt-1">Sem aprovação há mais de {data.summary.payoutDeadlineDays ?? 2} dias</p>
+
+              {/* FINANCEIRO DOS MOTORISTAS — repasses/pendências */}
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2 flex items-center gap-1.5"><UsersIcon className="w-3.5 h-3.5" /> Financeiro dos motoristas (repasses)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                    <div className="flex items-center gap-2 mb-2 text-warning"><Clock className="w-4 h-4" /><p className="text-sm font-medium">Repasses pendentes</p></div>
+                    <p className="text-2xl font-bold">{formatMoney(data.summary.pendingAmount)}</p>
+                    <p className="text-xs text-text-muted mt-1">Saídas previstas, ainda não pagas</p>
+                  </div>
+                  <div className="bg-background border border-border px-4 py-4 rounded-xl flex flex-col">
+                    <div className="flex items-center gap-2 mb-2 text-danger"><XCircle className="w-4 h-4" /><p className="text-sm font-medium">Rejeitados</p></div>
+                    <p className="text-2xl font-bold">{data.summary.rejectedCount || 0}</p>
+                    <p className="text-xs text-text-muted mt-1">Solicitações com erro</p>
+                  </div>
+                  <div className={`bg-background border px-4 py-4 rounded-xl flex flex-col ${data.summary.overdueCount > 0 ? 'border-warning/40' : 'border-border'}`}>
+                    <div className={`flex items-center gap-2 mb-2 ${data.summary.overdueCount > 0 ? 'text-warning' : 'text-text-muted'}`}><AlertTriangle className="w-4 h-4" /><p className="text-sm font-medium">Atrasados</p></div>
+                    <p className="text-2xl font-bold">{data.summary.overdueCount || 0}</p>
+                    <p className="text-xs text-text-muted mt-1">Sem aprovação há mais de {data.summary.payoutDeadlineDays ?? 2} dias</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {/* Gráfico real — comissões dos últimos 7 dias */}
-          <div className="h-32 w-full mt-4 bg-background border border-border rounded-xl p-2 hidden md:block">
-            <p className="text-[10px] uppercase tracking-wide text-text-muted px-2 pt-1">Comissões — últimos 7 dias</p>
+          <div className="h-32 w-full bg-background border border-border rounded-xl p-2 hidden md:block">
+            <p className="text-[10px] uppercase tracking-wide text-text-muted px-2 pt-1">Comissões da plataforma — últimos 7 dias</p>
             <ResponsiveContainer width="100%" height="85%">
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorValor" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -199,9 +197,12 @@ export default function Finance() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          {/* Auditoria de UX (2026-08-10): gráfico some no mobile (hidden md:block) sem
+              nenhum substituto — mantido assim por ora (troca por outra visualização é
+              escopo maior), mas os cards acima já cobrem os mesmos números em texto. */}
 
           {/* Filters Bar */}
-          <div className="flex flex-wrap items-center gap-3 mt-4">
+          <div className="flex flex-wrap items-center gap-3">
             <form onSubmit={handleSearch} className="relative flex-1 min-w-[200px]">
               <input
                 type="text"
@@ -212,7 +213,7 @@ export default function Finance() {
               />
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-text-muted" />
             </form>
-            
+
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.period} onChange={e => { setFilters(f => ({ ...f, period: e.target.value })); setPage(1); }}>
               <option value="all">Todo o período</option>
@@ -220,13 +221,14 @@ export default function Finance() {
               <option value="7d">Últimos 7 dias</option>
               <option value="30d">Últimos 30 dias</option>
             </select>
-            
+
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
               value={filters.status} onChange={e => { setFilters(f => ({ ...f, status: e.target.value })); setPage(1); }}>
               <option value="">Status (Todos)</option>
               <option value="requested">Solicitado</option>
               <option value="in_analysis">Em Análise</option>
               <option value="approved">Aprovado</option>
+              <option value="processing">Processando (debitado, aguardando PIX)</option>
               <option value="paid">Pago</option>
               <option value="rejected">Rejeitado</option>
             </select>
@@ -262,7 +264,7 @@ export default function Finance() {
               <tr>
                 <th className="px-4 py-3 w-10 text-center">
                   <button onClick={toggleSelectAll}>
-                    {selectedPayouts.length > 0 && selectedPayouts.length === data?.payouts?.length ? 
+                    {selectedPayouts.length > 0 && selectedPayouts.length === data?.payouts?.length ?
                       <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
                   </button>
                 </th>
@@ -282,7 +284,7 @@ export default function Finance() {
                     Nenhum pedido de saque encontrado.
                     {(data?.summary?.platformBalance > 0) && (
                       <span className="block mt-1 text-xs">
-                        Há comissões registradas no saldo da plataforma — a lista abaixo só mostra solicitações de repasse dos motoristas.
+                        Há comissões registradas — a lista abaixo só mostra solicitações de repasse dos motoristas.
                       </span>
                     )}
                   </td>
@@ -298,31 +300,29 @@ export default function Finance() {
                         </button>
                       </td>
                       <td className="px-4 py-4">
-                         <p className="text-text font-medium">{new Date(payout.createdAt).toLocaleDateString()} {new Date(payout.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                         <p className="text-xs text-text-muted mt-0.5">#{payout._id.substring(18).toUpperCase()}</p>
+                        <p className="text-text font-medium">{formatDateTime(payout.createdAt)}</p>
+                        <p className="text-xs text-text-muted mt-0.5">#{payout._id.substring(18).toUpperCase()}</p>
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-2">
-                           <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center flex-shrink-0 text-xs font-bold text-text-muted uppercase">
-                              {payout.captainId?.fullname?.firstname?.charAt(0) || '?'}
-                           </div>
-                           <div>
-                              <p className="font-medium text-text">{payout.captainId?.fullname?.firstname} {payout.captainId?.fullname?.lastname}</p>
-                              <p className="text-xs text-text-muted mt-0.5 font-mono">{payout.captainId?.pixKey || 'Chave não informada'}</p>
-                           </div>
+                          <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center shrink-0 text-xs font-bold text-text-muted uppercase">
+                            {payout.captainId?.fullname?.firstname?.charAt(0) || '?'}
+                          </div>
+                          <div>
+                            <p className="font-medium text-text">{payout.captainId?.fullname?.firstname} {payout.captainId?.fullname?.lastname}</p>
+                            <p className="text-xs text-text-muted mt-0.5 font-mono">{payout.captainId?.pixKey || 'Chave não informada'}</p>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <p className="font-bold text-text">R$ {payout.amount?.toFixed(2) || '0.00'}</p>
+                        <p className="font-bold text-text">{formatMoney(payout.amount)}</p>
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${statusColors[payout.status] || 'bg-background'}`}>
-                           {statusNames[payout.status] || payout.status}
-                        </span>
+                        <StatusBadge colorClass={statusColor(PAYOUT_STATUS_COLORS, payout.status)} label={statusLabel(PAYOUT_STATUS_LABELS, payout.status)} />
                       </td>
                       <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => setActivePayoutDrawer(payout)} className="p-1.5 hover:bg-background border border-transparent hover:border-border rounded transition-colors text-text-muted">
-                           <MoreVertical className="w-4 h-4" />
+                          <MoreVertical className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
@@ -332,7 +332,7 @@ export default function Finance() {
             </tbody>
           </table>
         </div>
-        
+
         {/* Pagination */}
         {data?.pages > 1 && (
           <div className="px-6 py-4 bg-surface border-t border-border flex items-center justify-between flex-shrink-0">
@@ -404,8 +404,8 @@ function PayoutDrawer({ payoutId, onClose }) {
   if (isLoading) {
     return (
       <>
-        <div className="fixed inset-0 bg-black/50 z-[2000]" onClick={onClose} />
-        <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface z-[2001] flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50 z-2000" onClick={onClose} />
+        <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface z-2001 flex items-center justify-center">
           <p className="text-text-muted">Carregando detalhes...</p>
         </div>
       </>
@@ -416,6 +416,7 @@ function PayoutDrawer({ payoutId, onClose }) {
   const logs = data?.logs || [];
   const captain = payout?.captainId;
   const wallet = data?.wallet;
+  const captainFullName = `${captain?.fullname?.firstname || ''} ${captain?.fullname?.lastname || ''}`.trim();
 
   const handleApprove = async () => {
     if (await confirm({ message: 'Aprovar este repasse? O valor será debitado agora da carteira do motorista — o pagamento em si (PIX) precisa ser confirmado manualmente depois, pois não há gateway integrado.', tone: 'danger', confirmLabel: 'Aprovar e debitar' })) {
@@ -438,139 +439,145 @@ function PayoutDrawer({ payoutId, onClose }) {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-[2000] transition-opacity" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface border-l border-border shadow-2xl z-[2001] flex flex-col animate-slide-in">
-        
+      <div className="fixed inset-0 bg-black/50 z-2000 transition-opacity" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-full md:w-[500px] lg:w-[600px] bg-surface border-l border-border shadow-2xl z-2001 flex flex-col animate-slide-in">
+
         {/* Header */}
-        <div className="flex-shrink-0 border-b border-border bg-background p-4 flex items-center justify-between">
-           <div>
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                Solicitação #{payout._id.substring(18).toUpperCase()}
-                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${statusColors[payout.status] || 'bg-background'}`}>
-                   {statusNames[payout.status] || payout.status}
-                </span>
-              </h2>
-              <p className="text-sm text-text-muted mt-1">{new Date(payout.createdAt).toLocaleString()}</p>
-           </div>
-           <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors"><X className="w-5 h-5" /></button>
+        <div className="shrink-0 border-b border-border bg-background p-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              Solicitação #{payout._id.substring(18).toUpperCase()}
+              <StatusBadge colorClass={statusColor(PAYOUT_STATUS_COLORS, payout.status)} label={statusLabel(PAYOUT_STATUS_LABELS, payout.status)} />
+            </h2>
+            <p className="text-sm text-text-muted mt-1">{formatDateTime(payout.createdAt)}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors"><X className="w-5 h-5" /></button>
         </div>
 
         {/* Action Bar */}
         {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
           <div className="bg-surface border-b border-border p-4 flex gap-3">
-             <button onClick={handleApprove} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
-                <CheckCircle className="w-5 h-5" /> {approveMutation.isPending ? 'Processando...' : 'Aprovar e Debitar'}
-             </button>
-             <button onClick={handleReject} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-danger/10 text-danger border border-danger/20 font-medium rounded hover:bg-danger/20 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
-                <XCircle className="w-5 h-5" /> {rejectMutation.isPending ? 'Processando...' : 'Rejeitar'}
-             </button>
+            <button onClick={handleApprove} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+              <CheckCircle className="w-5 h-5" /> {approveMutation.isPending ? 'Processando...' : 'Aprovar e Debitar'}
+            </button>
+            <button onClick={handleReject} disabled={approveMutation.isPending || rejectMutation.isPending} className="flex-1 py-2 bg-danger/10 text-danger border border-danger/20 font-medium rounded hover:bg-danger/20 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+              <XCircle className="w-5 h-5" /> {rejectMutation.isPending ? 'Processando...' : 'Rejeitar'}
+            </button>
           </div>
         )}
         {payout.status === 'processing' && (
           <div className="bg-surface border-b border-border p-4 space-y-3">
-             <p className="text-xs text-text-muted">Valor já debitado da carteira do motorista. Confirme aqui só depois de verificar no extrato bancário real que o PIX foi enviado.</p>
-             <button onClick={handleConfirmPaid} disabled={confirmPaidMutation.isPending} className="w-full py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
-                <CheckCircle className="w-5 h-5" /> {confirmPaidMutation.isPending ? 'Confirmando...' : 'Confirmar Pagamento Realizado'}
-             </button>
+            <p className="text-xs text-text-muted">Valor já debitado da carteira do motorista. Confirme aqui só depois de verificar no extrato bancário real que o PIX foi enviado.</p>
+            <button onClick={handleConfirmPaid} disabled={confirmPaidMutation.isPending} className="w-full py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
+              <CheckCircle className="w-5 h-5" /> {confirmPaidMutation.isPending ? 'Confirmando...' : 'Confirmar Pagamento Realizado'}
+            </button>
           </div>
         )}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-background/50">
-           
-           {/* Alertas */}
-           {captain?.isBlocked && (
-             <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg flex items-start gap-3">
-               <ShieldAlert className="w-5 h-5 text-danger mt-0.5" />
-               <div><p className="text-sm font-bold text-danger">Motorista Bloqueado</p><p className="text-xs text-danger/80">Você não pode aprovar pagamentos para motoristas bloqueados.</p></div>
-             </div>
-           )}
 
-           {/* Conferência Financeira */}
-           <div className="bg-surface rounded-xl border border-border overflow-hidden">
-              <div className="p-4 border-b border-border bg-background/50"><h3 className="text-sm font-bold uppercase tracking-wider text-text">Conferência Financeira</h3></div>
-              <div className="p-4 grid grid-cols-2 gap-4">
-                 <div>
-                    <p className="text-xs text-text-muted mb-1">Saldo Pendente na Carteira</p>
-                    <p className="text-lg font-bold">R$ {wallet?.pendingBalance?.toFixed(2) ?? '0.00'}</p>
-                 </div>
-                 <div>
-                    <p className="text-xs text-text-muted mb-1">Valor Solicitado</p>
-                    <p className="text-lg font-bold text-primary">R$ {payout.amount?.toFixed(2) || '0.00'}</p>
-                 </div>
-                 {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
-                   <div className="col-span-2 pt-4 border-t border-border mt-2">
-                      <p className="text-xs text-text-muted mb-1">Saldo Restante Após o Débito</p>
-                      <p className={`text-lg font-bold ${((wallet?.pendingBalance || 0) - payout.amount) < 0 ? 'text-danger' : ''}`}>
-                        R$ {((wallet?.pendingBalance || 0) - payout.amount).toFixed(2)}
-                      </p>
-                      {((wallet?.pendingBalance || 0) - payout.amount) < 0 && (
-                        <p className="text-xs text-danger mt-1">Saldo insuficiente — a aprovação será recusada.</p>
-                      )}
-                   </div>
-                 )}
+          {/* Alertas */}
+          {captain?.isBlocked && (
+            <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-danger mt-0.5" />
+              <div><p className="text-sm font-bold text-danger">Motorista Bloqueado</p><p className="text-xs text-danger/80">Você não pode aprovar pagamentos para motoristas bloqueados.</p></div>
+            </div>
+          )}
+
+          {/* Conferência Financeira */}
+          <div className="bg-surface rounded-xl border border-border overflow-hidden">
+            <div className="p-4 border-b border-border bg-background/50 flex items-center justify-between">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-text">Conferência Financeira</h3>
+              {captain?._id && (
+                <Link
+                  to={`/captains?search=${encodeURIComponent(captain.fullname?.firstname || captain.email || '')}`}
+                  className="text-xs text-primary font-medium hover:underline"
+                  title="Abre /captains já filtrado por este motorista — o ajuste manual de saldo fica na ficha dele, aba Financeiro."
+                >
+                  Ajustar saldo deste motorista →
+                </Link>
+              )}
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-text-muted mb-1">Saldo Pendente na Carteira</p>
+                <p className="text-lg font-bold">{formatMoney(wallet?.pendingBalance)}</p>
               </div>
-           </div>
-
-           {/* Detalhes de Pagamento & Gateway */}
-           <div className="bg-surface rounded-xl border border-border p-4 space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Building className="w-4 h-4"/> Detalhes do Recebedor</h3>
-              <div className="space-y-2">
-                 <div className="flex justify-between"><span className="text-sm text-text-muted">Nome</span><span className="text-sm font-medium">{captain?.fullname?.firstname} {captain?.fullname?.lastname}</span></div>
-                 <div className="flex justify-between"><span className="text-sm text-text-muted">Chave Pix</span><span className="text-sm font-medium font-mono">{captain?.pixKey || 'Não cadastrada'}</span></div>
-                 <div className="flex justify-between"><span className="text-sm text-text-muted">Gateway</span><span className="text-sm font-medium uppercase">{payout.gateway || 'MANUAL'}</span></div>
-                 {payout.transactionId && <div className="flex justify-between"><span className="text-sm text-text-muted">ID Transação</span><span className="text-sm font-medium text-primary">{payout.transactionId}</span></div>}
+              <div>
+                <p className="text-xs text-text-muted mb-1">Valor Solicitado</p>
+                <p className="text-lg font-bold text-primary">{formatMoney(payout.amount)}</p>
               </div>
-           </div>
+              {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
+                <div className="col-span-2 pt-4 border-t border-border mt-2">
+                  <p className="text-xs text-text-muted mb-1">Saldo Restante Após o Débito</p>
+                  <p className={`text-lg font-bold ${((wallet?.pendingBalance || 0) - payout.amount) < 0 ? 'text-danger' : ''}`}>
+                    {formatMoney((wallet?.pendingBalance || 0) - payout.amount)}
+                  </p>
+                  {((wallet?.pendingBalance || 0) - payout.amount) < 0 && (
+                    <p className="text-xs text-danger mt-1">Saldo insuficiente — a aprovação será recusada.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
-           {/* Motivo de Rejeição */}
-           {payout.reason && (
-              <div className="bg-danger/5 border border-danger/20 rounded-xl p-4">
-                 <p className="text-xs font-bold uppercase text-danger mb-1">Motivo da Rejeição</p>
-                 <p className="text-sm text-text">{payout.reason}</p>
+          {/* Detalhes de Pagamento & Gateway */}
+          <div className="bg-surface rounded-xl border border-border p-4 space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Building className="w-4 h-4" /> Detalhes do Recebedor</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between"><span className="text-sm text-text-muted">Nome</span><span className="text-sm font-medium">{captainFullName || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-sm text-text-muted">Chave Pix</span><span className="text-sm font-medium font-mono">{captain?.pixKey || 'Não cadastrada'}</span></div>
+              <div className="flex justify-between"><span className="text-sm text-text-muted">Gateway</span><span className="text-sm font-medium uppercase">{payout.gateway || 'MANUAL'}</span></div>
+              {payout.transactionId && <div className="flex justify-between"><span className="text-sm text-text-muted">ID Transação</span><span className="text-sm font-medium text-primary">{payout.transactionId}</span></div>}
+            </div>
+          </div>
+
+          {/* Motivo de Rejeição */}
+          {payout.reason && (
+            <div className="bg-danger/5 border border-danger/20 rounded-xl p-4">
+              <p className="text-xs font-bold uppercase text-danger mb-1">Motivo da Rejeição</p>
+              <p className="text-sm text-text">{payout.reason}</p>
+            </div>
+          )}
+
+          {/* Timeline (Auditoria) */}
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Timeline de Auditoria</h3>
+            <div className="relative pl-4 space-y-4">
+              <div className="absolute left-2.75 top-2 bottom-2 w-0.5 bg-border"></div>
+              <div className="relative">
+                <div className="absolute -left-3 top-1 w-3 h-3 rounded-full bg-border z-10"></div>
+                <div className="pl-4">
+                  <p className="text-sm font-medium text-text">Solicitação de Saque</p>
+                  <p className="text-xs text-text-muted">{formatDateTime(payout.createdAt)}</p>
+                </div>
               </div>
-           )}
+              {logs.map((log) => (
+                <div key={log._id} className="relative">
+                  <div className="absolute -left-3 top-1 w-3 h-3 rounded-full bg-primary z-10 border border-surface"></div>
+                  <div className="pl-4">
+                    <p className="text-sm font-medium text-primary capitalize">{log.action.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-text-muted">{formatDateTime(log.createdAt)}</p>
+                    <p className="text-xs text-text mt-1 italic">{log.reason}</p>
+                    <p className="text-[10px] text-text-muted mt-0.5">Por {log.adminName}</p>
+                  </div>
+                </div>
+              ))}
+              {payout.status === 'paid' && (
+                <div className="relative">
+                  <div className="absolute -left-3 top-1 w-3 h-3 rounded-full bg-primary z-10 border border-surface"></div>
+                  <div className="pl-4">
+                    <p className="text-sm font-medium text-primary">Repasse Finalizado</p>
+                    <p className="text-xs text-text-muted">{formatDateTime(payout.paidAt)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
-           {/* Timeline (Auditoria) */}
-           <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Timeline de Auditoria</h3>
-              <div className="relative pl-4 space-y-4">
-                 <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-border"></div>
-                 {/* Item 1: Request */}
-                 <div className="relative">
-                    <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-border z-10"></div>
-                    <div className="pl-4">
-                       <p className="text-sm font-medium text-text">Solicitação de Saque</p>
-                       <p className="text-xs text-text-muted">{new Date(payout.createdAt).toLocaleString()}</p>
-                    </div>
-                 </div>
-                 {/* Logs */}
-                 {logs.map((log) => (
-                    <div key={log._id} className="relative">
-                       <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-primary z-10 border border-surface"></div>
-                       <div className="pl-4">
-                          <p className="text-sm font-medium text-primary capitalize">{log.action.replace(/_/g, ' ')}</p>
-                          <p className="text-xs text-text-muted">{new Date(log.createdAt).toLocaleString()}</p>
-                          <p className="text-xs text-text mt-1 italic">{log.reason}</p>
-                          <p className="text-[10px] text-text-muted mt-0.5">Por {log.adminName}</p>
-                       </div>
-                    </div>
-                 ))}
-                 {/* Item: Final */}
-                 {payout.status === 'paid' && (
-                    <div className="relative">
-                       <div className="absolute -left-[17px] top-1 w-3 h-3 rounded-full bg-green-500 z-10 border border-surface"></div>
-                       <div className="pl-4">
-                          <p className="text-sm font-medium text-green-500">Repasse Finalizado</p>
-                          <p className="text-xs text-text-muted">{new Date(payout.paidAt).toLocaleString()}</p>
-                       </div>
-                    </div>
-                 )}
-              </div>
-           </div>
-
-           {/* Captain Financial History Preview */}
-           <CaptainFinancialHistory captainId={captain?._id} />
+          {/* Captain Financial History */}
+          <CaptainFinancialHistory captainId={captain?._id} />
 
         </div>
       </div>
@@ -578,42 +585,51 @@ function PayoutDrawer({ payoutId, onClose }) {
   )
 }
 
+// Auditoria de UX (2026-08-10): antes interlaçava rideModel/payoutModel direto
+// ("Simulated financial history" no comentário original) — recarga, ajuste manual e
+// bônus nunca apareciam. Agora consome transactionModel real (mesma fonte de
+// getCaptainWallet), com tipo traduzido, saldo antes/depois e responsável.
 function CaptainFinancialHistory({ captainId }) {
-  const { data: history, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['captain-financial-history', captainId],
     queryFn: async () => {
-      if(!captainId) return [];
-      const res = await api.get(`/admin/captains/${captainId}/financial-history`);
+      if (!captainId) return null;
+      const res = await api.get(`/admin/captains/${captainId}/financial-history`, { params: { limit: 15 } });
       return res.data;
     },
     enabled: !!captainId
   });
 
   if (isLoading) return <p className="text-xs text-text-muted">Carregando extrato...</p>;
-  if (!history || history.length === 0) return null;
+  const transactions = data?.transactions;
+  if (!transactions || transactions.length === 0) return null;
 
   return (
     <div className="pt-6 border-t border-border">
-       <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Últimos Movimentos (Extrato)</h3>
-       <div className="space-y-2">
-          {history.map((item, i) => (
-             <div key={i} className="flex items-center justify-between p-3 bg-surface border border-border rounded-lg">
-                <div className="flex items-center gap-3">
-                   {item.type === 'ride' ? <ArrowDownRight className="w-4 h-4 text-green-500"/> : <ArrowUpRight className="w-4 h-4 text-danger"/>}
-                   <div>
-                      <p className="text-sm font-medium">{item.label}</p>
-                      <p className="text-xs text-text-muted">{new Date(item.date).toLocaleString()}</p>
-                   </div>
-                </div>
-                <div className="text-right">
-                   <p className={`text-sm font-bold ${item.amount > 0 ? 'text-green-500' : 'text-danger'}`}>
-                     {item.amount > 0 ? '+' : ''}R$ {item.amount.toFixed(2)}
-                   </p>
-                   {item.commission && <p className="text-[10px] text-text-muted">- R$ {item.commission.toFixed(2)} taxa</p>}
-                </div>
-             </div>
-          ))}
-       </div>
+      <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Histórico Financeiro (Extrato Real)</h3>
+      <div className="space-y-2">
+        {transactions.map((tx) => (
+          <div key={tx._id} className="p-3 bg-surface border border-border rounded-lg">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{TRANSACTION_TYPE_LABELS[tx.type] || tx.type}</p>
+                <p className="text-xs text-text-muted truncate">{tx.description}</p>
+                {tx.reason && <p className="text-xs text-text-muted italic truncate">Motivo: {tx.reason}</p>}
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-sm font-bold ${tx.amount > 0 ? 'text-primary' : 'text-danger'}`}>
+                  {formatMoney(tx.amount, { showSign: true })}
+                </p>
+                <p className="text-[10px] text-text-muted mt-0.5">{formatDateTime(tx.createdAt)}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50 text-[11px] text-text-muted">
+              <span>Saldo: {formatMoney(tx.balanceBefore)} → {formatMoney(tx.balanceAfter)}</span>
+              {tx.adminId && <span>Responsável: {tx.adminId}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

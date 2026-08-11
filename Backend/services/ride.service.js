@@ -234,9 +234,11 @@ function getOtp(num) {
 }
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null, scheduledAt = null
+    user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null, scheduledAt = null,
+    source = 'passenger_requested', createdBy, createdByRole, adminPassenger, idempotencyKey,
+    pickupCoordinates: suppliedPickupCoordinates, destinationCoordinates: suppliedDestinationCoordinates,
 }) => {
-    if (!user || !pickup || !destination || !vehicleType) {
+    if ((!user && source !== 'admin') || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
     }
 
@@ -258,7 +260,7 @@ module.exports.createRide = async ({
 
     // Exclusão mútua user: não criar corrida imediata se há encomenda ativa.
     // Agendamento futuro não conflita com encomenda em andamento.
-    if (!parsedSchedule) {
+    if (!parsedSchedule && user) {
         const parcelModel = require('../models/parcel.model');
         const dispatchService = require('./dispatch.service');
         const activeParcel = await parcelModel.exists({
@@ -377,8 +379,8 @@ module.exports.createRide = async ({
     const paymentAmount = finalPrice - walletAmountUsed;
 
     // Agendadas: coords cedo para upcoming por raio (SCH-C3 / Fase 2.4). Imediatas: despacho grava.
-    let pickupCoordinates;
-    let destinationCoordinates;
+    let pickupCoordinates = suppliedPickupCoordinates;
+    let destinationCoordinates = suppliedDestinationCoordinates;
     if (parsedSchedule) {
         try {
             const pickupCoord = await mapService.getAddressCoordinate(pickup);
@@ -410,7 +412,11 @@ module.exports.createRide = async ({
         observation,
         requestFemaleDriver,
         vehicleType,
-        source: 'passenger_requested',
+        source,
+        createdBy,
+        createdByRole,
+        adminPassenger,
+        idempotencyKey,
         destinationPending: false,
         status: parsedSchedule ? 'scheduled' : 'requested',
         scheduledAt: parsedSchedule,
@@ -432,7 +438,7 @@ module.exports.createRide = async ({
 
     // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
     if (!parsedSchedule) {
-        if (paymentAmount > 0 || walletAmountUsed > 0) {
+        if (user && (paymentAmount > 0 || walletAmountUsed > 0)) {
             await paymentModel.create({
                 rideId: ride._id,
                 userId: user,

@@ -36,8 +36,9 @@ const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpen
             {isParcel ? <Package className="w-4 h-4 text-purple-500" /> : <User className="w-4 h-4 text-text-muted" />}
           </div>
           <div>
-            <p className="font-medium">{ride.user?.fullname?.firstname || (isParcel ? 'Remetente' : 'Passageiro')}</p>
+            <p className="font-medium">{ride.user?.fullname?.firstname || ride.adminPassenger?.name || (isParcel ? 'Remetente' : 'Passageiro')}</p>
             <p className="text-xs text-text-muted">{ride.captain?.fullname?.firstname ? `Motorista: ${ride.captain.fullname.firstname}` : 'Buscando motorista...'}</p>
+            {ride.source === 'admin' && <p className="text-[10px] font-semibold text-primary uppercase">Criada pelo ADM{ride.createdBy?.name ? ` · ${ride.createdBy.name}` : ''}</p>}
           </div>
         </div>
       </td>

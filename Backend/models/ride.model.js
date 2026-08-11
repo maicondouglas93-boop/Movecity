@@ -7,7 +7,7 @@ const rideSchema = new mongoose.Schema({
         ref: 'user',
         // Corrida presencial (driver_initiated) pode existir sem passageiro cadastrado.
         required: function () {
-            return this.source !== 'driver_initiated';
+            return !['driver_initiated', 'admin'].includes(this.source);
         },
     },
     captain: {
@@ -18,10 +18,19 @@ const rideSchema = new mongoose.Schema({
     // driver_initiated NUNCA entra no despacho (findCaptains / new-ride / broadcast).
     source: {
         type: String,
-        enum: [ 'passenger_requested', 'driver_initiated' ],
+        enum: [ 'passenger_requested', 'driver_initiated', 'admin' ],
         default: 'passenger_requested',
         index: true,
     },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser' },
+    createdByRole: { type: String, enum: ['admin'] },
+    adminPassenger: {
+        name: { type: String, trim: true },
+        phone: { type: String, trim: true },
+        passengerCount: { type: Number, min: 1, max: 8 },
+        note: { type: String, trim: true },
+    },
+    idempotencyKey: { type: String, trim: true },
     // true quando o motorista inicia sem destino e o GPS do fim define o destino.
     destinationPending: {
         type: Boolean,
@@ -339,6 +348,10 @@ rideSchema.index({ status: 1 });
 rideSchema.index({ captain: 1 });
 rideSchema.index({ user: 1 });
 rideSchema.index({ createdAt: -1 });
+rideSchema.index(
+    { createdBy: 1, idempotencyKey: 1 },
+    { unique: true, partialFilterExpression: { source: 'admin', idempotencyKey: { $type: 'string' } } }
+);
 // SCH-M1 Fase 2: cron de ativação + listagens por janela.
 rideSchema.index({ status: 1, scheduledAt: 1 });
 rideSchema.index({ status: 1, activatedAt: 1 });

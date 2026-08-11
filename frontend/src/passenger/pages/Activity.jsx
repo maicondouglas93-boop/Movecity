@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getAccessToken } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
 import api from '@/shared/services/axios';
 import Header from '@/passenger/components/Header';
-import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets';
+import { vehicleImages } from '@/shared/assets/vehicleAssets';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import StatusBadge from '@/shared/components/ui/StatusBadge';
 import Button from '@/shared/components/ui/Button';
+import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel } from '@/shared/utils/formatters';
+import { formatRating } from '@/shared/utils/identity';
 
 const Activity = () => {
     const [rides, setRides] = useState([]);
@@ -17,11 +19,13 @@ const Activity = () => {
     const [statusFilter, setStatusFilter] = useState('all'); // all, completed, cancelled, ongoing
     const [search, setSearch] = useState('');
     const [selectedRide, setSelectedRide] = useState(null);
+    const [errorMessage, setErrorMessage] = useState('');
     const navigate = useNavigate();
 
     const fetchHistory = async (pageNum, status, searchQuery, append = false) => {
         if (loading) return;
         setLoading(true);
+        setErrorMessage('');
         try {
             const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/history`, {
                 params: {
@@ -43,6 +47,7 @@ const Activity = () => {
             setHasMore(response.data.hasNext);
         } catch (error) {
             console.error("Error fetching history", error);
+            setErrorMessage('Não foi possível carregar seu histórico. Verifique sua conexão e tente novamente.');
         } finally {
             setLoading(false);
         }
@@ -78,6 +83,23 @@ const Activity = () => {
         const date = new Date(dateString);
         return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
+
+    const getRideAmountInfo = (ride) => {
+        if (ride?.status === 'cancelled') {
+            const fee = Number(ride?.cancellationFeeCharged || 0)
+            return {
+                label: fee > 0 ? 'Taxa de cancelamento' : 'Cancelada sem cobrança',
+                amount: fee > 0 ? formatCurrencyBRL(fee) : '—',
+            }
+        }
+        if (ride?.finalPrice != null) {
+            return { label: 'Valor final', amount: formatCurrencyBRL(ride.finalPrice) }
+        }
+        if (ride?.fare != null) {
+            return { label: 'Estimativa', amount: formatCurrencyBRL(ride.fare) }
+        }
+        return { label: 'Valor indisponível', amount: '—' }
+    }
 
     // Valores reais de ride.status (Backend/models/ride.model.js) — 'completed'/'ongoing'/
     // 'pending' nunca existiram no enum, por isso corridas finalizadas sempre caíam no
@@ -142,7 +164,18 @@ const Activity = () => {
                     </div>
                 )}
 
-                {rides.length === 0 && !loading && (
+                {errorMessage && !loading && (
+                    <EmptyState
+                        variant="error"
+                        icon="ri-error-warning-line"
+                        title="Histórico indisponível"
+                        description={errorMessage}
+                        actionLabel="Tentar novamente"
+                        onAction={() => fetchHistory(page, statusFilter, search, false)}
+                    />
+                )}
+
+                {rides.length === 0 && !loading && !errorMessage && (
                     <EmptyState
                         icon="ri-car-line"
                         title="Nenhuma viagem encontrada"
@@ -154,6 +187,7 @@ const Activity = () => {
                     <div className="flex flex-col gap-3">
                         {rides.map(ride => {
                             const statusInfo = getStatusInfo(ride.status);
+                            const amountInfo = getRideAmountInfo(ride)
                             return (
                                 <button
                                     key={ride._id}
@@ -171,7 +205,8 @@ const Activity = () => {
                                         </div>
                                     </div>
                                     <div className="text-right ml-4 flex flex-col items-end gap-1">
-                                        <h4 className="font-semibold text-ink-900">R$ {ride.finalPrice ?? ride.fare}</h4>
+                                        <h4 className="font-semibold text-ink-900">{amountInfo.amount}</h4>
+                                        <p className="text-[11px] text-ink-400">{amountInfo.label}</p>
                                         <StatusBadge tone={statusInfo.tone}>{statusInfo.text}</StatusBadge>
                                     </div>
                                 </button>
@@ -209,10 +244,18 @@ const Activity = () => {
                             </button>
                         </div>
 
-                        <div className='flex-1 overflow-y-auto p-4 pb-6'>
+                        <div className='flex-1 overflow-y-auto p-4 pb-28'>
+                            {(() => {
+                                const amountInfo = getRideAmountInfo(selectedRide)
+                                const rating = formatRating(selectedRide.captain?.rating)
+                                const distanceLabel = formatDistanceLabel(selectedRide.actualDistance || selectedRide.estimatedDistance)
+                                const durationLabel = formatDurationLabel(selectedRide.actualTime || selectedRide.estimatedTime)
+                                return (
+                            <>
                             <div className="flex items-center justify-between mb-6">
                                 <div>
-                                    <h1 className="text-4xl font-bold text-ink-900">R$ {selectedRide.finalPrice ?? selectedRide.fare}</h1>
+                                    <p className="text-sm font-medium text-ink-500">{amountInfo.label}</p>
+                                    <h1 className="text-4xl font-bold text-ink-900">{amountInfo.amount}</h1>
                                     <p className="text-ink-400 text-sm mt-1">{formatDate(selectedRide.createdAt)}</p>
                                 </div>
                                 <img src={vehicleImages[selectedRide.vehicleType || 'car']} className="h-16 object-contain" alt="" width="1024" height="1024" loading="lazy" />
@@ -243,7 +286,7 @@ const Activity = () => {
                                         </div>
                                         <div>
                                             <h4 className="font-semibold capitalize text-ink-900">{selectedRide.captain.fullname.firstname} {selectedRide.captain.fullname.lastname}</h4>
-                                            <p className="text-sm text-ink-400"><i className="ri-star-fill text-amber-400" aria-hidden="true"></i> 4.9</p>
+                                            <p className="text-sm text-ink-400"><i className="ri-star-fill text-amber-400" aria-hidden="true"></i> {rating || 'Sem avaliações'}</p>
                                         </div>
                                     </div>
                                     <div className="text-right">
@@ -256,13 +299,26 @@ const Activity = () => {
                             <div className="flex flex-col gap-3">
                                 <div className="flex justify-between items-center py-2 border-b border-line">
                                     <span className="text-ink-400">Forma de Pagamento</span>
-                                    <span className="font-medium text-ink-900 flex items-center gap-2"><i className="ri-money-dollar-circle-line text-brand-500" aria-hidden="true"></i> Dinheiro</span>
+                                    <span className="font-medium text-ink-900 flex items-center gap-2"><i className="ri-money-dollar-circle-line text-brand-500" aria-hidden="true"></i> {paymentMethodLabel(selectedRide.paymentMethod)}</span>
                                 </div>
+                                <div className="flex justify-between items-center py-2 border-b border-line">
+                                    <span className="text-ink-400">Status do pagamento</span>
+                                    <span className="font-medium text-ink-900">{paymentStatusLabel(selectedRide.paymentStatus, selectedRide.paymentMethod)}</span>
+                                </div>
+                                {(distanceLabel || durationLabel) && (
+                                <div className="flex justify-between items-center py-2 border-b border-line">
+                                    <span className="text-ink-400">Distância e duração</span>
+                                    <span className="font-medium text-ink-900">{[distanceLabel, durationLabel].filter(Boolean).join(' · ')}</span>
+                                </div>
+                                )}
                                 <div className="flex justify-between items-center py-2 border-b border-line">
                                     <span className="text-ink-400">Status</span>
                                     <span className="font-medium capitalize text-ink-900">{getStatusInfo(selectedRide.status).text}</span>
                                 </div>
                             </div>
+                            </>
+                                )
+                            })()}
                         </div>
 
                         <div className="p-5 border-t border-line bg-surface absolute bottom-0 w-full rounded-b-3xl">

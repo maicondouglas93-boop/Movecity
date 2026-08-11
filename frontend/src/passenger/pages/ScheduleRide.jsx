@@ -11,6 +11,7 @@ import { getAccessToken } from '@/shared/services/session'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import { vehicleImages } from '@/shared/assets/vehicleAssets'
+import { formatCurrencyBRL } from '@/shared/utils/formatters'
 
 const fieldClass =
   'w-full bg-surface-alt border border-line rounded-panel px-4 py-3.5 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20'
@@ -25,6 +26,7 @@ const ScheduleRide = () => {
   const { addToast } = useToast()
   const { userLocation } = useContext(LocationContext)
   const minDate = new Date(Date.now() + 15 * 60 * 1000)
+  const maxDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 
   const [pickup, setPickup] = useState('')
   const [destination, setDestination] = useState('')
@@ -98,6 +100,9 @@ const ScheduleRide = () => {
     if (Number.isNaN(at.getTime()) || at.getTime() < Date.now() + 14 * 60 * 1000) {
       return addToast('Agende com pelo menos 15 minutos de antecedência', 'error')
     }
+    if (at.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1000) {
+      return addToast('Agende com no máximo 7 dias de antecedência', 'error')
+    }
 
     setLoading(true)
     try {
@@ -160,6 +165,7 @@ const ScheduleRide = () => {
               type="datetime-local"
               className={fieldClass}
               min={toLocalInputValue(minDate)}
+              max={toLocalInputValue(maxDate)}
               value={scheduledAt}
               onChange={(e) => setScheduledAt(e.target.value)}
             />
@@ -222,7 +228,7 @@ const ScheduleRide = () => {
             <p className="text-base font-semibold text-ink-900">
               {fareLoading
                 ? 'Calculando…'
-                : `R$ ${Number(fareValue).toFixed(2).replace('.', ',')}`}
+                : formatCurrencyBRL(fareValue)}
             </p>
           </Card>
         )}
@@ -234,7 +240,7 @@ const ScheduleRide = () => {
             Confirmar agendamento
             {!fareLoading && fareValue != null ? (
               <span className="opacity-90 font-medium">
-                {' '}· R$ {Number(fareValue).toFixed(2).replace('.', ',')}
+                {' '}· {formatCurrencyBRL(fareValue)}
               </span>
             ) : null}
           </Button>

@@ -3,8 +3,9 @@ import { vehicleImages } from '@/shared/assets/vehicleAssets'
 import Card from '@/shared/components/ui/Card'
 import DetailRow from '@/shared/components/ui/DetailRow'
 import Button from '@/shared/components/ui/Button'
+import { formatCurrencyBRL, paymentMethodLabel } from '@/shared/utils/formatters'
 
-const paymentLabel = (method) => method === 'pix' ? 'Pix' : method === 'carteira' ? 'Carteira' : method === 'card' ? 'Cartão' : 'Dinheiro'
+const paymentLabel = paymentMethodLabel
 
 // O backend expira a corrida sozinha depois de 10min sem motorista aceitar, mas não
 // avisa o app (a expiração só é detectada na próxima vez que algo consulta a corrida
@@ -74,14 +75,14 @@ const LookingForDriver = (props) => {
                     />
                 </div>
                 <div className='min-w-0 flex-1'>
-                    <h3 className='text-base font-semibold text-ink-900 leading-tight'>Buscando motorista</h3>
+                    <h3 className='text-base font-semibold text-ink-900 leading-tight'>Procurando motorista</h3>
                     <p className='text-xs text-brand-700 mt-0.5'>
-                        Próximos… <span className='tabular-nums text-ink-400'>{elapsedLabel}</span>
+                        Avisando motoristas próximos… <span className='tabular-nums text-ink-400'>{elapsedLabel}</span>
                     </p>
                 </div>
                 {fareValue != null && (
                     <div className='text-right flex-shrink-0'>
-                        <p className='text-sm font-bold text-ink-900'>R${fareValue}</p>
+                        <p className='text-sm font-bold text-ink-900'>{formatCurrencyBRL(fareValue)}</p>
                         <p className='text-[11px] text-ink-400'>{paymentLabel(props.paymentMethod)}</p>
                     </div>
                 )}
@@ -90,7 +91,7 @@ const LookingForDriver = (props) => {
             {isTakingLong && (
                 <div className='flex gap-2 items-center bg-surface-alt rounded-panel px-2.5 py-2 mb-2.5'>
                     <i className="ri-time-line text-ink-400 text-base flex-shrink-0" aria-hidden="true"></i>
-                    <p className='text-xs text-ink-600'>Demorando mais que o normal — aguarde ou cancele.</p>
+                    <p className='text-xs text-ink-600'>Ainda não encontramos motorista disponível. Você pode continuar aguardando ou cancelar sem taxa antes do aceite.</p>
                 </div>
             )}
 

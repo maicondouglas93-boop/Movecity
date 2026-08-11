@@ -3,6 +3,7 @@ import { vehicleImages } from '@/shared/assets/vehicleAssets'
 import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
 import Button from '@/shared/components/ui/Button'
+import { formatCurrencyBRL } from '@/shared/utils/formatters'
 
 // Antes, tocar numa categoria já navegava direto pra confirmação — o usuário nunca via
 // o que tinha escolhido até a tela seguinte. Agora o toque só seleciona (card destacado)
@@ -66,7 +67,7 @@ const VehiclePanel = (props) => {
                             subtitle={category.description}
                             trailing={
                                 <span className='text-base font-bold text-ink-900'>
-                                    {props.fare?.fare?.[category.name] ? `R$${props.fare.fare[category.name]}` : ''}
+                                    {props.fare?.fare?.[category.name] != null ? formatCurrencyBRL(props.fare.fare[category.name]) : ''}
                                 </span>
                             }
                         />

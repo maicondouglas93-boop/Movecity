@@ -15,6 +15,7 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { openWhatsApp } from '@/shared/utils/whatsapp'
 import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
+import { formatBRL } from '@/shared/utils/currency'
 
 const PARCEL_PICKUP_STATUSES = ['provider_accepted', 'going_to_pickup', 'arrived_pickup']
 
@@ -286,7 +287,7 @@ const CaptainParcelRiding = () => {
             </p>
             <div className="rounded-panel border border-line bg-surface-alt px-3 py-3 text-center">
               <p className="text-xs text-ink-600 mb-0.5">Cliente deve pagar</p>
-              <p className="text-2xl font-black text-brand-600">R$ {passengerAmount.toFixed(2)}</p>
+              <p className="text-2xl font-black text-brand-600">{formatBRL(passengerAmount)}</p>
             </div>
             <button
               type="button"
@@ -341,7 +342,7 @@ const CaptainParcelRiding = () => {
                 compact
                 trailing={
                   <div className="text-right">
-                    <p className="text-sm font-bold text-ink-900">R$ {passengerAmount.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-ink-900">{formatBRL(passengerAmount)}</p>
                     <p className="text-[10px] text-ink-400">{payLabel}</p>
                   </div>
                 }
@@ -413,7 +414,7 @@ const CaptainParcelRiding = () => {
                   </div>
                   <div>
                     <p className="text-[10px] text-ink-400 uppercase tracking-wide">Valor</p>
-                    <p className="text-ink-900 font-medium">R$ {passengerAmount.toFixed(2)}</p>
+                    <p className="text-ink-900 font-medium">{formatBRL(passengerAmount)}</p>
                   </div>
                   {parcel.weightKg != null && (
                     <div>

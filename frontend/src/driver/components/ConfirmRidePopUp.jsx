@@ -7,6 +7,7 @@ import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
+import { formatBRL } from '@/shared/utils/currency'
 
 // Fase A da experiência de corrida ativa (2026-08-03): o status dos botões vem da
 // corrida real (backend), não mais de um useState fixo em 'accepted' — depois de um
@@ -181,7 +182,7 @@ const ConfirmRidePopUp = (props) => {
             <div className='flex items-center justify-between mb-2.5 gap-2'>
                 <h3 className='text-base font-semibold text-ink-900'>Iniciar corrida</h3>
                 {props.ride?.fare != null && (
-                    <p className="text-base font-bold text-ink-900">R${props.ride.fare}</p>
+                    <p className="text-base font-bold text-ink-900">{formatBRL(props.ride.fare)}</p>
                 )}
             </div>
             <PassengerIdentityCard

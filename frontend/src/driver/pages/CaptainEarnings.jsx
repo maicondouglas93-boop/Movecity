@@ -8,6 +8,7 @@ import Card from '@/shared/components/ui/Card';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
 import { getAccessToken } from '@/shared/services/session';
+import { formatBRL } from '@/shared/utils/currency';
 
 const RANGES = [
     { value: 'day', label: 'Hoje' },
@@ -56,7 +57,7 @@ const CaptainEarnings = () => {
                 <div className="bg-ink-900 text-white rounded-panel p-6 shadow-floating mb-6 text-center">
                     <p className="text-white/70 text-sm mb-1">Ganhos Totais</p>
                     <h2 className="text-4xl font-bold mb-2">
-                        {lifetimeLoading ? '...' : `R$ ${(lifetimeData?.totalEarnings ?? 0).toFixed(2)}`}
+                        {lifetimeLoading ? '...' : formatBRL(lifetimeData?.totalEarnings)}
                     </h2>
                     <p className="text-white/50 text-xs">Total líquido acumulado (mesmo cálculo dos períodos abaixo)</p>
                 </div>
@@ -95,7 +96,7 @@ const CaptainEarnings = () => {
                         Ganhos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
                     </p>
                     <h2 className="text-3xl font-black text-ink-900 tracking-tight">
-                        {isLoading ? '...' : `R$ ${data?.totalEarnings?.toFixed(2) || '0.00'}`}
+                        {isLoading ? '...' : formatBRL(data?.totalEarnings)}
                     </h2>
                     <p className="text-xs text-ink-600 mt-1">
                         {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'}`}
@@ -142,7 +143,7 @@ const CaptainEarnings = () => {
                                 </div>
                                 <div className="flex justify-between items-center text-xs border-t border-line pt-2 mt-1">
                                     <span className="text-ink-600">Você recebeu</span>
-                                    <span className="font-bold text-brand-600">R$ {(ride.driverAmount ?? ride.netEarnings)?.toFixed?.(2) ?? '0.00'}</span>
+                                    <span className="font-bold text-brand-600">{formatBRL(ride.driverAmount ?? ride.netEarnings)}</span>
                                 </div>
                             </Card>
                         ))}

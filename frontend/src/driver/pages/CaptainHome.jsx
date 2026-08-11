@@ -30,6 +30,7 @@ import { presentNativeRideOffer } from '@/shared/platform/nativeRideOffer.servic
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useOfferQueue } from '@/shared/services/rideOffer/useOfferQueue'
 import { useOfferAlert } from '@/shared/services/rideOffer/useOfferAlert'
+import { formatBRL } from '@/shared/utils/currency'
 import * as Sentry from '@sentry/react'
 
 const haversineKm = (a, b) => {
@@ -52,6 +53,12 @@ const CaptainHome = () => {
     // aviso — um motorista nesse estado ficava invisível ao despacho por push (com o
     // app fechado/minimizado) sem nenhuma pista de causa dentro do app.
     const [ notificationsDenied, setNotificationsDenied ] = useState(false)
+    // Auditoria do app do motorista (2026-08-11, P2): registerPush()/requestFCMToken()
+    // já retornavam null de forma limpa em toda falha (permissão negada de jeito
+    // atípico, registrationError nativo, timeout, google-services.json ausente) — só
+    // ninguém reagia a isso. O motorista continuava recebendo corridas via socket com
+    // o app aberto, mas perdia a rede de segurança de push sem nenhum aviso.
+    const [ pushRegistrationFailed, setPushRegistrationFailed ] = useState(false)
 
     const [ ride, setRide ] = useState(null)
     // Fase B da experiência de corrida ativa (2026-08-03): corridas 'requested'
@@ -165,24 +172,27 @@ const CaptainHome = () => {
     }, [])
 
     // Push: Web = FCM/SW; Android nativo = Capacitor Push (notification.service).
-    useEffect(() => {
-        const setupPush = async () => {
-            if (isNativePlatform()) {
-                await registerPush()
-                return
-            }
-            if (!('Notification' in window)) return
-            if (Notification.permission === 'granted') {
-                await requestFCMToken()
-                const jwt = getAccessToken('captain')
-                if (jwt) await syncTokenWithSW(jwt)
-            } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
-                setShowNotificationPrompt(true)
-            } else if (Notification.permission === 'denied') {
-                setNotificationsDenied(true)
-            }
+    const setupPush = async () => {
+        if (isNativePlatform()) {
+            const token = await registerPush()
+            setPushRegistrationFailed(!token)
+            return
         }
+        if (!('Notification' in window)) return
+        if (Notification.permission === 'granted') {
+            const token = await requestFCMToken()
+            setPushRegistrationFailed(!token)
+            const jwt = getAccessToken('captain')
+            if (jwt && token) await syncTokenWithSW(jwt)
+        } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
+            setShowNotificationPrompt(true)
+        } else if (Notification.permission === 'denied') {
+            setNotificationsDenied(true)
+        }
+    }
+    useEffect(() => {
         setupPush()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     useEffect(() => {
@@ -375,7 +385,7 @@ const CaptainHome = () => {
                 type: 'NEW_RIDE',
                 rideId: data._id,
                 title: 'Nova Solicitação de Corrida!',
-                message: `${data.pickup?.split(',')[0] || 'Origem'} → ${data.destination?.split(',')[0] || 'Destino'} • R$${data.fare}`,
+                message: `${data.pickup?.split(',')[0] || 'Origem'} → ${data.destination?.split(',')[0] || 'Destino'} • ${formatBRL(data.fare)}`,
                 fare: data.fare,
                 pickup: data.pickup,
                 destination: data.destination,
@@ -387,7 +397,7 @@ const CaptainHome = () => {
             if (!isNativePlatform() && document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
                 showBrowserNotification(
                     'Nova Solicitação de Corrida! 🚗',
-                    `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • R$${data.fare}`,
+                    `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • ${formatBRL(data.fare)}`,
                     { tag: `ride-${data._id}` }
                 )
                 console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`);
@@ -462,14 +472,14 @@ const CaptainHome = () => {
             if (captainRideRef.current || captainParcelRef.current) return
             offerQueue.enqueue('parcel', data)
             addToast(
-                `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · R$ ${Number(data.fare || 0).toFixed(2)}`,
+                `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · ${formatBRL(data.fare)}`,
                 'ride',
             )
             presentNativeRideOffer({
                 type: 'NEW_PARCEL',
                 parcelId: data._id,
                 title: 'Nova encomenda disponível',
-                message: `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
+                message: `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • ${formatBRL(data.fare)}`,
                 fare: data.fare,
                 pickup: data.pickup,
                 destination: data.destination,
@@ -478,7 +488,7 @@ const CaptainHome = () => {
             if (!isNativePlatform() && document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
                 showBrowserNotification(
                     'Nova encomenda disponível 📦',
-                    `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • R$${data.fare}`,
+                    `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • ${formatBRL(data.fare)}`,
                     { tag: `parcel-${data._id}` }
                 )
                 console.log(`[AUDIT][${TRACE_ID}] Web Push Nativo (Browser) exibido.`)
@@ -784,7 +794,7 @@ const CaptainHome = () => {
                                             <p className='text-sm font-bold text-brand-700'>Corrida disponível</p>
                                         </div>
                                         <p className='text-base font-bold text-ink-900'>
-                                            R$ {pending.fare?.toFixed ? pending.fare.toFixed(2) : pending.fare}
+                                            {formatBRL(pending.fare)}
                                         </p>
                                     </div>
                                     <div className='text-sm text-ink-900 space-y-1 mb-1'>
@@ -862,6 +872,31 @@ const CaptainHome = () => {
                                     >
                                         Entendi
                                     </button>
+                                </div>
+                            </div>
+                        )}
+                        {pushRegistrationFailed && (
+                            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-panel p-4 flex gap-3">
+                                <i className="ri-notification-off-fill text-amber-600 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-ink-900">Não foi possível ativar notificações de corrida</p>
+                                    <p className="text-xs text-ink-400 mt-0.5">Com o app fechado ou minimizado, você pode não ser avisado de novas corridas. Tente ativar de novo — com o app aberto, você continua recebendo ofertas normalmente.</p>
+                                    <div className="flex gap-2 mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setupPush()}
+                                            className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold"
+                                        >
+                                            Tentar de novo
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPushRegistrationFailed(false)}
+                                            className="min-h-[36px] px-4 rounded-full text-ink-600 text-sm font-medium"
+                                        >
+                                            Agora não
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}

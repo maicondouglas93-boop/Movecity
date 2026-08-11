@@ -15,6 +15,7 @@ import { openDriverAppSettings } from '@/shared/platform/driverPermissions.servi
 import { hasActiveService, resolveServiceKind } from '@/shared/services/captainLocationSync'
 import { isNativePlatform } from '@/shared/platform/platform'
 import DriverOemPermissionsCard from '@/driver/components/DriverOemPermissionsCard'
+import { formatBRL } from '@/shared/utils/currency'
 
 const PANEL_BG = 'bg-[#0B3D2E]'
 const ACCENT_GOLD = 'text-amber-300'
@@ -154,10 +155,7 @@ const CaptainDetails = ({ children = null }) => {
         return `${m}m`
     }
 
-    const formatMoney = (value) => {
-        const n = Number(value) || 0
-        return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    }
+    const formatMoney = formatBRL
 
     const openHelp = () => {
         const wa = String(import.meta.env.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '')

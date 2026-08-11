@@ -20,6 +20,7 @@ import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import api from '@/shared/services/axios'
 import { getAccessToken } from '@/shared/services/session'
 import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
+import { formatBRL } from '@/shared/utils/currency'
 
 const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
@@ -206,10 +207,10 @@ const CaptainRiding = () => {
         const handlePaymentCompleted = (data) => {
             const amount = Number(data?.finalPrice ?? data?.fare ?? rideData?.finalPrice ?? rideData?.fare ?? 0)
             const passengerName = data?.user?.fullname?.firstname || rideData?.user?.fullname?.firstname || 'passageiro'
-            addToast(`Pagamento recebido! R$ ${amount.toFixed(2)}`, 'success')
+            addToast(`Pagamento recebido! ${formatBRL(amount)}`, 'success')
             showBrowserNotification(
                 'Pagamento Recebido! 💰',
-                `R$ ${amount.toFixed(2)} recebido de ${passengerName}`
+                `${formatBRL(amount)} recebido de ${passengerName}`
             )
             // Fase A da experiência de corrida ativa (2026-08-03): limpa o RideContext
             // antes de voltar pra Home — sem isso, o contexto ficava com a corrida
@@ -484,7 +485,7 @@ const CaptainRiding = () => {
                                     </p>
                                     <p className='text-xs text-ink-600 font-medium'>
                                         {rideData?.user?.fullname?.firstname || 'Passageiro'}
-                                        {rideData?.fare ? ` · R$${rideData.fare}` : ''}
+                                        {rideData?.fare ? ` · ${formatBRL(rideData.fare)}` : ''}
                                     </p>
                                 </>
                             )}
@@ -525,7 +526,7 @@ const CaptainRiding = () => {
                             <p className='text-xs text-ink-600 font-medium'>
                                 {rideData?.destinationPending
                                     ? 'Preço ao finalizar'
-                                    : (rideData?.fare ? `R$${rideData.fare}` : '')}
+                                    : (rideData?.fare ? formatBRL(rideData.fare) : '')}
                             </p>
                         </div>
                     </div>
@@ -566,7 +567,7 @@ const CaptainRiding = () => {
                                 {rideData?.fare != null && (
                                     <div>
                                         <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Valor</p>
-                                        <p className='text-ink-900 font-medium'>R$ {rideData.fare}</p>
+                                        <p className='text-ink-900 font-medium'>{formatBRL(rideData.fare)}</p>
                                     </div>
                                 )}
                             </div>

@@ -44,8 +44,8 @@ describe('CaptainEarnings — Ganhos Totais usa o mesmo cálculo líquido dos pe
 
         renderEarnings({ earnings: 999.99, rating: 4.8, totalRides: 2 });
 
-        await waitFor(() => expect(screen.getByText('R$ 46.56')).toBeInTheDocument());
-        expect(screen.queryByText('R$ 999.99')).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.getByText('R$ 46,56')).toBeInTheDocument());
+        expect(screen.queryByText('R$ 999,99')).not.toBeInTheDocument();
     });
 
     it('motorista sem avaliação nenhuma mostra "—", não "5.0" fixo', async () => {

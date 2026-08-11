@@ -12,6 +12,7 @@ import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { reverseGeocode, formatAddressWithCoords } from '@/shared/services/mapsApi'
+import { formatBRL } from '@/shared/utils/currency'
 
 const FinishRide = (props) => {
     const [loading, setLoading] = useState(false)
@@ -351,14 +352,14 @@ const FinishRide = (props) => {
                             <h3 className='text-xl font-bold text-amber-700'>Serviço concluído</h3>
                             <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar.</p>
                             <p className='text-2xl font-bold text-ink-900 mt-2'>Valor do passageiro</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
+                            <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
                             <p className='text-ink-600 text-sm'>Redirecionando...</p>
                         </>
                     ) : (
                         <>
                             <h3 className='text-xl font-bold text-brand-700'>Serviço concluído</h3>
                             <p className='text-ink-600 text-center'>Pagamento confirmado</p>
-                            <p className='text-3xl font-black text-brand-600'>R$ {passengerAmount.toFixed(2)}</p>
+                            <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
                         </>
                     )}
                 </div>
@@ -370,7 +371,7 @@ const FinishRide = (props) => {
                     {/* Valor que o passageiro deve pagar (sem comissão/%). */}
                     <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
                         <p className='text-ink-600 text-sm mb-1'>Cliente deve pagar</p>
-                        <p className='text-brand-600 text-3xl font-black'>R$ {passengerAmount.toFixed(2)}</p>
+                        <p className='text-brand-600 text-3xl font-black'>{formatBRL(passengerAmount)}</p>
                     </div>
 
                     <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>

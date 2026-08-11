@@ -9,6 +9,7 @@ import StatusBadge from '@/shared/components/ui/StatusBadge'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
 import { getAccessToken } from '@/shared/services/session'
+import { formatBRL } from '@/shared/utils/currency'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
@@ -153,7 +154,7 @@ const CaptainWallet = () => {
                             <i className="ri-coins-fill text-yellow-500"></i> Meus Créditos
                         </p>
                         <h2 className={`text-4xl font-bold mb-2 ${creditBalance < 0 ? 'text-danger-600' : 'text-ink-900'}`}>
-                            R$ {creditBalance.toFixed(2)}
+                            {formatBRL(creditBalance)}
                         </h2>
                         <p className='text-xs text-ink-600 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
 
@@ -171,7 +172,7 @@ const CaptainWallet = () => {
                         <p className='text-sm text-blue-600 mb-1 flex items-center gap-1 font-semibold'>
                             <i className="ri-bank-card-fill"></i> Repasses Pendentes
                         </p>
-                        <h2 className='text-3xl font-bold text-blue-900 mb-1'>R$ {pendingBalance.toFixed(2)}</h2>
+                        <h2 className='text-3xl font-bold text-blue-900 mb-1'>{formatBRL(pendingBalance)}</h2>
                         <p className='text-xs text-blue-600 opacity-80 mb-4'>Valor retido de corridas no cartão aguardando transferência bancária para você.</p>
 
                         <button
@@ -260,14 +261,14 @@ const CaptainWallet = () => {
                                         </div>
                                         <div className='text-right'>
                                             <h4 className={`font-bold ${isDebit ? 'text-danger-500' : 'text-brand-600'}`}>
-                                                {isDebit ? '-' : '+'}R$ {Math.abs(tx.amount).toFixed(2)}
+                                                {isDebit ? '-' : '+'}{formatBRL(Math.abs(tx.amount))}
                                             </h4>
                                             {tx.paymentMethod === 'card' && <span className='text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>Cartão</span>}
                                         </div>
                                     </div>
                                     <div className='flex justify-between items-center text-xs text-ink-600 border-t border-line pt-2 mt-1'>
-                                        <p>Saldo Ant: R$ {tx.balanceBefore.toFixed(2)}</p>
-                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>R$ {tx.balanceAfter.toFixed(2)}</span></p>
+                                        <p>Saldo Ant: {formatBRL(tx.balanceBefore)}</p>
+                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>{formatBRL(tx.balanceAfter)}</span></p>
                                     </div>
                                 </div>
                             )

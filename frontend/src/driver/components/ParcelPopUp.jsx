@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
+import { formatBRL } from '@/shared/utils/currency'
 
 const SIZE_LABEL = { small: 'Pequeno', medium: 'Médio', large: 'Grande' }
 
@@ -37,7 +38,7 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
           </h3>
         </div>
         <p className="text-base font-bold text-ink-900 flex-shrink-0">
-          R$ {Number(parcel.fare || 0).toFixed(2).replace('.', ',')}
+          {formatBRL(parcel.fare)}
         </p>
       </div>
 

@@ -13,6 +13,7 @@ import { getAccessToken } from '@/shared/services/session';
 import { RideContext } from '@/shared/contexts/RideContext';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { useToast } from '@/shared/contexts/ToastContext';
+import { formatBRL } from '@/shared/utils/currency';
 
 const ACTIVE_STATUSES = [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ];
 
@@ -35,7 +36,7 @@ function formatDateTime(value) {
 function formatFare(ride) {
     const value = ride?.finalPrice ?? ride?.fare;
     if (value == null || Number.isNaN(Number(value))) return '—';
-    return `R$ ${Number(value).toFixed(2)}`;
+    return formatBRL(value);
 }
 
 // Rótulos amigáveis — status reais do Backend/models/ride.model.js (não inventar enum).

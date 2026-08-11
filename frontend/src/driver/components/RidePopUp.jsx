@@ -4,6 +4,7 @@ import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
+import { formatBRL } from '@/shared/utils/currency'
 
 // Fase B da experiência de corrida ativa (2026-08-03): o countdown de 20s saiu. Ele só
 // escondia o painel no frontend, sem declinar nada no servidor — a corrida continuava
@@ -61,7 +62,7 @@ const RidePopUp = (props) => {
                 <h3 className='text-base font-semibold text-ink-900'>Nova corrida</h3>
                 {props.ride?.fare != null && (
                     <p className="text-lg font-bold text-ink-900">
-                        R$ {props.ride?.fare?.toFixed ? props.ride.fare.toFixed(2) : props.ride?.fare}
+                        {formatBRL(props.ride?.fare)}
                     </p>
                 )}
             </div>
@@ -105,7 +106,7 @@ const RidePopUp = (props) => {
                     </span>
                     {(props.ride?.fare != null || props.ride?.finalPrice != null) && (
                         <span className="text-brand-600 font-semibold ml-auto">
-                            R$ {Number(props.ride.finalPrice ?? props.ride.fare).toFixed(2)}
+                            {formatBRL(props.ride.finalPrice ?? props.ride.fare)}
                         </span>
                     )}
                 </div>

@@ -119,6 +119,10 @@ router.post('/end-ride',
     authMiddleware.authCaptain,
     body('rideId').isMongoId().withMessage('Invalid ride id'),
     body('destination').optional().isString().isLength({ min: 3, max: 300 }).withMessage('Invalid destination'),
+    body('finishLat').optional().isFloat({ min: -90, max: 90 }),
+    body('finishLng').optional().isFloat({ min: -180, max: 180 }),
+    body('finishAccuracy').optional({ values: 'null' }).isFloat({ min: 0 }),
+    body('finishTimestamp').optional({ values: 'null' }).isNumeric(),
     rideController.endRide
 )
 

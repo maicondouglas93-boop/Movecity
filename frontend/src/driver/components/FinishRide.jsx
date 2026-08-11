@@ -6,12 +6,10 @@ import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Button from '@/shared/components/ui/Button'
-import AddressAutocomplete from '@/shared/components/ui/AddressAutocomplete'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
-import { reverseGeocode, formatAddressWithCoords } from '@/shared/services/mapsApi'
 import { formatBRL } from '@/shared/utils/currency'
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
@@ -43,46 +41,6 @@ const FinishRide = (props) => {
     const { addToast } = useToast()
     const { userLocation } = useContext(LocationContext)
 
-    // Corrida presencial "Definir destino ao finalizar": o backend não conhece o
-    // destino ainda (ride.destinationPending) — o motorista precisa digitá-lo aqui
-    // antes de finalizar, e o preço real é calculado no servidor a partir da rota
-    // origem→este destino (mesmo motor de tarifação de "Informar destino agora").
-    const needsDestination = !!(
-        props.ride?.destinationPending
-        || (props.ride?.source === 'driver_initiated' && !props.ride?.destination)
-    )
-    const [destinationInput, setDestinationInput] = useState('')
-    const [resolvingCurrentLocation, setResolvingCurrentLocation] = useState(false)
-
-    // "Usar minha localização atual": pega o GPS já compartilhado por LocationContext
-    // (mesmo watchPosition unificado usado no app inteiro — Capacitor Geolocation no
-    // Android, Geolocation API do navegador na PWA) e usa direto como destino, sem o
-    // motorista precisar digitar. Embute as coordenadas no texto (mesmo formato do
-    // AddressAutocomplete) pra o backend usar a posição exata em vez de geocodificar
-    // o endereço de novo.
-    async function useCurrentLocationAsDestination() {
-        if (userLocation?.lat == null || userLocation?.lng == null) {
-            addToast('Aguardando GPS. Ative a localização e tente novamente.', 'error')
-            return
-        }
-        setResolvingCurrentLocation(true)
-        try {
-            let address = ''
-            try {
-                const result = await reverseGeocode(userLocation.lat, userLocation.lng)
-                address = result?.address || ''
-            } catch (err) {
-                console.error('Reverse geocode error:', err)
-            }
-            if (!address) {
-                address = `${userLocation.lat.toFixed(5)}, ${userLocation.lng.toFixed(5)}`
-            }
-            setDestinationInput(formatAddressWithCoords({ address, lat: userLocation.lat, lng: userLocation.lng }))
-        } finally {
-            setResolvingCurrentLocation(false)
-        }
-    }
-
     // Fase 3 (M1, 2026-08-05): os setTimeout de navegação/avaliação pós-corrida eram
     // órfãos — desmontar este painel (ex.: corrida cancelada no meio) deixava um
     // navigate/setState pendente disparar em componente morto.
@@ -101,6 +59,9 @@ const FinishRide = (props) => {
     const passengerAmount = finalGross === null ? null : Math.max(0, finalGross - walletAmountUsed)
     const isWalletPayment = chargeRide?.paymentMethod === 'carteira'
     const walletPaymentPending = isWalletPayment && chargeRide?.paymentStatus !== 'paid'
+    const finalBreakdown = chargeRide?.fareBreakdown || {}
+    const finalDistanceKm = Math.max(0, Number(chargeRide?.actualDistance) || 0) / 1000
+    const finalMinutes = Math.max(0, Number(chargeRide?.actualTime) || 0) / 60
 
     const queryClient = useQueryClient();
 
@@ -108,7 +69,12 @@ const FinishRide = (props) => {
         mutationFn: async () => {
             const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
                 rideId: props.ride._id,
-                ...(needsDestination ? { destination: destinationInput.trim() } : {}),
+                ...(userLocation?.lat != null && userLocation?.lng != null ? {
+                    finishLat: userLocation.lat,
+                    finishLng: userLocation.lng,
+                    finishAccuracy: userLocation.accuracy ?? null,
+                    finishTimestamp: userLocation.timestamp ?? Date.now(),
+                } : {}),
             }, {
                 headers: {
                     Authorization: `Bearer ${getAccessToken('captain')}`
@@ -156,10 +122,6 @@ const FinishRide = (props) => {
     })
 
     async function endRide() {
-        if (needsDestination && destinationInput.trim().length < 3) {
-            addToast('Informe o endereço onde a corrida terminou.', 'error')
-            return
-        }
         endRideMutation.mutate();
     }
 
@@ -292,39 +254,9 @@ const FinishRide = (props) => {
                         </p>
                     </div>
 
-                    {needsDestination && (
-                        <div className="mt-3">
-                            <AddressAutocomplete
-                                id="finish-ride-destination"
-                                label="Onde a corrida terminou?"
-                                value={destinationInput}
-                                onChange={setDestinationInput}
-                                onResolved={setDestinationInput}
-                                placeholder="Digite o endereço de destino"
-                                biasLocation={userLocation}
-                                disabled={endRideMutation.isPending}
-                                icon="ri-map-pin-2-fill"
-                                inputClassName="w-full min-h-[44px] pl-10 pr-10 rounded-panel border border-line bg-surface text-sm text-ink-900 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                            />
-                            <button
-                                type="button"
-                                onClick={useCurrentLocationAsDestination}
-                                disabled={endRideMutation.isPending || resolvingCurrentLocation || userLocation?.lat == null}
-                                className="mt-2 w-full flex items-center justify-center gap-1.5 min-h-[40px] rounded-panel border border-line bg-surface-alt text-sm font-medium text-brand-700 active:scale-[0.99] transition-transform disabled:opacity-50"
-                            >
-                                <i className={resolvingCurrentLocation ? 'ri-loader-4-line animate-spin' : 'ri-crosshair-2-line'} aria-hidden="true" />
-                                {resolvingCurrentLocation ? 'Localizando…' : 'Usar minha localização atual'}
-                            </button>
-                            <p className="text-xs text-ink-400 mt-1">
-                                O preço é calculado pela rota real entre o embarque e este destino.
-                            </p>
-                        </div>
-                    )}
-
                     <Button
                         onClick={endRide}
                         loading={endRideMutation.isPending}
-                        disabled={needsDestination && destinationInput.trim().length < 3}
                         className="mt-3 !min-h-[44px] !text-sm"
                     >
                         Finalizar corrida
@@ -407,6 +339,38 @@ const FinishRide = (props) => {
                 <>
                     <h3 className='text-2xl font-semibold mb-3 text-ink-900'>Confirmar Pagamento</h3>
                     <p className='text-ink-600 mb-5'>Receba o pagamento do passageiro e confirme abaixo.</p>
+
+                    <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
+                        <p className='text-sm font-semibold text-ink-900 mb-3'>Cálculo da corrida</p>
+                        <div className='space-y-2 text-sm'>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Distância percorrida</span>
+                                <span className='font-semibold text-ink-900'>{finalDistanceKm.toFixed(1)} km</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Tempo da corrida</span>
+                                <span className='font-semibold text-ink-900'>{Math.round(finalMinutes)} min</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Tarifa base</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.baseFare || 0)}</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Distância</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.distanceFare || 0)}</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Minutos</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.timeFare || 0)}</span>
+                            </div>
+                            {Number(finalBreakdown.minimumFareAdjustment) > 0 && (
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Ajuste da tarifa mínima</span>
+                                    <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.minimumFareAdjustment)}</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
 
                     {/* Valor que o passageiro deve pagar (sem comissão/%). */}
                     <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>

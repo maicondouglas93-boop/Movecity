@@ -280,7 +280,7 @@ const CaptainRiding = () => {
                 }
             } catch (err) {}
         };
-        if (rideData?._id) fetchUnread();
+        if (rideData?._id && rideData?.user?._id) fetchUnread();
     }, [rideData])
 
     const vType = rideData?.vehicleType || 'car'
@@ -417,7 +417,7 @@ const CaptainRiding = () => {
                             <i className="text-lg ri-phone-fill"></i>
                         </a>
                     )}
-                    {rideData?.user && (
+                    {rideData?.user?._id && (
                         <button
                             type="button"
                             onClick={() => setIsChatOpen(true)}

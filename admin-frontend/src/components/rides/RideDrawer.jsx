@@ -26,6 +26,21 @@ export default function RideDrawer({ ride, onClose, onAction }) {
     enabled: !!ride?._id && !isParcel,
   });
 
+  const {
+    data: accessCode,
+    error: accessCodeError,
+    isFetching: isFetchingAccessCode,
+    refetch: revealAccessCode,
+  } = useQuery({
+    queryKey: ['manual-ride-access-code', ride?._id],
+    queryFn: async () => {
+      const { data } = await api.get(`/admin/rides/${ride._id}/access-code`);
+      return data;
+    },
+    enabled: false,
+    retry: false,
+  });
+
   if (!ride) return null;
 
   const af = ride.adminFinalization;
@@ -126,7 +141,41 @@ export default function RideDrawer({ ride, onClose, onAction }) {
 
           {/* ===== CLIENTE ===== */}
           <Section title="Cliente">
-            <PersonCard icon={<User className="w-4 h-4 text-text-muted" />} name={`${ride.user?.fullname?.firstname || ''} ${ride.user?.fullname?.lastname || ''}`.trim() || (isParcel ? 'Remetente' : 'Passageiro')} sub={ride.user?.phone} />
+            <PersonCard
+              icon={<User className="w-4 h-4 text-text-muted" />}
+              name={`${ride.user?.fullname?.firstname || ''} ${ride.user?.fullname?.lastname || ''}`.trim() || ride.adminPassenger?.name || (isParcel ? 'Remetente' : 'Passageiro')}
+              sub={ride.user?.phone || ride.adminPassenger?.phone}
+            />
+            {ride.adminPassenger?.passengerCount ? (
+              <p className="text-xs text-text-muted mt-2">
+                {ride.adminPassenger.passengerCount} passageiro(s)
+                {ride.adminPassenger.note ? ` · ${ride.adminPassenger.note}` : ''}
+              </p>
+            ) : null}
+            {ride.source === 'admin' && !['finished', 'cancelled'].includes(ride.status) ? (
+              <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                {accessCode?.otp ? (
+                  <div>
+                    <p className="text-xs text-text-muted">PIN para iniciar a corrida</p>
+                    <p className="mt-1 font-mono text-2xl font-bold tracking-[0.3em] text-primary">{accessCode.otp}</p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => revealAccessCode()}
+                    disabled={isFetchingAccessCode}
+                    className="text-sm font-medium text-primary hover:underline disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {isFetchingAccessCode ? 'Buscando PIN…' : 'Exibir PIN de início'}
+                  </button>
+                )}
+                {accessCodeError ? (
+                  <p className="mt-2 text-xs text-danger">
+                    {accessCodeError.response?.data?.message || 'Não foi possível recuperar o PIN.'}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {isParcel && ride.sender && (ride.sender.name || ride.sender.phone) && (
               <p className="text-xs text-text-muted mt-2">Remetente informado na encomenda: {ride.sender.name} {ride.sender.phone ? `· ${ride.sender.phone}` : ''}</p>
             )}

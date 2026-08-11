@@ -111,7 +111,12 @@ module.exports.getAutoCompleteSuggestions = async (input, lat, lng, sessionToken
 
     const body = {
         input,
-        sessionToken: token
+        sessionToken: token,
+        // MoveCity opera no Brasil. Sem estes campos, o backend do Render usa o IP do
+        // datacenter como referência e costuma priorizar cidades/ruas de outros países.
+        includedRegionCodes: [String(process.env.MAPS_COUNTRY_CODE || 'br').toLowerCase()],
+        languageCode: process.env.MAPS_LANGUAGE_CODE || 'pt-BR',
+        regionCode: String(process.env.MAPS_COUNTRY_CODE || 'br').toLowerCase(),
     };
     if (lat && lng) {
         const flat = parseFloat(lat);

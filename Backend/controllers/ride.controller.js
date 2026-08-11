@@ -7,7 +7,6 @@ const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const {
     sanitizeCaptainFinance,
-    sanitizeCaptainFinanceList,
     computeDriverAmount,
 } = require('../utils/financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
@@ -16,6 +15,18 @@ const { computeOfferExpiresAt } = require('../config/offerPolicy');
 function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
     if (!ride) return ride;
     const sanitized = sanitizeCaptainFinance(ride);
+    // Corrida criada pelo ADM pode ter passageiro sem conta. Entregar uma identidade
+    // sintética mantém as telas do motorista funcionando; telefone só aparece depois
+    // do aceite, seguindo a mesma privacidade aplicada aos passageiros cadastrados.
+    if (!sanitized.user && sanitized.source === 'admin' && sanitized.adminPassenger?.name) {
+        sanitized.user = {
+            fullname: { firstname: sanitized.adminPassenger.name },
+            ...(sanitized.status !== 'requested' && sanitized.adminPassenger.phone
+                ? { phone: sanitized.adminPassenger.phone }
+                : {}),
+            isGuest: true,
+        };
+    }
     const isPresential = sanitized.source === 'driver_initiated';
     if (!(keepPresentialOtp && isPresential)) {
         delete sanitized.otp;
@@ -34,8 +45,8 @@ function sanitizeCaptainRideHistoryPayload(data) {
     return {
         ...data,
         activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide, { keepPresentialOtp: true }) : null,
-        pendingOffers: sanitizeCaptainFinanceList(data.pendingOffers || []),
-        rides: sanitizeCaptainFinanceList(data.rides || []),
+        pendingOffers: (data.pendingOffers || []).map((ride) => toCaptainRideResponse(ride)),
+        rides: (data.rides || []).map((ride) => toCaptainRideResponse(ride)),
     };
 }
 
@@ -47,19 +58,19 @@ function sanitizeCaptainRideHistoryPayload(data) {
 // Exportada além de usada internamente (Bloco E da auditoria administrativa, 2026-08-02):
 // a reatribuição de corrida pelo painel admin precisa do mesmo redespacho — sem isso,
 // a corrida voltava a 'requested' mas nenhum motorista era notificado, ficando travada.
-async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId, targetCaptainId } = {}) {
+async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, excludeCaptainId, targetCaptainId, pickupCoordinates } = {}) {
     const dispatchService = require('../services/dispatch.service');
     // Motorista com qualquer trabalho ativo não pode aceitar outra oferta.
-    const { pickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
+    const { pickupCoordinates: resolvedPickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
         pickup,
         vehicleType,
-        { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true, serviceKind: ride.scheduledAt ? 'scheduledRide' : 'ride' }
+        { TRACE_ID, excludeCaptainId, excludeActiveRide: true, excludeActiveParcel: true, serviceKind: ride.scheduledAt ? 'scheduledRide' : 'ride', pickupCoordinates }
     );
     const matchingCaptains = targetCaptainId
         ? captains.filter((captain) => captain._id.toString() === targetCaptainId.toString())
         : captains;
 
-    console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, pickupCoordinates);
+    console.log(`[AUDIT][${TRACE_ID}] Pickup Coords:`, resolvedPickupCoordinates);
     console.log(`[AUDIT][${TRACE_ID}] Matching Captains finais:`, matchingCaptains.length);
 
     // Persiste as coordenadas do embarque na própria corrida (Etapa 6 da auditoria de UX,
@@ -67,7 +78,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
     // de oferta, calculada localmente a partir da posição GPS do motorista.
     const rideWithUser = await rideModel.findOneAndUpdate(
         { _id: ride._id },
-        { pickupCoordinates: { lat: pickupCoordinates.lat, lng: pickupCoordinates.lng } },
+        { pickupCoordinates: { lat: resolvedPickupCoordinates.lat, lng: resolvedPickupCoordinates.lng } },
         { new: true }
     ).populate('user');
 
@@ -100,7 +111,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
             // local. Campo extra e inofensivo pro Android nativo (ele não lê
             // esta chave hoje).
             offerExpiresAt: computeOfferExpiresAt(rideWithUser)?.toISOString(),
-            passengerName: rideWithUser.user?.fullname?.firstname || '',
+            passengerName: rideWithUser.user?.fullname?.firstname || rideWithUser.adminPassenger?.name || '',
             isScheduled: Boolean(rideWithUser.scheduledAt),
             scheduledAt: rideWithUser.scheduledAt,
         }, TRACE_ID).catch(console.error);
@@ -769,7 +780,7 @@ module.exports.getCaptainRideHistory = async (req, res) => {
 module.exports.getPendingRides = async (req, res) => {
     try {
         const rides = await rideService.getPendingRidesForCaptain({ captain: req.captain });
-        return res.status(200).json(sanitizeCaptainFinanceList(rides));
+        return res.status(200).json(rides.map((ride) => toCaptainRideResponse(ride)));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

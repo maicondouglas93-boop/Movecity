@@ -1200,7 +1200,11 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
             userModel.find({ 'fullname.firstname': { $regex: search, $options: 'i' } }).select('_id').limit(50),
             captainModel.find({ 'fullname.firstname': { $regex: search, $options: 'i' } }).select('_id').limit(50),
         ]);
-        const or = [{ status: { $regex: search, $options: 'i' } }];
+        const or = [
+            { status: { $regex: search, $options: 'i' } },
+            { 'adminPassenger.name': { $regex: search, $options: 'i' } },
+            { 'adminPassenger.phone': { $regex: search, $options: 'i' } },
+        ];
         if (matchedUsers.length) or.push({ user: { $in: matchedUsers.map((u) => u._id) } });
         if (matchedCaptains.length) or.push({ captain: { $in: matchedCaptains.map((c) => c._id) } });
         rideQuery.$or = or;
@@ -1214,6 +1218,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
     if (filters.paymentMethod) { rideQuery.paymentMethod = filters.paymentMethod; parcelQuery.paymentMethod = filters.paymentMethod; }
     if (filters.source === 'admin') rideQuery.source = 'admin';
     if (filters.source === 'passenger') rideQuery.source = 'passenger_requested';
+    const sourceExcludesParcels = filters.source === 'admin' || filters.source === 'passenger';
 
     if (filters.period && filters.period !== 'all') {
         const now = new Date();
@@ -1244,7 +1249,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
             .populate('captain', 'fullname email phone vehicle rating')
             .populate('createdBy', 'name')
             .sort({ createdAt: -1 }).limit(fetchCount),
-        type === 'ride' ? Promise.resolve([]) : parcelModel.find(parcelQuery)
+        type === 'ride' || sourceExcludesParcels ? Promise.resolve([]) : parcelModel.find(parcelQuery)
             .populate('user', 'fullname email phone')
             .populate('captain', 'fullname email phone vehicle rating')
             .sort({ createdAt: -1 }).limit(fetchCount),
@@ -1260,7 +1265,7 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
 
     const [totalRides, totalParcels] = await Promise.all([
         type === 'parcel' ? 0 : rideModel.countDocuments(rideQuery),
-        type === 'ride' ? 0 : parcelModel.countDocuments(parcelQuery),
+        type === 'ride' || sourceExcludesParcels ? 0 : parcelModel.countDocuments(parcelQuery),
     ]);
     const total = totalRides + totalParcels;
 
@@ -1274,13 +1279,13 @@ module.exports.getRides = async (page = 1, limit = 10, search = '', filters = {}
 
     const [reqR, reqP, ongR, ongP, finR, finP, canR, canP] = await Promise.all([
         type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'requested' }),
-        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'awaiting_provider' }),
+        type === 'ride' || sourceExcludesParcels ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'awaiting_provider' }),
         type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: { $in: ONGOING_RIDE_STATUSES } }),
-        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: { $in: ONGOING_PARCEL_STATUSES } }),
+        type === 'ride' || sourceExcludesParcels ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: { $in: ONGOING_PARCEL_STATUSES } }),
         type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'finished' }),
-        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'finished' }),
+        type === 'ride' || sourceExcludesParcels ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'finished' }),
         type === 'parcel' ? 0 : rideModel.countDocuments({ ...baseRideQuery, status: 'cancelled' }),
-        type === 'ride' ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'cancelled' }),
+        type === 'ride' || sourceExcludesParcels ? 0 : parcelModel.countDocuments({ ...baseParcelQuery, status: 'cancelled' }),
     ]);
     const requested = reqR + reqP;
     const ongoing = ongR + ongP;

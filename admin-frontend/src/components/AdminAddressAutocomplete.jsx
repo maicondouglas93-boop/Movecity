@@ -21,18 +21,24 @@ export default function AdminAddressAutocomplete({
   disabled = false,
   minChars = 3,
   debounceMs = 400,
+  embedCoordinatesInValue = true,
 }) {
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [sessionToken, setSessionToken] = useState(null);
   const debounceRef = useRef(null);
+  const abortRef = useRef(null);
+  const requestIdRef = useRef(0);
   const rootRef = useRef(null);
   const skipFetchRef = useRef(false);
 
   useEffect(() => () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -45,28 +51,42 @@ export default function AdminAddressAutocomplete({
 
   const fetchSuggestions = (input) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+    const requestId = ++requestIdRef.current;
     const q = String(input || '').trim();
     if (q.length < minChars) {
       setSuggestions([]);
       setSearching(false);
+      setHasSearched(false);
+      setOpen(false);
       return;
     }
     setSearching(true);
+    setHasSearched(false);
     debounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
         const { suggestions: list, sessionToken: next } = await getAddressSuggestions({
           input: q,
           lat: biasLocation?.lat ?? biasLocation?.ltd,
           lng: biasLocation?.lng,
           sessionToken,
+          signal: controller.signal,
         });
+        if (requestId !== requestIdRef.current) return;
         setSuggestions(list.slice(0, 8));
+        setActiveIndex(0);
+        setHasSearched(true);
         if (next) setSessionToken(next);
         setOpen(true);
       } catch {
+        if (controller.signal.aborted || requestId !== requestIdRef.current) return;
         setSuggestions([]);
+        setHasSearched(true);
+        setOpen(true);
       } finally {
-        setSearching(false);
+        if (requestId === requestIdRef.current) setSearching(false);
       }
     }, debounceMs);
   };
@@ -76,13 +96,17 @@ export default function AdminAddressAutocomplete({
     skipFetchRef.current = false;
     onChange?.(next);
     setOpen(true);
+    setActiveIndex(0);
     fetchSuggestions(next);
   };
 
   const resolveAndSelect = async (item) => {
     // Fecha a lista antes do async — evita removeChild quando o pai re-renderiza a rota.
+    ++requestIdRef.current;
+    abortRef.current?.abort();
     setOpen(false);
     setSuggestions([]);
+    setHasSearched(false);
     setResolving(true);
     try {
       let address = suggestionTitle(item);
@@ -107,7 +131,9 @@ export default function AdminAddressAutocomplete({
           + (suggestionSubtitle(item) ? ` - ${suggestionSubtitle(item)}` : '');
       }
 
-      const formatted = formatAddressWithCoords({ address, lat, lng });
+      const formatted = embedCoordinatesInValue
+        ? formatAddressWithCoords({ address, lat, lng })
+        : String(address || '').trim();
       skipFetchRef.current = true;
       onChange?.(formatted);
       onResolved?.(formatted, lat != null ? { lat: Number(lat), lng: Number(lng) } : null);
@@ -127,7 +153,25 @@ export default function AdminAddressAutocomplete({
     }
   };
 
-  const showList = open && (searching || resolving || suggestions.length > 0);
+  const handleKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      setOpen(false);
+      return;
+    }
+    if (!open || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((index) => (index + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      resolveAndSelect(suggestions[activeIndex]);
+    }
+  };
+
+  const showList = open && (searching || resolving || suggestions.length > 0 || hasSearched);
 
   return (
     <div ref={rootRef} className="relative">
@@ -144,6 +188,7 @@ export default function AdminAddressAutocomplete({
         value={value}
         disabled={disabled || resolving}
         onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
         onFocus={() => {
           if (suggestions.length > 0) setOpen(true);
           else if (String(value).trim().length >= minChars && !skipFetchRef.current) {
@@ -151,13 +196,17 @@ export default function AdminAddressAutocomplete({
           }
         }}
         autoComplete="off"
+        role="combobox"
+        aria-expanded={showList}
+        aria-controls={id ? `${id}-listbox` : undefined}
+        aria-activedescendant={showList && suggestions[activeIndex] && id ? `${id}-option-${activeIndex}` : undefined}
       />
       {(searching || resolving) && (
         <span className="absolute right-3 top-8 text-[10px] text-text-muted">…</span>
       )}
 
       {showList && (
-        <ul className="absolute z-40 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-surface border border-border rounded-lg shadow-lg divide-y divide-border">
+        <ul id={id ? `${id}-listbox` : undefined} role="listbox" className="absolute z-40 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-surface border border-border rounded-lg shadow-lg divide-y divide-border">
           {searching && suggestions.length === 0 && (
             <li className="px-3 py-2.5 text-xs text-text-muted">Buscando sugestões…</li>
           )}
@@ -168,11 +217,12 @@ export default function AdminAddressAutocomplete({
             const title = suggestionTitle(item);
             const subtitle = suggestionSubtitle(item);
             return (
-              <li key={`${title}-${idx}`}>
+              <li key={item?.placeId || `${title}-${idx}`} id={id ? `${id}-option-${idx}` : undefined} role="option" aria-selected={idx === activeIndex}>
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-background transition-colors"
+                  className={`w-full text-left px-3 py-2 hover:bg-background transition-colors ${idx === activeIndex ? 'bg-background' : ''}`}
                   onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(idx)}
                   onClick={() => resolveAndSelect(item)}
                 >
                   <span className="block text-sm font-medium text-text truncate">{title}</span>

@@ -7,7 +7,7 @@ const monitoringController = require('../controllers/monitoring.controller');
 const uploadController = require('../controllers/upload.controller');
 const { authAdmin, authorizeRoles } = require('../middlewares/adminAuth.middleware');
 const { loginLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
-const { body, query } = require('express-validator');
+const { body, param, query } = require('express-validator');
 
 // Auth Routes
 router.post('/login', loginLimiter, adminController.login);
@@ -96,8 +96,58 @@ router.get('/captains/:id/timeline', authAdmin, adminController.getCaptainTimeli
 
 // Rides
 router.get('/rides', authAdmin, adminController.getRides);
-router.post('/rides/manual/estimate', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.estimateManualRide);
-router.post('/rides/manual', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.createManualRide);
+router.post(
+    '/rides/manual/estimate',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    body('pickup').isString().trim().isLength({ min: 3, max: 500 }),
+    body('destination').isString().trim().isLength({ min: 3, max: 500 }),
+    body('pickupCoordinates.lat').optional().isFloat({ min: -90, max: 90 }),
+    body('pickupCoordinates.lng').optional().isFloat({ min: -180, max: 180 }),
+    body('destinationCoordinates.lat').optional().isFloat({ min: -90, max: 90 }),
+    body('destinationCoordinates.lng').optional().isFloat({ min: -180, max: 180 }),
+    body('vehicleType').isString().trim().isLength({ min: 1, max: 50 }),
+    adminController.estimateManualRide
+);
+router.post(
+    '/rides/manual/available-captains',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    body('pickup').isString().trim().isLength({ min: 3, max: 500 }),
+    body('pickupCoordinates.lat').optional().isFloat({ min: -90, max: 90 }),
+    body('pickupCoordinates.lng').optional().isFloat({ min: -180, max: 180 }),
+    body('vehicleType').isString().trim().isLength({ min: 1, max: 50 }),
+    adminController.getManualRideAvailableCaptains
+);
+router.post(
+    '/rides/manual',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    body('idempotencyKey').isString().trim().isLength({ min: 16, max: 100 }),
+    body('passenger.name').isString().trim().isLength({ min: 2, max: 120 }),
+    body('passenger.phone').isString().trim().isLength({ min: 8, max: 30 }),
+    body('passenger.passengerCount').isInt({ min: 1, max: 8 }),
+    body('passenger.userId').optional({ checkFalsy: true }).isMongoId(),
+    body('passenger.note').optional({ checkFalsy: true }).isString().trim().isLength({ max: 500 }),
+    body('pickup.address').isString().trim().isLength({ min: 3, max: 500 }),
+    body('pickup.lat').isFloat({ min: -90, max: 90 }),
+    body('pickup.lng').isFloat({ min: -180, max: 180 }),
+    body('destination.address').isString().trim().isLength({ min: 3, max: 500 }),
+    body('destination.lat').isFloat({ min: -90, max: 90 }),
+    body('destination.lng').isFloat({ min: -180, max: 180 }),
+    body('vehicleType').isString().trim().isLength({ min: 1, max: 50 }),
+    body('paymentMethod').isIn(['cash', 'pix']),
+    body('captainId').optional({ checkFalsy: true }).isMongoId(),
+    body('observation').optional({ checkFalsy: true }).isString().trim().isLength({ max: 500 }),
+    adminController.createManualRide
+);
+router.get(
+    '/rides/:id/access-code',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    param('id').isMongoId(),
+    adminController.getManualRideAccessCode
+);
 router.get('/rides/:id/timeline', authAdmin, adminController.getRideTimeline);
 router.put('/rides/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.cancelRide);
 router.put('/rides/:id/reassign', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.reassignRide);
@@ -136,7 +186,7 @@ router.post('/tariffs/schedule', authAdmin, authorizeRoles('super_admin'), admin
 router.get(
     '/maps/suggestions',
     authAdmin,
-    authorizeRoles('super_admin'),
+    authorizeRoles('super_admin', 'operador'),
     query('input').isString().isLength({ min: 3 }),
     query('lat').optional().isNumeric(),
     query('lng').optional().isNumeric(),
@@ -146,7 +196,7 @@ router.get(
 router.get(
     '/maps/place-details',
     authAdmin,
-    authorizeRoles('super_admin'),
+    authorizeRoles('super_admin', 'operador'),
     query('placeId').isString().isLength({ min: 1 }),
     query('sessionToken').optional().isString(),
     adminMapsController.getPlaceDetails

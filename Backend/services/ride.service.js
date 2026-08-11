@@ -280,8 +280,21 @@ module.exports.createRide = async ({
         }
     }
 
-    // Calcular rota e tempo real
-    const distanceTime = await mapService.getDistanceTime(pickup, destination);
+    // No fluxo do painel as coordenadas vêm do item escolhido no autocomplete.
+    // Usá-las evita uma segunda geocodificação escolher outra rua/cidade homônima.
+    const routePoint = (address, coordinates) => {
+        const lat = Number(coordinates?.lat);
+        const lng = Number(coordinates?.lng);
+        return coordinates?.lat !== '' && coordinates?.lat != null
+            && coordinates?.lng !== '' && coordinates?.lng != null
+            && Number.isFinite(lat) && Number.isFinite(lng)
+            ? `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+            : address;
+    };
+    const distanceTime = await mapService.getDistanceTime(
+        routePoint(pickup, suppliedPickupCoordinates),
+        routePoint(destination, suppliedDestinationCoordinates)
+    );
     const distance = distanceTime.distance.value;
     const time = distanceTime.duration.value;
 

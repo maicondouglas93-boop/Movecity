@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   formatAddressWithCoords,
   getAddressSuggestions,
@@ -43,11 +44,14 @@ export default function AdminAddressAutocomplete({
 
   useEffect(() => {
     const onDocClick = (e) => {
-      if (!rootRef.current?.contains(e.target)) setOpen(false);
+      if (rootRef.current?.contains(e.target)) return;
+      // Lista em portal (fora do root) — não fechar ao clicar na sugestão.
+      if (e.target.closest?.(`[data-admin-ac-list="${id || 'ac'}"]`)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+  }, [id]);
 
   const fetchSuggestions = (input) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -172,6 +176,32 @@ export default function AdminAddressAutocomplete({
   };
 
   const showList = open && (searching || resolving || suggestions.length > 0 || hasSearched);
+  const [listStyle, setListStyle] = useState(null);
+
+  useEffect(() => {
+    if (!showList || !rootRef.current) {
+      setListStyle(null);
+      return undefined;
+    }
+    const update = () => {
+      const input = rootRef.current?.querySelector('input');
+      const rect = (input || rootRef.current).getBoundingClientRect();
+      setListStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 5000,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [showList, suggestions.length, searching, resolving]);
 
   return (
     <div ref={rootRef} className="relative">
@@ -205,8 +235,14 @@ export default function AdminAddressAutocomplete({
         <span className="absolute right-3 top-8 text-[10px] text-text-muted">…</span>
       )}
 
-      {showList && (
-        <ul id={id ? `${id}-listbox` : undefined} role="listbox" className="absolute z-40 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-surface border border-border rounded-lg shadow-lg divide-y divide-border">
+      {showList && listStyle && createPortal(
+        <ul
+          id={id ? `${id}-listbox` : undefined}
+          data-admin-ac-list={id || 'ac'}
+          role="listbox"
+          style={listStyle}
+          className="max-h-56 overflow-y-auto bg-surface border border-border rounded-lg shadow-lg divide-y divide-border"
+        >
           {searching && suggestions.length === 0 && (
             <li className="px-3 py-2.5 text-xs text-text-muted">Buscando sugestões…</li>
           )}
@@ -233,7 +269,8 @@ export default function AdminAddressAutocomplete({
               </li>
             );
           })}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );

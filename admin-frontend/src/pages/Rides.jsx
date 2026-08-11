@@ -537,33 +537,40 @@ export default function Rides() {
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
-            <FitDriversBounds drivers={liveDriversList} />
-            {liveDriversList.map((driver) => (
-              <Marker
-                key={driver.captainId}
-                position={[driver.ltd, driver.lng]}
-                icon={driverMarkerIcon(driver.status)}
-              >
-                <Popup>
-                  <div className="text-sm space-y-1 min-w-[140px]">
-                    <p className="font-semibold">{driver.name || 'Motorista'}</p>
-                    <p className="text-xs">
-                      {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
-                    </p>
-                    {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
-                      <p className="text-xs opacity-80">
-                        {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </p>
-                    )}
-                    {driver.lastSeenAt && (
-                      <p className="text-[11px] opacity-60">GPS {timeAgo(driver.lastSeenAt)}</p>
-                    )}
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
+            {/* Congela markers enquanto o modal de corrida manual está aberto —
+                React 19 + react-leaflet quebram o DOM (insertBefore) com updates
+                de GPS + autocomplete no mesmo commit. */}
+            {!showManualRide && (
+              <>
+                <FitDriversBounds drivers={liveDriversList} />
+                {liveDriversList.map((driver) => (
+                  <Marker
+                    key={driver.captainId}
+                    position={[driver.ltd, driver.lng]}
+                    icon={driverMarkerIcon(driver.status)}
+                  >
+                    <Popup>
+                      <div className="text-sm space-y-1 min-w-[140px]">
+                        <p className="font-semibold">{driver.name || 'Motorista'}</p>
+                        <p className="text-xs">
+                          {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
+                        </p>
+                        {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
+                          <p className="text-xs opacity-80">
+                            {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        )}
+                        {driver.lastSeenAt && (
+                          <p className="text-[11px] opacity-60">GPS {timeAgo(driver.lastSeenAt)}</p>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+              </>
+            )}
           </MapContainer>
       </div>
 

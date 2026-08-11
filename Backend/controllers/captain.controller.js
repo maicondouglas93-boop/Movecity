@@ -485,7 +485,7 @@ module.exports.getSummary = async (req, res, next) => {
 module.exports.getEarnings = async (req, res, next) => {
     try {
         const { sanitizeEarningsBreakdown } = require('../utils/financePrivacy');
-        const range = ['day', 'week', 'month'].includes(req.query.range) ? req.query.range : 'day';
+        const range = ['day', 'week', 'month', 'all'].includes(req.query.range) ? req.query.range : 'day';
         const captainService = require('../services/captain.service');
         const breakdown = await captainService.getEarningsBreakdown(req.captain._id, range);
         res.status(200).json(sanitizeEarningsBreakdown(breakdown));

@@ -7,6 +7,7 @@ import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { RideContext } from '@/shared/contexts/RideContext'
+import { formatBRL } from '@/shared/utils/currency'
 
 // Fase A da experiência de corrida ativa (2026-08-03): o status dos botões vem da
 // corrida real (backend), não mais de um useState fixo em 'accepted' — depois de um
@@ -118,7 +119,11 @@ const ConfirmRidePopUp = (props) => {
                 setCaptainRide(optimisticRide)
                 setRideStatus(status); // optimistic
             } else {
-                setError('Failed to update status')
+                // Auditoria do app do motorista (2026-08-11, P1): antes ficava em `error`,
+                // um estado só renderizado dentro do formulário de PIN — uma falha aqui
+                // (rideStatus 'accepted'/'going_to_pickup') não aparecia em lugar nenhum
+                // da tela. addToast é visível em qualquer passo, igual ao resto do app.
+                addToast(err.response?.data?.message || 'Não foi possível atualizar o status. Tente novamente.', 'error')
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
         } finally {
@@ -129,7 +134,7 @@ const ConfirmRidePopUp = (props) => {
     const submitHandler = async (e) => {
         e.preventDefault()
         if (!otp || otp.length !== 6) {
-            return setError('Please enter the 6-digit OTP from the passenger')
+            return setError('Digite o PIN de 6 dígitos informado pelo passageiro.')
         }
         setError('')
         setLoading(true)
@@ -164,7 +169,7 @@ const ConfirmRidePopUp = (props) => {
                 props.setRidePopupPanel(false)
                 navigate('/captain-riding', { replace: true, state: { ride: optimisticRide } }) // Optimistic
             } else {
-                setError(err.response?.data?.message || 'Invalid OTP. Please try again.')
+                setError(err.response?.data?.message || 'PIN inválido. Tente novamente.')
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
         } finally {
@@ -177,7 +182,7 @@ const ConfirmRidePopUp = (props) => {
             <div className='flex items-center justify-between mb-2.5 gap-2'>
                 <h3 className='text-base font-semibold text-ink-900'>Iniciar corrida</h3>
                 {props.ride?.fare != null && (
-                    <p className="text-base font-bold text-ink-900">R${props.ride.fare}</p>
+                    <p className="text-base font-bold text-ink-900">{formatBRL(props.ride.fare)}</p>
                 )}
             </div>
             <PassengerIdentityCard

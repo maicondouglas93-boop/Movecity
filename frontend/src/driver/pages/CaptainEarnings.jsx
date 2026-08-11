@@ -8,6 +8,7 @@ import Card from '@/shared/components/ui/Card';
 import EmptyState from '@/shared/components/ui/EmptyState';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
 import { getAccessToken } from '@/shared/services/session';
+import { formatBRL } from '@/shared/utils/currency';
 
 const RANGES = [
     { value: 'day', label: 'Hoje' },
@@ -38,15 +39,32 @@ const CaptainEarnings = () => {
         }
     });
 
+    // Auditoria do app do motorista (2026-08-11, P1): "Ganhos Totais" lia
+    // captain.earnings — bruto (sem descontar comissão), nunca bate com a soma dos
+    // cards de período (líquidos) logo abaixo, na mesma tela. Busca a mesma
+    // metodologia (getEarningsBreakdown, só corridas, líquido) com range='all'.
+    const { data: lifetimeData, isLoading: lifetimeLoading } = useQuery({
+        queryKey: ['captainEarnings', 'all'],
+        queryFn: async () => {
+            const token = getAccessToken('captain');
+            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=all`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.data;
+        }
+    });
+
     return (
         <div className="h-screen bg-surface-alt flex flex-col pt-24">
             <PageHeader title="Ganhos" className="shadow-raised" />
 
             <div className="flex-1 overflow-y-auto p-4 pb-6">
                 <div className="bg-ink-900 text-white rounded-panel p-6 shadow-floating mb-6 text-center">
-                    <p className="text-white/70 text-sm mb-1">Faturamento bruto acumulado</p>
-                    <h2 className="text-4xl font-bold mb-2">{formatCurrency(captain?.earnings)}</h2>
-                    <p className="text-white/50 text-xs">Antes das comissões da plataforma</p>
+                    <p className="text-white/70 text-sm mb-1">Ganhos Totais</p>
+                    <h2 className="text-4xl font-bold mb-2">
+                        {lifetimeLoading ? '...' : formatBRL(lifetimeData?.totalEarnings)}
+                    </h2>
+                    <p className="text-white/50 text-xs">Total líquido acumulado (mesmo cálculo dos períodos abaixo)</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -57,8 +75,8 @@ const CaptainEarnings = () => {
                     </Card>
                     <Card shadow="raised" padding="p-5" className="text-center">
                         <i className="ri-star-fill text-2xl text-yellow-500 mb-2 block"></i>
-                        <h3 className="text-xl font-bold text-ink-900">{captain?.rating?.toFixed(1) || '5.0'}</h3>
-                        <p className="text-xs text-ink-600">Avaliação Média</p>
+                        <h3 className="text-xl font-bold text-ink-900">{captain?.rating ? captain.rating.toFixed(1) : '—'}</h3>
+                        <p className="text-xs text-ink-600">{captain?.rating ? 'Avaliação Média' : 'Sem avaliações ainda'}</p>
                     </Card>
                 </div>
 
@@ -83,7 +101,7 @@ const CaptainEarnings = () => {
                         Ganhos líquidos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
                     </p>
                     <h2 className="text-3xl font-black text-ink-900 tracking-tight">
-                        {isLoading ? '...' : formatCurrency(data?.totalEarnings)}
+                        {isLoading ? '...' : formatBRL(data?.totalEarnings)}
                     </h2>
                     <p className="text-xs text-ink-600 mt-1">
                         {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'}`}
@@ -129,8 +147,8 @@ const CaptainEarnings = () => {
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center text-xs border-t border-line pt-2 mt-1">
-                                    <span className="text-ink-600">Líquido recebido</span>
-                                    <span className="font-bold text-brand-600">{formatCurrency(ride.driverAmount ?? ride.netEarnings)}</span>
+                                    <span className="text-ink-600">Você recebeu</span>
+                                    <span className="font-bold text-brand-600">{formatBRL(ride.driverAmount ?? ride.netEarnings)}</span>
                                 </div>
                             </Card>
                         ))}

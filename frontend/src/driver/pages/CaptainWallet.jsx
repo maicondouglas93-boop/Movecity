@@ -9,6 +9,7 @@ import StatusBadge from '@/shared/components/ui/StatusBadge'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
 import { getAccessToken } from '@/shared/services/session'
+import { formatBRL } from '@/shared/utils/currency'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
@@ -20,7 +21,13 @@ const CaptainWallet = () => {
     const [payoutFeedback, setPayoutFeedback] = useState(null); // { type: 'success' | 'error', message }
 
     // Queries
-    const { data: walletData, isLoading: walletLoading } = useQuery({
+    const {
+        data: walletData,
+        isLoading: walletLoading,
+        isError: walletIsError,
+        refetch: refetchWallet,
+        isRefetching: walletRefetching,
+    } = useQuery({
         queryKey: ['captainWallet'],
         queryFn: async () => {
             const token = getAccessToken('captain')
@@ -29,7 +36,13 @@ const CaptainWallet = () => {
         }
     })
 
-    const { data: transactionsData, isLoading: transLoading } = useQuery({
+    const {
+        data: transactionsData,
+        isLoading: transLoading,
+        isError: transIsError,
+        refetch: refetchTransactions,
+        isRefetching: transRefetching,
+    } = useQuery({
         queryKey: ['captainTransactions'],
         queryFn: async () => {
             const token = getAccessToken('captain')
@@ -80,7 +93,12 @@ const CaptainWallet = () => {
     // Novos saldos
     const creditBalance = wallet?.creditBalance || 0;
     const pendingBalance = wallet?.pendingBalance || 0;
-    const isBlocked = captain?.canReceiveRides === false || creditBalance <= -20; // threshold provisório no front para UI rápida
+    // Auditoria do app do motorista (2026-08-11, P1): o limite de saldo negativo é
+    // configurável pelo admin (GlobalSetting.maximumNegativeBalance, default 0) e já
+    // decide canReceiveRides no backend de forma atômica a cada transação
+    // (Backend/services/wallet.service.js) — o "-20" fixo aqui era um palpite do
+    // frontend que podia divergir do limite real.
+    const isBlocked = captain?.canReceiveRides === false;
     const status = isBlocked ? 'BLOQUEADO' : 'ATIVO';
 
     return (
@@ -96,6 +114,22 @@ const CaptainWallet = () => {
             {/* Content */}
             <div className='flex-1 overflow-y-auto p-4 pb-6'>
                 
+                {/* Auditoria do app do motorista (2026-08-11, P1): antes, uma falha de rede
+                    aqui deixava wallet undefined e creditBalance/pendingBalance caíam
+                    silenciosamente pro fallback `|| 0` — o motorista via "R$ 0,00" como se
+                    fosse o saldo real, sem nenhum aviso de que a chamada tinha falhado
+                    (podia até mascarar um bloqueio por saldo negativo real). */}
+                {walletIsError ? (
+                    <EmptyState
+                        variant="error"
+                        icon="ri-wifi-off-line"
+                        title="Não foi possível carregar sua carteira"
+                        description="Verifique sua conexão e tente novamente."
+                        actionLabel={walletRefetching ? 'Tentando...' : 'Tentar de novo'}
+                        onAction={refetchWallet}
+                    />
+                ) : (
+                <>
                 {/* Notice Blocked */}
                 {isBlocked && (
                     <div className='bg-danger-50 border border-danger-500/30 text-danger-600 p-4 rounded-panel mb-4 text-sm flex items-start gap-3 shadow-raised'>
@@ -109,7 +143,7 @@ const CaptainWallet = () => {
 
                 {/* Balance Cards */}
                 <div className='grid grid-cols-1 gap-4 mb-6'>
-                    
+
                     {/* Credit Balance Card */}
                     <div className={`rounded-panel shadow-raised border p-5 relative overflow-hidden ${creditBalance < 0 ? 'bg-danger-50 border-danger-500/20' : 'bg-surface border-line'}`}>
                         <div className='absolute top-0 right-0 p-3'>
@@ -120,7 +154,7 @@ const CaptainWallet = () => {
                             <i className="ri-coins-fill text-yellow-500"></i> Meus Créditos
                         </p>
                         <h2 className={`text-4xl font-bold mb-2 ${creditBalance < 0 ? 'text-danger-600' : 'text-ink-900'}`}>
-                            R$ {creditBalance.toFixed(2)}
+                            {formatBRL(creditBalance)}
                         </h2>
                         <p className='text-xs text-ink-600 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
 
@@ -138,7 +172,7 @@ const CaptainWallet = () => {
                         <p className='text-sm text-blue-600 mb-1 flex items-center gap-1 font-semibold'>
                             <i className="ri-bank-card-fill"></i> Repasses Pendentes
                         </p>
-                        <h2 className='text-3xl font-bold text-blue-900 mb-1'>R$ {pendingBalance.toFixed(2)}</h2>
+                        <h2 className='text-3xl font-bold text-blue-900 mb-1'>{formatBRL(pendingBalance)}</h2>
                         <p className='text-xs text-blue-600 opacity-80 mb-4'>Valor retido de corridas no cartão aguardando transferência bancária para você.</p>
 
                         <button
@@ -166,16 +200,27 @@ const CaptainWallet = () => {
                     )}
 
                 </div>
+                </>
+                )}
 
                 {/* Transactions List */}
                 <h3 className='text-lg font-bold text-ink-900 mb-4'>Extrato (Ledger)</h3>
-                
+
                 {loading ? (
                     <div className='space-y-3'>
                         <Skeleton className="h-20 w-full" />
                         <Skeleton className="h-20 w-full" />
                         <Skeleton className="h-20 w-full" />
                     </div>
+                ) : transIsError ? (
+                    <EmptyState
+                        variant="error"
+                        icon="ri-wifi-off-line"
+                        title="Não foi possível carregar o extrato"
+                        description="Verifique sua conexão e tente novamente."
+                        actionLabel={transRefetching ? 'Tentando...' : 'Tentar de novo'}
+                        onAction={refetchTransactions}
+                    />
                 ) : transactions.length === 0 ? (
                     <EmptyState
                         icon="ri-exchange-dollar-line"
@@ -186,7 +231,7 @@ const CaptainWallet = () => {
                     <div className='space-y-3'>
                         {transactions.map((tx) => {
                             // Identify UI colors and icons based on strict ledger types
-                            const isCredit = ['recharge', 'bonus', 'ride_payment', 'adjustment'].includes(tx.type) && tx.balanceAfter >= tx.balanceBefore;
+                            const isCredit = ['recharge', 'bonus', 'ride_payment', 'parcel_payment', 'adjustment'].includes(tx.type) && tx.balanceAfter >= tx.balanceBefore;
                             const isDebit = !isCredit;
 
                             let icon = 'ri-exchange-dollar-line';
@@ -216,14 +261,14 @@ const CaptainWallet = () => {
                                         </div>
                                         <div className='text-right'>
                                             <h4 className={`font-bold ${isDebit ? 'text-danger-500' : 'text-brand-600'}`}>
-                                                {isDebit ? '-' : '+'}R$ {Math.abs(tx.amount).toFixed(2)}
+                                                {isDebit ? '-' : '+'}{formatBRL(Math.abs(tx.amount))}
                                             </h4>
                                             {tx.paymentMethod === 'card' && <span className='text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>Cartão</span>}
                                         </div>
                                     </div>
                                     <div className='flex justify-between items-center text-xs text-ink-600 border-t border-line pt-2 mt-1'>
-                                        <p>Saldo Ant: R$ {tx.balanceBefore.toFixed(2)}</p>
-                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>R$ {tx.balanceAfter.toFixed(2)}</span></p>
+                                        <p>Saldo Ant: {formatBRL(tx.balanceBefore)}</p>
+                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>{formatBRL(tx.balanceAfter)}</span></p>
                                     </div>
                                 </div>
                             )

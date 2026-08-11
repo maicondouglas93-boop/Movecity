@@ -15,6 +15,7 @@ import {
   estimatePresentialFare,
   startPresentialRide,
 } from '@/shared/services/presentialRideApi'
+import { formatBRL } from '@/shared/utils/currency'
 
 const STEPS = {
   CHOICE: 'choice',
@@ -311,7 +312,7 @@ const CaptainPresentialRide = () => {
                       <span>{formatKm(estimate.estimatedDistance)}</span>
                       <span>{formatMin(estimate.estimatedTime)}</span>
                       <span className="font-semibold text-ink-900">
-                        R$ {Number(estimate.fare).toFixed(2)}
+                        {formatBRL(estimate.fare)}
                       </span>
                     </div>
                   )}

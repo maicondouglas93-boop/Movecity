@@ -178,20 +178,28 @@ function startOfToday() {
 module.exports.getEarningsBreakdown = async (captainId, range = 'day') => {
     const rideModel = require('../models/ride.model');
 
-    let startDate;
+    // Auditoria do app do motorista (2026-08-11, P1): 'all' alimenta o card "Ganhos
+    // Totais" da tela de Ganhos com a MESMA metodologia (só corridas, líquido) dos
+    // cards de período logo abaixo — antes esse card lia captain.earnings (bruto,
+    // nunca subtrai comissão), que nunca batia com a soma exibida na mesma tela.
+    let startDate = null;
     if (range === 'week') {
         startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     } else if (range === 'month') {
         startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    } else {
+    } else if (range !== 'all') {
         startDate = startOfToday();
     }
 
-    const rides = await rideModel.find({
+    const query = {
         captain: captainId,
         status: 'finished',
-        updatedAt: { $gte: startDate }
-    }).sort({ updatedAt: -1 });
+    };
+    if (startDate) {
+        query.updatedAt = { $gte: startDate };
+    }
+
+    const rides = await rideModel.find(query).sort({ updatedAt: -1 });
 
     let totalEarnings = 0;
     let totalCommission = 0;

@@ -4,6 +4,7 @@ import api from '@/shared/services/axios'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import { getAccessToken } from '@/shared/services/session'
+import { formatBRL } from '@/shared/utils/currency'
 
 const formatWhen = (iso) => {
   if (!iso) return '—'
@@ -80,7 +81,7 @@ const CaptainScheduled = () => {
                   {item.vehicleType ? ` · ${item.vehicleType === 'moto' ? 'Moto' : 'Carro'}` : ''}
                 </span>
                 <span className="text-sm font-bold text-ink-900">
-                  R$ {Number(item.fare || 0).toFixed(2).replace('.', ',')}
+                  {formatBRL(item.fare)}
                 </span>
               </div>
               <p className="text-sm font-medium text-ink-900 flex items-center gap-1.5">

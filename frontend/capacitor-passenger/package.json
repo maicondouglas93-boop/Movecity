@@ -1,0 +1,12 @@
+{
+  "name": "movecity-passenger-capacitor",
+  "private": true,
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/geolocation": "^6.1.1",
+    "@capacitor/push-notifications": "^6.0.5",
+    "@capacitor/splash-screen": "^6.0.4"
+  }
+}

@@ -76,10 +76,10 @@ const pwaPlugin = VitePWA({
   }
 })
 
-// CaptainHeader importa PwaUpdateContext (virtual:pwa-register/react). No build
-// driver o plugin PWA fica desligado — este stub resolve o virtual sem registrar SW.
+// Headers importam PwaUpdateContext (virtual:pwa-register/react). Nos builds nativos
+// o plugin PWA fica desligado — este stub resolve o virtual sem registrar SW.
 const stubPwaRegisterPlugin = {
-  name: 'stub-pwa-register-driver',
+  name: 'stub-pwa-register-native',
   resolveId(id) {
     if (id === 'virtual:pwa-register/react') return id
     return undefined
@@ -98,27 +98,28 @@ const stubPwaRegisterPlugin = {
   },
 }
 
-// Capacitor espera index.html em webDir; a entrada de fonte continua sendo driver.html.
-const copyDriverHtmlAsIndexPlugin = {
-  name: 'copy-driver-html-as-index',
+// Capacitor espera index.html em webDir; cada APK mantém uma entrada Vite própria.
+const copyNativeHtmlAsIndexPlugin = (role) => ({
+  name: `copy-${role}-html-as-index`,
   closeBundle() {
-    const outDir = path.resolve(__dirname, 'dist-driver')
-    const from = path.join(outDir, 'driver.html')
+    const outDir = path.resolve(__dirname, `dist-${role}`)
+    const from = path.join(outDir, `${role}.html`)
     const to = path.join(outDir, 'index.html')
     if (fs.existsSync(from)) fs.copyFileSync(from, to)
   },
-}
+})
 
 // https://vite.dev/config/
-// mode === 'driver': nova entrada (driver.html → dist-driver), sem PWA.
+// mode === 'driver'/'passenger': entradas isoladas, sem PWA.
 // mode default: app web completo (index.html → dist) com PWA — comportamento preservado.
 export default defineConfig(({ mode }) => {
-  const isDriver = mode === 'driver'
+  const nativeRole = mode === 'driver' || mode === 'passenger' ? mode : null
+  const isNativeBuild = nativeRole !== null
 
   return {
     // Capacitor carrega assets via file/capacitor scheme — base absoluto "/" quebra
     // o build do motorista. O app Web completo mantém "/" (deploy Vercel/PWA).
-    base: isDriver ? './' : '/',
+    base: isNativeBuild ? './' : '/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -126,14 +127,16 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
-      ...(isDriver ? [stubPwaRegisterPlugin, copyDriverHtmlAsIndexPlugin] : [pwaPlugin]),
+      ...(isNativeBuild
+        ? [stubPwaRegisterPlugin, copyNativeHtmlAsIndexPlugin(nativeRole)]
+        : [pwaPlugin]),
     ],
-    build: isDriver
+    build: isNativeBuild
       ? {
-          outDir: 'dist-driver',
+          outDir: `dist-${nativeRole}`,
           emptyOutDir: true,
           rollupOptions: {
-            input: path.resolve(__dirname, 'driver.html'),
+            input: path.resolve(__dirname, `${nativeRole}.html`),
           },
         }
       : {

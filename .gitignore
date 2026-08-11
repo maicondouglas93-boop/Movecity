@@ -12,6 +12,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-driver
+dist-passenger
 dist-ssr
 *.local
 

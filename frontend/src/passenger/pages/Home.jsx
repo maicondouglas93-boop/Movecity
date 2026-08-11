@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import api from '@/shared/services/axios';
@@ -31,6 +31,8 @@ import { joinWithRetry } from '@/shared/services/socketAuth';
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue';
 import { showBrowserNotification } from '@/shared/services/browserNotify';
 import { formatCurrencyBRL } from '@/shared/utils/formatters';
+import { isNativePlatform } from '@/shared/platform/platform';
+import { registerPush } from '@/shared/platform/notification.service';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -151,6 +153,9 @@ const Home = () => {
         // negar por reflexo e perder notificação de corrida pra sempre (item 18 da
         // auditoria de UX; navegadores não deixam perguntar de novo depois de um "Bloquear").
         const setupFCM = async () => {
+            // O APK usa PassengerPushBridge + Capacitor Push. Service Worker e a API
+            // Notification continuam exclusivos do Web/PWA.
+            if (isNativePlatform()) return;
             if (!('Notification' in window)) return;
             if (Notification.permission === 'granted') {
                 await requestFCMToken();
@@ -166,6 +171,10 @@ const Home = () => {
     const handleEnableNotifications = async () => {
         setShowNotificationPrompt(false)
         localStorage.setItem('notificationPromptSeen', '1')
+        if (isNativePlatform()) {
+            await registerPush()
+            return
+        }
         const permission = await Notification.requestPermission()
         if (permission === 'granted') {
             await requestFCMToken();
@@ -226,6 +235,7 @@ const Home = () => {
     // dead zone — quebrando a Home inteira com "Cannot access 'rt' before
     // initialization" em produção (o build não pega isso, é erro de execução).
     useEffect(() => {
+        if (isNativePlatform()) return undefined
         const unsubscribe = onForegroundMessage((payload) => {
             const title = payload?.notification?.title || payload?.data?.title;
             const body = payload?.notification?.body || payload?.data?.message;

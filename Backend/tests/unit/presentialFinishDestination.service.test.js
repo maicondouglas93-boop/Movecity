@@ -1,8 +1,5 @@
-// Cobre o bug relatado: corrida presencial "Definir destino ao finalizar" caindo
-// pra tarifa mínima (R$12,50) em vez de calcular a rota real Lajinha->Ibatiba.
-// endRide agora aceita `destination` (texto digitado pelo motorista ao finalizar) e
-// usa a mesma função central (calculateRideFare) que "Informar destino agora" usa —
-// nunca resolve o preço a partir de um rastro de GPS incompleto/stale.
+// Corrida presencial sem destino: o endereço final descreve somente onde terminou.
+// Distância e tempo financeiros sempre representam a corrida inteira.
 
 jest.mock('../../services/maps.service', () => ({
     haversineKm: jest.fn(() => 0),
@@ -87,62 +84,104 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
         });
     });
 
-    test('calcula a rota real Lajinha->Ibatiba (~22,2km) em vez de cair pra tarifa mínima', async () => {
-        const ride = buildRide();
+    test('Lajinha->Manhuaçu->Lajinha usa 80km e 150min acumulados, não origem->fim', async () => {
+        const ride = buildRide({
+            actualDistance: 80000,
+            startedAt: new Date(Date.now() - 150 * 60 * 1000),
+        });
         rideModel.findOne.mockReturnValue(mockFindOneChain(ride));
         rideModel.findOneAndUpdate.mockResolvedValue({ _id: 'ride1', status: 'finished' });
-
-        mapService.getDistanceTime.mockResolvedValue({
-            distance: { value: 22200 },
-            duration: { value: 1920 },
+        require('../../models/captain.model').findById.mockReturnValue({
+            select: jest.fn().mockResolvedValue({
+                location: { ltd: LAJINHA.lat, lng: LAJINHA.lng },
+                lastSeenAt: new Date(),
+            }),
         });
-        mapService.getAddressCoordinate.mockResolvedValue({ ltd: -20.2349, lng: -41.5108 });
+        rideModel.findById.mockReturnValue({
+            populate: jest.fn().mockReturnValue({
+                populate: jest.fn().mockResolvedValue({
+                    _id: 'ride1',
+                    status: 'finished',
+                    pickup: 'Lajinha, Minas Gerais, Brazil',
+                    destination: 'Origem, Lajinha',
+                    actualDistance: 80000,
+                    actualTime: 9000,
+                    finalPrice: 250,
+                    commissionAmount: 50,
+                    fareBreakdown: { driverNetEarnings: 200 },
+                }),
+            }),
+        });
 
         PricingEngine.calculateFare.mockResolvedValue({
-            finalFare: 44.74,
-            commissionAmount: 8.95,
+            finalFare: 250,
+            commissionAmount: 50,
             commissionPercent: 20,
-            fareBreakdown: { baseFare: 5, distanceFare: 39.74 },
+            driverEarnings: 200,
+            fareBreakdown: {
+                baseFare: 5,
+                distanceFare: 160,
+                timeFare: 75,
+                finalFare: 250,
+                platformCommission: 50,
+                driverNetEarnings: 200,
+            },
         });
 
-        await rideService.endRide({
+        const result = await rideService.endRide({
             rideId: 'ride1',
             captain: { _id: 'cap1' },
-            destination: 'Ibatiba, State of Espírito Santo, 29395-000, Brazil',
         });
 
-        // A rota foi calculada Lajinha (origem real) -> Ibatiba (destino digitado),
-        // nunca a partir do GPS "preso" perto da origem.
-        expect(mapService.getDistanceTime).toHaveBeenCalledWith(
-            `${LAJINHA.lat},${LAJINHA.lng}`,
-            'Ibatiba, State of Espírito Santo, 29395-000, Brazil',
-        );
-
-        // PricingEngine recebeu a distância REAL da rota (22200m), não os ~30m do
-        // GPS parado perto da origem — essa era a causa da tarifa mínima (R$12,50).
+        expect(mapService.getDistanceTime).not.toHaveBeenCalled();
         expect(PricingEngine.calculateFare).toHaveBeenCalledWith(
-            expect.objectContaining({ distance: 22200 }),
+            expect.objectContaining({
+                distance: 80000,
+                time: expect.any(Number),
+                serviceKind: 'presential',
+            }),
         );
+        const pricingInput = PricingEngine.calculateFare.mock.calls[0][0];
+        expect(pricingInput.time).toBeGreaterThanOrEqual(8999);
+        expect(pricingInput.time).toBeLessThanOrEqual(9001);
 
         const updatePayload = rideModel.findOneAndUpdate.mock.calls[0][1].$set;
-        expect(updatePayload.finalPrice).toBe(44.74);
-        expect(updatePayload.actualDistance).toBe(22200);
-        expect(updatePayload.destination).toBe('Ibatiba, State of Espírito Santo, 29395-000, Brazil');
+        expect(updatePayload.finalPrice).toBe(250);
+        expect(updatePayload.actualDistance).toBe(80000);
+        expect(updatePayload.actualTime).toBe(pricingInput.time);
+        expect(updatePayload.commissionAmount).toBe(50);
+        expect(updatePayload.fareBreakdown.driverNetEarnings).toBe(200);
+        expect(updatePayload.destination).toBe('Origem, Lajinha');
         expect(updatePayload.destinationPending).toBe(false);
+        expect(require('../../models/payment.model').create).toHaveBeenCalledWith(expect.objectContaining({
+            rideId: 'ride1',
+            amount: 250,
+        }));
+        // O mesmo documento consumido pelo histórico expõe origem/fim iguais sem perder
+        // os 80 km, os 150 minutos nem o resultado financeiro consolidado.
+        expect(result).toEqual(expect.objectContaining({
+            status: 'finished',
+            pickup: 'Lajinha, Minas Gerais, Brazil',
+            destination: 'Origem, Lajinha',
+            actualDistance: 80000,
+            actualTime: 9000,
+            finalPrice: 250,
+            commissionAmount: 50,
+            fareBreakdown: expect.objectContaining({ driverNetEarnings: 200 }),
+        }));
     });
 
-    test('nunca mascara falha de rota com tarifa mínima — propaga ROUTE_CALCULATION_FAILED', async () => {
+    test('não inventa rota origem->fim quando não houve distância GPS suficiente', async () => {
         const ride = buildRide();
         rideModel.findOne.mockReturnValue(mockFindOneChain(ride));
-
-        mapService.getDistanceTime.mockRejectedValue(new Error('Unable to resolve coordinates'));
 
         await expect(rideService.endRide({
             rideId: 'ride1',
             captain: { _id: 'cap1' },
-            destination: 'Endereço inexistente 12345',
-        })).rejects.toMatchObject({ code: 'ROUTE_CALCULATION_FAILED' });
+            destination: 'Lajinha, Minas Gerais, Brazil',
+        })).rejects.toMatchObject({ code: 'INSUFFICIENT_TRIP_DISTANCE' });
 
+        expect(mapService.getDistanceTime).not.toHaveBeenCalled();
         expect(PricingEngine.calculateFare).not.toHaveBeenCalled();
         expect(rideModel.findOneAndUpdate).not.toHaveBeenCalled();
     });

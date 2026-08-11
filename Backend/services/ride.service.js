@@ -10,6 +10,7 @@ const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview }
 const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCachedTariffSetting } = require('./tariffSettingCache.service');
+const { normalizeCaptainLocation, isPlausibleTravel } = require('../utils/captainLocationValidation');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -1263,12 +1264,12 @@ async function reconcileWalletAtRideEnd(rideId) {
     return result;
 }
 
-module.exports.endRide = async ({ rideId, captain, destination = null }) => {
+module.exports.endRide = async ({ rideId, captain, destination = null, finishLocation = null }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
 
-    const ride = await rideModel.findOne({
+    let ride = await rideModel.findOne({
         _id: rideId,
         captain: captain._id
     }).populate('user').populate('captain').select('+otp');
@@ -1285,55 +1286,93 @@ module.exports.endRide = async ({ rideId, captain, destination = null }) => {
 
     const finishExtras = {};
     const isPresentialPendingDest = !!(ride.destinationPending || (ride.source === 'driver_initiated' && !ride.destination));
-    // Motorista digitou o destino real ao finalizar ("Definir destino ao finalizar").
-    // Este texto passa a ser o destino OFICIAL da corrida — a origem continua sendo a
-    // origem real registrada na criação (pickupCoordinates), nunca a localização atual
-    // do motorista. Correção do bug em que a corrida caía pra tarifa mínima (R$12,50)
-    // porque o preço final era resolvido só a partir do rastro de GPS acumulado
-    // durante a corrida (frágil: app em segundo plano, poucos pontos, jump filtrado),
-    // em vez de recalcular a rota real origem→destino com o mesmo motor de tarifação
-    // usado em "Informar destino agora".
+
+    // Consolida o fix capturado no clique de finalizar. A bridge envia GPS a cada 5s,
+    // então sem isto os últimos metros desde o tick anterior nunca entrariam na corrida.
+    // O mesmo conjunto de filtros financeiros do Socket.IO é aplicado e o CAS impede
+    // contar duas vezes caso um tick de localização concorra com a finalização.
+    if (isPresentialPendingDest && finishLocation) {
+        const normalized = normalizeCaptainLocation({
+            ltd: finishLocation.lat,
+            lng: finishLocation.lng,
+            accuracy: finishLocation.accuracy,
+            timestamp: finishLocation.timestamp,
+        });
+        if (normalized.valid) {
+            const point = normalized.location;
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const current = await rideModel.findOne({
+                    _id: rideId,
+                    captain: captain._id,
+                    status: 'started',
+                }).select('lastLocation lastLocationAt');
+                if (!current?.lastLocation || !isValidGpsCoord(current.lastLocation.lat, current.lastLocation.lng)) break;
+
+                const distMeters = mapService.haversineKm(
+                    current.lastLocation.lat,
+                    current.lastLocation.lng,
+                    point.lat,
+                    point.lng
+                ) * 1000;
+                const previousAt = current.lastLocationAt ? new Date(current.lastLocationAt).getTime() : null;
+                const elapsedMs = previousAt ? Math.max(0, Date.now() - previousAt) : null;
+                const countSegment = distMeters > 5
+                    && distMeters < 2000
+                    && normalized.isAccurateForFare
+                    && (elapsedMs == null || isPlausibleTravel(distMeters, elapsedMs));
+
+                const update = {
+                    $set: {
+                        lastLocation: { lat: point.lat, lng: point.lng },
+                        lastLocationAt: new Date(),
+                    },
+                };
+                if (countSegment) update.$inc = { actualDistance: distMeters };
+
+                const applied = await rideModel.findOneAndUpdate(
+                    {
+                        _id: rideId,
+                        captain: captain._id,
+                        status: 'started',
+                        'lastLocation.lat': current.lastLocation.lat,
+                        'lastLocation.lng': current.lastLocation.lng,
+                    },
+                    update,
+                    { new: true }
+                );
+                if (applied) break;
+            }
+
+            // A distância abaixo precisa incluir tanto os ticks do socket quanto o fix
+            // final recém-consolidado, nunca o snapshot lido no começo da requisição.
+            ride = await rideModel.findOne({
+                _id: rideId,
+                captain: captain._id,
+            }).populate('user').populate('captain').select('+otp');
+        }
+    }
+    // O texto informado ao finalizar descreve somente ONDE a corrida terminou. Em uma
+    // presencial iniciada sem destino ele jamais pode substituir a soma do percurso
+    // (ex.: Lajinha→Manhuaçu→Lajinha não é uma corrida de zero quilômetro).
     const typedDestination = (isPresentialPendingDest && destination && String(destination).trim().length >= 3)
         ? String(destination).trim()
         : null;
 
     if (typedDestination) {
-        const originLat = ride.pickupCoordinates?.lat ?? ride.origin?.coordinates?.[1];
-        const originLng = ride.pickupCoordinates?.lng ?? ride.origin?.coordinates?.[0];
-        if (!isValidGpsCoord(originLat, originLng)) {
-            const err = new Error('INVALID_FINISH_LOCATION');
-            err.code = 'INVALID_FINISH_LOCATION';
-            throw err;
-        }
-
-        // calculateRideFare já lança ROUTE_CALCULATION_FAILED se a rota não puder ser
-        // calculada ou vier com distância 0 — nunca mascarado com tarifa mínima.
-        const routeResult = await calculateRideFare({
-            originLat,
-            originLng,
-            destination: typedDestination,
-            vehicleType: ride.vehicleType,
-            paymentMethod: ride.paymentMethod === 'carteira' ? 'pix' : (ride.paymentMethod || 'cash'),
-            configSnapshot: ride.pricingSnapshot || null,
-            serviceKind: 'presential',
-        });
-
         finishExtras.destination = typedDestination;
         finishExtras.destinationPending = false;
-        if (routeResult.destinationCoords) {
-            finishExtras.destinationCoordinates = routeResult.destinationCoords;
+        const finalLat = ride.lastLocation?.lat;
+        const finalLng = ride.lastLocation?.lng;
+        if (isValidGpsCoord(finalLat, finalLng)) {
+            finishExtras.destinationCoordinates = { lat: finalLat, lng: finalLng };
         }
         finishExtras.destinationMeta = {
-            ...(routeResult.destinationCoords
-                ? { coordinates: [ routeResult.destinationCoords.lng, routeResult.destinationCoords.lat ] }
+            ...(isValidGpsCoord(finalLat, finalLng)
+                ? { coordinates: [ finalLng, finalLat ] }
                 : {}),
             timestamp: new Date(),
-            source: 'user_provided_at_finish',
+            source: 'user_provided',
         };
-        // Distância REAL da rota origem→destino informado — não a acumulada (e
-        // possivelmente incompleta) via rastreamento de GPS durante a corrida.
-        finishExtras.actualDistance = routeResult.distance;
-        ride.actualDistance = routeResult.distance;
     } else if (isPresentialPendingDest) {
         // Sem destino digitado ao finalizar: destino = última GPS válida do motorista
         // (comportamento legado, mantido para compatibilidade com apps antigos).
@@ -1348,9 +1387,11 @@ module.exports.endRide = async ({ rideId, captain, destination = null }) => {
             throw err;
         }
 
-        // Auditoria A4: exige contato GPS recente (lastSeenAt) — sem isso o finish
-        // usava a origem gravada na criação e gerava preço 0.
-        const lastSeenMs = freshCaptain?.lastSeenAt ? new Date(freshCaptain.lastSeenAt).getTime() : 0;
+        // O fix enviado no clique atualiza lastLocationAt mesmo entre dois ticks do
+        // socket. Usa esse timestamp da corrida primeiro; lastSeenAt é compatibilidade.
+        const lastSeenMs = ride.lastLocationAt
+            ? new Date(ride.lastLocationAt).getTime()
+            : (freshCaptain?.lastSeenAt ? new Date(freshCaptain.lastSeenAt).getTime() : 0);
         if (!lastSeenMs || (Date.now() - lastSeenMs) > 120000) {
             const err = new Error('STALE_FINISH_LOCATION');
             err.code = 'STALE_FINISH_LOCATION';
@@ -1386,24 +1427,8 @@ module.exports.endRide = async ({ rideId, captain, destination = null }) => {
             source: 'gps_at_finish',
         };
 
-        // Se o tracking GPS não acumulou distância útil, usa rota origem→destino real.
-        if (!(ride.actualDistance > 0) && isValidGpsCoord(originLat, originLng)) {
-            try {
-                const route = await mapService.getDistanceTime(
-                    `${originLat},${originLng}`,
-                    `${gpsLat},${gpsLng}`
-                );
-                if (route?.distance?.value > 0) {
-                    finishExtras.actualDistance = route.distance.value;
-                    ride.actualDistance = route.distance.value;
-                }
-            } catch (e) {
-                console.error('Erro calculando rota no fim da presencial sem destino:', e);
-                const err = new Error('ROUTE_CALCULATION_FAILED');
-                err.code = 'ROUTE_CALCULATION_FAILED';
-                throw err;
-            }
-        }
+        // Nunca infere percurso pela distância líquida origem→fim. Sem acumulador GPS
+        // útil, a validação financeira abaixo recusa a finalização em vez de inventar km.
     } else if (isValidGpsCoord(ride.lastLocation?.lat, ride.lastLocation?.lng)) {
         // Auditoria estimativa×final (2026-08-08): registra ONDE a corrida realmente
         // terminou (último GPS conhecido), sem tocar em destination/destinationCoordinates
@@ -2229,4 +2254,3 @@ module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }
 
     return review;
 }
-

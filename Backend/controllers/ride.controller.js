@@ -495,10 +495,21 @@ module.exports.endRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId, destination } = req.body;
+    const { rideId, destination, finishLat, finishLng, finishAccuracy, finishTimestamp } = req.body;
 
     try {
-        const ride = await rideService.endRide({ rideId, captain: req.captain, destination: destination || null });
+        const hasFinishCoordinates = finishLat != null && finishLng != null;
+        const ride = await rideService.endRide({
+            rideId,
+            captain: req.captain,
+            destination: destination || null,
+            finishLocation: hasFinishCoordinates ? {
+                lat: Number(finishLat),
+                lng: Number(finishLng),
+                accuracy: finishAccuracy == null ? null : Number(finishAccuracy),
+                timestamp: finishTimestamp == null ? null : Number(finishTimestamp),
+            } : null,
+        });
 
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {

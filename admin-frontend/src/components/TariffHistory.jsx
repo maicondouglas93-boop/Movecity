@@ -12,7 +12,8 @@ const FIELD_LABELS = {
   platformCommission: 'Comissão da plataforma',
   displayName: 'Nome de exibição',
   name: 'Identificador',
-  isActive: 'Categoria ativa',
+  isActive: 'Ativo',
+  active: 'Ativo',
   capacity: 'Capacidade',
   sortOrder: 'Ordem',
   pricing: 'Preços',
@@ -25,10 +26,11 @@ const FIELD_LABELS = {
   waiting: 'Espera',
   extraStops: 'Paradas extras',
   cancellation: 'Cancelamento',
-  start: 'Início',
-  end: 'Fim',
+  startTime: 'Horário início',
+  endTime: 'Horário fim',
   freeMinutes: 'Minutos livres',
-  perMinuteValue: 'Valor por minuto',
+  valuePerMinute: 'Valor por minuto',
+  valuePerStop: 'Valor por parada',
 };
 
 const MONEY_KEYS = new Set([
@@ -37,7 +39,8 @@ const MONEY_KEYS = new Set([
   'perMinute',
   'minimumFare',
   'value',
-  'perMinuteValue',
+  'valuePerMinute',
+  'valuePerStop',
 ]);
 
 const PERCENT_KEYS = new Set(['platformCommission']);
@@ -47,13 +50,17 @@ function labelFor(path) {
   const leaf = parts[parts.length - 1];
   if (FIELD_LABELS[path]) return FIELD_LABELS[path];
   if (FIELD_LABELS[leaf]) {
-    const parent = parts.length > 1 ? FIELD_LABELS[parts[parts.length - 2]] : null;
-    return parent ? `${parent} · ${FIELD_LABELS[leaf]}` : FIELD_LABELS[leaf];
+    const context = parts
+      .slice(0, -1)
+      .map((p) => FIELD_LABELS[p] || p)
+      .filter((p) => p !== 'Preços' && p !== 'pricing')
+      .join(' · ');
+    return context ? `${context} · ${FIELD_LABELS[leaf]}` : FIELD_LABELS[leaf];
   }
   return leaf.replace(/([A-Z])/g, ' $1').trim();
 }
 
-function formatLeaf(path, val) {
+function formatLeaf(path, val, flatSibling = {}) {
   if (val === undefined || val === null) return '—';
   if (typeof val === 'boolean') return val ? 'Sim' : 'Não';
   if (Array.isArray(val)) {
@@ -62,21 +69,25 @@ function formatLeaf(path, val) {
       .map((item) => (typeof item === 'object' ? (item.name || item.label || JSON.stringify(item)) : String(item)))
       .join(', ');
   }
-  if (typeof val === 'object') return null; // só folhas
+  if (typeof val === 'object') return null;
   const leaf = path.split('.').pop();
-  if (PERCENT_KEYS.has(leaf) || (leaf === 'value' && path.includes('percentage'))) {
-    return `${Number(val)}%`;
-  }
-  if (path.includes('parcelAdjustment') && leaf === 'value') {
-    // tipo pode ser percentage ou fixed — histórico nem sempre traz o type no mesmo path
-    const n = Number(val);
-    return Number.isFinite(n) && n <= 100 ? `${n}% / ${formatMoney(n)}` : formatMoney(val);
-  }
-  if (MONEY_KEYS.has(leaf) && typeof val === 'number') return formatMoney(val);
+  if (PERCENT_KEYS.has(leaf)) return `${Number(val)}%`;
   if (leaf === 'type') {
     if (val === 'percentage') return 'Porcentagem';
     if (val === 'fixed') return 'Valor fixo';
+    if (val === 'multiplier') return 'Multiplicador';
   }
+  if (path.includes('parcelAdjustment') && leaf === 'value') {
+    const typePath = path.replace(/\.value$/, '.type');
+    const type = flatSibling[typePath];
+    return type === 'fixed' ? formatMoney(val) : `${Number(val)}%`;
+  }
+  if (path.includes('surcharges.night') && leaf === 'value') {
+    const typePath = path.replace(/\.value$/, '.type');
+    const type = flatSibling[typePath];
+    return type === 'fixed' ? formatMoney(val) : `× ${Number(val)}`;
+  }
+  if (MONEY_KEYS.has(leaf) && typeof val === 'number') return formatMoney(val);
   return String(val);
 }
 
@@ -118,8 +129,8 @@ function collectChanges(oldValue, newValue) {
     const before = oldFlat[path];
     const after = newFlat[path];
     if (JSON.stringify(before) === JSON.stringify(after)) continue;
-    const formattedBefore = formatLeaf(path, before);
-    const formattedAfter = formatLeaf(path, after);
+    const formattedBefore = formatLeaf(path, before, oldFlat);
+    const formattedAfter = formatLeaf(path, after, newFlat);
     if (formattedBefore === null || formattedAfter === null) continue;
     rows.push({
       path,
@@ -128,7 +139,6 @@ function collectChanges(oldValue, newValue) {
       after: formattedAfter,
     });
   }
-  // Prioriza campos de preço no topo
   rows.sort((a, b) => {
     const ap = a.path.startsWith('pricing') ? 0 : 1;
     const bp = b.path.startsWith('pricing') ? 0 : 1;

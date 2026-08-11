@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useContext } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import api from '@/shared/services/axios'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
@@ -10,15 +10,17 @@ import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
 import { getAccessToken } from '@/shared/services/session'
 import { formatBRL } from '@/shared/utils/currency'
+import { openWhatsApp } from '@/shared/utils/whatsapp'
+import { useToast } from '@/shared/contexts/ToastContext'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
+    const { addToast } = useToast()
 
     const queryClient = useQueryClient();
 
     const [showRechargeModal, setShowRechargeModal] = useState(false);
-    const [payoutFeedback, setPayoutFeedback] = useState(null); // { type: 'success' | 'error', message }
 
     // Queries
     const {
@@ -55,25 +57,6 @@ const CaptainWallet = () => {
     const wallet = walletData;
     const transactions = transactionsData || [];
 
-    // Auditoria do painel administrativo (2026-08-02, Bloco C): antes não existia
-    // nenhum jeito do motorista solicitar o saque do saldo pendente — o Centro
-    // Financeiro do admin administrava uma lista de repasses que nada nunca criava.
-    const requestPayoutMutation = useMutation({
-        mutationFn: async () => {
-            const token = getAccessToken('captain')
-            const res = await api.post(`${import.meta.env.VITE_BASE_URL}/captains/payouts`, {}, { headers: { Authorization: `Bearer ${token}` } })
-            return res.data
-        },
-        onSuccess: () => {
-            setPayoutFeedback({ type: 'success', message: 'Saque solicitado! Acompanhe o status no seu extrato — a MoveCity vai transferir via Pix após aprovação.' })
-            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
-            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
-        },
-        onError: (err) => {
-            setPayoutFeedback({ type: 'error', message: err.response?.data?.message || 'Não foi possível solicitar o saque.' })
-        }
-    })
-
     // Socket invalidation
     useEffect(() => {
         const handleWalletUpdated = () => {
@@ -92,7 +75,6 @@ const CaptainWallet = () => {
 
     // Novos saldos
     const creditBalance = wallet?.creditBalance || 0;
-    const pendingBalance = wallet?.pendingBalance || 0;
     // Auditoria do app do motorista (2026-08-11, P1): o limite de saldo negativo é
     // configurável pelo admin (GlobalSetting.maximumNegativeBalance, default 0) e já
     // decide canReceiveRides no backend de forma atômica a cada transação
@@ -100,6 +82,18 @@ const CaptainWallet = () => {
     // frontend que podia divergir do limite real.
     const isBlocked = captain?.canReceiveRides === false;
     const status = isBlocked ? 'BLOQUEADO' : 'ATIVO';
+    const supportPhone = import.meta.env.VITE_SUPPORT_WHATSAPP
+
+    const contactSupport = () => {
+        const firstName = captain?.fullname?.firstname || 'motorista'
+        const opened = openWhatsApp(
+            supportPhone,
+            `Olá! Sou ${firstName}, motorista MoveCity, e quero fazer uma recarga de créditos.`,
+        )
+        if (!opened) {
+            addToast('WhatsApp do suporte indisponível. Peça o contato à equipe MoveCity.', 'info')
+        }
+    }
 
     return (
         <div className='h-screen bg-surface-alt flex flex-col pt-24'>
@@ -136,10 +130,37 @@ const CaptainWallet = () => {
                         <i className="ri-error-warning-fill text-xl"></i>
                         <div>
                             <p className='font-bold mb-1'>Conta Suspensa para Corridas</p>
-                            <p>Seu saldo de créditos está negativo além do limite permitido. Faça uma recarga via Pix para voltar a receber corridas instantaneamente.</p>
+                            <p>Seus créditos chegaram ao limite. Fale com o suporte para recarregar e voltar a receber corridas após a confirmação.</p>
                         </div>
                     </div>
                 )}
+
+                {/* Explicação do modelo financeiro atual: o passageiro paga o motorista
+                    diretamente e a carteira guarda somente créditos de comissão. */}
+                <section className='bg-brand-50 border border-brand-200 rounded-panel p-4 mb-4'>
+                    <div className='flex items-start gap-3'>
+                        <div className='h-10 w-10 rounded-full bg-brand-600 text-white flex items-center justify-center flex-shrink-0'>
+                            <i className='ri-hand-coin-fill text-xl' aria-hidden='true'></i>
+                        </div>
+                        <div>
+                            <h2 className='font-bold text-ink-900'>Como funciona seu pagamento</h2>
+                            <p className='text-sm text-ink-700 mt-1'>O valor da corrida vai direto para você. A MoveCity usa esta carteira apenas para descontar a comissão.</p>
+                        </div>
+                    </div>
+                    <ol className='grid grid-cols-3 gap-2 mt-4' aria-label='Etapas do pagamento'>
+                        {[
+                            ['1', 'Receba', 'Dinheiro ou Pix'],
+                            ['2', 'Confirme', 'No fim da corrida'],
+                            ['3', 'Comissão', 'Sai dos créditos'],
+                        ].map(([number, title, description]) => (
+                            <li key={number} className='bg-surface rounded-panel p-2.5 text-center border border-brand-100'>
+                                <span className='inline-flex h-6 w-6 items-center justify-center rounded-full bg-brand-600 text-white text-xs font-bold'>{number}</span>
+                                <p className='text-xs font-bold text-ink-900 mt-1.5'>{title}</p>
+                                <p className='text-[11px] leading-tight text-ink-600 mt-0.5'>{description}</p>
+                            </li>
+                        ))}
+                    </ol>
+                </section>
 
                 {/* Balance Cards */}
                 <div className='grid grid-cols-1 gap-4 mb-6'>
@@ -151,60 +172,30 @@ const CaptainWallet = () => {
                         </div>
 
                         <p className='text-sm text-ink-600 mb-1 flex items-center gap-1'>
-                            <i className="ri-coins-fill text-yellow-500"></i> Meus Créditos
+                            <i className="ri-coins-fill text-yellow-500"></i> Créditos para comissões
                         </p>
                         <h2 className={`text-4xl font-bold mb-2 ${creditBalance < 0 ? 'text-danger-600' : 'text-ink-900'}`}>
                             {formatBRL(creditBalance)}
                         </h2>
-                        <p className='text-xs text-ink-600 mb-4'>Usado para pagar as comissões da plataforma (Corridas em Dinheiro/Pix).</p>
+                        <p className='text-sm text-ink-600 mb-4'>Este saldo não é o seu ganho. Ele serve somente para pagar a comissão da MoveCity após você receber do passageiro.</p>
 
                         <button
                             type="button"
                             onClick={() => setShowRechargeModal(true)}
                             className='w-full bg-black text-white font-semibold py-3 rounded-panel flex items-center justify-center gap-2 hover:bg-gray-800 transition'
                         >
-                            <i className="ri-add-circle-fill text-green-400"></i> Adicionar Crédito (PIX)
+                            <i className="ri-whatsapp-fill text-green-400"></i> Recarregar com o suporte
                         </button>
                     </div>
-
-                    {/* Pending Balance Card */}
-                    <div className='bg-blue-50 rounded-panel shadow-raised border border-blue-100 p-5'>
-                        <p className='text-sm text-blue-600 mb-1 flex items-center gap-1 font-semibold'>
-                            <i className="ri-bank-card-fill"></i> Repasses Pendentes
-                        </p>
-                        <h2 className='text-3xl font-bold text-blue-900 mb-1'>{formatBRL(pendingBalance)}</h2>
-                        <p className='text-xs text-blue-600 opacity-80 mb-4'>Valor retido de corridas no cartão aguardando transferência bancária para você.</p>
-
-                        <button
-                            type="button"
-                            onClick={() => { setPayoutFeedback(null); requestPayoutMutation.mutate(); }}
-                            disabled={pendingBalance <= 0 || requestPayoutMutation.isPending}
-                            className='w-full bg-blue-600 text-white font-semibold py-3 rounded-panel flex items-center justify-center gap-2 hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed'
-                        >
-                            <i className="ri-send-plane-fill"></i> {requestPayoutMutation.isPending ? 'Solicitando...' : 'Solicitar Saque'}
-                        </button>
-                    </div>
-
-                    {payoutFeedback && (
-                        <div className={`p-4 rounded-panel text-sm flex items-start gap-3 shadow-raised border ${
-                            payoutFeedback.type === 'success'
-                                ? 'bg-brand-50 border-brand-500/30 text-brand-600'
-                                : 'bg-danger-50 border-danger-500/30 text-danger-600'
-                        }`}>
-                            <i className={`text-xl ${payoutFeedback.type === 'success' ? 'ri-checkbox-circle-fill' : 'ri-error-warning-fill'}`}></i>
-                            <p className='flex-1'>{payoutFeedback.message}</p>
-                            <button type="button" onClick={() => setPayoutFeedback(null)} aria-label="Fechar" className='text-current opacity-60 hover:opacity-100'>
-                                <i className="ri-close-line"></i>
-                            </button>
-                        </div>
-                    )}
-
                 </div>
                 </>
                 )}
 
                 {/* Transactions List */}
-                <h3 className='text-lg font-bold text-ink-900 mb-4'>Extrato (Ledger)</h3>
+                <div className='mb-4'>
+                    <h3 className='text-lg font-bold text-ink-900'>Movimentações dos créditos</h3>
+                    <p className='text-xs text-ink-600 mt-1'>Aqui aparecem recargas, comissões e ajustes. Seus ganhos ficam na tela Ganhos.</p>
+                </div>
 
                 {loading ? (
                     <div className='space-y-3'>
@@ -240,7 +231,8 @@ const CaptainWallet = () => {
                             let iconColor = 'text-ink-600';
 
                             if (tx.type === 'recharge') { icon = 'ri-add-line'; title = 'Recarga Pix'; bgColor = 'bg-brand-50'; iconColor = 'text-brand-600'; }
-                            if (tx.type === 'ride_payment' || tx.type === 'parcel_payment') { icon = 'ri-car-line'; title = 'Ganho de serviço'; bgColor = 'bg-blue-100'; iconColor = 'text-blue-600'; }
+                            if (tx.type === 'commission') { icon = 'ri-percent-line'; title = 'Comissão MoveCity'; bgColor = 'bg-danger-50'; iconColor = 'text-danger-600'; }
+                            if (tx.type === 'ride_payment' || tx.type === 'parcel_payment') { icon = 'ri-car-line'; title = 'Movimentação de serviço'; bgColor = 'bg-blue-100'; iconColor = 'text-blue-600'; }
                             if (tx.type === 'payout') { icon = 'ri-bank-line'; title = 'Repasse Bancário'; bgColor = 'bg-purple-100'; iconColor = 'text-purple-600'; }
                             if (tx.type === 'adjustment') { icon = 'ri-tools-line'; title = 'Ajuste Admin'; bgColor = 'bg-orange-100'; iconColor = 'text-orange-600'; }
 
@@ -267,8 +259,8 @@ const CaptainWallet = () => {
                                         </div>
                                     </div>
                                     <div className='flex justify-between items-center text-xs text-ink-600 border-t border-line pt-2 mt-1'>
-                                        <p>Saldo Ant: {formatBRL(tx.balanceBefore)}</p>
-                                        <p>Saldo Atual: <span className='font-semibold text-ink-600'>{formatBRL(tx.balanceAfter)}</span></p>
+                                        <p>Antes: {formatBRL(tx.balanceBefore)}</p>
+                                        <p>Depois: <span className='font-semibold text-ink-600'>{formatBRL(tx.balanceAfter)}</span></p>
                                     </div>
                                 </div>
                             )
@@ -296,17 +288,25 @@ const CaptainWallet = () => {
                             <div className='h-14 w-14 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-4'>
                                 <i className="ri-tools-fill text-2xl"></i>
                             </div>
-                            <h2 className='text-xl font-bold mb-2'>Recarga temporariamente indisponível</h2>
-                            <p className='text-sm text-ink-600 mb-6'>
-                                Ainda não temos um meio de pagamento automático conectado para recarga de créditos. Fale com o suporte da MoveCity para adicionar saldo à sua conta.
-                            </p>
+                            <h2 className='text-xl font-bold mb-2'>Recarregar créditos</h2>
+                            <p className='text-sm text-ink-600'>Nesta fase inicial, nossa equipe faz a recarga para você pelo suporte.</p>
+                            <div className='w-full bg-surface-alt border border-line rounded-panel p-4 my-5 text-left'>
+                                <p className='text-sm font-semibold text-ink-900 mb-3'>É simples:</p>
+                                <ol className='space-y-2 text-sm text-ink-600'>
+                                    <li className='flex gap-2'><span className='font-bold text-brand-600'>1.</span> Fale com o suporte.</li>
+                                    <li className='flex gap-2'><span className='font-bold text-brand-600'>2.</span> Receba a chave Pix e envie o valor.</li>
+                                    <li className='flex gap-2'><span className='font-bold text-brand-600'>3.</span> Envie o comprovante e aguarde o crédito aparecer aqui.</li>
+                                </ol>
+                            </div>
                             <button
                                 type="button"
-                                onClick={() => setShowRechargeModal(false)}
-                                className='w-full bg-black text-white font-semibold py-3 rounded-panel hover:bg-gray-800 transition-colors'
+                                onClick={contactSupport}
+                                className='w-full bg-green-600 text-white font-semibold py-3 rounded-panel hover:bg-green-700 transition-colors flex items-center justify-center gap-2'
                             >
-                                Entendi
+                                <i className='ri-whatsapp-fill text-xl' aria-hidden='true'></i>
+                                Falar com o suporte
                             </button>
+                            <p className='text-xs text-ink-500 mt-3'>O crédito é usado apenas para comissões. O pagamento das corridas continua indo direto para você.</p>
                         </div>
                     </div>
                 </div>

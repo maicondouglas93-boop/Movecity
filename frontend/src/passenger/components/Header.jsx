@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { usePwaUpdate } from '@/shared/contexts/PwaUpdateContext';
 import { useToast } from '@/shared/contexts/ToastContext';
 import InstallAppButton from '@/shared/components/ui/InstallAppButton';
 import NotificationBell from '@/shared/components/NotificationBell';
+import { shouldEnablePwa } from '@/shared/platform/platform';
 
 const Header = () => {
-    const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
     const { checkForUpdate, updateServiceWorker } = usePwaUpdate();
     const { addToast } = useToast();
+    const pwaEnabled = shouldEnablePwa();
 
     // Botão manual de atualização (2026-08-04): força checagem do SW e aplica na hora.
     // Corrigido no mesmo dia: com autoUpdate o check nunca via update nova e o toast
@@ -41,7 +42,7 @@ const Header = () => {
                     <Link to="/home" className="flex items-center min-w-0">
                         <img className='h-12 object-contain' src="/movecity-logo.png" alt="MoveCity" width="500" height="500" />
                     </Link>
-                    <InstallAppButton />
+                    {pwaEnabled && <InstallAppButton />}
                 </div>
                 <div className="flex items-center gap-0.5 flex-shrink-0">
                     <NotificationBell to="/notifications" />
@@ -77,14 +78,18 @@ const Header = () => {
                                 <i className="ri-user-3-line text-lg text-ink-400" aria-hidden="true"></i> Conta
                             </Link>
                             <div className="h-px bg-line my-1 mx-2"></div>
-                            <button
-                                type="button"
-                                onClick={handleUpdateClick}
-                                className="px-5 py-3 flex items-center gap-3 text-ink-600 active:bg-brand-50 active:text-brand-700 transition-colors text-sm font-medium text-left"
-                            >
-                                <i className="ri-refresh-line text-lg text-ink-400" aria-hidden="true"></i> Atualizar app
-                            </button>
-                            <div className="h-px bg-line my-1 mx-2"></div>
+                            {pwaEnabled && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={handleUpdateClick}
+                                        className="px-5 py-3 flex items-center gap-3 text-ink-600 active:bg-brand-50 active:text-brand-700 transition-colors text-sm font-medium text-left"
+                                    >
+                                        <i className="ri-refresh-line text-lg text-ink-400" aria-hidden="true"></i> Atualizar app
+                                    </button>
+                                    <div className="h-px bg-line my-1 mx-2"></div>
+                                </>
+                            )}
                             <Link onClick={() => setMenuOpen(false)} to="/user/logout" className="px-5 py-3 flex items-center gap-3 text-danger-500 active:bg-danger-50 transition-colors text-sm font-medium">
                                 <i className="ri-logout-box-r-line text-lg text-danger-500" aria-hidden="true"></i> Sair
                             </Link>

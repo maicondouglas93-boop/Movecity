@@ -1,11 +1,11 @@
-import React, { useContext, useEffect } from 'react'
+import { useContext, useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import { getAccessToken, getRefreshToken, clearSession } from '@/shared/services/session'
 import { clearTokenInSW } from '@/shared/services/swCommunication'
-import { getCurrentFcmToken } from '@/shared/services/fcm'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
+import { unregisterPush } from '@/shared/platform/notification.service'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
 //
@@ -35,23 +35,16 @@ export const UserLogout = () => {
         // aparelho continuaria recebendo notificações de quem saiu.
         const unregisterPushToken = async () => {
             try {
-                const fcmToken = await getCurrentFcmToken()
-                if (fcmToken && token) {
-                    await axios.delete(`${import.meta.env.VITE_BASE_URL}/notifications/token`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                        params: { token: fcmToken },
-                        withCredentials: true,
-                        timeout: 10000,
-                    })
-                }
+                if (token) await unregisterPush()
             } catch {
                 // Sair não pode depender disso funcionar.
             }
         }
 
-        Promise.all([
-            unregisterPushToken(),
-            axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
+        // Desvincula o FCM antes de revogar a sessão; em paralelo havia uma corrida
+        // em que /users/logout podia invalidar o JWT antes do DELETE do token.
+        unregisterPushToken()
+            .then(() => axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
                 params: refreshToken ? { refreshToken } : {},
                 withCredentials: true,
@@ -60,20 +53,20 @@ export const UserLogout = () => {
                 // Falha ao avisar o servidor não pode impedir o usuário de sair do
                 // aplicativo. A sessão local é limpa de qualquer forma; o refresh token
                 // continua revogável pelo servidor depois.
+            }))
+            .finally(() => {
+                clearTokenInSW()
+                clearSession('user')
+                // Auditoria PWA (2026-08-03, A6): o socket é um singleton por aba, nunca
+                // recriado — sem desconectar aqui, se outra conta logar na MESMA aba logo
+                // em seguida (sem recarregar a página), o join dela reusava esta mesma
+                // conexão física, e o registro desta conta no banco podia ficar apontando
+                // pra um socketId que agora pertence a outra pessoa. connect() força uma
+                // conexão nova (socket.id novo) pra quem usar o app em seguida.
+                socket.disconnect()
+                socket.connect()
+                navigate('/login', { replace: true })
             })
-        ]).finally(() => {
-            clearTokenInSW()
-            clearSession('user')
-            // Auditoria PWA (2026-08-03, A6): o socket é um singleton por aba, nunca
-            // recriado — sem desconectar aqui, se outra conta logar na MESMA aba logo
-            // em seguida (sem recarregar a página), o join dela reusava esta mesma
-            // conexão física, e o registro desta conta no banco podia ficar apontando
-            // pra um socketId que agora pertence a outra pessoa. connect() força uma
-            // conexão nova (socket.id novo) pra quem usar o app em seguida.
-            socket.disconnect()
-            socket.connect()
-            navigate('/login', { replace: true })
-        })
     }, [])
 
     return <SessionSplash label="Saindo..." />

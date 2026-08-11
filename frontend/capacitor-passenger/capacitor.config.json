@@ -1,0 +1,21 @@
+{
+  "appId": "br.com.movecity.passenger",
+  "appName": "MoveCity",
+  "webDir": "../dist-passenger",
+  "android": {
+    "path": "../android-passenger"
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#0B3D2E"
+    }
+  }
+}

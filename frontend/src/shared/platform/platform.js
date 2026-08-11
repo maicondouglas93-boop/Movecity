@@ -1,9 +1,10 @@
-// Role/plataforma do frontend — seams para build web vs build motorista (Capacitor).
+// Role/plataforma do frontend — seams para Web, APK Motorista e APK Passageiro.
 // Preferir estes helpers a espalhar Capacitor.isNativePlatform() nas telas.
 
 export function getAppRole() {
     const role = import.meta.env.VITE_APP_ROLE
-    return role === 'driver' ? 'driver' : 'web'
+    if (role === 'driver' || role === 'passenger') return role
+    return 'web'
 }
 
 export function isNativePlatform() {
@@ -18,7 +19,7 @@ export function isWeb() {
     return !isNativePlatform()
 }
 
-/** PWA (SW, Install/Update prompts) só no app web completo — nunca no build driver/APK. */
+/** PWA (SW, Install/Update prompts) só no app web completo — nunca nos APKs. */
 export function shouldEnablePwa() {
     return getAppRole() === 'web' && isWeb()
 }

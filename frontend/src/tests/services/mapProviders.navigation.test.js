@@ -169,6 +169,35 @@ describe('googleMapsProvider — câmera de navegação (Fase D)', () => {
         expect(marker.icon.anchor).toEqual({ x: 24, y: 24 })
     })
 
+    it('usa ícone neutro e distinto para motorista autorizado a carro e moto', async () => {
+        const provider = await loadGoogleProvider()
+        await initProvider(provider)
+
+        provider.placeMarker('driver_both', { lat: -23.5, lng: -46.6 }, { type: 'car_motorcycle' })
+        const marker = currentStub.markerInstances[currentStub.markerInstances.length - 1]
+        const svg = decodeURIComponent(marker.icon.url)
+
+        expect(svg).toContain('#6d28d9')
+        expect(svg).toContain('◎')
+        expect(svg).not.toContain('🚗')
+        expect(svg).not.toContain('🏍')
+    })
+
+    it('mantém os ícones existentes de carro e moto distintos do ícone neutro', async () => {
+        const provider = await loadGoogleProvider()
+        await initProvider(provider)
+
+        provider.placeMarker('driver_car', { lat: -23.5, lng: -46.6 }, { type: 'car' })
+        const carSvg = decodeURIComponent(currentStub.markerInstances.at(-1).icon.url)
+        provider.placeMarker('driver_moto', { lat: -23.4, lng: -46.5 }, { type: 'motorcycle' })
+        const motorcycleSvg = decodeURIComponent(currentStub.markerInstances.at(-1).icon.url)
+
+        expect(carSvg).toContain('🚗')
+        expect(carSvg).not.toContain('#6d28d9')
+        expect(motorcycleSvg).toContain('🏍')
+        expect(motorcycleSvg).not.toContain('#6d28d9')
+    })
+
     it('ignora rotação em marcadores que não representam direção', async () => {
         const provider = await loadGoogleProvider()
         await initProvider(provider)
@@ -249,6 +278,25 @@ describe('leafletProvider — degradação sem câmera (Fase D)', () => {
         expect(rotator.style.transform).toBe('rotate(120deg)')
         expect(rotator.style.opacity).toBe('1')
 
+        provider.destroy()
+    })
+
+    it('usa marcador neutro no Leaflet para autorização carro e moto', async () => {
+        vi.resetModules()
+        const { createLeafletProvider } = await import('@/shared/services/maps/leafletProvider')
+        const provider = createLeafletProvider()
+        const node = document.createElement('div')
+        node.style.width = '400px'
+        node.style.height = '400px'
+        document.body.appendChild(node)
+        await provider.init(node, { center: { lat: -23.55, lng: -46.63 }, zoom: 14 })
+
+        provider.placeMarker('driver_both', { lat: -23.55, lng: -46.63 }, { type: 'car_motorcycle' })
+
+        const icon = document.querySelector('.ri-user-location-fill')
+        expect(icon).not.toBeNull()
+        expect(icon.className).not.toContain('ri-car-fill')
+        expect(icon.className).not.toContain('ri-motorbike-fill')
         provider.destroy()
     })
 })

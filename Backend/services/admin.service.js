@@ -14,6 +14,10 @@ const { disconnectSocket } = require('../socket');
 const uploadService = require('./upload.service');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
+const {
+    VALID_VEHICLE_AUTHORIZATIONS,
+    deriveLegacyAuthorization,
+} = require('./vehicleAuthorization.service');
 
 module.exports.login = async (email, password) => {
     const admin = await adminUserModel.findOne({ email }).select('+password');
@@ -577,6 +581,7 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
     if (filters.status) query.status = filters.status;
     if (filters.approvalStatus) query.approvalStatus = filters.approvalStatus;
     if (filters.vehicleType) query['vehicle.vehicleType'] = filters.vehicleType;
+    if (filters.vehicleAuthorization) query.vehicleAuthorization = filters.vehicleAuthorization;
     if (filters.isOnline === 'true') query.isOnline = true;
     if (filters.isOnline === 'false') query.isOnline = false;
     if (filters.isBlocked === 'true') query.isBlocked = true;
@@ -625,7 +630,11 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
         if (obj.isOnline && isFresh) {
             operationalStatus = obj.canReceiveRides === false ? 'in_ride' : 'available';
         }
-        return { ...obj, operationalStatus };
+        return {
+            ...obj,
+            vehicleAuthorization: obj.vehicleAuthorization || deriveLegacyAuthorization(obj) || null,
+            operationalStatus,
+        };
     });
 
     // Summary aggregation
@@ -665,6 +674,7 @@ module.exports.formatLiveMapDriver = (captain) => {
             color: captain.vehicle?.color || '',
             modelo: captain.vehicle?.modelo || '',
         },
+        vehicleAuthorization: deriveLegacyAuthorization(captain),
         lastSeenAt: captain.lastSeenAt || null,
     };
 };
@@ -677,7 +687,7 @@ module.exports.getLiveMapCaptains = async () => {
         ...availabilityBase,
         'location.ltd': { $type: 'number' },
         'location.lng': { $type: 'number' },
-    }).select('fullname vehicle location isOnline canReceiveRides busyLock lastSeenAt');
+    }).select('fullname vehicle vehicleAuthorization location isOnline canReceiveRides busyLock lastSeenAt');
 
     const drivers = captains
         .map((c) => module.exports.formatLiveMapDriver(c))
@@ -828,6 +838,9 @@ module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip,
     const color = String(vehicleInput.color || '').trim();
     const plate = normalizePlate(vehicleInput.plate || '');
     const vehicleType = String(vehicleInput.vehicleType || '').trim();
+    const vehicleAuthorization = vehicleInput.vehicleAuthorization == null
+        ? deriveLegacyAuthorization(captain)
+        : String(vehicleInput.vehicleAuthorization).trim();
     const ano = Number(vehicleInput.ano);
 
     if (marca.length < 2) throw Object.assign(new Error('Marca inválida'), { statusCode: 400 });
@@ -840,6 +853,9 @@ module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip,
         throw Object.assign(new Error('Placa inválida (use ABC1234 ou Mercosul ABC1D23)'), { statusCode: 400 });
     }
     if (!vehicleType) throw Object.assign(new Error('Categoria do veículo é obrigatória'), { statusCode: 400 });
+    if (!VALID_VEHICLE_AUTHORIZATIONS.includes(vehicleAuthorization)) {
+        throw Object.assign(new Error('Tipo de veículo autorizado inválido'), { statusCode: 400 });
+    }
 
     const VehicleCategory = require('../models/vehicleCategory.model');
     const category = await VehicleCategory.findOne({ name: vehicleType }).lean();
@@ -863,6 +879,7 @@ module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip,
     const oldVehicle = captain.vehicle
         ? (typeof captain.vehicle.toObject === 'function' ? captain.vehicle.toObject() : { ...captain.vehicle })
         : {};
+    const oldVehicleAuthorization = deriveLegacyAuthorization(captain);
     const nextVehicle = {
         marca,
         modelo,
@@ -874,9 +891,11 @@ module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip,
     };
 
     captain.vehicle = nextVehicle;
+    captain.vehicleAuthorization = vehicleAuthorization;
     await captain.save();
 
     deleteByPrefix(`profile:captain:${captainId}`);
+    deleteByPrefix('drivers:');
 
     await module.exports.logAction({
         adminId: admin._id,
@@ -885,8 +904,8 @@ module.exports.updateCaptainVehicle = async (captainId, vehicleInput, admin, ip,
         targetId: captainId.toString(),
         targetModel: 'Captain',
         reason: reason || 'Correção de dados do veículo',
-        oldValue: oldVehicle,
-        newValue: nextVehicle,
+        oldValue: { vehicle: oldVehicle, vehicleAuthorization: oldVehicleAuthorization },
+        newValue: { vehicle: nextVehicle, vehicleAuthorization },
         ipAddress: ip || '0.0.0.0',
     });
 

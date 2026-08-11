@@ -521,11 +521,11 @@ module.exports.exportReportCSV = async (req, res, next) => {
 
 module.exports.getCaptains = async (req, res, next) => {
     try {
-        const { page = 1, limit = 10, search = '', status, approvalStatus, vehicleType, isOnline, isBlocked, operationalStatus } = req.query;
+        const { page = 1, limit = 10, search = '', status, approvalStatus, vehicleType, vehicleAuthorization, isOnline, isBlocked, operationalStatus } = req.query;
         // Bug de UX (auditoria 2026-08-10): a tela envia esses filtros na query, mas
         // eles nunca chegavam ao service — o admin selecionava "Online"/"Bloqueados" e
         // a lista voltava sempre igual, sem nenhum filtro de fato aplicado.
-        const filters = { status, approvalStatus, vehicleType, isOnline, isBlocked, operationalStatus };
+        const filters = { status, approvalStatus, vehicleType, vehicleAuthorization, isOnline, isBlocked, operationalStatus };
         const result = await adminService.getCaptains(Number(page), Number(limit), search, filters);
         res.status(200).json(result);
     } catch (error) {

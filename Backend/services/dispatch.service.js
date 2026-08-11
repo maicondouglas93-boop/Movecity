@@ -1,6 +1,12 @@
 const mapService = require('./maps.service');
 const rideModel = require('../models/ride.model');
 const { getCachedVehicleCategoryByName } = require('./vehicleCategoryCache.service');
+const {
+    authorizationAllowsFamily,
+    deriveLegacyAuthorization,
+    isCaptainAuthorizedForVehicleType,
+    vehicleFamilyFromCategory,
+} = require('./vehicleAuthorization.service');
 
 const CAPTAIN_SEARCH_RADIUS_KM = 15;
 
@@ -14,20 +20,20 @@ const ACTIVE_PARCEL_STATUSES = [
     'arrived_destination',
 ];
 
-/** Match estrito de categoria — sem fallback. */
-function filterCaptainsByVehicleType(captains, vehicleType, { excludeCaptainId, TRACE_ID = '[AUDIT]' } = {}) {
+/** Match de autorização do ADM; categoria desconhecida conserva o match legado estrito. */
+function filterCaptainsByVehicleType(captains, vehicleType, { excludeCaptainId, TRACE_ID = '[AUDIT]', category } = {}) {
+    const requestedFamily = vehicleFamilyFromCategory(category || vehicleType);
     return captains.filter((captain) => {
         if (excludeCaptainId && captain._id.toString() === excludeCaptainId.toString()) {
             return false;
         }
-        if (!captain.vehicle || !captain.vehicle.vehicleType) {
-            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Sem veículo definido)`);
-            return false;
-        }
-        const capType = captain.vehicle.vehicleType;
-        const isMatch = capType === vehicleType;
+        const authorization = deriveLegacyAuthorization(captain);
+        const capType = captain.vehicle?.vehicleType;
+        const isMatch = requestedFamily && authorization
+            ? authorizationAllowsFamily(authorization, requestedFamily)
+            : capType === vehicleType;
         if (!isMatch) {
-            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Veículo incompatível: ${capType} != ${vehicleType})`);
+            console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (Autorização incompatível: ${authorization || capType || 'não definida'} != ${requestedFamily || vehicleType})`);
         }
         return isMatch;
     });
@@ -118,16 +124,12 @@ async function isVehicleCategoryAllowed(vehicleType, serviceKind) {
     return category.allowedServices?.[field] !== false;
 }
 
-async function filterCaptainsByServicePermission(captains, serviceKind, { TRACE_ID = '[AUDIT]' } = {}) {
-    const cache = new Map();
-    const out = [];
-    for (const captain of captains) {
-        const vehicleType = captain.vehicle?.vehicleType;
-        if (!cache.has(vehicleType)) cache.set(vehicleType, await isVehicleCategoryAllowed(vehicleType, serviceKind));
-        if (cache.get(vehicleType)) out.push(captain);
-        else console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (categoria ${vehicleType} sem permissão para ${serviceKind})`);
-    }
-    return out;
+async function filterCaptainsByServicePermission(captains, vehicleType, serviceKind, { TRACE_ID = '[AUDIT]' } = {}) {
+    if (await isVehicleCategoryAllowed(vehicleType, serviceKind)) return captains;
+    captains.forEach((captain) => {
+        console.log(`[AUDIT][${TRACE_ID}] Captain ${captain._id} reprovado (categoria solicitada ${vehicleType} sem permissão para ${serviceKind})`);
+    });
+    return [];
 }
 
 async function findCaptainsNearPickup(pickup, vehicleType, {
@@ -154,12 +156,14 @@ async function findCaptainsNearPickup(pickup, vehicleType, {
         TRACE_ID
     );
 
+    const requestedCategory = await getCachedVehicleCategoryByName(vehicleType);
     let matching = filterCaptainsByVehicleType(captainsInRadius, vehicleType, {
         excludeCaptainId,
         TRACE_ID,
+        category: requestedCategory,
     });
 
-    matching = await filterCaptainsByServicePermission(matching, serviceKind, { TRACE_ID });
+    matching = await filterCaptainsByServicePermission(matching, vehicleType, serviceKind, { TRACE_ID });
 
     matching = await filterCaptainsWithoutActiveWork(matching, {
         excludeActiveRide,
@@ -180,6 +184,7 @@ module.exports = {
     filterCaptainsWithoutActiveWork,
     isVehicleCategoryAllowed,
     filterCaptainsByServicePermission,
+    isCaptainAuthorizedForVehicleType,
     captainHasActiveRide,
     captainHasActiveParcel,
     acquireCaptainBusyLock,

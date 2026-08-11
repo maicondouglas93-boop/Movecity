@@ -37,6 +37,7 @@ const VEHICLE_EMOJI = {
     car: '🚗',
     moto: '🏍',
     motorcycle: '🏍',
+    car_motorcycle: '◎',
     auto: '🚕',
 }
 
@@ -48,10 +49,12 @@ const VEHICLE_EMOJI = {
 function vehicleIconUrl(type, rotation = null) {
     const emoji = VEHICLE_EMOJI[type] || VEHICLE_EMOJI.car
     const ringColor = type === 'auto' ? '#facc15' : '#ffffff' // aproxima o acento amarelo do "auto" original
+    const fillColor = type === 'car_motorcycle' ? '#6d28d9' : '#000000'
+    const textFill = type === 'car_motorcycle' ? ' fill="#fff"' : ''
     const pointer = Number.isFinite(rotation)
         ? `<g transform="rotate(${rotation.toFixed(0)} 24 24)"><path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></g>`
         : ''
-    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<circle cx="24" cy="24" r="16" fill="#000" stroke="${ringColor}" stroke-width="2"/><text x="24" y="30" font-size="16" text-anchor="middle">${emoji}</text></svg>`)
+    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<circle cx="24" cy="24" r="16" fill="${fillColor}" stroke="${ringColor}" stroke-width="2"/><text x="24" y="30" font-size="16"${textFill} text-anchor="middle">${emoji}</text></svg>`)
 }
 
 const USER_ICON_URL = svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" fill-opacity="0.35"/><circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/></svg>`)

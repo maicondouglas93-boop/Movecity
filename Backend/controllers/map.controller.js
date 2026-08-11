@@ -1,5 +1,6 @@
 const mapService = require('../services/maps.service');
 const { validationResult } = require('express-validator');
+const { deriveLegacyAuthorization } = require('../services/vehicleAuthorization.service');
 
 
 module.exports.getCoordinates = async (req, res, next) => {
@@ -141,6 +142,7 @@ module.exports.getNearbyDrivers = async (req, res) => {
             .map(c => ({
                 id: c._id,
                 vehicleType: c.vehicle?.vehicleType || 'car',
+                vehicleAuthorization: deriveLegacyAuthorization(c),
                 location: { ltd: c.location.ltd, lng: c.location.lng }
             }));
 

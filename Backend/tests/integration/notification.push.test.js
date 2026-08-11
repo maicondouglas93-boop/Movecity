@@ -643,6 +643,7 @@ describe('Fase 8 (auditoria final): deep link correto por destinatário (M7)', (
         expect(payload.webpush.fcmOptions.link).toContain('/captain-home?rideOffer=ride-125');
         expect(payload.data.canAcceptInline).toBeUndefined();
         expect(payload.data.type).toBe('NEW_RIDE');
+        expect(payload.title).toContain('🚗 CORRIDA DE CARRO');
         expect(payload.title).toContain('R$ 18,50');
         expect(payload.message).toContain('Av. Paulista');
         expect(payload.message).toContain('Av. Faria Lima');

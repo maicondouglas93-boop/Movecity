@@ -397,6 +397,8 @@ function initializeSocket(server) {
                     color: captainDoc.vehicle.color || '',
                     modelo: captainDoc.vehicle.modelo || '',
                 } : null,
+                vehicleAuthorization: require('./services/vehicleAuthorization.service')
+                    .deriveLegacyAuthorization(captainDoc),
                 lastSeenAt: new Date().toISOString(),
             });
 
@@ -416,9 +418,11 @@ function initializeSocket(server) {
                 // removeram esse motorista na primeira.
                 emitDriverMapUpdate(userId, { busy: true });
             } else if (isAvailableOnMap) {
+                const { deriveLegacyAuthorization } = require('./services/vehicleAuthorization.service');
                 emitDriverMapUpdate(userId, {
                     busy: false,
                     vehicleType: captainDoc.vehicle?.vehicleType || 'car',
+                    vehicleAuthorization: deriveLegacyAuthorization(captainDoc),
                     location: { ltd: captainLocation.lat, lng: captainLocation.lng }
                 });
             }
@@ -676,7 +680,7 @@ const sendMessageToRoom = (roomName, messageObject) => {
 const driverMapState = new Map();
 const DRIVER_LOCATION_MIN_INTERVAL_MS = 4000;
 
-const emitDriverMapUpdate = (driverId, { busy, vehicleType, location }) => {
+const emitDriverMapUpdate = (driverId, { busy, vehicleType, vehicleAuthorization, location }) => {
     if (!io) return;
     const key = String(driverId);
     const previous = driverMapState.get(key);
@@ -694,7 +698,7 @@ const emitDriverMapUpdate = (driverId, { busy, vehicleType, location }) => {
     if (!becameAvailable && Date.now() - previous.lastEmitAt < DRIVER_LOCATION_MIN_INTERVAL_MS) return;
 
     driverMapState.set(key, { busy: false, lastEmitAt: Date.now() });
-    io.to('map-viewers').emit('driver-location', { driverId: key, vehicleType, location });
+    io.to('map-viewers').emit('driver-location', { driverId: key, vehicleType, vehicleAuthorization, location });
 }
 
 // Chamado quando o motorista sai do ar ou é liberado de uma corrida: esquece o último

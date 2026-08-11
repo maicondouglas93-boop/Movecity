@@ -274,6 +274,9 @@ async function performAcceptRide(rideId, captain, res) {
         if (err.message === 'CAPTAIN_ALREADY_HAS_ACTIVE_RIDE') {
             return res.status(409).json({ message: 'Você já está em outra corrida ativa.' });
         }
+        if (err.message === 'VEHICLE_MISMATCH') {
+            return res.status(403).json({ message: 'Você não está autorizado a atender este tipo de corrida.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -498,6 +501,8 @@ const announceCaptainAvailable = (captain, ride) => {
     emitDriverMapUpdate(captain._id, {
         busy: false,
         vehicleType: captain.vehicle?.vehicleType || 'car',
+        vehicleAuthorization: require('../services/vehicleAuthorization.service')
+            .deriveLegacyAuthorization(captain),
         location: { ltd, lng }
     });
 }

@@ -3,7 +3,7 @@
  * Sem senha, tokens, documentos ou dados administrativos.
  */
 module.exports.CAPTAIN_IDENTITY_FIELDS =
-    'fullname profilePicture rating vehicle phone socketId location';
+    'fullname profilePicture rating vehicle vehicleAuthorization phone socketId location';
 
 module.exports.USER_IDENTITY_FIELDS =
     'fullname profilePicture rating phone socketId';

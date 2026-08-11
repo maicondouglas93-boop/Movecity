@@ -5,6 +5,7 @@ const authService = require('../services/auth.service');
 const { validationResult } = require('express-validator');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
+const { deriveLegacyAuthorization } = require('../services/vehicleAuthorization.service');
 
 // Auditoria de sessão (2026-08-02): ver o comentário equivalente em user.controller.js.
 // O motorista tinha exatamente o mesmo problema — token de 24h e nenhuma renovação.
@@ -398,6 +399,7 @@ module.exports.toggleOnline = async (req, res, next) => {
             emitDriverMapUpdate(captain._id, {
                 busy: false,
                 vehicleType: captain.vehicle?.vehicleType || 'car',
+                vehicleAuthorization: deriveLegacyAuthorization(captain),
                 location: { ltd: captain.location.ltd, lng: captain.location.lng }
             });
             // Painel admin: aparece no mapa assim que fica online (sem esperar o próximo GPS).
@@ -417,6 +419,7 @@ module.exports.toggleOnline = async (req, res, next) => {
                         color: captain.vehicle?.color || '',
                         modelo: captain.vehicle?.modelo || '',
                     },
+                    vehicleAuthorization: deriveLegacyAuthorization(captain),
                     lastSeenAt: new Date().toISOString(),
                 }
             });

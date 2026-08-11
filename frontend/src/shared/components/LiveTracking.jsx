@@ -548,19 +548,20 @@ const LiveTracking = (props) => {
             driversAnimRef.current = requestAnimationFrame(step);
         };
 
-        const upsertDriver = ({ driverId, vehicleType, location }) => {
+        const upsertDriver = ({ driverId, vehicleType, vehicleAuthorization, location }) => {
             const pos = sanitizeCoord(location?.ltd, location?.lng);
             if (!driverId || !pos || !providerRef.current) return;
             const id = String(driverId);
+            const markerType = vehicleAuthorization || vehicleType || 'car';
             const existing = driversRef.current.get(id);
             if (!existing) {
-                driversRef.current.set(id, { current: pos, from: pos, target: null, startTime: 0, vehicleType, heading: null });
-                providerRef.current.placeMarker(`driver_${id}`, pos, { type: vehicleType || 'car' });
+                driversRef.current.set(id, { current: pos, from: pos, target: null, startTime: 0, vehicleType: markerType, heading: null });
+                providerRef.current.placeMarker(`driver_${id}`, pos, { type: markerType });
                 return;
             }
-            if (vehicleType && existing.vehicleType !== vehicleType) {
-                existing.vehicleType = vehicleType;
-                providerRef.current.setMarkerIcon(`driver_${id}`, vehicleType);
+            if (existing.vehicleType !== markerType) {
+                existing.vehicleType = markerType;
+                providerRef.current.setMarkerIcon(`driver_${id}`, markerType);
                 // Trocar o ícone recria o elemento no Leaflet e leva junto a rotação
                 // aplicada por CSS; reaplica para o ponteiro não sumir.
                 if (existing.heading != null) providerRef.current.setMarkerRotation(`driver_${id}`, existing.heading);
@@ -609,7 +610,12 @@ const LiveTracking = (props) => {
                 for (const id of [...driversRef.current.keys()]) {
                     if (!seen.has(id)) removeDriver(id);
                 }
-                drivers.forEach(d => upsertDriver({ driverId: d.id, vehicleType: d.vehicleType, location: d.location }));
+                drivers.forEach(d => upsertDriver({
+                    driverId: d.id,
+                    vehicleType: d.vehicleType,
+                    vehicleAuthorization: d.vehicleAuthorization,
+                    location: d.location,
+                }));
             } catch (err) {
                 console.error('Erro ao sincronizar motoristas próximos:', err);
             }
@@ -981,7 +987,11 @@ const LiveTracking = (props) => {
 
         prevCaptainPosRef.current = captainPosition;
 
-        const vType = props.ride?.vehicleType || props.ride?.captain?.vehicle?.vehicleType || props.vehicleType || 'car';
+        const vType = props.ride?.captain?.vehicleAuthorization
+            || props.ride?.vehicleType
+            || props.ride?.captain?.vehicle?.vehicleType
+            || props.vehicleType
+            || 'car';
 
         // If it's the first time placing the captain marker
         if (!hasCaptainMarkerRef.current) {
@@ -1036,7 +1046,7 @@ const LiveTracking = (props) => {
                 cancelAnimationFrame(animationFrameId);
             }
         };
-    }, [captainPosition, props.navigationMode, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicle?.vehicleType, shouldClearTrip]);
+    }, [captainPosition, props.navigationMode, props.vehicleType, props.ride?.vehicleType, props.ride?.captain?.vehicleAuthorization, props.ride?.captain?.vehicle?.vehicleType, shouldClearTrip]);
 
     // HUD de fase da corrida — antes só cobria 'accepted' e 'ongoing' (este último nunca
     // existiu no enum real do backend), então o card de progresso nunca aparecia durante

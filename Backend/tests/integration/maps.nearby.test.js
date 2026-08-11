@@ -39,8 +39,8 @@ describe('GET /maps/nearby-drivers (Fase C)', () => {
         userToken = generateAuthToken(user);
     });
 
-    it('retorna motorista disponível APENAS com id, vehicleType e location (nada pessoal)', async () => {
-        const captain = await availableCaptain();
+    it('retorna motorista disponível com autorização para definir o ícone, sem dados pessoais', async () => {
+        const captain = await availableCaptain({ vehicleAuthorization: 'car_motorcycle' });
 
         const res = await request(app)
             .get('/maps/nearby-drivers')
@@ -52,10 +52,11 @@ describe('GET /maps/nearby-drivers (Fase C)', () => {
         const driver = res.body[0];
         expect(driver.id).toBe(captain._id.toString());
         expect(driver.vehicleType).toBe('car');
+        expect(driver.vehicleAuthorization).toBe('car_motorcycle');
         expect(driver.location.ltd).toBe(VIEWER_POS.lat);
         // Posição de frota é sensível — nome/telefone/placa não podem vazar pra quem
         // só está olhando o mapa.
-        expect(Object.keys(driver).sort()).toEqual(['id', 'location', 'vehicleType']);
+        expect(Object.keys(driver).sort()).toEqual(['id', 'location', 'vehicleAuthorization', 'vehicleType']);
     });
 
     it('não retorna motorista com corrida ativa (ocupado não aparece como livre)', async () => {

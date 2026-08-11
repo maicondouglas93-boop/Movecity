@@ -7,7 +7,7 @@
 //   'user'        — posição do usuário (ponto azul pulsante)
 //   'pickup'      — pin verde de embarque
 //   'destination' — pin vermelho de destino
-//   'car' | 'moto' | 'motorcycle' | 'auto' — ícone de veículo do motorista
+//   'car' | 'moto' | 'motorcycle' | 'car_motorcycle' | 'auto' — ícone do motorista
 //
 // IDs de marcador usados por LiveTracking.jsx: 'user', 'captain', 'pickup', 'destination'.
 //

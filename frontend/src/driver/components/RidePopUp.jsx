@@ -29,6 +29,12 @@ const haversineKm = (a, b) => {
     return R * 2 * Math.atan2(Math.sqrt(sinA), Math.sqrt(1 - sinA))
 }
 
+const rideTypeHeading = (vehicleType) => {
+    if (['moto', 'motorcycle'].includes(vehicleType)) return '🏍️ CORRIDA DE MOTO'
+    if (vehicleType === 'car') return '🚗 CORRIDA DE CARRO'
+    return 'Nova corrida'
+}
+
 const RidePopUp = (props) => {
     const { userLocation } = useContext(LocationContext)
     const [accepting, setAccepting] = useState(false)
@@ -59,7 +65,7 @@ const RidePopUp = (props) => {
     return (
         <div className="pb-1">
             <div className='flex items-center justify-between mb-2.5'>
-                <h3 className='text-base font-semibold text-ink-900'>Nova corrida</h3>
+                <h3 className='text-base font-semibold text-ink-900'>{rideTypeHeading(props.ride?.vehicleType)}</h3>
                 {props.ride?.fare != null && (
                     <p className="text-lg font-bold text-ink-900">
                         {formatBRL(props.ride?.fare)}

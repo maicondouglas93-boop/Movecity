@@ -542,7 +542,7 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
     const captainModel = require('../models/captain.model');
     const mapService = require('./maps.service');
     const freshCaptain = await captainModel.findById(captain._id)
-        .select('approvalStatus isBlocked canReceiveRides isOnline location vehicle busyLock');
+        .select('approvalStatus isBlocked canReceiveRides isOnline location vehicle vehicleAuthorization busyLock');
     if (!freshCaptain) throw new Error('CAPTAIN_NOT_ALLOWED');
 
     if (
@@ -576,12 +576,13 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
             throw new Error('CAPTAIN_HAS_ACTIVE_PARCEL');
         }
 
-        const vehicleType = freshCaptain.vehicle?.vehicleType;
         const existing = await parcelModel.findById(parcelId);
         if (!existing) throw new Error('PARCEL_NOT_FOUND');
         if (existing.status === 'cancelled') throw new Error('PARCEL_CANCELLED');
         if (existing.status !== 'awaiting_provider') throw new Error('PARCEL_ALREADY_ACCEPTED');
-        if (existing.vehicleType !== vehicleType) throw new Error('VEHICLE_MISMATCH');
+        if (!(await dispatchService.isCaptainAuthorizedForVehicleType(freshCaptain, existing.vehicleType))) {
+            throw new Error('VEHICLE_MISMATCH');
+        }
 
         // Revalida raio no accept (pending já filtra, mas a API não pode confiar nisso).
         let pickup = existing.pickupCoordinates;
@@ -1009,7 +1010,7 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
 
     const captainModel = require('../models/captain.model');
     const freshCaptain = await captainModel.findById(captain._id)
-        .select('location vehicle isOnline isBlocked canReceiveRides approvalStatus');
+        .select('location vehicle vehicleAuthorization isOnline isBlocked canReceiveRides approvalStatus');
     if (!freshCaptain) return [];
 
     const isAvailable = freshCaptain.isOnline === true
@@ -1018,9 +1019,9 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
         && freshCaptain.approvalStatus === 'aprovado';
     if (!isAvailable) return [];
 
-    const vehicleType = freshCaptain.vehicle?.vehicleType;
-    if (!vehicleType) return [];
-    if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, 'parcel'))) return [];
+    const vehicleTypes = await require('./vehicleAuthorization.service')
+        .getAuthorizedVehicleTypesForCaptain(freshCaptain, 'parcel');
+    if (!vehicleTypes.length) return [];
 
     const position = freshCaptain.location;
     if (!position || position.ltd == null || position.lng == null) return [];
@@ -1031,7 +1032,7 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
     // SCH-C2: agendada ativada → activatedAt; imediata (activatedAt null) → createdAt.
     const candidates = await parcelModel.find({
         status: 'awaiting_provider',
-        vehicleType,
+        vehicleType: { $in: vehicleTypes },
         $or: [
             { activatedAt: { $gte: cutoff } },
             { activatedAt: null, createdAt: { $gte: cutoff } },

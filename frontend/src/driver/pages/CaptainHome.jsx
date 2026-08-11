@@ -43,6 +43,12 @@ const haversineKm = (a, b) => {
     return R * 2 * Math.atan2(Math.sqrt(sinA), Math.sqrt(1 - sinA))
 }
 
+const rideTypeAnnouncement = (vehicleType) => {
+    if (['moto', 'motorcycle'].includes(vehicleType)) return { heading: '🏍️ CORRIDA DE MOTO' }
+    if (vehicleType === 'car') return { heading: '🚗 CORRIDA DE CARRO' }
+    return { heading: 'Nova corrida' }
+}
+
 const CaptainHome = () => {
 
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
@@ -378,17 +384,19 @@ const CaptainHome = () => {
             offerQueue.enqueue('ride', data)
             console.log(`[AUDIT][${TRACE_ID}] Oferta enfileirada.`);
 
-            addToast(`Nova solicitação de ${data.vehicleType?.toUpperCase() || 'corrida'} de ${data.user?.fullname?.firstname || 'um passageiro'}!`, 'ride')
+            const rideType = rideTypeAnnouncement(data.vehicleType)
+            addToast(`${rideType.heading} · ${data.user?.fullname?.firstname || 'Passageiro'}`, 'ride')
 
             // APK: tela cheia nativa na hora (FSI vira só heads-up com tela desbloqueada).
             presentNativeRideOffer({
                 type: 'NEW_RIDE',
                 rideId: data._id,
-                title: 'Nova Solicitação de Corrida!',
+                title: rideType.heading,
                 message: `${data.pickup?.split(',')[0] || 'Origem'} → ${data.destination?.split(',')[0] || 'Destino'} • ${formatBRL(data.fare)}`,
                 fare: data.fare,
                 pickup: data.pickup,
                 destination: data.destination,
+                vehicleType: data.vehicleType,
                 deepLink: `/captain-home?rideOffer=${data._id}`,
             })
 
@@ -396,7 +404,7 @@ const CaptainHome = () => {
             // com o modal/popup já na tela, ela era só um eco redundante do mesmo aviso.
             if (!isNativePlatform() && document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
                 showBrowserNotification(
-                    'Nova Solicitação de Corrida! 🚗',
+                    rideType.heading,
                     `${data.pickup?.split(',')[0]} → ${data.destination?.split(',')[0]} • ${formatBRL(data.fare)}`,
                     { tag: `ride-${data._id}` }
                 )

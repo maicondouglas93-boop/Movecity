@@ -1,6 +1,7 @@
 const captainModel = require('../models/captain.model');
 const { getCache, setCache, deleteCache } = require('../cache/cache');
 const mongoose = require('mongoose');
+const { vehicleFamilyFromCategory } = require('./vehicleAuthorization.service');
 
 // Separação disponibilidade x conexão (2026-08-03) — ver
 // docs/plans/2026-08-03-disponibilidade-vs-conexao-motorista.md.
@@ -65,6 +66,7 @@ module.exports.createCaptain = async ({
         email,
         password,
         documentDeadline,
+        vehicleAuthorization: vehicleFamilyFromCategory(vehicleType) || undefined,
         vehicle: {
             marca,
             modelo,

@@ -181,6 +181,7 @@ const LiveTracking = (props) => {
     const offRouteSinceRef = useRef(null);
     const lastPrunedPositionRef = useRef(null);
     const onNavigationUpdateRef = useRef(props.onNavigationUpdate);
+    const onTripProgressRef = useRef(props.onTripProgress);
 
     // Keep routeCoordsRef in sync
     useEffect(() => {
@@ -194,6 +195,10 @@ const LiveTracking = (props) => {
     useEffect(() => {
         onNavigationUpdateRef.current = props.onNavigationUpdate;
     }, [props.onNavigationUpdate]);
+
+    useEffect(() => {
+        onTripProgressRef.current = props.onTripProgress;
+    }, [props.onTripProgress]);
 
     // GPS tracking sync from Global Context
     useEffect(() => {
@@ -1050,9 +1055,27 @@ const LiveTracking = (props) => {
         && rideStatus !== 'waiting_passenger'
         && rideStatus !== 'arrived_pickup'
         && rideStatus !== 'arrived_destination';
-    const remainingKm = showRemainingKm && routeCoords.length > 1 && captainPosition
-        ? calculateRouteDistance(getRemainingRoute(routeCoords, captainPosition)).toFixed(1)
+    const remainingDistanceKm = showRemainingKm && routeCoords.length > 1 && captainPosition
+        ? calculateRouteDistance(getRemainingRoute(routeCoords, captainPosition))
         : null;
+    const remainingKm = remainingDistanceKm != null ? remainingDistanceKm.toFixed(1) : null;
+    const totalDistanceKm = routeCoords.length > 1 ? calculateRouteDistance(routeCoords) : null;
+    const tripProgress = remainingDistanceKm != null && totalDistanceKm > 0
+        ? Math.min(1, Math.max(0, 1 - (remainingDistanceKm / totalDistanceKm)))
+        : 0;
+    const routeSummary = routeSummaryRef.current;
+    const tripEtaMinutes = remainingDistanceKm != null && routeSummary?.durationValue && routeSummary?.distanceValue > 0
+        ? Math.max(1, Math.round((routeSummary.durationValue * Math.min(1, (remainingDistanceKm * 1000) / routeSummary.distanceValue)) / 60))
+        : null;
+
+    useEffect(() => {
+        if (rideStatus !== 'started' || remainingDistanceKm == null) return;
+        onTripProgressRef.current?.({
+            progress: tripProgress,
+            remainingKm: remainingDistanceKm,
+            etaMinutes: tripEtaMinutes,
+        });
+    }, [rideStatus, remainingDistanceKm, tripProgress, tripEtaMinutes]);
 
     if (!hasPosition) {
         return (

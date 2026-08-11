@@ -20,6 +20,7 @@ import { joinWithRetry } from '@/shared/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel as getPaymentStatusLabel } from '@/shared/utils/formatters'
+import { getTripProgressMessage } from '@/passenger/utils/tripProgress'
 
 const shortAddress = (address) => {
     if (!address || typeof address !== 'string') return '—'
@@ -87,6 +88,7 @@ const Riding = () => {
     const [ ratingComment, setRatingComment ] = useState('')
     const [ submittingReview, setSubmittingReview ] = useState(false)
     const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
+    const [ tripProgress, setTripProgress ] = useState({ progress: 0, remainingKm: null, etaMinutes: null })
 
     const rideAmount = ride?.finalPrice ?? ride?.fare
     const rideAmountLabel = ride?.finalPrice != null ? 'Valor final' : 'Estimativa original'
@@ -265,6 +267,7 @@ const Riding = () => {
     const distanceLabel = formatDistanceLabel(ride?.actualDistance)
     const durationLabel = formatDurationLabel(ride?.actualTime)
     const captainName = personName(ride?.captain) || null
+    const progressMessage = getTripProgressMessage(tripProgress)
 
     return (
         <div className='h-[100dvh] relative flex flex-col bg-surface overflow-hidden'>
@@ -296,7 +299,7 @@ const Riding = () => {
             </div>
 
             <div className='flex-1 min-h-0 relative'>
-                <LiveTracking ride={ride} clearTrip={isFinished} />
+                <LiveTracking ride={ride} clearTrip={isFinished} onTripProgress={setTripProgress} />
             </div>
 
             <div className='flex-shrink-0 px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl -mt-3 relative z-10 bg-surface shadow-floating border-t border-line'>
@@ -308,6 +311,31 @@ const Riding = () => {
                     fareLabel={formatCurrencyBRL(rideAmount)}
                     compact
                 />
+
+                {!isFinished && (
+                    <div className='mt-3 rounded-panel border border-brand-100 bg-brand-50 px-3 py-2.5 flex gap-3' aria-live='polite'>
+                        <div className='h-9 w-9 rounded-full bg-brand-500 text-white flex flex-shrink-0 items-center justify-center'>
+                            <i className={progressMessage.icon} aria-hidden='true' />
+                        </div>
+                        <div className='min-w-0'>
+                            <p className='text-sm font-bold text-ink-900'>{progressMessage.title}</p>
+                            <p className='mt-0.5 text-xs leading-relaxed text-ink-600'>{progressMessage.text}</p>
+                        </div>
+                    </div>
+                )}
+
+                {!isFinished && (tripProgress.remainingKm != null || tripProgress.etaMinutes != null) && (
+                    <div className='mt-2.5 grid grid-cols-2 gap-2' aria-label='Progresso da viagem'>
+                        <div className='rounded-panel bg-surface-alt px-3 py-2'>
+                            <p className='text-[11px] text-ink-400'>Distância restante</p>
+                            <p className='text-sm font-bold tabular-nums text-ink-900'>{tripProgress.remainingKm?.toFixed(1) ?? '—'} km</p>
+                        </div>
+                        <div className='rounded-panel bg-surface-alt px-3 py-2'>
+                            <p className='text-[11px] text-ink-400'>Tempo estimado</p>
+                            <p className='text-sm font-bold tabular-nums text-ink-900'>{tripProgress.etaMinutes ? `${tripProgress.etaMinutes} min` : 'Calculando…'}</p>
+                        </div>
+                    </div>
+                )}
 
                 <div className='mt-2.5 flex items-center gap-3 text-xs text-ink-600'>
                     <span className='inline-flex items-center gap-1 min-w-0 flex-1 truncate'>

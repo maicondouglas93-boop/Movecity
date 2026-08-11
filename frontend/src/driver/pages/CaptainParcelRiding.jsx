@@ -7,7 +7,6 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import {
   confirmParcelDelivery,
   confirmParcelPayment,
-  getCaptainCurrentParcel,
   skipCaptainParcelReview,
   updateParcelStatus,
 } from '@/shared/services/parcelApi'
@@ -48,9 +47,17 @@ const CaptainParcelRiding = () => {
   const { state } = useLocation()
   const navigate = useNavigate()
   const { socket } = useContext(SocketContext)
-  const { setCaptainParcel } = useContext(RideContext)
+  const { captainParcel, setCaptainParcel, syncCaptainParcel } = useContext(RideContext)
   const { addToast } = useToast()
-  const [parcel, setParcel] = useState(state?.parcel || null)
+  const [parcel, setParcel] = useState(state?.parcel || captainParcel || null)
+  // Auditoria do app do motorista (2026-08-11, P0): sem isto, aceitar a encomenda pelo
+  // botão de ação da notificação nativa Android (o caminho mais comum com o app em
+  // segundo plano) cai direto em /captain-parcel sem location.state — a tela via
+  // `parcel === null` e mostrava "Nenhuma encomenda ativa" imediatamente, antes mesmo da
+  // busca ao servidor terminar (ou travada nesse estado se ela falhasse). Mesmo padrão
+  // já usado e correto em CaptainRiding.jsx (rehydrating + fallback só depois de
+  // sincronizar de verdade com o backend).
+  const [rehydrating, setRehydrating] = useState(!(state?.parcel || captainParcel))
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
@@ -70,11 +77,10 @@ const CaptainParcelRiding = () => {
     let alive = true
     ;(async () => {
       try {
-        const current = await getCaptainCurrentParcel()
+        const current = await syncCaptainParcel()
         if (!alive) return
         if (current) {
           setParcel(current)
-          setCaptainParcel(current)
           setStep(resolveStep(current))
           return
         }
@@ -83,12 +89,29 @@ const CaptainParcelRiding = () => {
           setStep(state?.step === 'rating' && state.parcel.paymentStatus === 'paid'
             ? 'rating'
             : resolveStep(state.parcel))
+          return
+        }
+        // current === null: backend confirma que não há encomenda ativa (404). Sem
+        // nada local pra mostrar, avisa e volta — nunca deixa a tela presa em
+        // "Nenhuma encomenda ativa" por baixo de um rehydrating que nunca termina.
+        if (!parcel) {
+          addToast('Nenhuma encomenda em andamento encontrada.', 'info')
+          navigate('/captain-home', { replace: true })
         }
       } catch {
-        /* ignore */
+        // Falha de rede/servidor: só manda pra Home se não havia NADA local — preserva
+        // o que já estava na tela em vez de trocar por um erro.
+        if (alive && !parcel) {
+          addToast('Nenhuma encomenda em andamento encontrada.', 'info')
+          navigate('/captain-home', { replace: true })
+        }
+      } finally {
+        if (alive) setRehydrating(false)
       }
     })()
     return () => { alive = false }
+    // Roda uma vez ao montar — mesmo padrão de CaptainRiding.jsx.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -101,6 +124,14 @@ const CaptainParcelRiding = () => {
     socket.on('parcel-cancelled', onCancelled)
     return () => socket.off('parcel-cancelled', onCancelled)
   }, [socket, navigate, addToast, setCaptainParcel])
+
+  if (rehydrating) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-surface-alt">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600"></div>
+      </div>
+    )
+  }
 
   if (!parcel) {
     return (

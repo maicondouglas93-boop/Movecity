@@ -199,11 +199,17 @@ const CaptainRiding = () => {
     useEffect(() => {
         if (!socket) return undefined
 
-        const handlePaymentCompleted = () => {
-            addToast(`Pagamento recebido! R$${rideData?.fare}`, 'success')
+        // Auditoria do app do motorista (2026-08-11, P1): o evento já traz a corrida
+        // atualizada do backend (com finalPrice correto) — usar isso em vez de
+        // rideData?.fare (estado local que nunca é atualizado depois que a corrida sai
+        // de 'started', então sempre mostrava a ESTIMATIVA, não o valor final cobrado).
+        const handlePaymentCompleted = (data) => {
+            const amount = Number(data?.finalPrice ?? data?.fare ?? rideData?.finalPrice ?? rideData?.fare ?? 0)
+            const passengerName = data?.user?.fullname?.firstname || rideData?.user?.fullname?.firstname || 'passageiro'
+            addToast(`Pagamento recebido! R$ ${amount.toFixed(2)}`, 'success')
             showBrowserNotification(
                 'Pagamento Recebido! 💰',
-                `R$${rideData?.fare} recebido de ${rideData?.user?.fullname?.firstname || 'passageiro'}`
+                `R$ ${amount.toFixed(2)} recebido de ${passengerName}`
             )
             // Fase A da experiência de corrida ativa (2026-08-03): limpa o RideContext
             // antes de voltar pra Home — sem isso, o contexto ficava com a corrida

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { FINALIZE_REASONS } from './rideUi';
 
@@ -14,9 +15,9 @@ export default function FinalizeRideModal({ ride, onClose, onConfirm, saving }) 
     onConfirm({ reason, observation: observation.trim() });
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[3500] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[4500] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
@@ -91,6 +92,7 @@ export default function FinalizeRideModal({ ride, onClose, onConfirm, saving }) 
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2, MapPin, X } from 'lucide-react';
 import api from '../../services/api';
@@ -386,15 +387,18 @@ export default function ManualRideModal({ onClose, onCreated }) {
 }
 
 function Shell({ children, onClose, closeDisabled = false }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Lançar corrida">
-      <div className="bg-surface border border-border rounded-xl w-full max-w-3xl p-6 relative shadow-2xl">
+  // Portal para document.body: React 19 + react-leaflet no /rides causa
+  // NotFoundError (insertBefore/removeChild) se o modal viver na mesma árvore do MapContainer.
+  return createPortal(
+    <div className="fixed inset-0 z-[4000] bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Lançar corrida">
+      <div className="bg-surface border border-border rounded-xl w-full max-w-3xl p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto">
         <button type="button" aria-label="Fechar" disabled={closeDisabled} onClick={onClose} className="absolute right-4 top-4 disabled:opacity-40">
           <X />
         </button>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 import { X, Activity, User, Car, Package, CreditCard, Flag, Shield, Navigation, History as HistoryIcon, ShieldCheck } from 'lucide-react';
@@ -49,10 +50,11 @@ export default function RideDrawer({ ride, onClose, onAction }) {
   const statusDict = isParcel ? PARCEL_STATUS_LABELS : RIDE_STATUS_LABELS;
   const history = Array.isArray(ride.statusHistory) ? ride.statusHistory : [];
 
-  return (
+  // Fora da árvore do MapContainer (React 19 + Leaflet → insertBefore/removeChild).
+  return createPortal(
     <>
-      <div className="fixed inset-0 bg-black/50 z-2000" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-surface border-l border-border shadow-2xl z-2001 flex flex-col">
+      <div className="fixed inset-0 bg-black/50 z-[4000]" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-surface border-l border-border shadow-2xl z-[4001] flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border bg-background/50">
@@ -293,7 +295,8 @@ export default function RideDrawer({ ride, onClose, onAction }) {
 
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 

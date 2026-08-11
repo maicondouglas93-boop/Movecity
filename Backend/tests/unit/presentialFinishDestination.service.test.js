@@ -1,6 +1,8 @@
 // Corrida presencial sem destino: o endereço final descreve somente onde terminou.
 // Distância e tempo financeiros sempre representam a corrida inteira.
 
+const mongoose = require('mongoose');
+
 jest.mock('../../services/maps.service', () => ({
     haversineKm: jest.fn(() => 0),
     getReverseGeocode: jest.fn().mockResolvedValue({ address: 'Origem, Lajinha' }),
@@ -15,11 +17,13 @@ jest.mock('../../services/pricingEngine.service', () => ({
 
 jest.mock('../../models/captain.model', () => ({
     findById: jest.fn(),
+    findByIdAndUpdate: jest.fn().mockResolvedValue({}),
 }));
 
 jest.mock('../../models/payment.model', () => ({
     findOne: jest.fn().mockResolvedValue(null),
     create: jest.fn().mockResolvedValue({}),
+    findOneAndUpdate: jest.fn().mockResolvedValue({}),
 }));
 
 jest.mock('../../models/user.model', () => ({}));
@@ -67,6 +71,7 @@ jest.mock('../../models/ride.model', () => ({
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn(),
     findById: jest.fn(),
+    updateOne: jest.fn().mockResolvedValue({}),
 }));
 
 const rideService = require('../../services/ride.service');
@@ -77,11 +82,19 @@ const PricingEngine = require('../../services/pricingEngine.service');
 describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.spyOn(mongoose, 'startSession').mockResolvedValue({
+            withTransaction: async (work) => work(),
+            endSession: async () => {},
+        });
         rideModel.findById.mockReturnValue({
             populate: jest.fn().mockReturnValue({
                 populate: jest.fn().mockResolvedValue({ _id: 'ride1', status: 'finished' }),
             }),
         });
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     test('Lajinha->Manhuaçu->Lajinha usa 80km e 150min acumulados, não origem->fim', async () => {
@@ -90,7 +103,12 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
             startedAt: new Date(Date.now() - 150 * 60 * 1000),
         });
         rideModel.findOne.mockReturnValue(mockFindOneChain(ride));
-        rideModel.findOneAndUpdate.mockResolvedValue({ _id: 'ride1', status: 'finished' });
+        rideModel.findOneAndUpdate.mockImplementation((_filter, update) => {
+            if (update?.$set?.finalizationState === 'finishing') {
+                return mockFindOneChain({ ...ride, finalizationState: 'finishing' });
+            }
+            return Promise.resolve({ _id: 'ride1', status: 'finished' });
+        });
         require('../../models/captain.model').findById.mockReturnValue({
             select: jest.fn().mockResolvedValue({
                 location: { ltd: LAJINHA.lat, lng: LAJINHA.lng },
@@ -145,7 +163,10 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
         expect(pricingInput.time).toBeGreaterThanOrEqual(8999);
         expect(pricingInput.time).toBeLessThanOrEqual(9001);
 
-        const updatePayload = rideModel.findOneAndUpdate.mock.calls[0][1].$set;
+        const finishCall = rideModel.findOneAndUpdate.mock.calls.find(([, update]) => (
+            update?.$set?.status === 'finished'
+        ));
+        const updatePayload = finishCall[1].$set;
         expect(updatePayload.finalPrice).toBe(250);
         expect(updatePayload.actualDistance).toBe(80000);
         expect(updatePayload.actualTime).toBe(pricingInput.time);
@@ -153,10 +174,13 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
         expect(updatePayload.fareBreakdown.driverNetEarnings).toBe(200);
         expect(updatePayload.destination).toBe('Origem, Lajinha');
         expect(updatePayload.destinationPending).toBe(false);
-        expect(require('../../models/payment.model').create).toHaveBeenCalledWith(expect.objectContaining({
-            rideId: 'ride1',
-            amount: 250,
-        }));
+        expect(require('../../models/payment.model').findOneAndUpdate).toHaveBeenCalledWith(
+            { rideId: 'ride1' },
+            expect.objectContaining({
+                $set: expect.objectContaining({ amount: 250, status: 'pending' }),
+            }),
+            expect.objectContaining({ upsert: true, session: expect.any(Object) }),
+        );
         // O mesmo documento consumido pelo histórico expõe origem/fim iguais sem perder
         // os 80 km, os 150 minutos nem o resultado financeiro consolidado.
         expect(result).toEqual(expect.objectContaining({
@@ -174,6 +198,12 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
     test('não inventa rota origem->fim quando não houve distância GPS suficiente', async () => {
         const ride = buildRide();
         rideModel.findOne.mockReturnValue(mockFindOneChain(ride));
+        rideModel.findOneAndUpdate.mockImplementation((_filter, update) => {
+            if (update?.$set?.finalizationState === 'finishing') {
+                return mockFindOneChain({ ...ride, finalizationState: 'finishing' });
+            }
+            return Promise.resolve({ _id: 'ride1', status: 'finished' });
+        });
 
         await expect(rideService.endRide({
             rideId: 'ride1',
@@ -183,13 +213,20 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
 
         expect(mapService.getDistanceTime).not.toHaveBeenCalled();
         expect(PricingEngine.calculateFare).not.toHaveBeenCalled();
-        expect(rideModel.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(rideModel.findOneAndUpdate.mock.calls.some(([, update]) => (
+            update?.$set?.status === 'finished'
+        ))).toBe(false);
     });
 
     test('sem destino digitado, mantém o fluxo legado baseado em GPS (compatibilidade)', async () => {
         const ride = buildRide();
         rideModel.findOne.mockReturnValue(mockFindOneChain(ride));
-        rideModel.findOneAndUpdate.mockResolvedValue({ _id: 'ride1', status: 'finished' });
+        rideModel.findOneAndUpdate.mockImplementation((_filter, update) => {
+            if (update?.$set?.finalizationState === 'finishing') {
+                return mockFindOneChain({ ...ride, finalizationState: 'finishing' });
+            }
+            return Promise.resolve({ _id: 'ride1', status: 'finished' });
+        });
         require('../../models/captain.model').findById.mockReturnValue({
             select: jest.fn().mockResolvedValue({
                 location: { ltd: LAJINHA.lat + 0.0002, lng: LAJINHA.lng + 0.0002 },

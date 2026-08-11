@@ -81,19 +81,69 @@ export async function enqueueOfflineAction({ type, rideId, payload }) {
 // risco de chegar ANTES da identidade autenticada existir no socket e ser rejeitada à
 // toa. Por isso só é chamado depois do ack de sucesso do 'join' (ver CaptainHome.jsx /
 // CaptainRiding.jsx).
-export async function flushQueuedLocations(socket) {
-    const locations = await db.driverLocations.toArray()
-    if (locations.length === 0) return
-    const lastLoc = locations[locations.length - 1]
-    socket.emit('update-location-captain', {
-        location: {
-            ltd: lastLoc.lat,
-            lng: lastLoc.lng,
-            ...(Number.isFinite(lastLoc.accuracy) ? { accuracy: lastLoc.accuracy } : {}),
-            ...(lastLoc.timestamp ? { timestamp: lastLoc.timestamp } : {}),
+const LOCATION_ACK_TIMEOUT_MS = 10_000
+let locationFlushPromise = null
+
+function emitLocationWithAck(socket, point) {
+    return new Promise((resolve, reject) => {
+        if (!socket?.connected) {
+            reject(new Error('Socket desconectado durante sincronização GPS'))
+            return
         }
+
+        let settled = false
+        const timer = setTimeout(() => {
+            if (settled) return
+            settled = true
+            reject(new Error('Confirmação do ponto GPS expirou'))
+        }, LOCATION_ACK_TIMEOUT_MS)
+
+        socket.emit('update-location-captain', {
+            pointId: point.pointId,
+            ...(point.rideId ? { rideId: point.rideId } : {}),
+            location: {
+                ltd: point.lat,
+                lng: point.lng,
+                ...(Number.isFinite(point.accuracy) ? { accuracy: point.accuracy } : {}),
+                timestamp: point.capturedAt,
+            }
+        }, (response) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            if (!response?.ok) {
+                reject(new Error(response?.code || 'Ponto GPS não confirmado'))
+                return
+            }
+            resolve(response)
+        })
     })
-    await db.driverLocations.clear()
+}
+
+async function runLocationFlush(socket, { rideId } = {}) {
+    const all = await db.driverLocations.orderBy('capturedAt').toArray()
+    const locations = rideId
+        ? all.filter(point => String(point.rideId || '') === String(rideId))
+        : all
+
+    for (const point of locations) {
+        await emitLocationWithAck(socket, point)
+        // Só remove depois do ack do backend. Se a resposta se perder, o ponto fica e
+        // o pointId garante que o replay não conte o segmento novamente.
+        await db.driverLocations.delete(point.id)
+    }
+
+    return { synced: locations.length }
+}
+
+export async function flushQueuedLocations(socket, options = {}) {
+    if (locationFlushPromise) await locationFlushPromise
+    locationFlushPromise = runLocationFlush(socket, options)
+    try {
+        return await locationFlushPromise
+    } finally {
+        locationFlushPromise = null
+    }
 }
 
 // Processa a fila em ordem cronológica, sequencialmente (nunca em paralelo — uma ação

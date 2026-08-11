@@ -177,11 +177,29 @@ const rideSchema = new mongoose.Schema({
         lat: Number,
         lng: Number
     },
-    // Horário de recebimento do último ponto no servidor. Nunca vem do relógio do
-    // aparelho e serve para descartar deslocamentos impossíveis da distância tarifável.
+    // Horário de captura confirmado do último ponto válido. No replay offline ele vem
+    // do ponto persistido no aparelho; a plausibilidade também exige ordem, janela da
+    // corrida, precisão e velocidade máxima antes de qualquer efeito financeiro.
     lastLocationAt: {
         type: Date,
     },
+    // IDs dos pontos GPS já confirmados pelo backend. Mantido fora das respostas
+    // normais para não inflar payloads de corridas longas; é a chave de idempotência
+    // do replay offline (o mesmo ponto jamais soma distância duas vezes).
+    processedTrackingPointIds: {
+        type: [String],
+        default: [],
+        select: false,
+    },
+    // Lock lógico da finalização. O status público continua `started` enquanto o
+    // cálculo é consolidado; nesse intervalo o tracking não pode mais alterar valores
+    // financeiros. Falhas deixam o estado recuperável por retry.
+    finalizationState: {
+        type: String,
+        enum: ['finishing', 'finished_pending_payment', 'completed', 'retry_required'],
+    },
+    finalizationStartedAt: Date,
+    finalizationError: String,
     actualTime: {
         type: Number,
     },

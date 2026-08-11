@@ -10,7 +10,7 @@ const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview }
 const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCachedTariffSetting } = require('./tariffSettingCache.service');
-const { normalizeCaptainLocation, isPlausibleTravel } = require('../utils/captainLocationValidation');
+const { processRideTrackingPoint } = require('./rideTracking.service');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -44,7 +44,7 @@ const VALID_ORIGINS_BY_TARGET = {
 // motorista desistindo (acima): `captain` e `otp` precisam sair do documento, não só
 // mudar de valor. Retorna `null` quando a transição não é válida a partir do estado
 // atual (ou quando `extraFilter` não bate), e quem chama decide a mensagem/status HTTP.
-async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}, extraPush = {}) {
+async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}, extraPush = {}, options = {}) {
     const validOrigins = VALID_ORIGINS_BY_TARGET[toStatus];
     if (!validOrigins) {
         throw new Error(`Transição de status desconhecida: ${toStatus}`);
@@ -62,7 +62,7 @@ async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {},
     return rideModel.findOneAndUpdate(
         { _id: rideId, status: { $in: validOrigins }, ...extraFilter },
         update,
-        { new: true }
+        { new: true, ...(options.session ? { session: options.session } : {}) }
     );
 }
 
@@ -1158,7 +1158,10 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         startedAt: new Date(),
         // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
         ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
-            ? { lastLocation: { lat: ride.captain.location.ltd, lng: ride.captain.location.lng } }
+            ? {
+                lastLocation: { lat: ride.captain.location.ltd, lng: ride.captain.location.lng },
+                lastLocationAt: new Date(),
+            }
             : {}),
     });
     if (!updatedRide) {
@@ -1297,79 +1300,79 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
         throw new Error('Ride not found');
     }
 
-    // 'ongoing' nunca existiu no enum de status (Backend/models/ride.model.js) — checagem
-    // morta removida, `started` é a única origem real de `finished`.
+    // Retry idempotente: se a resposta da primeira finalização se perdeu, devolve o
+    // documento já consolidado. Para carteira, também tenta completar uma liquidação
+    // que tenha ficado explicitamente marcada como recuperável.
+    if (ride.status === 'finished') {
+        if (
+            ride.finalizationState === 'retry_required'
+            && (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0)
+        ) {
+            const settlement = await reconcileWalletAtRideEnd(rideId);
+            if (ride.paymentMethod === 'carteira' && settlement.settled && ride.paymentStatus !== 'paid') {
+                await module.exports.confirmPaymentReceived({ rideId, captain, allowWalletAuto: true });
+            }
+        }
+        return rideModel.findById(rideId).populate('user').populate('captain');
+    }
+
     if (!VALID_ORIGINS_BY_TARGET.finished.includes(ride.status)) {
         throw new Error('Ride not started');
     }
 
+    // O fix do clique entra pelo mesmo pipeline idempotente do socket ANTES do lock.
+    // Depois do claim abaixo nenhuma escrita de tracking consegue alterar a tarifa.
+    if (finishLocation) {
+        await processRideTrackingPoint({
+            rideId,
+            captainId: captain._id,
+            pointId: `finish:${rideId}:${finishLocation.timestamp || Date.now()}`,
+            location: {
+                ltd: finishLocation.lat,
+                lng: finishLocation.lng,
+                accuracy: finishLocation.accuracy,
+                timestamp: finishLocation.timestamp,
+            },
+        });
+    }
+
+    const staleFinishingBefore = new Date(Date.now() - 2 * 60 * 1000);
+    const claimedForFinalization = await rideModel.findOneAndUpdate(
+        {
+            _id: rideId,
+            captain: captain._id,
+            status: 'started',
+            $or: [
+                { finalizationState: { $ne: 'finishing' } },
+                { finalizationStartedAt: { $lt: staleFinishingBefore } },
+            ],
+        },
+        {
+            $set: {
+                finalizationState: 'finishing',
+                finalizationStartedAt: new Date(),
+            },
+            $unset: { finalizationError: 1 },
+        },
+        { new: true }
+    ).populate('user').populate('captain').select('+otp');
+
+    if (!claimedForFinalization) {
+        const current = await rideModel.findOne({ _id: rideId, captain: captain._id });
+        if (current?.status === 'finished') {
+            return rideModel.findById(rideId).populate('user').populate('captain');
+        }
+        const err = new Error('FINALIZATION_IN_PROGRESS');
+        err.code = 'FINALIZATION_IN_PROGRESS';
+        throw err;
+    }
+
+    ride = claimedForFinalization;
+    let finalizationClaimed = true;
+
+    try {
     const finishExtras = {};
     const isPresentialPendingDest = !!(ride.destinationPending || (ride.source === 'driver_initiated' && !ride.destination));
-
-    // Consolida o fix capturado no clique de finalizar. A bridge envia GPS a cada 5s,
-    // então sem isto os últimos metros desde o tick anterior nunca entrariam na corrida.
-    // O mesmo conjunto de filtros financeiros do Socket.IO é aplicado e o CAS impede
-    // contar duas vezes caso um tick de localização concorra com a finalização.
-    if (isPresentialPendingDest && finishLocation) {
-        const normalized = normalizeCaptainLocation({
-            ltd: finishLocation.lat,
-            lng: finishLocation.lng,
-            accuracy: finishLocation.accuracy,
-            timestamp: finishLocation.timestamp,
-        });
-        if (normalized.valid) {
-            const point = normalized.location;
-            for (let attempt = 0; attempt < 2; attempt += 1) {
-                const current = await rideModel.findOne({
-                    _id: rideId,
-                    captain: captain._id,
-                    status: 'started',
-                }).select('lastLocation lastLocationAt');
-                if (!current?.lastLocation || !isValidGpsCoord(current.lastLocation.lat, current.lastLocation.lng)) break;
-
-                const distMeters = mapService.haversineKm(
-                    current.lastLocation.lat,
-                    current.lastLocation.lng,
-                    point.lat,
-                    point.lng
-                ) * 1000;
-                const previousAt = current.lastLocationAt ? new Date(current.lastLocationAt).getTime() : null;
-                const elapsedMs = previousAt ? Math.max(0, Date.now() - previousAt) : null;
-                const countSegment = distMeters > 5
-                    && distMeters < 2000
-                    && normalized.isAccurateForFare
-                    && (elapsedMs == null || isPlausibleTravel(distMeters, elapsedMs));
-
-                const update = {
-                    $set: {
-                        lastLocation: { lat: point.lat, lng: point.lng },
-                        lastLocationAt: new Date(),
-                    },
-                };
-                if (countSegment) update.$inc = { actualDistance: distMeters };
-
-                const applied = await rideModel.findOneAndUpdate(
-                    {
-                        _id: rideId,
-                        captain: captain._id,
-                        status: 'started',
-                        'lastLocation.lat': current.lastLocation.lat,
-                        'lastLocation.lng': current.lastLocation.lng,
-                    },
-                    update,
-                    { new: true }
-                );
-                if (applied) break;
-            }
-
-            // A distância abaixo precisa incluir tanto os ticks do socket quanto o fix
-            // final recém-consolidado, nunca o snapshot lido no começo da requisição.
-            ride = await rideModel.findOne({
-                _id: rideId,
-                captain: captain._id,
-            }).populate('user').populate('captain').select('+otp');
-        }
-    }
     // O texto informado ao finalizar descreve somente ONDE a corrida terminou. Em uma
     // presencial iniciada sem destino ele jamais pode substituir a soma do percurso
     // (ex.: Lajinha→Manhuaçu→Lajinha não é uma corrida de zero quilômetro).
@@ -1550,68 +1553,99 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     // Adicionais já embutidos no finalPrice via Unified Pricing Engine (recálculo) ou
     // somados diretamente acima (sem recálculo).
 
-    const updated = await transitionRide(rideId, 'finished', { captain: captain._id }, {
-        actualTime: actualTimeSeconds,
-        finalPrice: finalPrice,
-        paymentStatus: 'pending', // Awaiting driver to confirm cash received
-        actualDistance,
-        finishedAt: new Date(),
-        ...finishExtras,
-        ...pricingUpdate,
-    });
-    if (!updated) {
-        throw new Error('Ride not started');
-    }
+    // Corrida final, payment pendente e liberação do busyLock formam uma unidade
+    // atômica. Se qualquer escrita falhar, o Mongo desfaz todas e a corrida continua
+    // `started` com finalizationState recuperável — nunca `finished` pela metade.
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            const updated = await transitionRide(
+                rideId,
+                'finished',
+                { captain: captain._id, finalizationState: 'finishing' },
+                {
+                    actualTime: actualTimeSeconds,
+                    finalPrice,
+                    paymentStatus: 'pending',
+                    actualDistance,
+                    finishedAt: new Date(),
+                    finalizationState: 'finished_pending_payment',
+                    ...finishExtras,
+                    ...pricingUpdate,
+                },
+                { finalizationError: 1 },
+                {},
+                { session }
+            );
+            if (!updated) throw new Error('Ride not started');
 
-    // Garante registro de pagamento (presencial sem user/estimativa inicial).
-    if (ride.user) {
-        const existingPayment = await paymentModel.findOne({ rideId });
-        if (!existingPayment) {
-            await paymentModel.create({
-                rideId,
-                userId: ride.user._id || ride.user,
+            const paymentSet = {
                 amount: finalPrice,
                 method: ride.paymentMethod || 'cash',
                 status: 'pending',
-            });
-        } else if (existingPayment.amount !== finalPrice) {
-            existingPayment.amount = finalPrice;
-            await existingPayment.save();
-        }
-    } else {
-        const existingPayment = await paymentModel.findOne({ rideId });
-        if (!existingPayment) {
-            await paymentModel.create({
-                rideId,
-                amount: finalPrice,
-                method: ride.paymentMethod || 'cash',
-                status: 'pending',
-            });
-        } else if (existingPayment.amount !== finalPrice) {
-            existingPayment.amount = finalPrice;
-            await existingPayment.save();
-        }
+            };
+            if (ride.user) paymentSet.userId = ride.user._id || ride.user;
+            await paymentModel.findOneAndUpdate(
+                { rideId },
+                { $set: paymentSet, $setOnInsert: { rideId } },
+                { new: true, upsert: true, session, setDefaultsOnInsert: true }
+            );
+
+            const captainModel = require('../models/captain.model');
+            await captainModel.findByIdAndUpdate(
+                captain._id,
+                { $set: { busyLock: false } },
+                { session }
+            );
+        });
+        finalizationClaimed = false;
+    } finally {
+        await session.endSession();
     }
 
     // Carteira é dinheiro já sob custódia da plataforma. Reconciliamos eventual
     // diferença entre estimativa e preço final antes de liberar o repasse; o motorista
     // nunca deve confirmar nem cobrar esse pagamento manualmente.
     if (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0) {
-        const settlement = await reconcileWalletAtRideEnd(rideId);
-        if (ride.paymentMethod === 'carteira' && settlement.settled) {
-            await module.exports.confirmPaymentReceived({
-                rideId,
-                captain,
-                allowWalletAuto: true,
-            });
+        try {
+            const settlement = await reconcileWalletAtRideEnd(rideId);
+            if (ride.paymentMethod === 'carteira' && settlement.settled) {
+                await module.exports.confirmPaymentReceived({
+                    rideId,
+                    captain,
+                    allowWalletAuto: true,
+                });
+            }
+        } catch (err) {
+            await rideModel.updateOne(
+                { _id: rideId, status: 'finished', paymentStatus: { $ne: 'paid' } },
+                {
+                    $set: {
+                        finalizationState: 'retry_required',
+                        finalizationError: err.message || 'WALLET_SETTLEMENT_FAILED',
+                    }
+                }
+            );
+            throw err;
         }
     }
 
-    const dispatchService = require('./dispatch.service');
-    await dispatchService.releaseCaptainBusyLock(captain._id);
-
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');
     return updatedRide;
+    } catch (err) {
+        if (finalizationClaimed) {
+            await rideModel.updateOne(
+                { _id: rideId, captain: captain._id, status: 'started', finalizationState: 'finishing' },
+                {
+                    $set: {
+                        finalizationState: 'retry_required',
+                        finalizationError: err.message || 'FINALIZATION_FAILED',
+                    }
+                }
+            ).catch(() => {});
+        }
+        throw err;
+    }
 }
 
 // Idempotente e transacional (P1.1 da auditoria de concorrência, 2026-08-01): duas
@@ -1663,7 +1697,10 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain, allowWalletAut
             // o WriteConflict do Mongo já força um retry que refaz a pré-checagem acima.
             const claimed = await rideModel.findOneAndUpdate(
                 { _id: rideId, captain: captain._id, status: 'finished', paymentStatus: { $ne: 'paid' } },
-                { $set: { paymentStatus: 'paid' } },
+                {
+                    $set: { paymentStatus: 'paid', finalizationState: 'completed' },
+                    $unset: { finalizationError: 1 },
+                },
                 { new: true, session }
             );
             if (!claimed) {

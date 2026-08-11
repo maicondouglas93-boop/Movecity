@@ -173,13 +173,7 @@ class PricingEngine {
 
         let currentSubtotal = breakdown.baseFare + breakdown.distanceFare + breakdown.timeFare;
 
-        // 2. Mínimo
-        if (currentSubtotal < minimumFare) {
-            breakdown.minimumFareAdjustment = minimumFare - currentSubtotal;
-            currentSubtotal = minimumFare;
-        }
-
-        // 3. Adicionais e Condições (Surcharges)
+        // 2. Adicionais e Condições (Surcharges)
         
         // 3.1. Tempo de Espera
         let waitingCharge = 0;
@@ -306,7 +300,6 @@ class PricingEngine {
         breakdown.surcharges.globalTariffs = globalTariffsCharge;
         breakdown.globalTariffsApplied = appliedGlobals;
         currentSubtotal += globalTariffsCharge;
-        breakdown.subtotal = currentSubtotal;
 
         // 5. Taxa de Cartão (opcional - legado globalSetting)
         let cardFee = 0;
@@ -315,6 +308,16 @@ class PricingEngine {
             currentSubtotal += cardFee;
         }
         breakdown.cardFee = cardFee;
+
+        // Tarifa mínima é o piso do subtotal COMPLETO. Aplicá-la antes de qualquer
+        // adicional — inclusive a taxa de cartão — cobrava `mínimo + adicional`
+        // quando o subtotal completo já alcançava o piso (ex.: 6 + 2, mínimo 8,
+        // virava 10). Descontos continuam depois do piso porque não são acréscimos.
+        if (currentSubtotal < minimumFare) {
+            breakdown.minimumFareAdjustment = minimumFare - currentSubtotal;
+            currentSubtotal = minimumFare;
+        }
+        breakdown.subtotal = currentSubtotal;
 
         // 6. Cupons de Desconto
         let couponDiscount = 0;

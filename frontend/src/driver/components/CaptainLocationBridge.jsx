@@ -67,6 +67,7 @@ export default function CaptainLocationBridge() {
                 socket,
                 location: locationRef?.current,
                 captainId: captain._id,
+                rideId: captainRide?.status === 'started' ? captainRide._id : null,
             })
         }
         tick()
@@ -78,7 +79,7 @@ export default function CaptainLocationBridge() {
                 intervalRef.current = null
             }
         }
-    }, [captain?._id, socket, locationRef, intervalMs])
+    }, [captain?._id, captainRide?._id, captainRide?.status, socket, locationRef, intervalMs])
 
     return null
 }

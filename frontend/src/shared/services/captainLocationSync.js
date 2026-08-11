@@ -1,4 +1,5 @@
 import { db } from '@/shared/services/db'
+import { flushQueuedLocations } from '@/shared/services/offlineQueue'
 
 /**
  * Frequências de envio de GPS (documentadas — Phase 1 Capacitor).
@@ -8,16 +9,19 @@ import { db } from '@/shared/services/db'
 export const LOCATION_INTERVAL_ONLINE_MS = 10_000
 export const LOCATION_INTERVAL_ACTIVE_MS = 5_000
 
-/** Máximo de pontos na fila offline — flush envia só o último; evita fila infinita. */
-const MAX_QUEUED_LOCATIONS = 20
-
 const isDev = Boolean(import.meta.env.DEV)
+
+function trackingPointId({ rideId, captainId, location, capturedAt }) {
+    const lat = Number(location.lat).toFixed(6)
+    const lng = Number(location.lng).toFixed(6)
+    return `${rideId}:${captainId}:${capturedAt}:${lat}:${lng}`
+}
 
 /**
  * Envia (ou enfileira) a posição atual do motorista.
  * Identidade no backend vem do join autenticado — userId no payload é legado/opcional.
  */
-export async function emitCaptainLocation({ socket, location, captainId }) {
+export async function emitCaptainLocation({ socket, location, captainId, rideId = null }) {
     if (!location || location.lat == null || location.lng == null) return { sent: false }
 
     const payload = {
@@ -28,6 +32,35 @@ export async function emitCaptainLocation({ socket, location, captainId }) {
             ...(Number.isFinite(location.accuracy) ? { accuracy: location.accuracy } : {}),
             ...(location.timestamp ? { timestamp: location.timestamp } : {}),
         },
+    }
+
+    // Durante uma corrida, persistimos ANTES de emitir mesmo quando online. Assim uma
+    // queda entre o emit e o ack não cria um buraco irrecuperável na trajetória.
+    if (rideId) {
+        const capturedAt = Number(location.timestamp) || Date.now()
+        const pointId = trackingPointId({ rideId, captainId, location, capturedAt })
+        try {
+            await db.driverLocations.put({
+                pointId,
+                rideId: String(rideId),
+                userId: captainId,
+                lat: location.lat,
+                lng: location.lng,
+                accuracy: location.accuracy ?? null,
+                capturedAt,
+                queuedAt: Date.now(),
+            })
+            if (socket?.connected) {
+                await flushQueuedLocations(socket, { rideId })
+                if (isDev) console.log('[Location] queued point confirmed')
+                return { sent: true, confirmed: true }
+            }
+            if (isDev) console.log('[Location] update queued (offline)')
+            return { sent: false, queued: true }
+        } catch (e) {
+            console.error('[Location] queue/sync failed', e)
+            return { sent: false, queued: true }
+        }
     }
 
     if (socket?.connected) {
@@ -42,16 +75,11 @@ export async function emitCaptainLocation({ socket, location, captainId }) {
             lat: location.lat,
             lng: location.lng,
             accuracy: location.accuracy ?? null,
-            timestamp: Date.now(),
+            capturedAt: Number(location.timestamp) || Date.now(),
+            queuedAt: Date.now(),
+            pointId: `availability:${captainId}:${Number(location.timestamp) || Date.now()}`,
+            rideId: null,
         })
-        const count = await db.driverLocations.count()
-        if (count > MAX_QUEUED_LOCATIONS) {
-            const overflow = await db.driverLocations
-                .orderBy('id')
-                .limit(count - MAX_QUEUED_LOCATIONS)
-                .primaryKeys()
-            if (overflow.length) await db.driverLocations.bulkDelete(overflow)
-        }
         if (isDev) console.log('[Location] update queued (offline)')
         return { sent: false, queued: true }
     } catch (e) {

@@ -146,6 +146,11 @@ module.exports.loginCaptain = async (req, res, next) => {
         return res.status(401).json({ message: 'Email ou senha inválidos' });
     }
 
+    if (captain.isBlocked) {
+        await authService.revokeAllForUser({ userId: captain._id, userType: 'captain', reason: 'blocked' });
+        return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
+    }
+
     return await respondWithCaptainSession(res, { captain, ip: req.ip });
 }
 

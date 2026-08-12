@@ -20,9 +20,11 @@ const chatRoutes = require('./routes/chat.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const vehicleCategoryRoutes = require('./routes/vehicleCategory.routes');
 const supportRoutes = require('./routes/support.routes');
+const accountDeletionRoutes = require('./routes/accountDeletion.routes');
 require('./services/tariffScheduler.service'); // registra o cron que aplica tarifas agendadas
 require('./services/captainDeadline.service'); // registra o cron do prazo de documentação do motorista
 require('./services/schedule.service'); // registra o cron que ativa corridas/encomendas agendadas
+require('./services/accountDeletion.service'); // anonimiza contas 30 dias após a solicitação
 
 const adminRoutes = require('./routes/admin.routes');
 const appVersionRoutes = require('./routes/appVersion.routes');
@@ -97,6 +99,7 @@ app.use('/chat', chatRoutes);
 app.use('/webhooks', webhookRoutes);
 app.use('/vehicle-categories', vehicleCategoryRoutes);
 app.use('/support', supportRoutes);
+app.use('/account-deletion', accountDeletionRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

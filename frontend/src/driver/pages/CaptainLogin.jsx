@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useContext, useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
@@ -18,7 +18,7 @@ const Captainlogin = () => {
   const emailRef = useRef(null)
   const passwordRef = useRef(null)
 
-  const { captain, setCaptain } = React.useContext(CaptainDataContext)
+  const { setCaptain } = useContext(CaptainDataContext)
   const navigate = useNavigate()
   const { addToast } = useToast()
 
@@ -122,6 +122,11 @@ const Captainlogin = () => {
 
         </form>
         <p className='text-center text-ink-600'>Quer dirigir com a gente? <Link to='/captain-signup' className='text-brand-700 font-medium'>Cadastre-se como Motorista</Link></p>
+        <div className="flex justify-center gap-4 mt-5 text-xs font-semibold text-ink-600">
+          <Link to="/privacy">Privacidade</Link>
+          <Link to="/support">Suporte</Link>
+          <Link to="/account-deletion">Excluir conta</Link>
+        </div>
       </div>
       {/* Só na web: o APK motorista (VITE_APP_ROLE=driver) não tem rotas de passageiro. */}
       {getAppRole() === 'web' && (

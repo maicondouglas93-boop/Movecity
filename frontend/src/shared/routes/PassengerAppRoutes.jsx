@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import passengerRoutes from '@/passenger/routes'
 import { getAccessToken, getRefreshToken } from '@/shared/services/session'
+import legalRoutes from '@/shared/routes/legalRoutes'
 
 const PassengerRootRedirect = () => {
     const navigate = useNavigate()
@@ -20,6 +21,7 @@ const PassengerAppRoutes = () => (
     <Suspense fallback={<SessionSplash label="Carregando..." />}>
         <Routes>
             <Route path="/" element={<PassengerRootRedirect />} />
+            {legalRoutes}
             {passengerRoutes}
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

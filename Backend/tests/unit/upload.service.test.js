@@ -91,4 +91,17 @@ describe('upload.service (ImageKit)', () => {
         await expect(uploadService.deleteImage(null)).resolves.toBeUndefined();
         expect(imagekitMock.__mockState.deleteFile).not.toHaveBeenCalled();
     });
+
+    it('deleteImageStrict: apaga arquivo gerenciado e propaga a operação', async () => {
+        const url = await uploadService.uploadProfileImage(TINY_PNG);
+        await uploadService.deleteImageStrict(url);
+
+        const fileId = new URL(url).searchParams.get('ik-fileId');
+        expect(imagekitMock.__mockState.deleteFile).toHaveBeenCalledWith(fileId);
+    });
+
+    it('deleteImageStrict: ignora foto externa que não pertence ao ImageKit', async () => {
+        await uploadService.deleteImageStrict('https://lh3.googleusercontent.com/profile/photo.jpg');
+        expect(imagekitMock.__mockState.deleteFile).not.toHaveBeenCalled();
+    });
 });

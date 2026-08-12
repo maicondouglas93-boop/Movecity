@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import driverRoutes from '@/driver/routes'
 import { getAccessToken } from '@/shared/services/session'
+import legalRoutes from '@/shared/routes/legalRoutes'
 
 // Entrada "/" do bundle motorista — sem Start (CTA de passageiro).
 const DriverRootRedirect = () => {
@@ -24,6 +25,7 @@ const DriverAppRoutes = () => (
     <Suspense fallback={<SessionSplash label="Carregando..." />}>
         <Routes>
             <Route path="/" element={<DriverRootRedirect />} />
+            {legalRoutes}
             {driverRoutes}
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

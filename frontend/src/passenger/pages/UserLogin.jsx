@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react'
+import { useState, useContext, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { useNavigate } from 'react-router-dom'
@@ -17,7 +17,7 @@ const UserLogin = () => {
   const [ password, setPassword ] = useState('')
   const [ loading, setLoading ] = useState(false)
 
-  const { user, setUser } = useContext(UserDataContext)
+  const { setUser } = useContext(UserDataContext)
   const navigate = useNavigate()
   const { addToast } = useToast()
 
@@ -141,6 +141,11 @@ const UserLogin = () => {
           Entrar com o Google
         </Button>
         <p className='text-center text-ink-400'>Novo por aqui? <Link to='/signup' className='text-brand-700 font-medium'>Criar uma conta</Link></p>
+        <div className="flex justify-center gap-4 mt-5 text-xs font-semibold text-ink-600">
+          <Link to="/privacy">Privacidade</Link>
+          <Link to="/support">Suporte</Link>
+          <Link to="/account-deletion">Excluir conta</Link>
+        </div>
       </div>
       <div className='p-7'>
         <Link

@@ -147,6 +147,31 @@ module.exports.deleteImage = async (fileUrl) => {
     }
 };
 
+// Exclusão de conta não pode perder a referência do arquivo e seguir adiante se o
+// provedor estiver fora do ar. Esta variante propaga falhas para o worker tentar de
+// novo no próximo ciclo. URLs externas (por exemplo, foto do Google) são ignoradas.
+module.exports.deleteImageStrict = async (fileUrl) => {
+    if (!fileUrl) return;
+    const embeddedFileId = extractFileId(fileUrl);
+    let belongsToImageKit = Boolean(embeddedFileId);
+    if (!belongsToImageKit && imagekitConfig.urlEndpoint) {
+        try {
+            const stored = new URL(fileUrl);
+            const endpoint = new URL(imagekitConfig.urlEndpoint);
+            belongsToImageKit = stored.origin === endpoint.origin
+                && stored.pathname.startsWith(endpoint.pathname.replace(/\/$/, ''));
+        } catch {
+            belongsToImageKit = false;
+        }
+    }
+    if (!belongsToImageKit) return;
+
+    const ik = requireClient();
+    const fileId = embeddedFileId || await resolveFileId(fileUrl);
+    if (!fileId) throw new Error('Arquivo do ImageKit não localizado para exclusão');
+    await ik.files.delete(fileId);
+};
+
 // Gera uma URL temporária (5 min) para visualizar um documento privado — usada pelo
 // painel admin em vez da URL salva no banco, que não é mais publicamente acessível.
 module.exports.getSignedDocumentUrl = async (fileUrl) => {

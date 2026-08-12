@@ -71,6 +71,12 @@ router.patch('/documents',
 
 router.get('/logout', authMiddleware.authCaptain, captainController.logoutCaptain)
 
+router.post('/account-deletion',
+    authMiddleware.authCaptain,
+    body('confirmation').equals('EXCLUIR').withMessage('Digite EXCLUIR para confirmar.'),
+    require('../controllers/accountDeletion.controller').requestCaptain
+)
+
 router.get('/wallet', authMiddleware.authCaptain, captainController.getWallet)
 router.get('/transactions', authMiddleware.authCaptain, captainController.getTransactions)
 router.post('/payouts', authMiddleware.authCaptain, captainController.requestPayout)

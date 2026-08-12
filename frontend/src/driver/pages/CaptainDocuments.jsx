@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { getAccessToken } from '@/shared/services/session'
+import { isImageFile, postImageUpload } from '@/shared/services/imageUpload'
 import { useToast } from '@/shared/contexts/ToastContext'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import Card from '@/shared/components/ui/Card'
@@ -35,7 +36,7 @@ const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
     const handleFileChange = async (e) => {
         const file = e.target.files[0]
         if (!file) return
-        if (!file.type.startsWith('image/')) {
+        if (!isImageFile(file)) {
             addToast('Selecione uma imagem válida (foto do documento).', 'error')
             e.target.value = ''
             return
@@ -47,12 +48,18 @@ const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
         }
         setUploading(true)
         try {
-            const formData = new FormData()
-            formData.append('image', file)
-            formData.append('docType', docKey)
-            const uploadRes = await api.post(`${import.meta.env.VITE_BASE_URL}/uploads/document`, formData, {
-                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-            })
+            // Usa o mesmo pipeline já endurecido para o WebView Android. O nome
+            // explícito do arquivo faz o Capacitor enviar esta parte como arquivo e
+            // não como campo vazio, enquanto o helper deixa o navegador gerar o
+            // boundary correto do multipart para o multer do backend.
+            const uploadRes = await postImageUpload(
+                `${import.meta.env.VITE_BASE_URL}/uploads/document`,
+                file,
+                {
+                    token: getAccessToken('captain'),
+                    fields: { docType: docKey },
+                },
+            )
             const patchRes = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {
                 docType: docKey,
                 url: uploadRes.data.url

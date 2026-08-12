@@ -12,9 +12,12 @@ export function isImageFile(file) {
  * NÃO definir Content-Type manualmente — sem boundary o multer recebe req.file=undefined
  * ("Nenhuma imagem enviada"), especialmente no WebView do APK.
  */
-export async function postImageUpload(url, file, { token, timeout = 60000 } = {}) {
+export async function postImageUpload(url, file, { token, timeout = 60000, fields = {} } = {}) {
     const formData = new FormData()
     formData.append('image', file, file.name || 'photo.jpg')
+    Object.entries(fields).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) formData.append(key, String(value))
+    })
     const headers = {}
     if (token) headers.Authorization = `Bearer ${token}`
     return api.post(url, formData, { headers, timeout })

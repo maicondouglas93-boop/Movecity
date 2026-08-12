@@ -32,6 +32,7 @@ const CaptainRiding = () => {
     const [ cancelling, setCancelling ] = useState(false)
     const [ elapsedSec, setElapsedSec ] = useState(0)
     const [ liveDistance, setLiveDistance ] = useState(0)
+    const [ liveFare, setLiveFare ] = useState(null)
     const location = useLocation()
     // Auditoria de UX do motorista (2026-08-02, §2.6): rideData vivia só em
     // location.state, que não sobrevive a um refresh de página nem ao app sendo
@@ -91,6 +92,9 @@ const CaptainRiding = () => {
             if (payload?.rideId && rideData?._id && String(payload.rideId) !== String(rideData._id)) return
             if (typeof payload?.actualDistance === 'number') {
                 setLiveDistance(payload.actualDistance)
+            }
+            if (typeof payload?.liveFare?.amount === 'number') {
+                setLiveFare(payload.liveFare.amount)
             }
         }
         socket.on('captain-location-updated', onLoc)
@@ -286,6 +290,8 @@ const CaptainRiding = () => {
     const vType = rideData?.vehicleType || 'car'
     const vehicleLabel = vehicleLabels[vType] || 'MoveGo'
     const vehicleImg = vehicleImages[vType] || vehicleImages.car
+    const currentRideAmount = liveFare
+        ?? (rideData?.destinationPending ? null : (rideData?.finalPrice ?? rideData?.fare))
 
     // Etapa atual pra "Abrir no Google Maps": coleta enquanto o motorista ainda
     // não pegou o passageiro, destino a partir de 'started'. Usa coordenada
@@ -507,6 +513,19 @@ const CaptainRiding = () => {
                         <p className='text-xs text-ink-600 mb-2'>Passageiro presencial (sem conta vinculada)</p>
                     ) : null}
 
+                    <div
+                        className='mb-2 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'
+                        aria-live='polite'
+                    >
+                        <div className='min-w-0'>
+                            <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
+                            <p className='text-[11px] text-ink-500 truncate'>Atualizado por tempo e distância</p>
+                        </div>
+                        <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
+                            {currentRideAmount != null ? formatBRL(currentRideAmount) : 'Calculando…'}
+                        </p>
+                    </div>
+
                     <div className='flex items-center gap-2.5 min-w-0'>
                         <img
                             src={vehicleImg}
@@ -525,8 +544,8 @@ const CaptainRiding = () => {
                             </p>
                             <p className='text-xs text-ink-600 font-medium'>
                                 {rideData?.destinationPending
-                                    ? 'Preço ao finalizar'
-                                    : (rideData?.fare ? formatBRL(rideData.fare) : '')}
+                                    ? 'Destino definido ao finalizar'
+                                    : (currentRideAmount != null ? `Agora: ${formatBRL(currentRideAmount)}` : '')}
                             </p>
                         </div>
                     </div>
@@ -558,16 +577,16 @@ const CaptainRiding = () => {
                                     <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Pagamento</p>
                                     <p className='text-ink-900 font-medium capitalize'>{rideData?.paymentMethod || '—'}</p>
                                 </div>
-                                {rideData?.actualDistance != null && (
+                                {liveDistance != null && (
                                     <div>
                                         <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Distância</p>
-                                        <p className='text-ink-900 font-medium'>{(rideData.actualDistance / 1000).toFixed(1)} km</p>
+                                        <p className='text-ink-900 font-medium'>{(liveDistance / 1000).toFixed(1)} km</p>
                                     </div>
                                 )}
-                                {rideData?.fare != null && (
+                                {currentRideAmount != null && (
                                     <div>
-                                        <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Valor</p>
-                                        <p className='text-ink-900 font-medium'>{formatBRL(rideData.fare)}</p>
+                                        <p className='text-[10px] text-ink-400 uppercase tracking-wide'>Valor atual</p>
+                                        <p className='text-ink-900 font-medium'>{formatBRL(currentRideAmount)}</p>
                                     </div>
                                 )}
                             </div>

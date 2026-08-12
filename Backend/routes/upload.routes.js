@@ -11,4 +11,11 @@ router.post('/vehicle', authMiddleware.authCaptain, uploadController.uploadMiddl
 
 router.post('/document', authMiddleware.authCaptain, uploadController.uploadMiddleware, uploadController.uploadDocument);
 
+router.post(
+    '/document-binary',
+    authMiddleware.authCaptain,
+    uploadController.documentBinaryMiddleware,
+    uploadController.uploadDocumentBinary
+);
+
 module.exports = router;

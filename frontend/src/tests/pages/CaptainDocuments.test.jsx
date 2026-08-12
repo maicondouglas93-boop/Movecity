@@ -12,23 +12,23 @@ vi.mock('@/shared/services/session', () => ({
 }))
 vi.mock('@/shared/services/imageUpload', async () => {
     const actual = await vi.importActual('@/shared/services/imageUpload')
-    return { ...actual, postImageUpload: vi.fn() }
+    return { ...actual, postDocumentImageUpload: vi.fn() }
 })
 vi.mock('@/shared/contexts/ToastContext', () => ({
     useToast: () => ({ addToast: vi.fn() }),
 }))
 
 import api from '@/shared/services/axios'
-import { postImageUpload } from '@/shared/services/imageUpload'
+import { postDocumentImageUpload } from '@/shared/services/imageUpload'
 
 describe('CaptainDocuments', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        postImageUpload.mockResolvedValue({ data: { url: 'https://storage.test/cnh.webp' } })
+        postDocumentImageUpload.mockResolvedValue({ data: { url: 'https://storage.test/cnh.webp' } })
         api.patch.mockResolvedValue({ data: { captain: { documents: {} } } })
     })
 
-    it('usa o pipeline multipart compatível com o APK ao enviar documento', async () => {
+    it('usa o pipeline de documentos compatível com a plataforma', async () => {
         const setCaptain = vi.fn()
         const { container } = render(
             <MemoryRouter>
@@ -42,12 +42,12 @@ describe('CaptainDocuments', () => {
 
         fireEvent.change(inputs[1], { target: { files: [file] } })
 
-        await waitFor(() => expect(postImageUpload).toHaveBeenCalledWith(
+        await waitFor(() => expect(postDocumentImageUpload).toHaveBeenCalledWith(
             expect.stringContaining('/uploads/document'),
             file,
             {
                 token: 'captain-token',
-                fields: { docType: 'cnhBack' },
+                docType: 'cnhBack',
             },
         ))
         await waitFor(() => expect(api.patch).toHaveBeenCalledWith(

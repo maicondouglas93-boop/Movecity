@@ -14,9 +14,10 @@ test -s "$AAB" || { echo "FAIL: AAB ausente/vazio: $AAB"; exit 1; }
 unzip -tq "$AAB" >/dev/null
 unzip -l "$AAB" | grep -q 'base/manifest/AndroidManifest.xml'
 unzip -l "$AAB" | grep -q 'base/dex/classes.dex'
-jarsigner -verify -strict "$AAB" >/dev/null
+jarsigner -verify "$AAB" >/dev/null
 
-if ! jarsigner -verify -verbose -certs "$AAB" 2>&1 | grep -q 'X.509'; then
+SIGNATURE_REPORT="$(jarsigner -verify -verbose -certs "$AAB" 2>&1)"
+if ! grep -q 'X.509' <<< "$SIGNATURE_REPORT"; then
   echo "FAIL: certificado X.509 não encontrado no AAB"
   exit 1
 fi

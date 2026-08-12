@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
@@ -67,6 +67,16 @@ function run(command, args, cwd, env = process.env) {
     if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
+function findAabs(directory) {
+    if (!existsSync(directory)) return []
+
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const entryPath = path.join(directory, entry.name)
+        if (entry.isDirectory()) return findAabs(entryPath)
+        return entry.isFile() && entry.name.endsWith('.aab') ? [entryPath] : []
+    })
+}
+
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const gradle = process.platform === 'win32' ? 'gradlew.bat' : 'bash'
 const releaseEnv = {
@@ -91,5 +101,22 @@ run(
 )
 
 const output = path.join(config.androidDir, config.output)
-if (!existsSync(output)) fail(`AAB não encontrado em ${output}`)
+if (!existsSync(output)) {
+    const bundleRoot = path.join(config.androidDir, 'app', 'build', 'outputs', 'bundle')
+    const generatedAabs = findAabs(bundleRoot)
+
+    if (generatedAabs.length !== 1) {
+        const found = generatedAabs.length
+            ? generatedAabs.map((file) => path.relative(config.androidDir, file)).join(', ')
+            : 'nenhum'
+        fail(`AAB esperado não encontrado em ${output}; encontrados: ${found}`)
+    }
+
+    mkdirSync(path.dirname(output), { recursive: true })
+    copyFileSync(generatedAabs[0], output)
+    console.log(
+        `[aab:${role}] saída normalizada: ${path.relative(config.androidDir, generatedAabs[0])}`
+        + ` -> ${path.relative(config.androidDir, output)}`,
+    )
+}
 console.log(`[aab:${role}] OK -> ${output}`)

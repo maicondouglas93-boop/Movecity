@@ -16,6 +16,8 @@
     "cap:sync": "npm run build:driver && npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:release": "node scripts/cap-release.mjs",
+    "aab:driver": "node scripts/build-play-bundle.mjs driver",
+    "aab:passenger": "node scripts/build-play-bundle.mjs passenger",
     "cap:add:passenger": "npm run build:passenger && node scripts/cap-passenger.mjs add android",
     "cap:sync:passenger": "npm run build:passenger && node scripts/cap-passenger.mjs sync android",
     "cap:open:passenger": "node scripts/cap-passenger.mjs open android",

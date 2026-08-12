@@ -1,8 +1,9 @@
 ext {
     // Firebase BoM 34.x (mesma versão validada no Motorista) exige API 23+.
     minSdkVersion = 23
-    compileSdkVersion = 34
-    targetSdkVersion = 34
+    // Google Play exige API 36 para novos apps/updates a partir de 31/08/2026.
+    compileSdkVersion = 36
+    targetSdkVersion = 36
     androidxActivityVersion = '1.8.0'
     androidxAppCompatVersion = '1.6.1'
     androidxCoordinatorLayoutVersion = '1.2.0'

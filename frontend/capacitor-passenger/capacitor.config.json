@@ -1,6 +1,6 @@
 {
   "appId": "br.com.movecity.passenger",
-  "appName": "MoveCity",
+  "appName": "MoveCity Passageiro",
   "webDir": "../dist-passenger",
   "android": {
     "path": "../android-passenger"

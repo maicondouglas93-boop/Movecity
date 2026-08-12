@@ -7,7 +7,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        // API 36 requer AGP 8.9.1 ou superior.
+        classpath 'com.android.tools.build:gradle:8.9.1'
         // Plugin Google Services — lê google-services.json e injeta nos SDKs Firebase
         classpath 'com.google.gms:google-services:4.5.0'
         // Necessário com Firebase 34.x + AGP < 8.4 em apps Java-only (senão crash

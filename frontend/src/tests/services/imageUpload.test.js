@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/shared/services/axios', () => ({
     default: { post: vi.fn() },
 }))
+vi.mock('@capacitor/core', () => ({
+    CapacitorHttp: { request: vi.fn() },
+}))
 vi.mock('@/shared/platform/platform', () => ({
     isNativePlatform: vi.fn(() => false),
 }))
 
 import api from '@/shared/services/axios'
+import { CapacitorHttp } from '@capacitor/core'
 import { isNativePlatform } from '@/shared/platform/platform'
 import { isImageFile, postDocumentImageUpload, postImageUpload } from '@/shared/services/imageUpload'
 
@@ -16,6 +20,11 @@ describe('imageUpload', () => {
         vi.clearAllMocks()
         isNativePlatform.mockReturnValue(false)
         api.post.mockResolvedValue({ data: { url: 'https://storage.test/document.webp' } })
+        CapacitorHttp.request.mockResolvedValue({
+            status: 200,
+            data: { url: 'https://storage.test/document.webp' },
+            headers: {},
+        })
     })
 
     it('envia arquivo multipart com nome e campos extras', async () => {
@@ -45,28 +54,67 @@ describe('imageUpload', () => {
         expect(isImageFile(file)).toBe(true)
     })
 
-    it('envia bytes puros pela rota binária no APK Android', async () => {
+    it('envia documento pela ponte nativa como arquivo base64 no APK Android', async () => {
         isNativePlatform.mockReturnValue(true)
-        const bytes = new Uint8Array([137, 80, 78, 71]).buffer
-        const file = {
-            name: 'cnh-frente.png',
+        const file = new File([new Uint8Array([137, 80, 78, 71])], 'cnh-frente.png', {
             type: 'image/png',
-            arrayBuffer: vi.fn().mockResolvedValue(bytes),
-        }
+        })
 
         await postDocumentImageUpload('/uploads/document', file, {
             token: 'captain-token',
             docType: 'cnhFront',
         })
 
-        expect(file.arrayBuffer).toHaveBeenCalledTimes(1)
-        expect(api.post).toHaveBeenCalledWith('/uploads/document-binary', bytes, {
+        expect(api.post).not.toHaveBeenCalled()
+        expect(CapacitorHttp.request).toHaveBeenCalledWith({
+            url: '/uploads/document-binary',
+            method: 'POST',
             headers: {
                 Authorization: 'Bearer captain-token',
                 'Content-Type': 'application/octet-stream',
             },
             params: { docType: 'cnhFront' },
-            timeout: 60000,
+            data: 'iVBORw==',
+            dataType: 'file',
+            connectTimeout: 60000,
+            readTimeout: 60000,
+            responseType: 'json',
+        })
+    })
+
+    it('envia foto de perfil do motorista pela mesma ponte nativa', async () => {
+        isNativePlatform.mockReturnValue(true)
+        const file = new File(['perfil'], 'perfil.jpg', { type: 'image/jpeg' })
+
+        await postImageUpload('https://api.test/uploads/captain-profile', file, {
+            token: 'captain-token',
+        })
+
+        expect(api.post).not.toHaveBeenCalled()
+        expect(CapacitorHttp.request).toHaveBeenCalledWith(expect.objectContaining({
+            url: 'https://api.test/uploads/captain-profile-binary',
+            method: 'POST',
+            data: 'cGVyZmls',
+            dataType: 'file',
+        }))
+    })
+
+    it('propaga erro HTTP nativo no mesmo formato usado pelas telas', async () => {
+        isNativePlatform.mockReturnValue(true)
+        CapacitorHttp.request.mockResolvedValue({
+            status: 500,
+            data: { message: 'Erro ao fazer upload da imagem' },
+            headers: {},
+        })
+        const file = new File(['perfil'], 'perfil.jpg', { type: 'image/jpeg' })
+
+        await expect(postImageUpload('/uploads/captain-profile', file, {
+            token: 'captain-token',
+        })).rejects.toMatchObject({
+            response: {
+                status: 500,
+                data: { message: 'Erro ao fazer upload da imagem' },
+            },
         })
     })
 

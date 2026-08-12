@@ -12,6 +12,7 @@ const {
     normalizeCaptainLocation,
 } = require('./utils/captainLocationValidation');
 const { processRideTrackingPoint } = require('./services/rideTracking.service');
+const { calculateLiveRideFare } = require('./services/liveRideFare.service');
 
 let io;
 
@@ -318,6 +319,7 @@ function initializeSocket(server) {
 
             if (ride) {
                 let currentDistance = ride.actualDistance || 0;
+                let liveFare = null;
 
                 if (ride.status === 'started' || ride.status === 'ongoing') {
                     // Registros antigos de disponibilidade não têm rideId. Se forem
@@ -349,23 +351,32 @@ function initializeSocket(server) {
                         });
                         currentDistance = trackingAck.actualDistance ?? currentDistance;
                     }
+
+                    try {
+                        liveFare = await calculateLiveRideFare({
+                            ride,
+                            actualDistance: currentDistance,
+                        });
+                    } catch (error) {
+                        // Localização e tracking não podem parar se o cálculo de preço
+                        // falhar pontualmente. O próximo heartbeat tenta novamente.
+                        console.error('Erro calculando valor da corrida em tempo real:', error);
+                    }
                 }
 
-                if (ride.user && ride.user.socketId) {
-                    io.to(ride.user.socketId).emit('captain-location-updated', {
-                        ltd: captainLocation.lat,
-                        lng: captainLocation.lng,
-                        actualDistance: currentDistance,
-                        rideId: ride._id.toString(),
-                    });
-                }
-                // Also send back to the captain's socket to update their local map in real time
-                socket.emit('captain-location-updated', {
+                const locationUpdate = {
                     ltd: captainLocation.lat,
                     lng: captainLocation.lng,
                     actualDistance: currentDistance,
                     rideId: ride._id.toString(),
-                });
+                    ...(liveFare ? { liveFare } : {}),
+                };
+
+                if (ride.user && ride.user.socketId) {
+                    io.to(ride.user.socketId).emit('captain-location-updated', locationUpdate);
+                }
+                // Also send back to the captain's socket to update their local map in real time
+                socket.emit('captain-location-updated', locationUpdate);
             } else if (parcel) {
                 const locPayload = {
                     ltd: captainLocation.lat,

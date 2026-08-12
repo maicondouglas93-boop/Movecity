@@ -89,10 +89,15 @@ const Riding = () => {
     const [ submittingReview, setSubmittingReview ] = useState(false)
     const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
     const [ tripProgress, setTripProgress ] = useState({ progress: 0, remainingKm: null, etaMinutes: null })
+    const [ liveFare, setLiveFare ] = useState(null)
 
-    const rideAmount = ride?.finalPrice ?? ride?.fare
-    const rideAmountLabel = ride?.finalPrice != null ? 'Valor final' : 'Estimativa original'
     const isFinished = ride?.status === 'finished'
+    const rideAmount = isFinished
+        ? (ride?.finalPrice ?? ride?.fare)
+        : (liveFare ?? ride?.finalPrice ?? ride?.fare)
+    const rideAmountLabel = isFinished
+        ? 'Valor final'
+        : (liveFare != null ? 'Valor atual' : 'Estimativa original')
     const paymentStatusLabel = getPaymentStatusLabel(ride?.paymentStatus, ride?.paymentMethod)
 
     const goHomeClean = useCallback(() => {
@@ -130,6 +135,26 @@ const Riding = () => {
             socket.off('connect', handleConnect)
         }
     }, [user, socket])
+
+    useEffect(() => {
+        if (!socket) return undefined
+
+        const handleLocationUpdate = (payload) => {
+            if (payload?.rideId && ride?._id && String(payload.rideId) !== String(ride._id)) return
+
+            if (typeof payload?.liveFare?.amount === 'number') {
+                setLiveFare(payload.liveFare.amount)
+            }
+            if (typeof payload?.actualDistance === 'number') {
+                setRideLocal((previous) => previous
+                    ? { ...previous, actualDistance: payload.actualDistance }
+                    : previous)
+            }
+        }
+
+        socket.on('captain-location-updated', handleLocationUpdate)
+        return () => socket.off('captain-location-updated', handleLocationUpdate)
+    }, [socket, ride?._id])
 
     useEffect(() => {
         const handleRideEnded = (endedRide) => {
@@ -308,9 +333,23 @@ const Riding = () => {
                 <DriverIdentityCard
                     captain={ride?.captain}
                     vehicleTypeFallback={ride?.vehicleType}
-                    fareLabel={formatCurrencyBRL(rideAmount)}
                     compact
                 />
+
+                {!isFinished && (
+                    <div
+                        className='mt-3 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'
+                        aria-live='polite'
+                    >
+                        <div className='min-w-0'>
+                            <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
+                            <p className='text-[11px] text-ink-500 truncate'>Atualiza conforme tempo e distância</p>
+                        </div>
+                        <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
+                            {rideAmount != null ? formatCurrencyBRL(rideAmount) : 'Calculando…'}
+                        </p>
+                    </div>
+                )}
 
                 {!isFinished && (
                     <div className='mt-3 rounded-panel border border-brand-100 bg-brand-50 px-3 py-2.5 flex gap-3' aria-live='polite'>

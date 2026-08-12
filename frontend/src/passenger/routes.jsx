@@ -33,6 +33,7 @@ const Scheduled = lazy(() => import('@/passenger/pages/account/Scheduled'))
 const Favorites = lazy(() => import('@/passenger/pages/account/Favorites'))
 const Help = lazy(() => import('@/passenger/pages/account/Help'))
 const Notifications = lazy(() => import('@/passenger/pages/Notifications'))
+const SharedRideTracking = lazy(() => import('@/passenger/pages/SharedRideTracking'))
 
 // Rotas do fluxo de passageiro.
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.
@@ -41,6 +42,7 @@ const Notifications = lazy(() => import('@/passenger/pages/Notifications'))
 // nunca rodava e a tela perdia os eventos de fim de corrida/pagamento. O wrapper
 // garante o perfil carregado (e o redirect pro login quando não há sessão).
 const passengerRoutes = [
+  <Route key='shared-ride-tracking' path='/track/:token' element={<SharedRideTracking />} />,
   <Route key='login' path='/login' element={<UserLogin />} />,
   <Route key='signup' path='/signup' element={<UserSignup />} />,
   <Route key='riding' path='/riding' element={

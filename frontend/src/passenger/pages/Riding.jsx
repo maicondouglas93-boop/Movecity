@@ -21,6 +21,12 @@ import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel as getPaymentStatusLabel } from '@/shared/utils/formatters'
 import { getTripProgressMessage } from '@/passenger/utils/tripProgress'
+import PassengerSafetyCenter from '@/passenger/components/PassengerSafetyCenter'
+import {
+    calculateFareDifference,
+    describeLiveFareFreshness,
+    normalizeLiveFare,
+} from '@/passenger/utils/liveFarePresentation'
 
 const shortAddress = (address) => {
     if (!address || typeof address !== 'string') return '—'
@@ -89,23 +95,79 @@ const Riding = () => {
     const [ submittingReview, setSubmittingReview ] = useState(false)
     const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
     const [ tripProgress, setTripProgress ] = useState({ progress: 0, remainingKm: null, etaMinutes: null })
-    const [ liveFare, setLiveFare ] = useState(null)
+    const [ liveFare, setLiveFare ] = useState(() => normalizeLiveFare(
+        location.state?.ride?.liveFare || userRide?.liveFare
+    ))
+    const [ fareClock, setFareClock ] = useState(Date.now())
+    const [ online, setOnline ] = useState(() => navigator.onLine)
+    const [ captainLocation, setCaptainLocation ] = useState(null)
 
     const isFinished = ride?.status === 'finished'
     const rideAmount = isFinished
         ? (ride?.finalPrice ?? ride?.fare)
-        : (liveFare ?? ride?.finalPrice ?? ride?.fare)
+        : (liveFare?.amount ?? ride?.finalPrice ?? ride?.fare)
     const rideAmountLabel = isFinished
         ? 'Valor final'
-        : (liveFare != null ? 'Valor atual' : 'Estimativa original')
+        : (liveFare?.amount != null ? 'Valor atual' : 'Estimativa original')
     const paymentStatusLabel = getPaymentStatusLabel(ride?.paymentStatus, ride?.paymentMethod)
+    const fareDifference = calculateFareDifference(rideAmount, ride?.fare)
+    const fareFreshness = describeLiveFareFreshness({
+        updatedAt: liveFare?.calculatedAt,
+        now: fareClock,
+        online,
+    })
 
-    const goHomeClean = useCallback(() => {
+    useEffect(() => {
+        const interval = setInterval(() => setFareClock(Date.now()), 1000)
+        const handleOnline = () => setOnline(true)
+        const handleOffline = () => setOnline(false)
+        window.addEventListener('online', handleOnline)
+        window.addEventListener('offline', handleOffline)
+        return () => {
+            clearInterval(interval)
+            window.removeEventListener('online', handleOnline)
+            window.removeEventListener('offline', handleOffline)
+        }
+    }, [])
+
+    useEffect(() => {
+        const next = normalizeLiveFare(ride?.liveFare)
+        if (next) setLiveFare(next)
+    }, [ride?.liveFare])
+
+    useEffect(() => {
+        if (ride?.status !== 'started') return undefined
+
+        let cancelled = false
+        const reconcile = async () => {
+            const restored = await syncUserRide()
+            if (cancelled) return
+            const snapshot = normalizeLiveFare(restored?.liveFare)
+            if (snapshot) setLiveFare(snapshot)
+        }
+
+        // Atualiza também com o carro parado: o preço pode variar pelo tempo mesmo sem
+        // um novo ponto de GPS. Reconexão/retorno do app continuam cobertos pelo contexto.
+        reconcile()
+        const interval = setInterval(reconcile, 20_000)
+        return () => {
+            cancelled = true
+            clearInterval(interval)
+        }
+    }, [ride?._id, ride?.status, syncUserRide])
+
+    const finishAndGoHome = useCallback(() => {
         clearUserRide?.()
         setRideLocal(null)
         setShowPayModal(false)
         navigate('/home', { state: { clearTrip: true }, replace: true })
     }, [clearUserRide, navigate])
+
+    const minimizeActiveRide = useCallback(() => {
+        // Mantém RideContext intacto. A Home exibe o atalho persistente para voltar e
+        // o backend continua sendo reconciliado em segundo plano.
+        navigate('/home', { replace: true, state: { minimizedRideId: ride?._id } })
+    }, [navigate, ride?._id])
 
     const openPostRideFlow = useCallback((endedRide) => {
         const data = endedRide || ride
@@ -123,6 +185,7 @@ const Riding = () => {
 
         const handleConnect = () => {
             joinWithRetry(socket, { userId: user._id, userType: 'user' })
+            syncUserRide()
         }
 
         if (socket.connected) {
@@ -134,7 +197,7 @@ const Riding = () => {
         return () => {
             socket.off('connect', handleConnect)
         }
-    }, [user, socket])
+    }, [user, socket, syncUserRide])
 
     useEffect(() => {
         if (!socket) return undefined
@@ -143,7 +206,10 @@ const Riding = () => {
             if (payload?.rideId && ride?._id && String(payload.rideId) !== String(ride._id)) return
 
             if (typeof payload?.liveFare?.amount === 'number') {
-                setLiveFare(payload.liveFare.amount)
+                setLiveFare(normalizeLiveFare(payload.liveFare))
+            }
+            if (payload?.ltd != null && payload?.lng != null) {
+                setCaptainLocation({ lat: payload.ltd, lng: payload.lng })
             }
             if (typeof payload?.actualDistance === 'number') {
                 setRideLocal((previous) => previous
@@ -300,11 +366,11 @@ const Riding = () => {
             <div className='absolute right-3 top-3 z-10 flex flex-col gap-2'>
                 <button
                     type="button"
-                    onClick={goHomeClean}
-                    aria-label="Voltar para o início"
+                    onClick={isFinished ? finishAndGoHome : minimizeActiveRide}
+                    aria-label={isFinished ? 'Voltar para o início' : 'Minimizar corrida'}
                     className='h-11 w-11 bg-surface flex items-center justify-center rounded-full shadow-raised text-ink-900'
                 >
-                    <i className="text-lg ri-home-5-line" aria-hidden="true"></i>
+                    <i className={`text-lg ${isFinished ? 'ri-home-5-line' : 'ri-subtract-line'}`} aria-hidden="true"></i>
                 </button>
                 {!isFinished && (
                     <button
@@ -324,7 +390,12 @@ const Riding = () => {
             </div>
 
             <div className='flex-1 min-h-0 relative'>
-                <LiveTracking ride={ride} clearTrip={isFinished} onTripProgress={setTripProgress} />
+                <LiveTracking
+                    ride={ride}
+                    clearTrip={isFinished}
+                    onTripProgress={setTripProgress}
+                    onCaptainLocation={setCaptainLocation}
+                />
             </div>
 
             <div className='flex-shrink-0 px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl -mt-3 relative z-10 bg-surface shadow-floating border-t border-line'>
@@ -343,7 +414,15 @@ const Riding = () => {
                     >
                         <div className='min-w-0'>
                             <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
-                            <p className='text-[11px] text-ink-500 truncate'>Atualiza conforme tempo e distância</p>
+                            <p className={`text-[11px] truncate ${fareFreshness.stale ? 'text-amber-700' : 'text-ink-500'}`}>
+                                {fareFreshness.label}
+                            </p>
+                            <p className='text-[11px] text-ink-400 mt-0.5'>
+                                Estimativa inicial: {ride?.fare != null ? formatCurrencyBRL(ride.fare) : '—'}
+                                {fareDifference != null && Math.abs(fareDifference) >= 0.01
+                                    ? ` · ${fareDifference > 0 ? '+' : '-'}${formatCurrencyBRL(Math.abs(fareDifference))}`
+                                    : ''}
+                            </p>
                         </div>
                         <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
                             {rideAmount != null ? formatCurrencyBRL(rideAmount) : 'Calculando…'}
@@ -388,6 +467,12 @@ const Riding = () => {
                     )}
                 </div>
 
+                {!isFinished && (
+                    <div className='mt-2.5 flex justify-center'>
+                        <PassengerSafetyCenter ride={ride} captainLocation={captainLocation} />
+                    </div>
+                )}
+
                 {isFinished ? (
                     <Button
                         onClick={() => { setModalStep('summary'); setShowPayModal(true) }}
@@ -412,7 +497,7 @@ const Riding = () => {
                         {modalStep !== 'done' && (
                             <button
                                 type="button"
-                                onClick={goHomeClean}
+                                onClick={finishAndGoHome}
                                 aria-label="Fechar e voltar ao início"
                                 className='absolute right-1/2 translate-x-1/2 top-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400'
                             >
@@ -571,7 +656,7 @@ const Riding = () => {
                                 </div>
                                 <h2 className='text-2xl font-bold text-ink-900 mb-1'>Tudo certo!</h2>
                                 <p className='text-ink-400 mb-8 text-center'>Obrigado por viajar conosco. Você já pode pedir uma nova corrida.</p>
-                                <Button onClick={goHomeClean}>
+                                <Button onClick={finishAndGoHome}>
                                     Voltar para início
                                 </Button>
                             </div>

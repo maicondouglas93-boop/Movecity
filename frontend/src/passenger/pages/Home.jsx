@@ -26,6 +26,7 @@ import { getFriendlyErrorMessage } from '@/shared/services/errorMessages';
 import { useBackToClose } from '@/shared/hooks/useBackToClose';
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner';
 import Button from '@/shared/components/ui/Button';
+import RideChat from '@/shared/components/RideChat';
 import { getAccessToken } from '@/shared/services/session';
 import { joinWithRetry } from '@/shared/services/socketAuth';
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue';
@@ -48,6 +49,9 @@ const Home = () => {
     const [ confirmRidePanel, setConfirmRidePanel ] = useState(false)
     const [ vehicleFound, setVehicleFound ] = useState(false)
     const [ waitingForDriver, setWaitingForDriver ] = useState(false)
+    const [ waitingChatOpen, setWaitingChatOpen ] = useState(false)
+    const [ approachProgress, setApproachProgress ] = useState({ remainingKm: null, etaMinutes: null })
+    const [ captainLocation, setCaptainLocation ] = useState(null)
     const [ pickupSuggestions, setPickupSuggestions ] = useState([])
     const [ destinationSuggestions, setDestinationSuggestions ] = useState([])
     const [ suggestionsSessionToken, setSuggestionsSessionToken ] = useState(null)
@@ -818,6 +822,8 @@ const Home = () => {
                     showNearbyDrivers={!ride || ride.status === 'requested' || ride.status === 'finished' || ride.status === 'cancelled'}
                     // Pós-corrida: força remoção de polyline/markers da viagem anterior.
                     clearTrip={Boolean(location.state?.clearTrip) || ride?.status === 'finished' || ride?.status === 'cancelled'}
+                    onTripProgress={setApproachProgress}
+                    onCaptainLocation={setCaptainLocation}
                 />
             </div>
             
@@ -1097,14 +1103,26 @@ const Home = () => {
                     cancelRide={cancelRide} />
             </div>
             {/* Painel sempre aberto: altura pelo conteúdo — sem scroll nem expansão. */}
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl'>
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[88dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}
+                    approachProgress={approachProgress}
+                    captainLocation={captainLocation}
+                    onOpenChat={() => setWaitingChatOpen(true)}
                     setVehicleFound={setVehicleFound}
                     setWaitingForDriver={setWaitingForDriver}
                     waitingForDriver={waitingForDriver} />
             </div>
+
+            {ride && ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status) && (
+                <RideChat
+                    ride={ride}
+                    isOpen={waitingChatOpen}
+                    onClose={() => setWaitingChatOpen(false)}
+                    currentUserType="user"
+                />
+            )}
 
             {/* Bottom Navigation */}
             {!(panelOpen || vehiclePanel || confirmRidePanel || optionalsPanel || paymentPanel || vehicleFound || waitingForDriver || isSelectingOnMap) && (

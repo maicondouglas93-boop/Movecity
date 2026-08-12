@@ -182,6 +182,7 @@ const LiveTracking = (props) => {
     const lastPrunedPositionRef = useRef(null);
     const onNavigationUpdateRef = useRef(props.onNavigationUpdate);
     const onTripProgressRef = useRef(props.onTripProgress);
+    const onCaptainLocationRef = useRef(props.onCaptainLocation);
 
     // Keep routeCoordsRef in sync
     useEffect(() => {
@@ -199,6 +200,10 @@ const LiveTracking = (props) => {
     useEffect(() => {
         onTripProgressRef.current = props.onTripProgress;
     }, [props.onTripProgress]);
+
+    useEffect(() => {
+        onCaptainLocationRef.current = props.onCaptainLocation;
+    }, [props.onCaptainLocation]);
 
     // GPS tracking sync from Global Context
     useEffect(() => {
@@ -273,10 +278,12 @@ const LiveTracking = (props) => {
             if (props.parcelId && data.parcelId && String(data.parcelId) !== String(props.parcelId)) {
                 return;
             }
-            setCaptainPosition({
+            const nextPosition = {
                 lat: data.ltd,
                 lng: data.lng
-            });
+            };
+            setCaptainPosition(nextPosition);
+            onCaptainLocationRef.current?.(nextPosition);
         };
 
         socket.on('captain-location-updated', handleCaptainLocationUpdated);
@@ -1079,11 +1086,16 @@ const LiveTracking = (props) => {
         : null;
 
     useEffect(() => {
-        if (rideStatus !== 'started' || remainingDistanceKm == null) return;
+        // O mesmo cálculo também alimenta o painel do passageiro enquanto o motorista
+        // se aproxima do embarque. Antes o mapa já conhecia distância/ETA nessa fase,
+        // mas o dado ficava preso dentro deste componente e não chegava ao painel.
+        const reportsProgress = ['accepted', 'going_to_pickup', 'started'].includes(rideStatus);
+        if (!reportsProgress || remainingDistanceKm == null) return;
         onTripProgressRef.current?.({
             progress: tripProgress,
             remainingKm: remainingDistanceKm,
             etaMinutes: tripEtaMinutes,
+            phase: rideStatus === 'started' ? 'trip' : 'pickup',
         });
     }, [rideStatus, remainingDistanceKm, tripProgress, tripEtaMinutes]);
 

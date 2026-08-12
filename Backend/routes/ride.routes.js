@@ -47,6 +47,16 @@ router.get('/current',
     rideController.getCurrentRide
 )
 
+router.post('/share',
+    authMiddleware.authUser,
+    body('rideId').isMongoId().withMessage('Corrida inválida'),
+    rideController.createRideShareLink
+)
+
+// Link temporário compartilhado pelo próprio passageiro. Somente leitura e payload
+// sanitizado; o token assinado substitui autenticação de conta nesta rota específica.
+router.get('/share/:token', rideController.getSharedRide)
+
 router.post('/cancel',
     authMiddleware.authUser,
     body('rideId').isMongoId().withMessage('Invalid ride id'),

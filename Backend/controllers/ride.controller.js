@@ -5,6 +5,8 @@ const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMap
 const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
+const { calculateLiveRideFare } = require('../services/liveRideFare.service');
+const jwt = require('jsonwebtoken');
 const {
     sanitizeCaptainFinance,
     computeDriverAmount,
@@ -743,9 +745,104 @@ module.exports.getCurrentRide = async (req, res) => {
         if (!ride) {
             return res.status(404).json({ message: 'No active ride found' });
         }
-        return res.status(200).json(ride);
+
+        // A localização via socket continua sendo o caminho de menor latência, mas não
+        // pode ser a única fonte da tarifa ao vivo: o GPS pode ficar suspenso em segundo
+        // plano e o preço também depende do tempo transcorrido. Toda reconciliação de
+        // /rides/current devolve um snapshot novo, permitindo que o passageiro recupere
+        // o valor correto após refresh, reconexão ou alguns segundos sem heartbeat.
+        let liveFare = null;
+        try {
+            liveFare = await calculateLiveRideFare({
+                ride,
+                actualDistance: ride.actualDistance,
+            });
+        } catch (fareError) {
+            // Uma falha pontual de precificação não pode esconder a corrida ativa.
+            // O cliente mantém a última estimativa conhecida e tenta novamente.
+            console.error('Erro reconciliando valor ao vivo da corrida:', fareError);
+        }
+
+        const payload = typeof ride.toObject === 'function' ? ride.toObject() : ride;
+        return res.status(200).json(liveFare ? { ...payload, liveFare } : payload);
     } catch (err) {
         return res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports.createRideShareLink = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: errors.array()[0]?.msg || 'Corrida inválida' });
+        }
+
+        const ride = await rideModel.findOne({
+            _id: req.body.rideId,
+            user: req.user._id,
+            status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
+        }).select('_id user');
+        if (!ride) {
+            return res.status(404).json({ message: 'Corrida ativa não encontrada.' });
+        }
+
+        // Link temporário e somente-leitura. O token não contém telefone, nome ou
+        // localização; apenas autoriza o endpoint público a devolver a visão sanitizada.
+        const token = jwt.sign({
+            scope: 'ride_share',
+            rideId: ride._id.toString(),
+            userId: req.user._id.toString(),
+        }, process.env.JWT_SECRET, { expiresIn: '6h' });
+        const frontendOrigin = String(process.env.FRONTEND_URL || req.get('origin') || '').replace(/\/$/, '');
+        const path = `/track/${encodeURIComponent(token)}`;
+
+        return res.status(201).json({
+            token,
+            expiresInSeconds: 6 * 60 * 60,
+            url: frontendOrigin ? `${frontendOrigin}${path}` : path,
+        });
+    } catch (err) {
+        return res.status(500).json({ message: 'Não foi possível criar o compartilhamento.' });
+    }
+}
+
+module.exports.getSharedRide = async (req, res) => {
+    try {
+        const payload = jwt.verify(req.params.token, process.env.JWT_SECRET);
+        if (payload?.scope !== 'ride_share' || !payload?.rideId || !payload?.userId) {
+            return res.status(401).json({ message: 'Compartilhamento inválido.' });
+        }
+
+        const ride = await rideModel.findById(payload.rideId)
+            .populate('captain', 'fullname profilePicture rating vehicle location lastSeenAt')
+            .select('user status pickup destination vehicleType captain updatedAt');
+        if (!ride || String(ride.user) !== String(payload.userId)) {
+            return res.status(404).json({ message: 'Corrida compartilhada não encontrada.' });
+        }
+
+        const captain = ride.captain;
+        return res.status(200).json({
+            rideId: ride._id,
+            status: ride.status,
+            pickup: ride.pickup,
+            destination: ride.destination,
+            updatedAt: ride.updatedAt,
+            captain: captain ? {
+                fullname: captain.fullname,
+                profilePicture: captain.profilePicture,
+                rating: captain.rating,
+                vehicle: captain.vehicle,
+                lastSeenAt: captain.lastSeenAt,
+            } : null,
+            location: captain?.location?.ltd != null && captain?.location?.lng != null
+                ? { lat: captain.location.ltd, lng: captain.location.lng }
+                : null,
+        });
+    } catch (err) {
+        if (err?.name === 'TokenExpiredError') {
+            return res.status(410).json({ message: 'Este compartilhamento expirou.' });
+        }
+        return res.status(401).json({ message: 'Compartilhamento inválido.' });
     }
 }
 

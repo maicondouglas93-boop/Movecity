@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 import WaitingForDriver from '@/passenger/components/WaitingForDriver';
+import { ToastProvider } from '@/shared/contexts/ToastContext';
 
 // Correção crítica do cancelamento (2026-08-03): a regra de negócio sempre permitiu o
 // passageiro cancelar com motorista já designado (accepted..waiting_passenger — ver
@@ -25,16 +26,31 @@ const baseRide = {
 };
 
 describe('WaitingForDriver — botão Cancelar corrida', () => {
+    const renderWaiting = (props = {}) => render(
+        <ToastProvider>
+            <WaitingForDriver
+                ride={baseRide}
+                cancelRide={vi.fn()}
+                setWaitingForDriver={vi.fn()}
+                onOpenChat={vi.fn()}
+                {...props}
+            />
+        </ToastProvider>
+    )
+
     it('mostra o PIN e o botão de cancelar quando a corrida permite', () => {
-        render(<WaitingForDriver ride={baseRide} cancelRide={vi.fn()} setWaitingForDriver={vi.fn()} />);
+        renderWaiting();
 
         expect(screen.getByText('123456')).toBeInTheDocument();
+        expect(screen.getByText('Motorista confirmado')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /chat/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /abrir central de segurança/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /cancelar corrida/i })).toBeInTheDocument();
     });
 
     it('exige o segundo toque antes de cancelar (pode haver taxa) e só então chama cancelRide', async () => {
         const cancelRide = vi.fn().mockResolvedValue();
-        render(<WaitingForDriver ride={baseRide} cancelRide={cancelRide} setWaitingForDriver={vi.fn()} />);
+        renderWaiting({ cancelRide });
 
         const button = screen.getByRole('button', { name: /cancelar corrida/i });
         fireEvent.click(button);

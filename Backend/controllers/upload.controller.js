@@ -1,4 +1,5 @@
 const multer = require('multer');
+const express = require('express');
 const uploadService = require('../services/upload.service');
 const userModel = require('../models/user.model');
 const captainModel = require('../models/captain.model');
@@ -11,7 +12,27 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
+const DOCUMENT_TYPES = new Set(['cnhFront', 'cnhBack', 'crlv', 'vehicleFront', 'selfie']);
+
 module.exports.uploadMiddleware = upload.single('image');
+
+const rawDocumentUpload = express.raw({
+    type: 'application/octet-stream',
+    limit: '5mb',
+});
+
+// O APK envia documentos como bytes puros para não depender da serialização
+// multipart do WebView Android. Converte o erro de limite em resposta útil, sem
+// deixar o error handler global transformá-lo em 500.
+module.exports.documentBinaryMiddleware = (req, res, next) => {
+    rawDocumentUpload(req, res, (err) => {
+        if (err?.type === 'entity.too.large') {
+            return res.status(413).json({ message: 'A foto deve ter no máximo 5 MB.' });
+        }
+        if (err) return next(err);
+        return next();
+    });
+};
 
 module.exports.uploadProfile = async (req, res) => {
     try {
@@ -92,5 +113,24 @@ module.exports.uploadDocument = async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Erro ao fazer upload do documento', error: err.message });
+    }
+};
+
+module.exports.uploadDocumentBinary = async (req, res) => {
+    try {
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+            return res.status(400).json({ message: 'Nenhuma imagem enviada' });
+        }
+
+        const { docType } = req.query;
+        if (!DOCUMENT_TYPES.has(docType)) {
+            return res.status(400).json({ message: 'Tipo de documento inválido' });
+        }
+
+        const url = await uploadService.uploadDocument(req.body, docType);
+        return res.status(200).json({ url, message: 'Upload concluído com sucesso' });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Erro ao fazer upload do documento', error: err.message });
     }
 };

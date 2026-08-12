@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { getAccessToken } from '@/shared/services/session'
-import { isImageFile, postImageUpload } from '@/shared/services/imageUpload'
+import { isImageFile, postDocumentImageUpload } from '@/shared/services/imageUpload'
 import { useToast } from '@/shared/contexts/ToastContext'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import Card from '@/shared/components/ui/Card'
@@ -48,16 +48,14 @@ const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
         }
         setUploading(true)
         try {
-            // Usa o mesmo pipeline já endurecido para o WebView Android. O nome
-            // explícito do arquivo faz o Capacitor enviar esta parte como arquivo e
-            // não como campo vazio, enquanto o helper deixa o navegador gerar o
-            // boundary correto do multipart para o multer do backend.
-            const uploadRes = await postImageUpload(
+            // No navegador usa multipart; no APK envia bytes puros pela rota binária,
+            // evitando o FormData que alguns WebViews Android entregam sem a imagem.
+            const uploadRes = await postDocumentImageUpload(
                 `${import.meta.env.VITE_BASE_URL}/uploads/document`,
                 file,
                 {
                     token: getAccessToken('captain'),
-                    fields: { docType: docKey },
+                    docType: docKey,
                 },
             )
             const patchRes = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {

@@ -4,8 +4,10 @@ const uploadController = require('../controllers/upload.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
 
 router.post('/profile', authMiddleware.authUser, uploadController.uploadMiddleware, uploadController.uploadProfile);
+router.post('/profile-binary', authMiddleware.authUser, uploadController.imageBinaryMiddleware, uploadController.uploadProfileBinary);
 
 router.post('/captain-profile', authMiddleware.authCaptain, uploadController.uploadMiddleware, uploadController.uploadCaptainProfile);
+router.post('/captain-profile-binary', authMiddleware.authCaptain, uploadController.imageBinaryMiddleware, uploadController.uploadCaptainProfileBinary);
 
 router.post('/vehicle', authMiddleware.authCaptain, uploadController.uploadMiddleware, uploadController.uploadVehicle);
 

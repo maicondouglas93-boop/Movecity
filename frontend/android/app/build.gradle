@@ -63,6 +63,12 @@ android {
                 logger.warn('MoveCity: keystore.properties ausente — assembleRelease assinado com DEBUG.')
             }
         }
+        // Bundle destinado exclusivamente à Google Play. O overlay
+        // src/playRelease/AndroidManifest.xml remove permissões do canal sideload.
+        playRelease {
+            initWith release
+            matchingFallbacks = ['release']
+        }
     }
 }
 

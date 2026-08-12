@@ -1,0 +1,189 @@
+name: Android Play Store — AABs
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Aplicativo a gerar
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - driver
+          - passenger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-play-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+  JAVA_VERSION: "17"
+
+jobs:
+  tests:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npx vitest run
+
+  driver:
+    name: AAB MoveCity Motorista
+    if: ${{ inputs.app == 'driver' || inputs.app == 'both' }}
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 16 SDK
+        run: sdkmanager --install "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+      - name: Configure driver upload key
+        working-directory: frontend/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            test -n "${!name}" || { echo "FAIL: secret de assinatura do motorista ausente: $name"; exit 1; }
+          done
+          echo "$KEYSTORE_BASE64" | base64 -d > movecity-driver-release.jks
+          {
+            echo "storeFile=movecity-driver-release.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+      - name: Validate driver Firebase config
+        working-directory: frontend
+        run: node scripts/ci/check-native-push-config.mjs
+      - name: Build signed Play bundle
+        working-directory: frontend
+        env: &frontend_env
+          VITE_DISTRIBUTION_CHANNEL: play
+          VITE_NATIVE_PUSH_ENABLED: "true"
+          VITE_BASE_URL: ${{ secrets.VITE_BASE_URL }}
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          VITE_MAPS_PROVIDER: google
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+          VITE_GOOGLE_MAPS_MAP_ID: ${{ secrets.VITE_GOOGLE_MAPS_MAP_ID }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SUPPORT_WHATSAPP: ${{ secrets.VITE_SUPPORT_WHATSAPP }}
+          VITE_SUPPORT_EMAIL: ${{ secrets.VITE_SUPPORT_EMAIL }}
+        run: npm run aab:driver
+      - name: Verify production API in web bundle
+        working-directory: frontend
+        env:
+          VITE_BASE_URL: ${{ secrets.VITE_BASE_URL }}
+        run: node scripts/ci/check-driver-bundle-env.mjs
+      - name: Validate driver AAB and Play manifest
+        working-directory: frontend
+        run: |
+          chmod +x scripts/ci/validate-release-aab.sh
+          NAME="$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)"
+          CODE="$(grep '^VERSION_CODE=' android/version.properties | cut -d= -f2)"
+          AAB="android/app/build/outputs/bundle/playRelease/app-play-release.aab"
+          scripts/ci/validate-release-aab.sh "$AAB" "$NAME" "$CODE"
+          MANIFEST="$(find android/app/build/intermediates/merged_manifests/playRelease -name AndroidManifest.xml | head -n 1)"
+          test -n "$MANIFEST"
+          for permission in REQUEST_INSTALL_PACKAGES USE_FULL_SCREEN_INTENT USE_EXACT_ALARM SCHEDULE_EXACT_ALARM REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+            ! grep -q "$permission" "$MANIFEST" || { echo "FAIL: $permission presente no AAB Play"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: movecity-driver-play-aab
+          path: frontend/android/app/build/outputs/bundle/playRelease/app-play-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+  passenger:
+    name: AAB MoveCity Passageiro
+    if: ${{ inputs.app == 'passenger' || inputs.app == 'both' }}
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 16 SDK
+        run: sdkmanager --install "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+      - name: Configure passenger Firebase and upload key
+        working-directory: frontend/android-passenger
+        env:
+          GOOGLE_SERVICES_BASE64: ${{ secrets.PASSENGER_GOOGLE_SERVICES_JSON_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.PASSENGER_ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PASSENGER_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PASSENGER_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PASSENGER_ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in GOOGLE_SERVICES_BASE64 KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            test -n "${!name}" || { echo "FAIL: secret do passageiro ausente: $name"; exit 1; }
+          done
+          echo "$GOOGLE_SERVICES_BASE64" | base64 -d > app/google-services.json
+          echo "$KEYSTORE_BASE64" | base64 -d > movecity-passenger-upload.jks
+          {
+            echo "storeFile=movecity-passenger-upload.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+      - name: Build signed Play bundle
+        working-directory: frontend
+        env: *frontend_env
+        run: npm run aab:passenger
+      - name: Validate passenger AAB
+        working-directory: frontend
+        run: |
+          chmod +x scripts/ci/validate-release-aab.sh
+          NAME="$(grep '^VERSION_NAME=' android-passenger/version.properties | cut -d= -f2)"
+          CODE="$(grep '^VERSION_CODE=' android-passenger/version.properties | cut -d= -f2)"
+          scripts/ci/validate-release-aab.sh \
+            android-passenger/app/build/outputs/bundle/release/app-release.aab \
+            "$NAME" "$CODE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: movecity-passenger-play-aab
+          path: frontend/android-passenger/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14

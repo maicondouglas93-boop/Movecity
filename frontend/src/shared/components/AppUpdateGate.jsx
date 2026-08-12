@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { isNativePlatform } from '@/shared/platform/platform'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
 import {
@@ -10,11 +10,15 @@ import {
     cancelDownload,
 } from '@/shared/platform/appUpdate.service'
 
+const IS_PLAY_BUILD = import.meta.env.VITE_DISTRIBUTION_CHANNEL === 'play'
+
 /**
  * Verificação assíncrona de atualização do APK (não bloqueia o boot).
  * Só ativa no Capacitor Android (build motorista).
  */
 export default function AppUpdateGate() {
+    // A Play Store gerencia atualizações do AAB. O instalador próprio de APK fica
+    // restrito ao canal sideload para não solicitar instalação de fontes externas.
     const [state, setState] = useState(null) // resultado check
     const [visible, setVisible] = useState(false)
     const [downloading, setDownloading] = useState(false)
@@ -24,6 +28,7 @@ export default function AppUpdateGate() {
     const busyRef = useRef(false)
 
     const runCheck = useCallback(async ({ force = false } = {}) => {
+        if (IS_PLAY_BUILD) return
         if (!isNativePlatform()) return
         if (busyRef.current && !force) return
         busyRef.current = true
@@ -68,6 +73,7 @@ export default function AppUpdateGate() {
     }, [])
 
     useEffect(() => {
+        if (IS_PLAY_BUILD) return undefined
         if (!isNativePlatform()) return undefined
         const t = setTimeout(() => {
             runCheck({ force: false })
@@ -84,7 +90,7 @@ export default function AppUpdateGate() {
         }
     }, [runCheck])
 
-    if (!isNativePlatform() || !visible || !state) return null
+    if (IS_PLAY_BUILD || !isNativePlatform() || !visible || !state) return null
 
     const remote = state.remote || {}
     const installed = state.installed || {}

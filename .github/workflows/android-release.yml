@@ -153,8 +153,8 @@ jobs:
           mkdir -p "$ANDROID_HOME/licenses"
           echo -e "24333f8a63b6825ea9c5614f55414964abb4bc9\n" > "$ANDROID_HOME/licenses/android-sdk-license"
           sdkmanager --install \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
             "platform-tools"
 
       - name: Require native push config (google-services + flag)

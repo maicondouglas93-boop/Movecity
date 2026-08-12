@@ -97,6 +97,11 @@ module.exports.loginUser = async (req, res, next) => {
             return res.status(401).json({ message: 'E-mail ou senha inválidos' });
         }
 
+        if (user.isBlocked) {
+            await authService.revokeAllForUser({ userId: user._id, userType: 'user', reason: 'blocked' });
+            return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
+        }
+
         return await respondWithSession(res, {
             userDoc: user,
             userType: 'user',
@@ -233,6 +238,11 @@ module.exports.googleLogin = async (req, res, next) => {
         const { email, name, picture } = decodedToken;
 
         let user = await userModel.findOne({ email });
+
+        if (user?.isBlocked) {
+            await authService.revokeAllForUser({ userId: user._id, userType: 'user', reason: 'blocked' });
+            return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
+        }
 
         if (!user) {
             const nameParts = name ? name.trim().split(/\s+/) : ['Google', 'User'];

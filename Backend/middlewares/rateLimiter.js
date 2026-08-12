@@ -16,6 +16,14 @@ module.exports.notificationTokenLimiter = rateLimit({
     message: { message: "Muitas tentativas de registro de notificação. Tente novamente em 15 minutos." }
 });
 
+module.exports.accountDeletionLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Muitas solicitações. Tente novamente mais tarde.' }
+});
+
 // PIN de entrega: limita brute-force por captain (4 dígitos).
 module.exports.parcelPinLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,

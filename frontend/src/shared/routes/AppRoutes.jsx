@@ -5,6 +5,7 @@ import Start from '@/shared/pages/Start'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import passengerRoutes from '@/passenger/routes'
 import driverRoutes from '@/driver/routes'
+import legalRoutes from '@/shared/routes/legalRoutes'
 
 // Ponto unico de composicao das rotas.
 // '/' e a tela neutra de escolha entre passageiro e motorista, por isso fica aqui
@@ -16,6 +17,7 @@ const AppRoutes = () => (
   <Suspense fallback={<SessionSplash label="Carregando..." />}>
     <Routes>
       <Route path='/' element={<Start />} />
+      {legalRoutes}
       {passengerRoutes}
       {driverRoutes}
     </Routes>

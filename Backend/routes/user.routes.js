@@ -44,6 +44,12 @@ router.post('/refresh', userController.refreshUserSession)
 
 router.get('/logout', authMiddleware.authUser, userController.logoutUser)
 
+router.post('/account-deletion',
+    authMiddleware.authUser,
+    body('confirmation').equals('EXCLUIR').withMessage('Digite EXCLUIR para confirmar.'),
+    require('../controllers/accountDeletion.controller').requestUser
+)
+
 // Lista unificada de corridas/encomendas agendadas (compat FE Scheduled.jsx).
 router.get('/scheduled', authMiddleware.authUser, require('../controllers/schedule.controller').listMine)
 

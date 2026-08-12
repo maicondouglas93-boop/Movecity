@@ -15,6 +15,11 @@ router.post('/refresh', adminController.refresh);
 router.get('/me', authAdmin, adminController.me);
 router.post('/logout', authAdmin, adminController.logout);
 
+// Solicitações feitas pela página pública precisam de verificação manual antes de
+// bloquear a conta. O endpoint nunca aprova automaticamente apenas pelo e-mail.
+router.get('/account-deletions', authAdmin, authorizeRoles('super_admin', 'suporte'), require('../controllers/accountDeletion.controller').listAdmin);
+router.post('/account-deletions/:id/approve', authAdmin, authorizeRoles('super_admin', 'suporte'), require('../controllers/accountDeletion.controller').approveAdmin);
+
 // Dashboard Route
 router.get('/dashboard', authAdmin, adminController.getDashboard);
 router.get('/health', authAdmin, adminController.getHealthStatus);

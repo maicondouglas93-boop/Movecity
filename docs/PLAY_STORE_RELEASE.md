@@ -120,17 +120,13 @@ Estes itens exigem dados, decisões ou acessos que não ficam no repositório:
 - **Firebase do passageiro:** `google-services.json` ainda não existe no projeto.
 - **Upload keys:** confirmar a chave existente do motorista e criar/guardar a do
   passageiro.
-- **Política de privacidade pública:** a página atual fica atrás de login e não é
-  suficiente como URL pública da ficha da loja. Publicar uma página HTTPS, sem PDF,
-  identificando MoveCity, dados coletados, uso, compartilhamento, retenção,
-  segurança, exclusão e contato do responsável.
-- **Exclusão de conta:** a tela do passageiro chama `DELETE /users/profile`, mas o
-  backend ainda não expõe essa rota; o motorista não tem fluxo equivalente. Corrigir
-  ambos e publicar também uma URL web onde passageiros e motoristas possam solicitar
-  a exclusão.
-- **Data safety:** preencher conforme os SDKs e o backend reais (localização,
-  identificação, contato, mensagens, fotos/documentos, dados financeiros e
-  diagnósticos, quando aplicável).
+- **Publicar as páginas já implementadas:** após o deploy, validar sem login
+  `https://www.moovecity.com.br/privacy`, `/support` e `/account-deletion`.
+- **Validar o fluxo de exclusão em produção:** passageiro e motorista já bloqueiam a
+  conta imediatamente e agendam a anonimização em 30 dias. O suporte deve acompanhar
+  e aprovar os pedidos públicos em `GET/POST /api/admin/account-deletions`.
+- **Data safety:** usar `docs/PLAY_STORE_DATA_SAFETY.md` como base e conferir as
+  respostas no formulário atual da Play Console.
 - **Conteúdo da loja:** faltam feature graphic 1024×500 e screenshots reais dos dois
   apps. O PNG 512×512 existente pode servir como ponto de partida para o ícone da
   ficha, após validação da marca.
@@ -164,3 +160,6 @@ Estes itens exigem dados, decisões ou acessos que não ficam no repositório:
 - motorista em background com notificação de serviço ativa;
 - logout e exclusão de conta;
 - ausência do instalador próprio de APK no build Play.
+
+Os textos sugeridos das duas fichas, contatos e URLs estão em
+`docs/PLAY_STORE_LISTING.md`.

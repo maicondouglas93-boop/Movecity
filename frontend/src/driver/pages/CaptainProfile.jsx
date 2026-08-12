@@ -1,6 +1,6 @@
-import React, { useContext, useEffect, useState } from 'react';
+/* eslint-disable react/prop-types */
+import { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '@/shared/services/axios';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
 import CaptainHeader from '@/driver/components/CaptainHeader';
 import Avatar from '@/shared/components/Avatar';
@@ -339,7 +339,7 @@ const CaptainProfile = () => {
                     </div>
                 </Card>
 
-                <Card shadow="raised" padding="p-5">
+                <Card shadow="raised" padding="p-5" className="mb-6">
                     <h3 className="font-semibold text-ink-900 mb-2">Sobre o MoveCity</h3>
                     <p className="text-sm text-ink-600">MoveCity Motorista</p>
                     <p className="text-sm text-ink-900 font-medium mt-1">
@@ -358,6 +358,21 @@ const CaptainProfile = () => {
                             Verificar atualizações
                         </Button>
                     )}
+                </Card>
+
+                <Card shadow="raised" padding="p-5" className="mb-6">
+                    <h3 className="font-semibold text-ink-900 mb-3">Privacidade e suporte</h3>
+                    <div className="divide-y divide-line">
+                        <button type="button" onClick={() => navigate('/privacy')} className="w-full min-h-[48px] flex items-center justify-between text-left">
+                            <span>Política de Privacidade</span><i className="ri-arrow-right-s-line text-xl" aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => navigate('/support')} className="w-full min-h-[48px] flex items-center justify-between text-left">
+                            <span>Suporte</span><i className="ri-arrow-right-s-line text-xl" aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => navigate('/captain/delete-account')} className="w-full min-h-[48px] flex items-center justify-between text-left text-danger-600 font-semibold">
+                            <span>Excluir minha conta</span><i className="ri-delete-bin-line text-xl" aria-hidden="true" />
+                        </button>
+                    </div>
                 </Card>
             </div>
 

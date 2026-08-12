@@ -1,34 +1,26 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/shared/services/axios';
 import { useToast } from '@/shared/contexts/ToastContext';
 import Button from '@/shared/components/ui/Button';
-import { clearSession, getAccessToken } from '@/shared/services/session';
+import { clearSession } from '@/shared/services/session';
 
 const DeleteAccount = () => {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [confirmText, setConfirmText] = useState('');
-    const [password, setPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
-
-    const isButtonEnabled = confirmText === 'EXCLUIR' && password.length >= 1;
+    const isButtonEnabled = confirmText.trim().toUpperCase() === 'EXCLUIR';
 
     const handleDelete = async () => {
         setLoading(true);
         try {
-            await api.delete(`${import.meta.env.VITE_BASE_URL}/users/profile`, {
-                headers: { Authorization: `Bearer ${getAccessToken('user')}` },
-                data: { password } // Enviando senha para confirmação no backend
-            });
-            addToast('Conta excluída com sucesso.', 'success');
-            // Remove a sessão inteira (access + refresh) e redireciona — sem limpar o
-            // refresh token aqui, a sessão de longa duração sobreviveria à exclusão da conta.
+            await api.post('/users/account-deletion', { confirmation: 'EXCLUIR' });
             clearSession('user');
-            setTimeout(() => navigate('/'), 2000);
+            addToast('Conta desativada. A remoção dos dados ocorrerá em até 30 dias.', 'success');
+            navigate('/login', { replace: true });
         } catch (error) {
-            addToast('Falha ao excluir (API offline)', 'error');
+            addToast(error.response?.data?.message || 'Não foi possível solicitar a exclusão.', 'error');
         } finally {
             setLoading(false);
         }
@@ -52,8 +44,8 @@ const DeleteAccount = () => {
                 <div className="bg-danger-50 border border-danger-500/20 rounded-panel p-4 flex gap-3 mb-6">
                     <i className="ri-error-warning-fill text-2xl text-danger-500 mt-0.5" aria-hidden="true"></i>
                     <div>
-                        <h3 className="font-bold text-danger-700 mb-1">Ação irreversível</h3>
-                        <p className="text-sm text-danger-600">Ao deletar sua conta, todo o seu histórico de viagens, cupons, saldo na carteira e cartões salvos serão perdidos permanentemente.</p>
+                        <h3 className="font-bold text-danger-700 mb-1">Sua conta será desativada agora</h3>
+                        <p className="text-sm text-danger-600">As sessões serão encerradas imediatamente. Seus dados pessoais serão apagados ou anonimizados em até 30 dias, exceto quando a conservação for necessária por segurança ou obrigação legal.</p>
                     </div>
                 </div>
 
@@ -70,30 +62,7 @@ const DeleteAccount = () => {
                     />
                 </div>
 
-                {confirmText === 'EXCLUIR' && (
-                    <div className="animate-fade-in">
-                        <label className="font-semibold text-ink-900 mb-2 block">
-                            Digite sua senha para finalizar:
-                        </label>
-                        <div className="relative">
-                            <input
-                                type={showPassword ? "text" : "password"}
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="Sua senha atual"
-                                className="w-full bg-surface border border-line pl-4 pr-12 py-3 rounded-panel outline-none focus:border-danger-500 font-medium text-ink-900"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-400"
-                            >
-                                <i className={`ri-eye-${showPassword ? 'off-' : ''}line text-lg`} aria-hidden="true"></i>
-                            </button>
-                        </div>
-                    </div>
-                )}
+                <p className="text-sm text-ink-600 leading-6">Se houver corrida ou encomenda ativa, finalize ou cancele o serviço antes de continuar. Esta solicitação não poderá ser desfeita pelo aplicativo.</p>
             </div>
 
             <div className="p-5 bg-surface border-t border-line pb-10">

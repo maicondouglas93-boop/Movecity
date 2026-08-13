@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { RideContext } from '@/shared/contexts/RideContext'
@@ -83,9 +83,8 @@ const ParcelWizard = () => {
     getVehicleCategories(vehicleService)
       .then((data) => {
         if (cancelled) return
-        // O backend de encomendas valida vehicleType como moto/car; filtra aqui para a
-        // UI nunca oferecer categoria dinâmica que a API recusaria depois do cálculo.
-        const list = (Array.isArray(data) ? data : []).filter((cat) => ['moto', 'car'].includes(cat.name))
+        // A API já devolve somente categorias ativas e liberadas para encomendas.
+        const list = Array.isArray(data) ? data : []
         setVehicleCategories(list)
         setForm((f) => {
           if (f.vehicleType && list.some((c) => c.name === f.vehicleType)) return f
@@ -134,13 +133,12 @@ const ParcelWizard = () => {
         vehicleType: form.vehicleType,
         size: form.size,
         weightKg: form.weightKg,
+        service: vehicleService,
       })
       setFareInfo(data)
       if (data.blocked) {
         const msg = data.warnings?.[0]
-          || (form.vehicleType === 'moto'
-            ? 'Este item não cabe na moto — escolha carro.'
-            : 'Este item não cabe no carro — escolha outro veículo ou reduza o item.')
+          || 'Este item não é compatível com o veículo escolhido. Escolha outra categoria ou reduza o item.'
         addToast(msg, 'error')
       }
     } catch (err) {
@@ -149,7 +147,7 @@ const ParcelWizard = () => {
     } finally {
       setFareLoading(false)
     }
-  }, [canQuote, form.pickup, form.destination, form.vehicleType, form.size, form.weightKg, addToast])
+  }, [canQuote, form.pickup, form.destination, form.vehicleType, form.size, form.weightKg, vehicleService, addToast])
 
   useEffect(() => {
     if (fareTimer.current) clearTimeout(fareTimer.current)
@@ -179,9 +177,7 @@ const ParcelWizard = () => {
       return 'Complete os dados de quem recebe'
     }
     if (fareInfo?.blocked) {
-      return form.vehicleType === 'moto'
-        ? 'Este item não cabe na moto — escolha carro ou reduza peso/tamanho.'
-        : 'Este item não cabe no carro — reduza peso/tamanho ou altere o veículo.';
+      return 'Este item não cabe no veículo escolhido — reduza peso/tamanho ou altere a categoria.'
     }
     if (!fareInfo?.fare) return 'Aguarde o cálculo do preço'
     if (scheduleMode) {
@@ -242,7 +238,8 @@ const ParcelWizard = () => {
   const sizeLabel = SIZE_OPTIONS.find((s) => s.id === form.size)?.label || form.size
   const vehicleLabel =
     vehicleCategories.find((c) => c.name === form.vehicleType)?.displayName
-    || (form.vehicleType === 'moto' ? 'Moto' : form.vehicleType === 'car' ? 'Carro' : '—')
+    || form.vehicleType
+    || '—'
 
   return (
     <div className="min-h-screen bg-surface-alt flex flex-col">

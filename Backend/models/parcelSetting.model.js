@@ -1,22 +1,9 @@
 const mongoose = require('mongoose');
 
-const vehicleParcelPricingSchema = new mongoose.Schema({
-    baseFare: { type: Number, default: 6 },
-    perKm: { type: Number, default: 1.8 },
-    perMinute: { type: Number, default: 0.35 },
-    minimumFare: { type: Number, default: 8 },
-    maxWeightKg: { type: Number, default: 10 },
-    maxPackageSize: {
-        type: String,
-        enum: ['small', 'medium', 'large'],
-        default: 'medium',
-    },
-    requireDeliveryPin: { type: Boolean, default: true },
-    blockIncompatibleVehicle: { type: Boolean, default: true },
-}, { _id: false });
-
 // Tarifas e regras de encomenda (singleton lógico — um documento ativo).
-// Fase tarifas por veículo: deliveryPricing.moto / deliveryPricing.car.
+// As chaves de deliveryPricing são os nomes internos das categorias criadas pelo ADM
+// (moto, car, suv, utilitario...). Mixed é intencional; cada bloco é normalizado e
+// validado por parcel.service.js antes de ser salvo.
 // Campos top-level legados (baseFare, perKm, …) permanecem para migração/leitura antiga.
 const parcelSettingSchema = new mongoose.Schema({
     // --- Legado (pré-deliveryPricing); mantidos e sincronizados a partir de moto ---
@@ -39,10 +26,10 @@ const parcelSettingSchema = new mongoose.Schema({
 
     // --- Fonte de verdade atual ---
     deliveryPricing: {
-        moto: { type: vehicleParcelPricingSchema, default: () => ({}) },
-        car: {
-            type: vehicleParcelPricingSchema,
-            default: () => ({
+        type: mongoose.Schema.Types.Mixed,
+        default: () => ({
+            moto: {},
+            car: {
                 baseFare: 10,
                 perKm: 1.8,
                 perMinute: 0.35,
@@ -51,10 +38,10 @@ const parcelSettingSchema = new mongoose.Schema({
                 maxPackageSize: 'large',
                 requireDeliveryPin: true,
                 blockIncompatibleVehicle: true,
-            }),
-        },
+            },
+        }),
     },
-    // 1 = legado (tarifa global); 2 = deliveryPricing.moto/car migrado ou salvo pelo admin.
+    // 1 = legado (tarifa global); 2 = regras por categoria migradas ou salvas pelo admin.
     pricingVersion: { type: Number, default: 1 },
 }, { timestamps: true });
 

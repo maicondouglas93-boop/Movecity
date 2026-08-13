@@ -243,14 +243,19 @@ async function ensureDeliveryPricing(settings) {
 }
 
 function resolveVehiclePricing(settings, vehicleType) {
-    const key = vehicleType === 'car' ? 'car' : 'moto';
-    const block = settings.deliveryPricing?.[key];
+    const key = String(vehicleType || 'moto');
+    const deliveryPricing = settings.deliveryPricing?.toObject?.()
+        || settings.deliveryPricing
+        || {};
+    const block = deliveryPricing[key];
     if (hasUsableVehiclePricing(block)) {
         return pricingToPlain(block);
     }
-    // Fallback extremo (não deveria ocorrer após ensureDeliveryPricing)
+    // Categoria recém-criada ainda pode não ter regras operacionais próprias. Usa um
+    // padrão conservador até o ADM ajustar peso/tamanho na página Encomendas.
+    const fallbackKey = key === 'car' ? 'car' : 'moto';
     const legacy = buildPricingFromLegacy(settings);
-    return legacy[key];
+    return legacy[fallbackKey];
 }
 
 // Auditoria de cache (2026-08-08, A6): singleton lido em validateVehicleCompatibility,
@@ -305,34 +310,38 @@ function pushHistory(parcel, status, by = 'system') {
 
 module.exports.validateVehicleCompatibility = async ({ vehicleType, size, weightKg }) => {
     const settings = await getSettings();
-    if (!['moto', 'car'].includes(vehicleType)) {
+    if (!vehicleType || typeof vehicleType !== 'string') {
         return { warnings: ['Tipo de veículo inválido'], blocked: true, settings };
     }
 
     const pricing = resolveVehiclePricing(settings, vehicleType);
     const warnings = [];
-    const label = vehicleType === 'moto' ? 'moto' : 'carro';
-    const alt = vehicleType === 'moto' ? 'carro' : 'moto';
+    const label = vehicleType === 'moto' ? 'moto' : vehicleType === 'car' ? 'carro' : vehicleType;
 
     const maxRank = SIZE_RANK[pricing.maxPackageSize] || 2;
     const sizeRank = SIZE_RANK[size] || 1;
     if (sizeRank > maxRank) {
-        warnings.push(`Item grande demais para ${label} — recomendamos ${alt}.`);
+        warnings.push(`Item grande demais para ${label} — escolha outra categoria de veículo.`);
     }
     if (Number(weightKg) > Number(pricing.maxWeightKg)) {
-        warnings.push(`Peso acima de ${pricing.maxWeightKg} kg para ${label} — recomendamos ${alt}.`);
+        warnings.push(`Peso acima de ${pricing.maxWeightKg} kg para ${label} — escolha outra categoria de veículo.`);
     }
 
     const blocked = Boolean(pricing.blockIncompatibleVehicle) && warnings.length > 0;
     return { warnings, blocked, settings, pricing };
 };
 
-module.exports.getParcelFare = async ({ pickup, destination, vehicleType }) => {
+module.exports.getParcelFare = async ({ pickup, destination, vehicleType, serviceKind = 'parcel' }) => {
     if (!pickup || !destination || !vehicleType) {
         throw new Error('pickup, destination e vehicleType são obrigatórios');
     }
-    if (!['moto', 'car'].includes(vehicleType)) {
+    if (typeof vehicleType !== 'string' || !vehicleType.trim()) {
         throw new Error('vehicleType inválido');
+    }
+    if (!await dispatchService.isVehicleCategoryAllowed(vehicleType, serviceKind)) {
+        const err = new Error('VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE');
+        err.code = 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE';
+        throw err;
     }
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination);
@@ -453,16 +462,14 @@ module.exports.createParcel = async (payload) => {
         throw err;
     }
 
-    {
-        const serviceKind = parsedSchedule ? 'scheduledParcel' : 'parcel';
-        if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, serviceKind))) {
-            const err = new Error('VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE');
-            err.code = 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE';
-            throw err;
-        }
+    const serviceKind = parsedSchedule ? 'scheduledParcel' : 'parcel';
+    if (!(await dispatchService.isVehicleCategoryAllowed(vehicleType, serviceKind))) {
+        const err = new Error('VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE');
+        err.code = 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE';
+        throw err;
     }
 
-    const fareData = await module.exports.getParcelFare({ pickup, destination, vehicleType });
+    const fareData = await module.exports.getParcelFare({ pickup, destination, vehicleType, serviceKind });
     let destinationCoordinates;
     let pickupCoordinates;
     try {
@@ -1119,9 +1126,12 @@ module.exports.updateSettings = async (patch = {}) => {
     // Preferência: deliveryPricing por veículo (fonte de verdade).
     if (patch.deliveryPricing && typeof patch.deliveryPricing === 'object') {
         const current = settings.deliveryPricing?.toObject?.() || settings.deliveryPricing || {};
-        const moto = mergeVehiclePricing(current.moto, patch.deliveryPricing.moto);
-        const car = mergeVehiclePricing(current.car, patch.deliveryPricing.car);
-        settings.deliveryPricing = { moto, car };
+        const next = { ...current };
+        for (const [vehicleType, vehiclePatch] of Object.entries(patch.deliveryPricing)) {
+            if (!vehicleType || ['__proto__', 'constructor', 'prototype'].includes(vehicleType)) continue;
+            next[vehicleType] = mergeVehiclePricing(current[vehicleType], vehiclePatch);
+        }
+        settings.deliveryPricing = next;
         settings.markModified('deliveryPricing');
     }
 
@@ -1153,7 +1163,7 @@ module.exports.updateSettings = async (patch = {}) => {
                 perMinute: moto.perMinute,
             };
         }
-        settings.deliveryPricing = { moto, car };
+        settings.deliveryPricing = { ...current, moto, car };
         settings.markModified('deliveryPricing');
     }
 

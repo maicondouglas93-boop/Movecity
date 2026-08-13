@@ -9,7 +9,8 @@ router.get('/fare',
     authMiddleware.authUser,
     query('pickup').isString().isLength({ min: 3 }),
     query('destination').isString().isLength({ min: 3 }),
-    query('vehicleType').isIn(['moto', 'car']),
+    query('vehicleType').isString().trim().isLength({ min: 1, max: 64 }),
+    query('service').optional().isIn(['parcel', 'scheduledParcel']),
     parcelController.getFare
 );
 
@@ -17,7 +18,7 @@ router.post('/create',
     authMiddleware.authUser,
     body('pickup').isString().isLength({ min: 3 }),
     body('destination').isString().isLength({ min: 3 }),
-    body('vehicleType').isIn(['moto', 'car']),
+    body('vehicleType').isString().trim().isLength({ min: 1, max: 64 }),
     body('sender.name').isString().isLength({ min: 2 }),
     body('sender.phone').isString().isLength({ min: 8 }),
     body('recipient.name').isString().isLength({ min: 2 }),

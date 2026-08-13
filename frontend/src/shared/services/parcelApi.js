@@ -1,8 +1,8 @@
 import api from './axios'
 
-export async function getParcelFare({ pickup, destination, vehicleType, size, weightKg }) {
+export async function getParcelFare({ pickup, destination, vehicleType, size, weightKg, service }) {
     const { data } = await api.get('/parcels/fare', {
-        params: { pickup, destination, vehicleType, size, weightKg },
+        params: { pickup, destination, vehicleType, size, weightKg, service },
     })
     return data
 }

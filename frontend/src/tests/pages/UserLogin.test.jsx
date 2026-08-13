@@ -5,6 +5,7 @@ import api from '@/shared/services/axios';
 import UserLogin from '@/passenger/pages/UserLogin';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
+import { getGoogleIdToken } from '@/shared/services/googleAuth';
 
 // Mock dependências externas — Fase 1 (C1): a página migrou do axios cru para a
 // instância configurada (@/shared/services/axios), então é ela que precisa ser mockada.
@@ -110,6 +111,20 @@ describe('UserLogin Component', () => {
       expect(mockNavigate).not.toHaveBeenCalled();
       // Verificamos se o toast foi chamado. Como o toast context renderiza uma div global, podemos ver a mensagem nela
       expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+    });
+  });
+
+  it('mostra falha do login Google em vez de ignorar o clique', async () => {
+    getGoogleIdToken.mockRejectedValueOnce({
+      code: 'GOOGLE_AUTH_CANCELLED',
+      message: 'Login Google cancelado ou indisponível.',
+    });
+
+    renderWithProviders(<UserLogin />);
+    fireEvent.click(screen.getByRole('button', { name: /entrar com o google/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Erro no Google: Login Google cancelado ou indisponível.')).toBeInTheDocument();
     });
   });
 });

@@ -17,6 +17,7 @@ const UserLogin = () => {
   const [ email, setEmail ] = useState('')
   const [ password, setPassword ] = useState('')
   const [ loading, setLoading ] = useState(false)
+  const [ googleLoading, setGoogleLoading ] = useState(false)
 
   const { setUser } = useContext(UserDataContext)
   const navigate = useNavigate()
@@ -32,6 +33,9 @@ const UserLogin = () => {
   const provider = new GoogleAuthProvider();
 
   const handleGoogleLogin = async () => {
+    if (googleLoading) return
+    setGoogleLoading(true)
+
     try {
       const idToken = await getGoogleIdToken(auth, provider)
 
@@ -49,10 +53,12 @@ const UserLogin = () => {
       }
     } catch (error) {
       console.error('Google login error:', error);
-      if (!['auth/popup-closed-by-user', 'GOOGLE_AUTH_CANCELLED'].includes(error.code)) {
+      if (error.code !== 'auth/popup-closed-by-user') {
         const backendError = error.response?.data?.error || error.response?.data?.message || error.message;
         addToast(`Erro no Google: ${backendError}`, 'error');
       }
+    } finally {
+      setGoogleLoading(false)
     }
   };
 
@@ -131,6 +137,8 @@ const UserLogin = () => {
           type="button"
           variant="secondary"
           onClick={handleGoogleLogin}
+          loading={googleLoading}
+          disabled={loading}
           className='mb-5 flex items-center justify-center gap-3'
         >
           <GoogleIcon />

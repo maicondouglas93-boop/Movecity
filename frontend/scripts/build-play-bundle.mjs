@@ -87,6 +87,15 @@ const releaseEnv = {
     VITE_DISTRIBUTION_CHANNEL: 'play',
 }
 
+if (role === 'passenger') {
+    run(
+        process.execPath,
+        ['scripts/ci/check-passenger-google-auth-config.mjs'],
+        frontendDir,
+        releaseEnv,
+    )
+}
+
 console.log(`[aab:${role}] sincronizando web + Capacitor`)
 run(npm, config.sync, frontendDir, releaseEnv)
 

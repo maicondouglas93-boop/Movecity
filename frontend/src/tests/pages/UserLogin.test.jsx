@@ -1,6 +1,5 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import api from '@/shared/services/axios';
 import UserLogin from '@/passenger/pages/UserLogin';
@@ -16,7 +15,9 @@ vi.mock('@/shared/services/axios', () => ({
 vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(),
   GoogleAuthProvider: vi.fn(),
-  signInWithPopup: vi.fn(),
+}));
+vi.mock('@/shared/services/googleAuth', () => ({
+  getGoogleIdToken: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();
@@ -57,6 +58,14 @@ describe('UserLogin Component', () => {
     expect(screen.getByPlaceholderText('senha')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /entrar$/i })).toBeInTheDocument(); // O botão padrão de entrar
     expect(screen.getByRole('button', { name: /entrar com o google/i })).toBeInTheDocument();
+  });
+
+  it('não oferece entrada de motorista no build do passageiro', () => {
+    vi.stubEnv('VITE_APP_ROLE', 'passenger');
+    renderWithProviders(<UserLogin />);
+
+    expect(screen.queryByRole('link', { name: /entrar como motorista/i })).not.toBeInTheDocument();
+    vi.unstubAllEnvs();
   });
 
   it('handles successful login', async () => {

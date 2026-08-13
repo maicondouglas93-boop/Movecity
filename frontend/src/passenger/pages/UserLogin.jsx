@@ -5,8 +5,9 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 
 import { useToast } from '@/shared/contexts/ToastContext'
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { app } from '@/shared/services/firebase';
+import { getGoogleIdToken } from '@/shared/services/googleAuth'
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 import { saveSession, getAccessToken } from '@/shared/services/session'
@@ -31,13 +32,8 @@ const UserLogin = () => {
   const provider = new GoogleAuthProvider();
 
   const handleGoogleLogin = async () => {
-    if (!auth) {
-      addToast('Login com Google indisponível neste ambiente', 'error');
-      return;
-    }
     try {
-      const result = await signInWithPopup(auth, provider);
-      const idToken = await result.user.getIdToken();
+      const idToken = await getGoogleIdToken(auth, provider)
 
       const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
         idToken: idToken
@@ -53,7 +49,7 @@ const UserLogin = () => {
       }
     } catch (error) {
       console.error('Google login error:', error);
-      if (error.code !== 'auth/popup-closed-by-user') {
+      if (!['auth/popup-closed-by-user', 'GOOGLE_AUTH_CANCELLED'].includes(error.code)) {
         const backendError = error.response?.data?.error || error.response?.data?.message || error.message;
         addToast(`Erro no Google: ${backendError}`, 'error');
       }
@@ -147,12 +143,14 @@ const UserLogin = () => {
           <Link to="/account-deletion">Excluir conta</Link>
         </div>
       </div>
-      <div className='p-7'>
-        <Link
-          to='/captain-login'
-          className='bg-surface-alt border border-brand-200 flex items-center justify-center text-brand-700 font-semibold mb-5 rounded-panel px-4 py-3 w-full text-lg active:bg-brand-50 transition-colors'
-        >Entrar como Motorista</Link>
-      </div>
+      {import.meta.env.VITE_APP_ROLE !== 'passenger' && (
+        <div className='p-7'>
+          <Link
+            to='/captain-login'
+            className='bg-surface-alt border border-brand-200 flex items-center justify-center text-brand-700 font-semibold mb-5 rounded-panel px-4 py-3 w-full text-lg active:bg-brand-50 transition-colors'
+          >Entrar como Motorista</Link>
+        </div>
+      )}
     </div>
   )
 }

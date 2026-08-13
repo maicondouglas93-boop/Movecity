@@ -1,11 +1,12 @@
-import React, { useState, useContext, useEffect } from 'react'
+import { useState, useContext, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
 
 import { useToast } from '@/shared/contexts/ToastContext'
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { app } from '@/shared/services/firebase';
+import { getGoogleIdToken } from '@/shared/services/googleAuth'
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 import { saveSession, getAccessToken } from '@/shared/services/session'
@@ -21,7 +22,7 @@ const UserSignup = () => {
   const [ loading, setLoading ] = useState(false)
 
   const navigate = useNavigate()
-  const { user, setUser } = useContext(UserDataContext)
+  const { setUser } = useContext(UserDataContext)
   const { addToast } = useToast()
 
   useEffect(() => {
@@ -34,13 +35,8 @@ const UserSignup = () => {
   const provider = new GoogleAuthProvider();
 
   const handleGoogleLogin = async () => {
-    if (!auth) {
-      addToast('Login com Google indisponível neste ambiente', 'error');
-      return;
-    }
     try {
-      const result = await signInWithPopup(auth, provider);
-      const idToken = await result.user.getIdToken();
+      const idToken = await getGoogleIdToken(auth, provider)
 
       const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
         idToken: idToken
@@ -56,7 +52,7 @@ const UserSignup = () => {
       }
     } catch (error) {
       console.error('Google login error:', error);
-      if (error.code !== 'auth/popup-closed-by-user') {
+      if (!['auth/popup-closed-by-user', 'GOOGLE_AUTH_CANCELLED'].includes(error.code)) {
         addToast('Erro ao realizar login com o Google', 'error');
       }
     }

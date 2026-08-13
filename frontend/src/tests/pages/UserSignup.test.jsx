@@ -1,6 +1,5 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import api from '@/shared/services/axios';
 import UserSignup from '@/passenger/pages/UserSignup';
@@ -15,7 +14,9 @@ vi.mock('@/shared/services/axios', () => ({
 vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(),
   GoogleAuthProvider: vi.fn(),
-  signInWithPopup: vi.fn(),
+}));
+vi.mock('@/shared/services/googleAuth', () => ({
+  getGoogleIdToken: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();

@@ -5,7 +5,7 @@ Este documento cobre os dois aplicativos móveis do MoveCity:
 | Aplicativo | Package ID | Nome | versionCode | versionName | Bundle |
 |---|---|---|---:|---|---|
 | Motorista | `br.com.movecity.driver` | MoveCity Motorista | `24` | `1.1.22` | `bundlePlayRelease` |
-| Passageiro | `br.com.movecity.passenger` | MoveCity Passageiro | `1` | `1.0.0` | `bundleRelease` |
+| Passageiro | `br.com.movecity.passenger` | MoveCity Passageiro | `2` | `1.0.1` | `bundleRelease` |
 
 Os dois projetos usam `compileSdk 36`, `targetSdk 36`, AGP 8.9.1, Gradle
 8.11.1 e Java 17. O `versionCode` de cada app é independente e deve aumentar a
@@ -73,6 +73,18 @@ Crie primeiro no Firebase um app Android com package exato
 
 Não reutilize o `google-services.json` do motorista: ele pertence a
 `br.com.movecity.driver`.
+
+### Login Google do passageiro na Play Store
+
+O app Passageiro usa o Credential Manager nativo no Android. Depois de ativar o
+Play App Signing, copie o SHA-1 do **certificado da chave de assinatura do app**
+(não apenas o da upload key), adicione-o ao app Android
+`br.com.movecity.passenger` no Firebase, baixe novamente o
+`google-services.json` e atualize `PASSENGER_GOOGLE_SERVICES_JSON_BASE64`.
+
+O build falha quando o JSON não contém tanto o cliente OAuth Web quanto o cliente
+OAuth Android com SHA-1, evitando publicar outro AAB em que o login Google só
+falharia no aparelho.
 
 ## Geração local
 

@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PassengerDeepLinkPlugin.class);
+        registerPlugin(PassengerGoogleAuthPlugin.class);
         super.onCreate(savedInstanceState);
         PassengerAlertNotifier.ensureChannel(this);
         PassengerDeepLinkStore.fromIntent(this, getIntent());

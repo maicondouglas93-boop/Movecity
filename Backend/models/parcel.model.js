@@ -17,8 +17,9 @@ const parcelSchema = new mongoose.Schema({
     },
     vehicleType: {
         type: String,
-        enum: ['moto', 'car'],
         required: true,
+        trim: true,
+        maxlength: 64,
     },
     pickup: { type: String, required: true },
     destination: { type: String, required: true },

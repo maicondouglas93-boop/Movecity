@@ -61,7 +61,8 @@ module.exports.getFare = async (req, res) => {
 
     try {
         const { pickup, destination, vehicleType } = req.query;
-        const fare = await parcelService.getParcelFare({ pickup, destination, vehicleType });
+        const serviceKind = req.query.service === 'scheduledParcel' ? 'scheduledParcel' : 'parcel';
+        const fare = await parcelService.getParcelFare({ pickup, destination, vehicleType, serviceKind });
         const compatibility = await parcelService.validateVehicleCompatibility({
             vehicleType,
             size: req.query.size || 'small',
@@ -69,6 +70,9 @@ module.exports.getFare = async (req, res) => {
         });
         return res.status(200).json({ ...fare, warnings: compatibility.warnings, blocked: compatibility.blocked });
     } catch (err) {
+        if (err.code === 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE') {
+            return res.status(400).json({ message: 'Esta categoria não está disponível para encomendas.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 };
@@ -136,6 +140,9 @@ module.exports.createParcel = async (req, res) => {
     } catch (err) {
         if (err.code === 'VEHICLE_INCOMPATIBLE') {
             return res.status(400).json({ message: err.message });
+        }
+        if (err.code === 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE') {
+            return res.status(400).json({ message: 'Esta categoria não está disponível para este tipo de encomenda.' });
         }
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });

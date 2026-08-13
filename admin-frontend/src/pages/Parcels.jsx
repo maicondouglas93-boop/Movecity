@@ -3,39 +3,54 @@ import { Link } from 'react-router-dom';
 import { Package, ArrowUpRight } from 'lucide-react';
 import api from '../services/api';
 
-const EMPTY_OPS = {
+const MOTO_OPS = {
   maxWeightKg: 10,
   maxPackageSize: 'medium',
   requireDeliveryPin: true,
   blockIncompatibleVehicle: true,
 };
 
-const normalizeSettings = (raw) => {
+const CAR_OPS = { ...MOTO_OPS, maxWeightKg: 50, maxPackageSize: 'large' };
+
+const defaultOpsForCategory = (category) => (
+  category?.name === 'car' || category?.iconKey === 'car' ? CAR_OPS : MOTO_OPS
+);
+
+const normalizeSettings = (raw, categories) => {
   const dp = raw?.deliveryPricing || {};
+  const deliveryPricing = {};
+  categories.forEach((category) => {
+    deliveryPricing[category.name] = {
+      ...defaultOpsForCategory(category),
+      ...pickOps(dp[category.name]),
+    };
+  });
   return {
     ...raw,
-    deliveryPricing: {
-      moto: { ...EMPTY_OPS, maxWeightKg: 10, maxPackageSize: 'medium', ...pickOps(dp.moto) },
-      car: { ...EMPTY_OPS, maxWeightKg: 50, maxPackageSize: 'large', ...pickOps(dp.car) },
-    },
+    deliveryPricing,
   };
 };
 
 function pickOps(block = {}) {
-  return {
-    maxWeightKg: block.maxWeightKg,
-    maxPackageSize: block.maxPackageSize,
-    requireDeliveryPin: block.requireDeliveryPin,
-    blockIncompatibleVehicle: block.blockIncompatibleVehicle,
-  };
+  return ['maxWeightKg', 'maxPackageSize', 'requireDeliveryPin', 'blockIncompatibleVehicle']
+    .reduce((result, key) => {
+      if (block[key] !== undefined) result[key] = block[key];
+      return result;
+    }, {});
 }
 
-function VehicleOpsCard({ title, vehicleKey, pricing, onChange }) {
+function VehicleOpsCard({ category, pricing, onChange }) {
+  const vehicleKey = category.name;
   const set = (key, value) => onChange(vehicleKey, { ...pricing, [key]: value });
 
   return (
     <div className="bg-surface border border-border rounded-xl p-4 space-y-3 flex-1 min-w-[280px]">
-      <h3 className="font-semibold text-text">{title}</h3>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-semibold text-text">{category.displayName}</h3>
+        {!category.isActive && (
+          <span className="text-[11px] font-semibold uppercase text-text-muted bg-background px-2 py-1 rounded">Inativa</span>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-3 text-sm">
         <label className="flex flex-col gap-1">
           <span className="text-text-muted">Peso máximo (kg)</span>
@@ -95,6 +110,7 @@ function VehicleOpsCard({ title, vehicleKey, pricing, onChange }) {
 // cancelamento e paginação.
 export default function Parcels() {
   const [settings, setSettings] = useState(null);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -102,8 +118,17 @@ export default function Parcels() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/admin/parcel-settings');
-      setSettings(normalizeSettings(data));
+      const [{ data: settingsData }, { data: categoryData }] = await Promise.all([
+        api.get('/admin/parcel-settings'),
+        api.get('/admin/vehicle-categories'),
+      ]);
+      const parcelCategories = (Array.isArray(categoryData) ? categoryData : [])
+        .filter((category) => category.allowedServices?.parcel !== false
+          || category.allowedServices?.scheduledParcel !== false)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+          || a.displayName.localeCompare(b.displayName));
+      setCategories(parcelCategories);
+      setSettings(normalizeSettings(settingsData, parcelCategories));
     } catch (err) {
       console.error(err);
       setSaveMsg(err.response?.data?.message || 'Falha ao carregar');
@@ -131,12 +156,14 @@ export default function Parcels() {
     try {
       // Só regras operacionais — preço fica em Tarifas por categoria.
       const { data } = await api.put('/admin/parcel-settings', {
-        deliveryPricing: {
-          moto: pickOps(settings.deliveryPricing.moto),
-          car: pickOps(settings.deliveryPricing.car),
-        },
+        deliveryPricing: Object.fromEntries(
+          categories.map((category) => [
+            category.name,
+            pickOps(settings.deliveryPricing[category.name]),
+          ])
+        ),
       });
-      setSettings(normalizeSettings(data));
+      setSettings(normalizeSettings(data, categories));
       setSaveMsg('Regras operacionais salvas. Preços de encomenda ficam em Tarifas por categoria.');
     } catch (err) {
       console.error(err);
@@ -177,20 +204,20 @@ export default function Parcels() {
       ) : settings?.deliveryPricing && (
         <section className="space-y-3">
           <h2 className="font-semibold text-lg">Regras operacionais por veículo</h2>
-          <div className="flex flex-wrap gap-4">
-            <VehicleOpsCard
-              title="Moto"
-              vehicleKey="moto"
-              pricing={settings.deliveryPricing.moto}
-              onChange={patchVehicle}
-            />
-            <VehicleOpsCard
-              title="Carro"
-              vehicleKey="car"
-              pricing={settings.deliveryPricing.car}
-              onChange={patchVehicle}
-            />
-          </div>
+          {categories.length === 0 ? (
+            <p className="text-sm text-text-muted">Nenhuma categoria está liberada para encomendas.</p>
+          ) : (
+            <div className="flex flex-wrap gap-4">
+              {categories.map((category) => (
+                <VehicleOpsCard
+                  key={category._id || category.name}
+                  category={category}
+                  pricing={settings.deliveryPricing[category.name]}
+                  onChange={patchVehicle}
+                />
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <button
               type="button"

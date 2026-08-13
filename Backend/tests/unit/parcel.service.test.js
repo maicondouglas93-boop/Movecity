@@ -109,6 +109,60 @@ describe('parcel.service', () => {
         expect(moto.fareBreakdown.surcharges.parcelAdjustment).toBe(0);
     });
 
+    it('aceita categoria dinâmica liberada para encomendas', async () => {
+        await VehicleCategory.create({
+            name: 'utilitario',
+            displayName: 'Utilitário',
+            iconKey: 'car',
+            isActive: true,
+            allowedServices: {
+                ride: false,
+                parcel: true,
+                scheduledRide: false,
+                scheduledParcel: true,
+            },
+            baseFare: 18,
+            perKmRate: 4.5,
+            perMinuteRate: 0.8,
+            minFare: 18,
+            pricing: {
+                baseFare: 18,
+                perKm: 4.5,
+                perMinute: 0.8,
+                minimumFare: 18,
+                platformCommission: 20,
+                parcelAdjustment: { isActive: false, type: 'percentage', value: 0 },
+            },
+        });
+
+        await parcelService.updateSettings({
+            deliveryPricing: {
+                utilitario: {
+                    maxWeightKg: 80,
+                    maxPackageSize: 'large',
+                    requireDeliveryPin: true,
+                    blockIncompatibleVehicle: true,
+                },
+            },
+        });
+
+        const fare = await parcelService.getParcelFare({
+            pickup: 'aaa street',
+            destination: 'bbb street',
+            vehicleType: 'utilitario',
+        });
+        const compatibility = await parcelService.validateVehicleCompatibility({
+            vehicleType: 'utilitario',
+            size: 'large',
+            weightKg: 70,
+        });
+
+        expect(fare.fare).toBe(52.5);
+        expect(fare.pricingSnapshot.category.name).toBe('utilitario');
+        expect(compatibility.blocked).toBe(false);
+        expect(compatibility.pricing.maxWeightKg).toBe(80);
+    });
+
     it('alterar só moto na categoria não muda tarifa do carro', async () => {
         await VehicleCategory.updateOne(
             { name: 'moto' },

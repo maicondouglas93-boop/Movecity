@@ -4,6 +4,7 @@ import { UserDataContext } from '@/passenger/contexts/UserContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { bindPushNavigation, registerPush } from '@/shared/platform/notification.service'
 import { isNativePlatform } from '@/shared/platform/platform'
+import { requestLocationPermission } from '@/shared/platform/location.service'
 import { normalizePassengerDeepLink } from '@/passenger/platform/passengerDeepLink.service'
 
 /** Inicialização única do push Android, fora das telas e protegida por plataforma. */
@@ -19,6 +20,13 @@ export default function PassengerPushBridge() {
         let disposed = false
 
         ;(async () => {
+            // Android mostra um diálogo de permissão por vez. Antes, o LocationProvider
+            // pedia GPS enquanto este bridge pedia notificações; em alguns aparelhos
+            // apenas o diálogo de notificação aparecia. GPS vem primeiro porque é
+            // necessário para preencher a origem e calcular a corrida.
+            await requestLocationPermission()
+            if (disposed) return
+
             // Sequencial: evita a corrida de removeAllListeners já identificada na
             // auditoria do Motorista sem alterar o comportamento dele.
             await registerPush()

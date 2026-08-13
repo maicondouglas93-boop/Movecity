@@ -10,6 +10,10 @@ let webWatchId = null
 let fgsActive = false
 let fgsTitle = null
 let fgsBody = null
+// O PassengerPushBridge e o LocationProvider podem iniciar juntos logo depois do
+// login. Compartilhar a promessa evita abrir duas solicitações de localização e,
+// principalmente, permite que o pedido de notificação aguarde o de GPS terminar.
+let nativeLocationPermissionPromise = null
 /** Evita start/update concorrente (toggle + CaptainLocationBridge). */
 let fgsOpPromise = null
 
@@ -49,14 +53,11 @@ export async function watchPosition(onSuccess, onError, options = {}) {
     if (isNativePlatform()) {
         const { Geolocation } = await import('@capacitor/geolocation')
         try {
-            const perm = await Geolocation.checkPermissions()
-            if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
-                const requested = await Geolocation.requestPermissions()
-                if (requested.location !== 'granted' && requested.coarseLocation !== 'granted') {
-                    log('permission denied')
-                    onError?.({ code: 1, message: 'Permissão de localização negada.', PERMISSION_DENIED: 1 })
-                    return 'native:denied'
-                }
+            const permission = await requestLocationPermission()
+            if (!permission.granted) {
+                log('permission denied')
+                onError?.({ code: 1, message: 'Permissão de localização negada.', PERMISSION_DENIED: 1 })
+                return 'native:denied'
             }
             log('permission granted')
         } catch (err) {
@@ -135,15 +136,34 @@ export async function requestLocationPermission() {
     if (!isNativePlatform()) {
         return checkLocationPermission()
     }
+
+    if (!nativeLocationPermissionPromise) {
+        nativeLocationPermissionPromise = (async () => {
+            const { Geolocation } = await import('@capacitor/geolocation')
+            const current = await Geolocation.checkPermissions()
+            const alreadyGranted = current.location === 'granted' || current.coarseLocation === 'granted'
+            if (alreadyGranted) {
+                return { granted: true, state: current.location || current.coarseLocation }
+            }
+
+            const requested = await Geolocation.requestPermissions()
+            const granted = requested.location === 'granted' || requested.coarseLocation === 'granted'
+            log(granted ? 'permission granted' : 'permission denied')
+            return { granted, state: requested.location || requested.coarseLocation || 'denied' }
+        })()
+    }
+
+    const pendingPermission = nativeLocationPermissionPromise
+
     try {
-        const { Geolocation } = await import('@capacitor/geolocation')
-        const requested = await Geolocation.requestPermissions()
-        const granted = requested.location === 'granted' || requested.coarseLocation === 'granted'
-        log(granted ? 'permission granted' : 'permission denied')
-        return { granted, state: requested.location || requested.coarseLocation || 'denied' }
+        return await pendingPermission
     } catch (err) {
         log('permission error', err?.message)
         return { granted: false, state: 'error', message: err?.message }
+    } finally {
+        if (nativeLocationPermissionPromise === pendingPermission) {
+            nativeLocationPermissionPromise = null
+        }
     }
 }
 

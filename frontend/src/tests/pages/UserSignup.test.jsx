@@ -5,6 +5,7 @@ import api from '@/shared/services/axios';
 import UserSignup from '@/passenger/pages/UserSignup';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
+import { getGoogleIdToken } from '@/shared/services/googleAuth';
 
 // Fase 1 (C1): a página migrou do axios cru para a instância configurada.
 vi.mock('@/shared/services/axios', () => ({
@@ -89,6 +90,20 @@ describe('UserSignup Component', () => {
       });
       expect(mockSetUser).toHaveBeenCalledWith({ fullname: { firstname: 'Jane' } });
       expect(mockNavigate).toHaveBeenCalledWith('/home');
+    });
+  });
+
+  it('informa quando o login Google nativo falha', async () => {
+    getGoogleIdToken.mockRejectedValueOnce({
+      code: 'GOOGLE_AUTH_FAILED',
+      message: 'Não foi possível abrir o login Google.',
+    });
+
+    renderWithProviders(<UserSignup />);
+    fireEvent.click(screen.getByRole('button', { name: /entrar com o google/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Erro no Google: Não foi possível abrir o login Google.')).toBeInTheDocument();
     });
   });
 });

@@ -17,7 +17,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import com.google.firebase.auth.AuthCredential;
 import com.google.firebase.auth.FirebaseAuth;
@@ -45,10 +45,11 @@ public class PassengerGoogleAuthPlugin extends Plugin {
         }
         final String serverClientId = getContext().getString(clientIdResource);
 
-        GetGoogleIdOption googleIdOption = new GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(serverClientId)
-            .setAutoSelectEnabled(false)
+        // Este metodo e acionado por um botao explicito da interface. O fluxo
+        // GetGoogleIdOption e destinado ao bottom sheet automatico e pode ser
+        // suprimido pelo Android quando "Sign-in prompts" esta desativado. O
+        // GetSignInWithGoogleOption sempre inicia o fluxo proprio do botao.
+        GetSignInWithGoogleOption googleIdOption = new GetSignInWithGoogleOption.Builder(serverClientId)
             .build();
 
         GetCredentialRequest request = new GetCredentialRequest.Builder()

@@ -39,7 +39,7 @@ export default function Promotions() {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { register, handleSubmit, watch, setValue, reset } = useForm({
+  const { register, handleSubmit, watch, reset } = useForm({
     defaultValues: {
       type: 'coupon',
       code: '',
@@ -61,7 +61,6 @@ export default function Promotions() {
       budgetLimit: '',
       globalUsageLimit: '',
       usagePerUserLimit: 1,
-      combinable: false,
       sendPush: false
     }
   });
@@ -80,12 +79,12 @@ export default function Promotions() {
   const createMutation = useMutation({
     mutationFn: async (data) => await api.post('/admin/promotions', data),
     onSuccess: () => {
-      toast.success('Promoção criada com sucesso!');
+      toast.success('Cupom criado com sucesso!');
       reset();
       queryClient.invalidateQueries({ queryKey: ['promotions'] });
       setActiveTab('list');
     },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar promoção')
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao criar cupom')
   });
 
   const statusMutation = useMutation({
@@ -94,17 +93,17 @@ export default function Promotions() {
       toast.success('Status atualizado!');
       queryClient.invalidateQueries({ queryKey: ['promotions'] });
     },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar status da promoção')
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao atualizar status do cupom')
   });
 
   const simulateMutation = useMutation({
     mutationFn: async (data) => await api.post('/admin/promotions/simulate', data),
     onSuccess: (res) => setSimulation(prev => ({ ...prev, result: res.data })),
-    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao simular impacto da promoção')
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao simular cupom')
   });
 
   const onSubmit = (data) => {
-    const payload = { ...data };
+    const payload = { ...data, type: 'coupon', code: data.code.trim().toUpperCase() };
     // Process CSV strings to arrays
     if (payload.rules.cities) {
       payload.rules.cities = payload.rules.cities.split(',').map(s => s.trim());
@@ -113,7 +112,9 @@ export default function Promotions() {
     }
     // Parse numeric fields safely
     payload.value = Number(payload.value);
-    payload.maxDiscountLimit = payload.maxDiscountLimit ? Number(payload.maxDiscountLimit) : undefined;
+    payload.maxDiscountLimit = payload.discountType === 'percentage' && payload.maxDiscountLimit
+      ? Number(payload.maxDiscountLimit)
+      : undefined;
     payload.budgetLimit = payload.budgetLimit ? Number(payload.budgetLimit) : undefined;
     payload.globalUsageLimit = payload.globalUsageLimit ? Number(payload.globalUsageLimit) : undefined;
     payload.usagePerUserLimit = payload.usagePerUserLimit ? Number(payload.usagePerUserLimit) : 1;
@@ -130,28 +131,38 @@ export default function Promotions() {
 
   const handleDuplicate = (promo) => {
     reset({
-      ...promo,
+      type: 'coupon',
       title: promo.title + ' (Cópia)',
-      code: promo.code ? promo.code + '_COPY' : '',
+      code: promo.code ? `${promo.code.slice(0, 25)}_COPY` : '',
+      description: promo.description || '',
+      discountType: ['percentage', 'fixed'].includes(promo.discountType) ? promo.discountType : 'percentage',
+      value: promo.value,
+      maxDiscountLimit: promo.maxDiscountLimit || '',
       rules: {
         ...promo.rules,
         cities: promo.rules.cities?.join(', ') || ''
-      }
+      },
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      budgetLimit: promo.budgetLimit || '',
+      globalUsageLimit: promo.globalUsageLimit || '',
+      usagePerUserLimit: promo.usagePerUserLimit || 1,
+      sendPush: false
     });
     setActiveTab('new');
-    toast.success('Promoção carregada no formulário!');
+    toast.success('Cupom carregado no formulário!');
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-20">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Motor de Growth & Promoções</h1>
-        <p className="text-text-muted mt-1">Gerencie cupons, cashbacks, limites orçamentários e regras por cidade.</p>
+        <h1 className="text-2xl font-bold tracking-tight">Cupons de Desconto</h1>
+        <p className="text-text-muted mt-1">Crie cupons por porcentagem ou valor fixo e controle validade, regras e orçamento.</p>
       </div>
 
       <div className="flex border-b border-border">
-        <button onClick={() => setActiveTab('new')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'new' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Criar Campanha</button>
-        <button onClick={() => setActiveTab('list')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'list' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Painel de Controle</button>
+        <button onClick={() => setActiveTab('new')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'new' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Criar Cupom</button>
+        <button onClick={() => setActiveTab('list')} className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'list' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'}`}>Cupons Cadastrados</button>
       </div>
 
       {activeTab === 'new' && (
@@ -163,23 +174,13 @@ export default function Promotions() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Tag className="w-4 h-4" /> 1. Configuração Básica</h2>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1">Tipo de Promoção</label>
-                    <select {...register('type')} className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none">
-                      <option value="coupon">Cupom de Desconto</option>
-                      <option value="campaign">Campanha Automática (Fundo)</option>
-                      <option value="referral">Indicação de Amigos</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1">Código (Opcional)</label>
-                    <input type="text" {...register('code')} placeholder="Ex: CARNAVAL20" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none uppercase" />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-text-muted mb-1">Código do Cupom</label>
+                  <input type="text" {...register('code')} required minLength={3} maxLength={30} placeholder="Ex: CARNAVAL20" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none uppercase" />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-text-muted mb-1">Título da Campanha (Interno/App)</label>
+                  <label className="block text-xs font-medium text-text-muted mb-1">Título do Cupom (Interno/App)</label>
                   <input type="text" {...register('title')} required placeholder="Ex: Especial de Carnaval" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
                 </div>
                 <div>
@@ -192,24 +193,24 @@ export default function Promotions() {
               <div className="bg-surface border border-border p-6 rounded-xl space-y-5">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Gift className="w-4 h-4" /> 2. O Benefício</h2>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className={`grid grid-cols-1 ${formValues.discountType === 'percentage' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Mecânica</label>
                     <select {...register('discountType')} className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none">
                       <option value="percentage">Porcentagem (%)</option>
                       <option value="fixed">Valor Fixo (R$)</option>
-                      <option value="cashback">Cashback (R$ na carteira)</option>
-                      <option value="free_ride">Corrida Grátis</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1">Valor (%, R$)</label>
-                    <input type="number" {...register('value')} required min="0" step="0.01" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
+                    <label className="block text-xs font-medium text-text-muted mb-1">{formValues.discountType === 'percentage' ? 'Porcentagem (%)' : 'Desconto (R$)'}</label>
+                    <input type="number" {...register('value')} required min="0.01" max={formValues.discountType === 'percentage' ? 100 : undefined} step="0.01" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1">Teto Máximo (R$)</label>
-                    <input type="number" {...register('maxDiscountLimit')} min="0" step="0.01" placeholder="Sem limite" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
-                  </div>
+                  {formValues.discountType === 'percentage' && (
+                    <div>
+                      <label className="block text-xs font-medium text-text-muted mb-1">Teto Máximo (R$)</label>
+                      <input type="number" {...register('maxDiscountLimit')} min="0.01" step="0.01" placeholder="Sem limite" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -258,11 +259,11 @@ export default function Promotions() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Orçamento Máximo (R$)</label>
-                    <input type="number" {...register('budgetLimit')} min="0" placeholder="Sem teto" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
+                    <input type="number" {...register('budgetLimit')} min="0.01" step="0.01" placeholder="Sem teto" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1">Max Usos (Total da Campanha)</label>
-                    <input type="number" {...register('globalUsageLimit')} min="0" placeholder="Sem limite" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
+                    <label className="block text-xs font-medium text-text-muted mb-1">Máx. de Usos do Cupom</label>
+                    <input type="number" {...register('globalUsageLimit')} min="1" placeholder="Sem limite" className="w-full bg-background border border-border rounded-lg p-3 text-sm focus:border-primary outline-none" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Max Usos (Por Usuário)</label>
@@ -273,12 +274,12 @@ export default function Promotions() {
               
               <div className="flex gap-4 p-4 bg-primary/10 border border-primary/20 rounded-xl items-center">
                 <input type="checkbox" {...register('sendPush')} id="sendPush" className="w-5 h-5 text-primary bg-surface border-primary rounded focus:ring-primary" />
-                <label htmlFor="sendPush" className="font-bold text-primary cursor-pointer">Enviar Push Notification para toda base avisando da promoção</label>
+                <label htmlFor="sendPush" className="font-bold text-primary cursor-pointer">Enviar notificação aos passageiros com o código do cupom</label>
               </div>
 
               <div className="pt-4 pb-10">
                 <button type="submit" disabled={createMutation.isPending} className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg disabled:opacity-50 text-lg">
-                  Ativar Motor de Promoção
+                  Criar e Ativar Cupom
                 </button>
               </div>
             </form>
@@ -290,7 +291,7 @@ export default function Promotions() {
               <div className="bg-surface border border-border rounded-xl shadow-sm p-6 overflow-hidden relative">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-info"></div>
                 <h3 className="text-lg font-bold flex items-center gap-2 mb-6 text-text">
-                  <Calculator className="w-5 h-5 text-primary" /> Simulador de Impacto
+                  <Calculator className="w-5 h-5 text-primary" /> Simulador do Cupom
                 </h3>
 
                 <div className="space-y-4">
@@ -374,7 +375,7 @@ export default function Promotions() {
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-background/50 border-b border-border text-text-muted">
                 <tr>
-                  <th className="p-4 font-bold uppercase text-[11px] tracking-wider">Campanha</th>
+                  <th className="p-4 font-bold uppercase text-[11px] tracking-wider">Cupom</th>
                   <th className="p-4 font-bold uppercase text-[11px] tracking-wider">Benefício</th>
                   <th className="p-4 font-bold uppercase text-[11px] tracking-wider">Orçamento / Uso</th>
                   <th className="p-4 font-bold uppercase text-[11px] tracking-wider">Status</th>
@@ -383,9 +384,9 @@ export default function Promotions() {
               </thead>
               <tbody className="divide-y divide-border">
                 {isLoading ? (
-                  <tr><td colSpan="5" className="p-8 text-center text-text-muted">Carregando promoções...</td></tr>
+                  <tr><td colSpan="5" className="p-8 text-center text-text-muted">Carregando cupons...</td></tr>
                 ) : promosData?.promotions?.length === 0 ? (
-                  <tr><td colSpan="5" className="p-8 text-center text-text-muted">Nenhuma campanha cadastrada.</td></tr>
+                  <tr><td colSpan="5" className="p-8 text-center text-text-muted">Nenhum cupom cadastrado.</td></tr>
                 ) : (
                   promosData?.promotions?.map(promo => {
                     const budgetUsed = promo.currentBudgetUsed || 0;
@@ -399,22 +400,14 @@ export default function Promotions() {
                           <div className="flex gap-2 items-center">
                             {promo.code ? (
                               <span className="text-[10px] font-mono bg-text/10 text-text px-1.5 py-0.5 rounded border border-border">{promo.code}</span>
-                            ) : (
-                              <span className="text-[10px] uppercase font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded">{promo.type}</span>
-                            )}
+                            ) : <span className="text-[10px] text-danger font-bold">Sem código</span>}
                             {promo.rules?.cities?.length > 0 && <span className="text-[10px] text-text-muted">📍 Local</span>}
                           </div>
                         </td>
                         <td className="p-4">
                           <p className="font-bold text-primary">
                             {promo.discountType === 'percentage' && `${promo.value}% OFF`}
-                            {/* Cashback é tratado como valor fixo em R$ no motor real
-                                (promotion.service.js: "cashback tratado como desconto
-                                imediato na tarifa"), nunca porcentagem — mostrar "%"
-                                aqui enganava o admin sobre o valor real do benefício. */}
                             {promo.discountType === 'fixed' && `${formatMoney(promo.value)} OFF`}
-                            {promo.discountType === 'cashback' && `${formatMoney(promo.value)} Cashback`}
-                            {promo.discountType === 'free_ride' && `Corrida Grátis`}
                           </p>
                           {promo.maxDiscountLimit && <p className="text-[10px] text-text-muted">Máximo R$ {promo.maxDiscountLimit}</p>}
                         </td>

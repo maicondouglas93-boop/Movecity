@@ -2,15 +2,8 @@ const promotionModel = require('../models/promotion.model');
 const promotionUsageModel = require('../models/promotionUsage.model');
 const userModel = require('../models/user.model');
 
-// Auditoria do painel administrativo (2026-08-02, Bloco H, achados F3/F4): o painel
-// gerenciava um formulário inteiro de promoções — segmentação, orçamento, limites de
-// uso — e nada em nenhuma corrida jamais consultava isso. Este arquivo é o que faz
-// "Promoção" significar alguma coisa: findApplicablePromotion valida um código contra
-// todas as regras cadastradas, evaluateDiscount calcula o valor (mesma matemática usada
-// pelo simulador do admin, pra o simulador nunca prometer um resultado diferente do real).
-
-// Compartilhada com admin.controller.js: simulatePromotion — antes essa lógica só
-// existia ali, duplicada, e não tratava 'cashback' (caía em desconto zero).
+// A mesma matemática é usada pelo simulador do painel e pela criação da corrida.
+// O módulo aceita somente cupons de porcentagem ou valor fixo.
 module.exports.evaluateDiscount = (promotion, rideValue) => {
     let discount = 0;
 
@@ -19,15 +12,8 @@ module.exports.evaluateDiscount = (promotion, rideValue) => {
         if (promotion.maxDiscountLimit && discount > promotion.maxDiscountLimit) {
             discount = promotion.maxDiscountLimit;
         }
-    } else if (promotion.discountType === 'fixed' || promotion.discountType === 'cashback') {
-        // cashback tratado como desconto imediato na tarifa nesta versão — decisão de
-        // escopo registrada em docs/plans/2026-08-02-execucao-bloco-h-admin-regras-negocio.md.
+    } else if (promotion.discountType === 'fixed') {
         discount = promotion.value;
-        if (promotion.maxDiscountLimit && discount > promotion.maxDiscountLimit) {
-            discount = promotion.maxDiscountLimit;
-        }
-    } else if (promotion.discountType === 'free_ride') {
-        discount = rideValue;
         if (promotion.maxDiscountLimit && discount > promotion.maxDiscountLimit) {
             discount = promotion.maxDiscountLimit;
         }
@@ -46,7 +32,7 @@ module.exports.evaluateDiscount = (promotion, rideValue) => {
 module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, paymentMethod, rideValue }) => {
     if (!code) return null;
 
-    const promotion = await promotionModel.findOne({ code: code.toUpperCase().trim() });
+    const promotion = await promotionModel.findOne({ type: 'coupon', code: code.toUpperCase().trim() });
     if (!promotion) return { error: 'Cupom não encontrado' };
 
     if (promotion.status !== 'active') return { error: 'Este cupom não está ativo' };
@@ -118,6 +104,9 @@ module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, pay
 
     const { discount } = module.exports.evaluateDiscount(promotion, rideValue);
     if (discount <= 0) return { error: 'Este cupom não gera desconto para esta corrida' };
+    if (promotion.budgetLimit && ((promotion.currentBudgetUsed || 0) + discount) > promotion.budgetLimit) {
+        return { error: 'Este cupom não possui orçamento suficiente para este desconto' };
+    }
 
     return { promotion, discountAmount: discount };
 };

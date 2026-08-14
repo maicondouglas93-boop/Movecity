@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { isNativePlatform } from '@/shared/platform/platform'
+import { onAppActive } from '@/shared/platform/appLifecycle.service'
+import { requestLocationPermission } from '@/shared/platform/location.service'
 import {
     getDriverPermissionStatus,
     markOemPermissionsOnboardingSeen,
@@ -24,23 +26,20 @@ export default function DriverOemPermissionsCard() {
 
     const refresh = async () => {
         if (!isNativePlatform()) return
-        const show = await shouldShowOemPermissionsCard()
+        const next = await getDriverPermissionStatus()
+        const show = await shouldShowOemPermissionsCard(next)
         if (!show) {
             setVisible(false)
             return
         }
-        const next = await getDriverPermissionStatus()
         setStatus(next)
         setVisible(true)
     }
 
     useEffect(() => {
         refresh()
-        const onVis = () => {
-            if (document.visibilityState === 'visible') refresh()
-        }
-        document.addEventListener('visibilitychange', onVis)
-        return () => document.removeEventListener('visibilitychange', onVis)
+        const offActive = onAppActive(refresh)
+        return () => offActive?.()
     }, [])
 
     if (!visible || !status) return null
@@ -64,6 +63,19 @@ export default function DriverOemPermissionsCard() {
                     </p>
 
                     <ul className="mt-3 space-y-2">
+                        {status.hasForegroundLocation === false && (
+                            <li>
+                                <ActionRow
+                                    label="Permitir localização durante o uso"
+                                    hint="Necessário para ficar online e receber serviços próximos"
+                                    onClick={async () => {
+                                        const result = await requestLocationPermission()
+                                        if (!result.granted) await openDriverAppSettings()
+                                        await refresh()
+                                    }}
+                                />
+                            </li>
+                        )}
                         {!status.canUseFullScreenIntent && (
                             <li>
                                 <ActionRow
@@ -91,7 +103,7 @@ export default function DriverOemPermissionsCard() {
                                 />
                             </li>
                         )}
-                        {status.hasBackgroundLocation === false && (
+                        {status.hasForegroundLocation !== false && status.hasBackgroundLocation === false && (
                             <li>
                                 <ActionRow
                                     label="Localização o tempo todo"
@@ -139,9 +151,11 @@ export default function DriverOemPermissionsCard() {
                                 setStatus(next)
                                 // Autostart/pop-up MIUI não são consultáveis — fecha se o resto ok.
                                 const bgOk = next.hasBackgroundLocation !== false
+                                const fgOk = next.hasForegroundLocation !== false
                                 const dndOk = next.hasNotificationPolicyAccess !== false
                                 if (
-                                    next.canUseFullScreenIntent
+                                    fgOk
+                                    && next.canUseFullScreenIntent
                                     && next.ignoringBatteryOptimizations
                                     && dndOk
                                     && bgOk

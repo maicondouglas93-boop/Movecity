@@ -16,11 +16,10 @@ import api from '@/shared/services/axios'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/shared/contexts/ToastContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
-import { requestFCMToken, onForegroundMessage } from '@/shared/services/fcm'
-import { registerPush, bindPushNavigation } from '@/shared/platform/notification.service'
+import { onForegroundMessage } from '@/shared/services/fcm'
+import { bindPushNavigation } from '@/shared/platform/notification.service'
 import { syncNativeCaptainSession } from '@/shared/platform/nativeSession.service'
 import { isNativePlatform } from '@/shared/platform/platform'
-import { syncTokenWithSW } from '@/shared/services/swCommunication'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { getAccessToken } from '@/shared/services/session'
@@ -53,18 +52,7 @@ const CaptainHome = () => {
 
     const [ ridePopupPanel, setRidePopupPanel ] = useState(false)
     const [ confirmRidePopupPanel, setConfirmRidePopupPanel ] = useState(false)
-    const [ showNotificationPrompt, setShowNotificationPrompt ] = useState(false)
     const [ searchParams, setSearchParams ] = useSearchParams()
-    // Auditoria PWA (2026-08-03, C3): antes, permissão "negada" não gerava nenhum
-    // aviso — um motorista nesse estado ficava invisível ao despacho por push (com o
-    // app fechado/minimizado) sem nenhuma pista de causa dentro do app.
-    const [ notificationsDenied, setNotificationsDenied ] = useState(false)
-    // Auditoria do app do motorista (2026-08-11, P2): registerPush()/requestFCMToken()
-    // já retornavam null de forma limpa em toda falha (permissão negada de jeito
-    // atípico, registrationError nativo, timeout, google-services.json ausente) — só
-    // ninguém reagia a isso. O motorista continuava recebendo corridas via socket com
-    // o app aberto, mas perdia a rede de segurança de push sem nenhum aviso.
-    const [ pushRegistrationFailed, setPushRegistrationFailed ] = useState(false)
 
     const [ ride, setRide ] = useState(null)
     // Fase B da experiência de corrida ativa (2026-08-03): corridas 'requested'
@@ -79,7 +67,7 @@ const CaptainHome = () => {
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
     const { captain, setCaptain } = useContext(CaptainDataContext)
-    const { locationRef, locationError, userLocation } = useContext(LocationContext)
+    const { userLocation } = useContext(LocationContext)
     const { captainRide, setCaptainRide, syncCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const [ refreshingApproval, setRefreshingApproval ] = useState(false)
@@ -159,46 +147,10 @@ const CaptainHome = () => {
         return () => window.clearInterval(id)
     }, [captain?._id, captain?.approvalStatus, captain?.isBlocked])
 
-    // Auditoria de UX do motorista (2026-08-02, §2.5): sem GPS, updateLocation() (efeito
-    // abaixo) simplesmente retorna cedo e a posição do motorista para de ser atualizada
-    // no servidor — ele some do raio de despacho enquanto a tela continua dizendo
-    // "Procurando corridas...". Sem isso, o motorista não tinha como saber por que não
-    // estava recebendo nada. Edge-triggered (só quando o erro aparece), pra não repetir
-    // o toast a cada render enquanto o problema persiste.
-    useEffect(() => {
-        if (locationError) {
-            addToast(`Sem sinal de GPS: ${locationError} Você pode não estar recebendo corridas.`, 'error')
-        }
-    }, [locationError])
-
     // Espelha JWT + API base no SharedPreferences (Aceitar com app morto / lock screen).
     useEffect(() => {
         const token = getAccessToken('captain')
         if (token) syncNativeCaptainSession({ token }).catch(() => {})
-    }, [])
-
-    // Push: Web = FCM/SW; Android nativo = Capacitor Push (notification.service).
-    const setupPush = async () => {
-        if (isNativePlatform()) {
-            const token = await registerPush()
-            setPushRegistrationFailed(!token)
-            return
-        }
-        if (!('Notification' in window)) return
-        if (Notification.permission === 'granted') {
-            const token = await requestFCMToken()
-            setPushRegistrationFailed(!token)
-            const jwt = getAccessToken('captain')
-            if (jwt && token) await syncTokenWithSW(jwt)
-        } else if (Notification.permission === 'default' && !localStorage.getItem('notificationPromptSeenCaptain')) {
-            setShowNotificationPrompt(true)
-        } else if (Notification.permission === 'denied') {
-            setNotificationsDenied(true)
-        }
-    }
-    useEffect(() => {
-        setupPush()
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     useEffect(() => {
@@ -242,26 +194,6 @@ const CaptainHome = () => {
             unsubWeb?.()
         }
     }, [addToast, navigate])
-
-    const handleEnableNotifications = async () => {
-        setShowNotificationPrompt(false)
-        localStorage.setItem('notificationPromptSeenCaptain', '1')
-        if (isNativePlatform()) {
-            await registerPush()
-            return
-        }
-        const permission = await Notification.requestPermission()
-        if (permission === 'granted') {
-            await requestFCMToken()
-            const jwt = getAccessToken('captain')
-            if (jwt) await syncTokenWithSW(jwt)
-        }
-    }
-
-    const handleDismissNotifications = () => {
-        setShowNotificationPrompt(false)
-        localStorage.setItem('notificationPromptSeenCaptain', '1')
-    }
 
     const { requestLock } = useWakeLock();
     useEffect(() => {
@@ -842,73 +774,6 @@ const CaptainHome = () => {
                                 </div>
                             )
                         })}
-                        {showNotificationPrompt && (
-                            <div className="mb-4 bg-surface-alt border border-line rounded-panel p-4 flex gap-3">
-                                <i className="ri-notification-3-fill text-brand-500 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-ink-900">Ativar notificações?</p>
-                                    <p className="text-xs text-ink-400 mt-0.5">Avisamos de novas corridas mesmo com o app em segundo plano.</p>
-                                    <div className="flex gap-2 mt-3">
-                                        <button
-                                            type="button"
-                                            onClick={handleEnableNotifications}
-                                            className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold"
-                                        >
-                                            Ativar
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleDismissNotifications}
-                                            className="min-h-[36px] px-4 rounded-full text-ink-600 text-sm font-medium"
-                                        >
-                                            Agora não
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                        {notificationsDenied && (
-                            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-panel p-4 flex gap-3">
-                                <i className="ri-notification-off-fill text-amber-600 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-ink-900">Notificações bloqueadas</p>
-                                    <p className="text-xs text-ink-400 mt-0.5">Você não vai receber avisos de corrida com o app fechado ou minimizado. Ative nas configurações de notificação do navegador para este site.</p>
-                                    <button
-                                        type="button"
-                                        onClick={() => setNotificationsDenied(false)}
-                                        className="min-h-[36px] px-4 mt-3 rounded-full text-ink-600 text-sm font-medium"
-                                    >
-                                        Entendi
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                        {pushRegistrationFailed && (
-                            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-panel p-4 flex gap-3">
-                                <i className="ri-notification-off-fill text-amber-600 text-xl flex-shrink-0 mt-0.5" aria-hidden="true"></i>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-ink-900">Não foi possível ativar notificações de corrida</p>
-                                    <p className="text-xs text-ink-400 mt-0.5">Com o app fechado ou minimizado, você pode não ser avisado de novas corridas. Tente ativar de novo — com o app aberto, você continua recebendo ofertas normalmente.</p>
-                                    <div className="flex gap-2 mt-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => setupPush()}
-                                            className="min-h-[36px] px-4 rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold"
-                                        >
-                                            Tentar de novo
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPushRegistrationFailed(false)}
-                                            className="min-h-[36px] px-4 rounded-full text-ink-600 text-sm font-medium"
-                                        >
-                                            Agora não
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
                         <CaptainDetails>
                             {!captainRide && !captainParcel && (
                                 <>

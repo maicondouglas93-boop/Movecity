@@ -20,9 +20,9 @@ const navItems = [
   { icon: Car, label: 'Motoristas', path: '/captains' },
   { icon: CreditCard, label: 'Financeiro', path: '/finance', roles: ['super_admin', 'financeiro'] },
   { icon: Receipt, label: 'Tarifas', path: '/tariffs' },
-  { icon: Tag, label: 'Cupons', path: '/promotions', roles: ['super_admin', 'operador'] },
+  { icon: Tag, label: 'Cupons', path: '/promotions', roles: ['super_admin', 'operador', 'marketing'] },
   { icon: BarChart3, label: 'Relatórios & BI', path: '/reports', roles: ['super_admin'] },
-  { icon: Bell, label: 'Comunicação', path: '/notifications', roles: ['super_admin', 'operador'] },
+  { icon: Bell, label: 'Comunicação', path: '/notifications', roles: ['super_admin', 'operador', 'marketing'] },
   { icon: ClipboardList, label: 'Logs & Auditoria', path: '/logs', roles: ['super_admin'] },
   { icon: Smartphone, label: 'Atualização Motorista', path: '/driver-app', roles: ['super_admin'] },
 ];

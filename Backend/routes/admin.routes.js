@@ -63,11 +63,71 @@ router.post('/campaigns', authAdmin, authorizeRoles('super_admin', 'operador', '
 router.post('/campaigns/estimate', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.estimateAudience);
 router.post('/campaigns/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.cancelCampaign);
 
-// Promotions Engine
-router.post('/promotions', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.createPromotion);
+// Cupons de desconto
+router.post(
+    '/promotions',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador', 'marketing'),
+    body('code')
+        .isString().trim().isLength({ min: 3, max: 30 })
+        .matches(/^[A-Za-z0-9_-]+$/)
+        .withMessage('O código deve ter entre 3 e 30 caracteres e usar apenas letras, números, _ ou -'),
+    body('title').isString().trim().isLength({ min: 2, max: 120 }),
+    body('description').optional({ checkFalsy: true }).isString().trim().isLength({ max: 500 }),
+    body('discountType').isIn(['percentage', 'fixed']),
+    body('value').isFloat({ gt: 0 }).custom((value, { req }) => {
+        if (req.body.discountType === 'percentage' && Number(value) > 100) {
+            throw new Error('O desconto percentual não pode ultrapassar 100%');
+        }
+        return true;
+    }),
+    body('maxDiscountLimit').optional({ checkFalsy: true }).isFloat({ gt: 0 }),
+    body('startDate').isISO8601({ strict: true }),
+    body('endDate').optional({ checkFalsy: true }).isISO8601({ strict: true }).custom((value, { req }) => {
+        if (req.body.startDate && value < req.body.startDate) {
+            throw new Error('A data final não pode ser anterior à data inicial');
+        }
+        return true;
+    }),
+    body('budgetLimit').optional({ checkFalsy: true }).isFloat({ gt: 0 }),
+    body('globalUsageLimit').optional({ checkFalsy: true }).isInt({ min: 1 }),
+    body('usagePerUserLimit').optional({ checkFalsy: true }).isInt({ min: 1 }),
+    body('rules.cities').optional().isArray(),
+    body('rules.cities.*').optional().isString().trim().isLength({ min: 1, max: 100 }),
+    body('rules.vehicleCategories').optional().isArray(),
+    body('rules.vehicleCategories.*').optional().isString().trim().isLength({ min: 1, max: 50 }),
+    body('rules.paymentMethods').optional().isArray(),
+    body('rules.paymentMethods.*').optional().isIn(['pix', 'cash', 'card']),
+    body('rules.firstRideOnly').optional().isBoolean(),
+    body('rules.timeWindow.startTime').optional({ checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d$/),
+    body('rules.timeWindow.endTime').optional({ checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d$/),
+    body('sendPush').optional().isBoolean(),
+    adminController.createPromotion
+);
 router.get('/promotions', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.getPromotions);
-router.put('/promotions/:id/status', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.updatePromotionStatus);
-router.post('/promotions/simulate', authAdmin, authorizeRoles('super_admin', 'operador', 'marketing'), adminController.simulatePromotion);
+router.put(
+    '/promotions/:id/status',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador', 'marketing'),
+    param('id').isMongoId(),
+    body('status').isIn(['active', 'paused']),
+    adminController.updatePromotionStatus
+);
+router.post(
+    '/promotions/simulate',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador', 'marketing'),
+    body('rideValue').isFloat({ gt: 0 }),
+    body('promotionData.discountType').isIn(['percentage', 'fixed']),
+    body('promotionData.value').isFloat({ gt: 0 }).custom((value, { req }) => {
+        if (req.body.promotionData?.discountType === 'percentage' && Number(value) > 100) {
+            throw new Error('O desconto percentual não pode ultrapassar 100%');
+        }
+        return true;
+    }),
+    body('promotionData.maxDiscountLimit').optional({ checkFalsy: true }).isFloat({ gt: 0 }),
+    adminController.simulatePromotion
+);
 
 // BI / Reports
 router.get('/reports/dashboard', authAdmin, authorizeRoles('super_admin'), adminController.getReportDashboard);

@@ -307,29 +307,53 @@ module.exports.cancelCampaign = async (req, res, next) => {
 };
 
 // PROMOTIONS ENGINE
+const parseCouponDate = (value, endOfDay = false) => {
+    if (!value) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const time = endOfDay ? '23:59:59.999' : '00:00:00.000';
+        return new Date(`${value}T${time}-03:00`);
+    }
+    return new Date(value);
+};
+
 module.exports.createPromotion = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: 'Dados do cupom inválidos', errors: errors.array() });
+        }
+
         const Promotion = require('../models/promotion.model');
-        const data = req.body;
+        const code = req.body.code.trim().toUpperCase();
+        const duplicate = await Promotion.exists({ type: 'coupon', code });
+        if (duplicate) {
+            return res.status(409).json({ message: 'Já existe um cupom com este código' });
+        }
 
-        // Auditoria de UX/produção (2026-08-10): o botão único desta tela diz "Ativar
-        // Motor de Promoção", mas o status nunca era setado aqui — caía no default do
-        // schema ('draft'). Toda campanha criada nascia INATIVA apesar do botão dizer
-        // que estava ativando, e se "Enviar Push" estivesse marcado, o push saía pra
-        // toda a base anunciando um cupom que `evaluateDiscount`/`findApplicablePromotion`
-        // (promotion.service.js:52) rejeitava por não estar 'active'. A janela de
-        // validade continua sendo respeitada de verdade por startDate/endDate no
-        // momento do resgate (promotion.service.js:55-56), então marcar como 'active'
-        // aqui não pula essa checagem — só corrige o status para bater com o que o
-        // botão promete.
-        data.status = 'active';
-
-        data.auditLogs = [{
-            adminId: req.admin._id,
-            adminName: req.admin.name || 'Admin',
-            action: 'created',
-            details: 'Campanha criada e ativada'
-        }];
+        const data = {
+            type: 'coupon',
+            code,
+            title: req.body.title.trim(),
+            description: req.body.description?.trim(),
+            discountType: req.body.discountType,
+            value: Number(req.body.value),
+            maxDiscountLimit: req.body.discountType === 'percentage' && req.body.maxDiscountLimit
+                ? Number(req.body.maxDiscountLimit)
+                : undefined,
+            rules: req.body.rules,
+            startDate: parseCouponDate(req.body.startDate),
+            endDate: parseCouponDate(req.body.endDate, true),
+            budgetLimit: req.body.budgetLimit ? Number(req.body.budgetLimit) : undefined,
+            globalUsageLimit: req.body.globalUsageLimit ? Number(req.body.globalUsageLimit) : undefined,
+            usagePerUserLimit: req.body.usagePerUserLimit ? Number(req.body.usagePerUserLimit) : 1,
+            status: 'active',
+            auditLogs: [{
+                adminId: req.admin._id,
+                adminName: req.admin.name || 'Admin',
+                action: 'created',
+                details: 'Cupom criado e ativado'
+            }]
+        };
 
         const promotion = new Promotion(data);
         await promotion.save();
@@ -337,19 +361,17 @@ module.exports.createPromotion = async (req, res, next) => {
         const auditService = require('../services/audit.service');
         await auditService.logAction(req.admin._id, 'CREATE', 'Promotion', promotion._id, { title: data.title, code: data.code }, req.ip);
 
-        if (data.sendPush) {
-            // Se tiver integração com Push, cria uma campanha NotificationCampaign espelho
+        if (req.body.sendPush) {
             const NotificationCampaign = require('../models/notificationCampaign.model');
             await NotificationCampaign.create({
                 title: data.title,
-                message: data.description || 'Nova promoção ativada para você!',
-                imageUrl: data.bannerImage,
-                deepLink: 'promotions',
+                message: `${data.description ? `${data.description} ` : ''}Use o cupom ${code} na sua próxima corrida.`,
+                deepLink: 'home',
                 type: 'promotion',
-                targetRules: { audienceType: 'all' }, // Simplificado para o demo
+                targetRules: { audienceType: 'passengers' },
                 adminId: req.admin._id,
                 status: 'scheduled',
-                scheduledAt: data.startDate || new Date()
+                scheduledAt: data.startDate
             });
         }
 
@@ -376,7 +398,11 @@ function computeEffectiveStatus(promo) {
 module.exports.getPromotions = async (req, res, next) => {
     try {
         const Promotion = require('../models/promotion.model');
-        const promotions = await Promotion.find().sort({ createdAt: -1 });
+        const promotions = await Promotion.find({
+            type: 'coupon',
+            code: { $exists: true, $ne: '' },
+            discountType: { $in: ['percentage', 'fixed'] }
+        }).sort({ createdAt: -1 });
         const withEffectiveStatus = promotions.map((p) => ({ ...p.toObject(), effectiveStatus: computeEffectiveStatus(p) }));
         res.status(200).json({ promotions: withEffectiveStatus });
     } catch (error) {
@@ -386,12 +412,21 @@ module.exports.getPromotions = async (req, res, next) => {
 
 module.exports.updatePromotionStatus = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: 'Status do cupom inválido', errors: errors.array() });
+        }
+
         const { id } = req.params;
         const { status } = req.body;
         const Promotion = require('../models/promotion.model');
         
         const promotion = await Promotion.findById(id);
-        if (!promotion) return res.status(404).json({ message: 'Promoção não encontrada' });
+        const isSupportedCoupon = promotion
+            && promotion.type === 'coupon'
+            && promotion.code
+            && ['percentage', 'fixed'].includes(promotion.discountType);
+        if (!isSupportedCoupon) return res.status(404).json({ message: 'Cupom não encontrado' });
 
         const previousStatus = promotion.status;
         promotion.status = status;
@@ -410,7 +445,7 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
             action: 'update_promotion_status',
             targetId: promotion._id.toString(),
             targetModel: 'Promotion',
-            reason: `Status da promoção "${promotion.title}" alterado de ${previousStatus} para ${status}`,
+            reason: `Status do cupom "${promotion.title}" alterado de ${previousStatus} para ${status}`,
             oldValue: { status: previousStatus },
             newValue: { status },
             ipAddress: req.ip
@@ -424,11 +459,12 @@ module.exports.updatePromotionStatus = async (req, res, next) => {
 
 module.exports.simulatePromotion = async (req, res, next) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: 'Dados da simulação inválidos', errors: errors.array() });
+        }
+
         const { rideValue, promotionData } = req.body;
-        // Bloco H (2026-08-02): usa a mesma função que a aplicação real em createRide
-        // usa (promotion.service.js) â€” antes essa matemática vivia duplicada só aqui e
-        // não tratava 'cashback' (caía em desconto zero); agora o simulador nunca pode
-        // divergir do que realmente acontece numa corrida.
         const promotionService = require('../services/promotion.service');
         const { discount, clientPays, subsidy } = promotionService.evaluateDiscount(promotionData, rideValue);
 

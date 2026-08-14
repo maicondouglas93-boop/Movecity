@@ -79,7 +79,7 @@ function App() {
             </Route>
           </Route>
 
-          <Route element={<ProtectedRoute allowedRoles={['super_admin', 'operador']} />}>
+          <Route element={<ProtectedRoute allowedRoles={['super_admin', 'operador', 'marketing']} />}>
             <Route element={<Layout />}>
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/promotions" element={<Promotions />} />

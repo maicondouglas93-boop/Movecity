@@ -1,15 +1,23 @@
 const mongoose = require('mongoose');
 
 const promotionSchema = new mongoose.Schema({
-    // Identificação Básica
-    type: { type: String, enum: ['coupon', 'campaign', 'referral', 'auto_apply'], default: 'coupon' },
-    code: { type: String, uppercase: true, trim: true, index: true }, // ex: MOVE20, opcional se for campanha sem código
+    // O módulo trabalha exclusivamente com cupons informados pelo passageiro.
+    type: { type: String, enum: ['coupon'], default: 'coupon', immutable: true },
+    code: {
+        type: String,
+        required: true,
+        uppercase: true,
+        trim: true,
+        minlength: 3,
+        maxlength: 30,
+        index: true
+    },
     title: { type: String, required: true },
     description: { type: String },
     
     // Benefício
-    discountType: { type: String, enum: ['percentage', 'fixed', 'cashback', 'free_ride'], default: 'percentage' },
-    value: { type: Number, required: true, min: 0 },
+    discountType: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+    value: { type: Number, required: true, min: 0.01 },
     maxDiscountLimit: { type: Number }, // Teto do desconto em Reais (ex: max R$ 20 de desconto num cupom de 50%)
 
     // Segmentação (Regras Complexas)

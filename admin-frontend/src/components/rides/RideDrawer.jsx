@@ -2,8 +2,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
-import { X, Activity, User, Car, Package, CreditCard, Flag, Shield, Navigation, History as HistoryIcon, ShieldCheck } from 'lucide-react';
-import { timeAgo, itemStatusLabel, itemStatusColor, canFinalizeRide, currentLegTarget, googleMapsUrl, RIDE_LOG_ACTION_LABELS } from './rideUi';
+import { X, Activity, User, Car, Package, CreditCard, Flag, Shield, Navigation, History as HistoryIcon, ShieldCheck, RefreshCw } from 'lucide-react';
+import { timeAgo, itemStatusLabel, itemStatusColor, canFinalizeRide, canRelaunchManualRide, currentLegTarget, googleMapsUrl, RIDE_LOG_ACTION_LABELS } from './rideUi';
 import { RIDE_STATUS_LABELS, PARCEL_STATUS_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_COLORS, statusLabel } from '../../utils/statusDictionary';
 import StatusBadge from '../StatusBadge';
 import { formatMoney, formatDateTime } from '../../utils/format';
@@ -111,6 +111,11 @@ export default function RideDrawer({ ride, onClose, onAction }) {
               {ride.status === 'requested' && !isParcel && (
                 <button onClick={() => { onClose(); onAction(ride, 'reassign'); }} className="flex-1 min-w-[120px] py-2 bg-warning/10 text-warning text-sm font-medium rounded-lg border border-warning/20 hover:bg-warning/20 transition-colors">
                   Reatribuir
+                </button>
+              )}
+              {canRelaunchManualRide(ride) && (
+                <button onClick={() => { onClose(); onAction(ride, 'relaunch'); }} className="flex-1 min-w-[150px] py-2 bg-primary/10 text-primary text-sm font-medium rounded-lg border border-primary/20 hover:bg-primary/20 transition-colors inline-flex items-center justify-center gap-1.5">
+                  <RefreshCw className="w-4 h-4" /> Lançar novamente
                 </button>
               )}
             </div>

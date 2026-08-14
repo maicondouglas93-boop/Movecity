@@ -1,4 +1,4 @@
-"""Gera mipmaps Android a partir de public/pwa-icon-512.png.
+"""Gera mipmaps Android a partir do ícone específico de cada aplicativo.
 
 Uso:
   python scripts/generate-android-icons.py passenger
@@ -13,11 +13,20 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "public" / "pwa-icon-512.png"
 
 TARGETS = {
-    "passenger": ROOT / "android-passenger" / "app" / "src" / "main" / "res",
-    "driver": ROOT / "android" / "app" / "src" / "main" / "res",
+    "passenger": {
+        "res": ROOT / "android-passenger" / "app" / "src" / "main" / "res",
+        "source": ROOT / "public" / "pwa-icon-512.png",
+        "background": (255, 255, 255, 255),
+        "background_hex": "#FFFFFF",
+    },
+    "driver": {
+        "res": ROOT / "android" / "app" / "src" / "main" / "res",
+        "source": ROOT / "public" / "movecity-driver-icon.png",
+        "background": (0, 0, 0, 255),
+        "background_hex": "#000000",
+    },
 }
 
 DENSITIES = [
@@ -40,28 +49,33 @@ def fit_logo(logo: Image.Image, size: int, pad_ratio: float = 0.12) -> Image.Ima
     return canvas
 
 
-def with_white_bg(img: Image.Image) -> Image.Image:
-    bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+def with_bg(img: Image.Image, color: tuple[int, int, int, int]) -> Image.Image:
+    bg = Image.new("RGBA", img.size, color)
     bg.alpha_composite(img)
     return bg.convert("RGBA")
 
 
-def round_mask(img: Image.Image) -> Image.Image:
+def round_mask(img: Image.Image, background: tuple[int, int, int, int]) -> Image.Image:
     size = img.size[0]
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
     draw.ellipse((0, 0, size - 1, size - 1), fill=255)
-    out = with_white_bg(img)
+    out = with_bg(img, background)
     out.putalpha(mask)
     return out
 
 
-def generate(res: Path, logo: Image.Image) -> None:
+def generate(
+    res: Path,
+    logo: Image.Image,
+    background: tuple[int, int, int, int],
+    background_hex: str,
+) -> None:
     for folder, launcher_px, fg_px in DENSITIES:
         out_dir = res / folder
         out_dir.mkdir(parents=True, exist_ok=True)
-        with_white_bg(fit_logo(logo, launcher_px, pad_ratio=0.08)).save(out_dir / "ic_launcher.png", "PNG")
-        round_mask(fit_logo(logo, launcher_px, pad_ratio=0.08)).save(out_dir / "ic_launcher_round.png", "PNG")
+        with_bg(fit_logo(logo, launcher_px, pad_ratio=0.08), background).save(out_dir / "ic_launcher.png", "PNG")
+        round_mask(fit_logo(logo, launcher_px, pad_ratio=0.08), background).save(out_dir / "ic_launcher_round.png", "PNG")
         fit_logo(logo, fg_px, pad_ratio=0.18).save(out_dir / "ic_launcher_foreground.png", "PNG")
         print(f"  {folder}: launcher={launcher_px} fg={fg_px}")
 
@@ -78,9 +92,9 @@ def generate(res: Path, logo: Image.Image) -> None:
 
     (res / "values").mkdir(parents=True, exist_ok=True)
     (res / "values" / "ic_launcher_background.xml").write_text(
-        """<?xml version="1.0" encoding="utf-8"?>
+        f"""<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">{background_hex}</color>
 </resources>
 """,
         encoding="utf-8",
@@ -94,11 +108,12 @@ def main() -> int:
         print(f"Uso: {sys.argv[0]} [passenger|driver|all]")
         return 1
 
-    logo = Image.open(SRC).convert("RGBA")
     for name in names:
-        res = TARGETS[name]
+        target = TARGETS[name]
+        res = target["res"]
+        logo = Image.open(target["source"]).convert("RGBA")
         print(f"[{name}] {res}")
-        generate(res, logo)
+        generate(res, logo, target["background"], target["background_hex"])
     print("done")
     return 0
 

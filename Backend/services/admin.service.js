@@ -14,6 +14,7 @@ const { disconnectSocket } = require('../socket');
 const uploadService = require('./upload.service');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
+const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const {
     VALID_VEHICLE_AUTHORIZATIONS,
     deriveLegacyAuthorization,
@@ -1164,6 +1165,8 @@ function normalizeRideForList(r) {
         cancelledAt: obj.cancelledAt,
         adminFinalization: obj.adminFinalization,
         statusHistory: obj.statusHistory,
+        dispatchLastAttemptAt: obj.dispatchLastAttemptAt,
+        offerExpiresAt: obj.source === 'admin' ? computeOfferExpiresAt(obj) : undefined,
     };
 }
 

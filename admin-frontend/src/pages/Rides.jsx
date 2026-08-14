@@ -288,6 +288,15 @@ export default function Rides() {
     onError: (err) => toast.error(err.response?.data?.message || 'Erro ao reatribuir corrida')
   });
 
+  const relaunchMutation = useMutation({
+    mutationFn: (id) => api.post(`/admin/rides/${id}/relaunch`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rides'] });
+      toast.success('Corrida lançada novamente para os motoristas.');
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Erro ao lançar a corrida novamente'),
+  });
+
   const finalizeMutation = useMutation({
     mutationFn: ({ id, reason, observation }) =>
       api.put(`/admin/rides/${id}/finalize`, { reason, observation }),
@@ -364,6 +373,12 @@ export default function Rides() {
         confirmLabel: 'Reatribuir'
       });
       if (ok) reassignMutation.mutate(ride._id);
+    } else if (actionType === 'relaunch') {
+      const ok = await confirm({
+        message: 'Deseja enviar novamente esta mesma corrida aos motoristas disponíveis?',
+        confirmLabel: 'Lançar novamente',
+      });
+      if (ok) relaunchMutation.mutate(ride._id);
     } else if (actionType === 'finalize') {
       setFinalizeRide(ride);
     } else if (actionType === 'view') {

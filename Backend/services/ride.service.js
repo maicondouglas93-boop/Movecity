@@ -1878,8 +1878,9 @@ module.exports.getCurrentRide = async ({ user }) => {
     // sem checar nada. Migrado pra transitionRide: o filtro `status:'requested'` no
     // próprio findOneAndUpdate garante que só expira se ainda estiver mesmo pendente.
     if (ride && ride.status === 'requested') {
-        // SCH-C1: pós-ativação de agendada usa activatedAt; imediata usa createdAt.
-        const clock = ride.activatedAt || ride.createdAt;
+        // Um relançamento abre uma nova janela real de disponibilidade; depois,
+        // agendada usa activatedAt e imediata usa createdAt.
+        const clock = ride.dispatchLastAttemptAt || ride.activatedAt || ride.createdAt;
         const diffInMinutes = (Date.now() - new Date(clock).getTime()) / 60000;
         if (diffInMinutes > 10) {
             await transitionRide(ride._id, 'cancelled', {}, {
@@ -2021,10 +2022,12 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
         // Presencial nunca fica em requested, mas o filtro evita vazamento futuro.
         source: { $ne: 'driver_initiated' },
         vehicleType: { $in: vehicleTypes },
-        // SCH-C1: agendada ativada → activatedAt; imediata (activatedAt null) → createdAt.
+        // Relançada usa dispatchLastAttemptAt; agendada ativada usa activatedAt;
+        // imediata (activatedAt null) usa createdAt.
         $or: [
+            { dispatchLastAttemptAt: { $gte: cutoff } },
             { activatedAt: { $gte: cutoff } },
-            { activatedAt: null, createdAt: { $gte: cutoff } },
+            { dispatchLastAttemptAt: null, activatedAt: null, createdAt: { $gte: cutoff } },
         ],
         // pickupCoordinates é persistido no despacho; sem ele não dá pra aplicar o raio.
         'pickupCoordinates.lat': { $exists: true }

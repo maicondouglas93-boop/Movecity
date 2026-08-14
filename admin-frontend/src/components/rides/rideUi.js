@@ -65,9 +65,17 @@ export function googleMapsUrl(target) {
 export const RIDE_LOG_ACTION_LABELS = {
   cancel_ride: 'Corrida cancelada pelo admin',
   reassign_ride: 'Corrida reatribuída (voltou à fila)',
+  relaunch_manual_ride: 'Corrida lançada novamente',
   bulk_cancel_rides: 'Cancelamento em lote',
   admin_finalize_ride: 'Corrida finalizada manualmente',
 };
+
+export function canRelaunchManualRide(ride, now = Date.now()) {
+  if (!ride || ride.serviceType === 'parcel') return false;
+  if (ride.source !== 'admin' || ride.status !== 'requested' || ride.captain) return false;
+  const expiresAt = ride.offerExpiresAt ? new Date(ride.offerExpiresAt).getTime() : NaN;
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
 
 /** Motivos aceitos por PUT /admin/rides/:id/finalize (espelha o backend). */
 export const FINALIZE_REASONS = [

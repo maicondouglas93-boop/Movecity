@@ -147,6 +147,20 @@ router.post(
     adminController.createManualRide
 );
 router.get(
+    '/rides/:id/manual-dispatch',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    param('id').isMongoId(),
+    adminController.getManualRideDispatchStatus
+);
+router.post(
+    '/rides/:id/relaunch',
+    authAdmin,
+    authorizeRoles('super_admin', 'operador'),
+    param('id').isMongoId(),
+    adminController.relaunchManualRide
+);
+router.get(
     '/rides/:id/access-code',
     authAdmin,
     authorizeRoles('super_admin', 'operador'),

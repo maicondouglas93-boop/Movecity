@@ -725,6 +725,41 @@ module.exports.getManualRideAccessCode = async (req, res, next) => {
     }
 };
 
+module.exports.getManualRideDispatchStatus = async (req, res, next) => {
+    if (manualRideValidationError(req, res)) return;
+    try {
+        const status = await require('../services/manualRideDispatch.service')
+            .getManualDispatchStatus(req.params.id);
+        return res.status(200).json(status);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ message: error.message, code: error.code });
+        }
+        next(error);
+    }
+};
+
+module.exports.relaunchManualRide = async (req, res, next) => {
+    if (manualRideValidationError(req, res)) return;
+    try {
+        const ride = await require('../services/manualRideDispatch.service').relaunchManualRide({
+            rideId: req.params.id,
+            admin: req.admin,
+            ip: req.ip,
+        });
+        return res.status(200).json(ride);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                message: error.message,
+                code: error.code,
+                manualDispatch: error.dispatchState,
+            });
+        }
+        next(error);
+    }
+};
+
 function manualRideValidationError(req, res) {
     const errors = validationResult(req);
     if (errors.isEmpty()) return false;
@@ -833,6 +868,7 @@ module.exports.createManualRide = async (req, res, next) => {
     const rideService = require('../services/ride.service');
     const dispatchService = require('../services/dispatch.service');
     const { dispatchRideToCaptains } = require('./ride.controller');
+    const { manualRideResponse } = require('../services/manualRideDispatch.service');
     const { passenger, pickup, destination, vehicleType, paymentMethod, observation, captainId, idempotencyKey } = req.body;
 
     try {
@@ -841,10 +877,7 @@ module.exports.createManualRide = async (req, res, next) => {
             return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
         }
         if (existing) {
-            return res.status(200).json({
-                ...existing.toObject(),
-                manualDispatch: { reused: true },
-            });
+            return res.status(200).json(manualRideResponse(existing, { reused: true }));
         }
 
         let passengerPhone = normalizePassengerPhone(passenger.phone);
@@ -919,6 +952,11 @@ module.exports.createManualRide = async (req, res, next) => {
             destinationCoordinates: { lat: Number(destination.lat), lng: Number(destination.lng) },
         });
 
+        // Marca o começo da janela exibida no painel e nos apps dos motoristas.
+        // No relançamento este mesmo campo recebe um novo horário, sem criar outra corrida.
+        ride.dispatchLastAttemptAt = new Date();
+        await ride.save();
+
         const offeredCount = await dispatchRideToCaptains(ride, {
             pickup: pickup.address,
             vehicleType,
@@ -970,20 +1008,17 @@ module.exports.createManualRide = async (req, res, next) => {
         const result = await Ride.findById(ride._id)
             .select('+otp')
             .populate('user captain createdBy', 'fullname phone name');
-        return res.status(201).json({
-            ...result.toObject(),
-            manualDispatch: {
+        return res.status(201).json(manualRideResponse(result, {
                 mode: captainId ? 'selected' : 'automatic',
                 offeredCount,
-            },
-        });
+        }));
     } catch (error) {
         if (error?.code === 11000 && idempotencyKey) {
             const ride = await findManualRideForAdmin(Ride, req.admin._id, idempotencyKey);
             if (manualRideCancellationWasDispatchFailure(ride)) {
                 return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
             }
-            if (ride) return res.status(200).json({ ...ride.toObject(), manualDispatch: { reused: true } });
+            if (ride) return res.status(200).json(manualRideResponse(ride, { reused: true }));
         }
         if (error?.code === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Esse passageiro já possui uma encomenda em andamento.' });

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, KeyRound, Loader2, MapPin, X } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, CheckCircle2, KeyRound, Loader2, MapPin, RefreshCw, X } from 'lucide-react';
 import api from '../../services/api';
 import AdminAddressAutocomplete from '../AdminAddressAutocomplete';
 import { formatMoney } from '../../utils/format';
@@ -33,6 +33,7 @@ function passengerDisplayName(user) {
 }
 
 export default function ManualRideModal({ onClose, onCreated }) {
+  const queryClient = useQueryClient();
   const [passengerMode, setPassengerMode] = useState('guest');
   const [passengerSearch, setPassengerSearch] = useState('');
   const [form, setForm] = useState({
@@ -46,6 +47,7 @@ export default function ManualRideModal({ onClose, onCreated }) {
   });
   const [estimate, setEstimate] = useState(null);
   const [result, setResult] = useState(null);
+  const [clock, setClock] = useState(() => Date.now());
   const idempotencyKeyRef = useRef(newIdempotencyKey());
 
   const categories = useQuery({
@@ -125,6 +127,40 @@ export default function ManualRideModal({ onClose, onCreated }) {
       onCreated?.(ride);
     },
   });
+  const dispatchStatus = useQuery({
+    queryKey: ['manual-ride-dispatch-status', result?._id],
+    queryFn: async () => (await api.get(`/admin/rides/${result._id}/manual-dispatch`)).data,
+    enabled: Boolean(result?._id),
+    refetchInterval: (query) => query.state.data?.status === 'requested' ? 3_000 : false,
+    retry: false,
+  });
+  const relaunchMutation = useMutation({
+    mutationFn: async () => (await api.post(`/admin/rides/${result._id}/relaunch`)).data,
+    onSuccess: (ride) => {
+      setResult(ride);
+      setClock(Date.now());
+      queryClient.setQueryData(['manual-ride-dispatch-status', ride._id], ride.manualDispatch);
+      onCreated?.(ride);
+    },
+    onError: () => dispatchStatus.refetch(),
+  });
+
+  const liveDispatch = dispatchStatus.data || result?.manualDispatch || null;
+  const offerExpiresAt = liveDispatch?.offerExpiresAt || result?.offerExpiresAt;
+  const remainingSeconds = offerExpiresAt
+    ? Math.max(0, Math.ceil((new Date(offerExpiresAt).getTime() - clock) / 1000))
+    : 0;
+  const waitingForCaptain = (liveDispatch?.status || result?.status) === 'requested'
+    && !(liveDispatch?.captainId || result?.captain);
+  const canRelaunch = waitingForCaptain
+    && (liveDispatch?.canRelaunch === true || (Boolean(offerExpiresAt) && remainingSeconds === 0));
+
+  useEffect(() => {
+    if (!result?._id || !waitingForCaptain || !offerExpiresAt) return undefined;
+    setClock(Date.now());
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [result?._id, waitingForCaptain, offerExpiresAt]);
 
   const prepareEditAfterFailure = () => {
     if (!createMutation.isError) return;
@@ -194,14 +230,47 @@ export default function ManualRideModal({ onClose, onCreated }) {
           {result.manualDispatch?.mode === 'selected' && (
             <Notice>Oferta enviada ao motorista selecionado. A corrida será vinculada quando ele aceitar.</Notice>
           )}
+          {waitingForCaptain && !canRelaunch && (
+            <Notice>
+              Aguardando um motorista aceitar · {remainingSeconds}s
+            </Notice>
+          )}
+          {canRelaunch && (
+            <Notice tone="warning">
+              O tempo da oferta terminou e ninguém aceitou. Você pode enviar novamente a mesma corrida.
+            </Notice>
+          )}
+          {!waitingForCaptain && liveDispatch?.status && (
+            <Notice>Um motorista aceitou ou a corrida avançou. Não é necessário lançar novamente.</Notice>
+          )}
+          {relaunchMutation.error && (
+            <Notice tone="danger">
+              {relaunchMutation.error.response?.data?.message || 'Não foi possível lançar novamente. Tente outra vez.'}
+            </Notice>
+          )}
           <div className="text-sm text-left rounded-lg border border-border p-4 space-y-1">
             <p><strong>Passageiro:</strong> {form.passenger.name}</p>
             <p><strong>Partida:</strong> {form.pickup.address}</p>
             <p><strong>Destino:</strong> {form.destination.address}</p>
           </div>
-          <button type="button" className="w-full py-3 bg-primary text-white rounded-lg font-semibold" onClick={onClose}>
-            Fechar
-          </button>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <button type="button" className="w-full py-3 border border-border rounded-lg font-semibold" onClick={onClose}>
+              Fechar
+            </button>
+            {canRelaunch && (
+              <button
+                type="button"
+                disabled={relaunchMutation.isPending}
+                className="w-full py-3 bg-primary text-white rounded-lg font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                onClick={() => relaunchMutation.mutate()}
+              >
+                {relaunchMutation.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <RefreshCw className="w-4 h-4" />}
+                {relaunchMutation.isPending ? 'LANÇANDO…' : 'LANÇAR NOVAMENTE'}
+              </button>
+            )}
+          </div>
         </div>
       </Shell>
     );

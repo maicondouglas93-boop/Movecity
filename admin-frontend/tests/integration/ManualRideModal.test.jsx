@@ -69,6 +69,9 @@ describe('Lançamento manual de corrida', () => {
       }
       if (url === '/admin/captains') return { data: { captains: [] } };
       if (url === '/admin/users') return { data: { users: [] } };
+      if (/\/admin\/rides\/[^/]+\/manual-dispatch$/.test(url)) {
+        return { data: { status: 'requested', captainId: null, canRelaunch: false, offerExpiresAt: new Date(Date.now() + 45_000).toISOString() } };
+      }
       throw new Error(`GET inesperado: ${url}`);
     });
   });
@@ -129,5 +132,63 @@ describe('Lançamento manual de corrida', () => {
     expect(manualBodies).toHaveLength(2);
     expect(manualBodies[0].idempotencyKey).toBe(manualBodies[1].idempotencyKey);
     expect(screen.queryByRole('option', { name: 'Cartão' })).not.toBeInTheDocument();
+  });
+
+  it('permite lançar novamente a mesma corrida depois que a oferta expira', async () => {
+    const expiredAt = new Date(Date.now() - 1_000).toISOString();
+    api.get.mockImplementation(async (url) => {
+      if (url === '/admin/vehicle-categories') {
+        return { data: { categories: [{ _id: 'cat-1', name: 'car', displayName: 'Carro', capacity: 4, isActive: true, allowedServices: { ride: true } }] } };
+      }
+      if (url === '/admin/captains') return { data: { captains: [] } };
+      if (url === '/admin/users') return { data: { users: [] } };
+      if (url === '/admin/rides/ride-1/manual-dispatch') {
+        return { data: { status: 'requested', captainId: null, canRelaunch: true, offerExpiresAt: expiredAt } };
+      }
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    api.post.mockImplementation(async (url) => {
+      if (url === '/admin/rides/manual/available-captains') return { data: { captains: [] } };
+      if (url === '/admin/rides/manual/estimate') return { data: { distance: 6200, time: 900, fare: 18.5 } };
+      if (url === '/admin/rides/manual') {
+        return {
+          data: {
+            _id: 'ride-1',
+            status: 'requested',
+            otp: '482913',
+            offerExpiresAt: expiredAt,
+            manualDispatch: { status: 'requested', captainId: null, canRelaunch: true, offerExpiresAt: expiredAt, offeredCount: 1 },
+          },
+        };
+      }
+      if (url === '/admin/rides/ride-1/relaunch') {
+        return {
+          data: {
+            _id: 'ride-1',
+            status: 'requested',
+            otp: '482913',
+            manualDispatch: {
+              status: 'requested',
+              captainId: null,
+              canRelaunch: false,
+              offerExpiresAt: new Date(Date.now() + 45_000).toISOString(),
+              relaunched: true,
+              offeredCount: 1,
+            },
+          },
+        };
+      }
+      throw new Error(`POST inesperado: ${url}`);
+    });
+
+    renderModal();
+    await fillValidRide();
+    fireEvent.click(screen.getByRole('button', { name: 'LANÇAR CORRIDA' }));
+
+    const relaunch = await screen.findByRole('button', { name: 'LANÇAR NOVAMENTE' });
+    fireEvent.click(relaunch);
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/rides/ride-1/relaunch'));
+    await screen.findByText(/Aguardando um motorista aceitar/);
   });
 });

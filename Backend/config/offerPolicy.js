@@ -8,14 +8,23 @@
 // (RideOfferNotifier.postRichOfferNotification -> setTimeoutAfter).
 const OFFER_HIGHLIGHT_TTL_MS = 45_000;
 
-// Âncora única: corrida/encomenda agendada usa activatedAt (quando saiu de
-// scheduled -> requested/awaiting_provider); imediata usa createdAt. Mesmo
-// critério já usado em getPendingRidesForCaptain/findPendingForCaptain.
-function computeOfferExpiresAt(doc) {
+// Âncora única: relançamento usa dispatchLastAttemptAt; corrida/encomenda
+// agendada usa activatedAt (quando saiu de scheduled ->
+// requested/awaiting_provider); imediata usa createdAt. Mesmo critério já
+// usado em getPendingRidesForCaptain/findPendingForCaptain.
+function getOfferAnchor(doc) {
     if (!doc) return null;
-    const anchor = doc.activatedAt || doc.createdAt;
+    // Redispatches precisam abrir uma nova janela de destaque. `dispatchLastAttemptAt`
+    // é preenchido pelo worker de agendadas e pelo relançamento manual do painel.
+    const anchor = doc.dispatchLastAttemptAt || doc.activatedAt || doc.createdAt;
     if (!anchor) return null;
-    return new Date(new Date(anchor).getTime() + OFFER_HIGHLIGHT_TTL_MS);
+    return new Date(anchor);
 }
 
-module.exports = { OFFER_HIGHLIGHT_TTL_MS, computeOfferExpiresAt };
+function computeOfferExpiresAt(doc) {
+    const anchor = getOfferAnchor(doc);
+    if (!anchor) return null;
+    return new Date(anchor.getTime() + OFFER_HIGHLIGHT_TTL_MS);
+}
+
+module.exports = { OFFER_HIGHLIGHT_TTL_MS, getOfferAnchor, computeOfferExpiresAt };

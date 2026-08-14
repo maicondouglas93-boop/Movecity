@@ -1,8 +1,8 @@
 import React, { useState, useEffect, memo } from 'react';
 import {
-  Search, MoreVertical, CreditCard, User, Car, Package, CheckSquare, Square, RotateCcw, ShieldAlert, Flag,
+  Search, MoreVertical, CreditCard, User, Car, Package, CheckSquare, Square, RotateCcw, ShieldAlert, Flag, RefreshCw,
 } from 'lucide-react';
-import { timeAgo, itemStatusLabel, itemStatusColor, canFinalizeRide } from './rideUi';
+import { timeAgo, itemStatusLabel, itemStatusColor, canFinalizeRide, canRelaunchManualRide } from './rideUi';
 import StatusBadge from '../StatusBadge';
 import { formatMoney } from '../../utils/format';
 import { PAYMENT_METHOD_LABELS } from '../../utils/statusDictionary';
@@ -101,6 +101,12 @@ function RideActionMenu({ ride, onAction }) {
           {ride.status === 'requested' && ride.serviceType !== 'parcel' && (
             <button onClick={() => onAction(ride, 'reassign')} className="w-full text-left px-4 py-2 text-sm hover:bg-background flex items-center gap-2 text-warning">
               <RotateCcw className="w-4 h-4" /> Reatribuir
+            </button>
+          )}
+
+          {canRelaunchManualRide(ride) && (
+            <button onClick={() => onAction(ride, 'relaunch')} className="w-full text-left px-4 py-2 text-sm hover:bg-primary/10 flex items-center gap-2 text-primary">
+              <RefreshCw className="w-4 h-4" /> Lançar novamente
             </button>
           )}
 

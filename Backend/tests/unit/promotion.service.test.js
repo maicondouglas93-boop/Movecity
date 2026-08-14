@@ -1,21 +1,15 @@
-jest.mock('../../models/promotion.model', () => ({
-    findOne: jest.fn(),
-    findByIdAndUpdate: jest.fn(),
-}));
-jest.mock('../../models/promotionUsage.model', () => ({
-    countDocuments: jest.fn(),
-    create: jest.fn(),
-}));
-jest.mock('../../models/user.model', () => ({ findById: jest.fn() }));
-
 const promotionModel = require('../../models/promotion.model');
 const promotionUsageModel = require('../../models/promotionUsage.model');
 const userModel = require('../../models/user.model');
 const promotionService = require('../../services/promotion.service');
 
+const findPromotion = vi.spyOn(promotionModel, 'findOne');
+const countPromotionUses = vi.spyOn(promotionUsageModel, 'countDocuments');
+const findUser = vi.spyOn(userModel, 'findById');
+
 describe('promotion.service — cupons de desconto', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     test('calcula desconto percentual e respeita o teto', () => {
@@ -39,7 +33,7 @@ describe('promotion.service — cupons de desconto', () => {
     });
 
     test('busca exclusivamente cupons pelo código normalizado', async () => {
-        promotionModel.findOne.mockResolvedValue({
+        findPromotion.mockResolvedValue({
             _id: 'coupon-1',
             type: 'coupon',
             code: 'MOVE10',
@@ -51,8 +45,8 @@ describe('promotion.service — cupons de desconto', () => {
             currentBudgetUsed: 0,
             rules: {},
         });
-        userModel.findById.mockResolvedValue({ _id: 'user-1', totalRides: 0 });
-        promotionUsageModel.countDocuments.mockResolvedValue(0);
+        findUser.mockResolvedValue({ _id: 'user-1', totalRides: 0 });
+        countPromotionUses.mockResolvedValue(0);
 
         const result = await promotionService.findApplicablePromotion({
             code: ' move10 ',
@@ -67,7 +61,7 @@ describe('promotion.service — cupons de desconto', () => {
     });
 
     test('não aplica desconto maior que o orçamento restante', async () => {
-        promotionModel.findOne.mockResolvedValue({
+        findPromotion.mockResolvedValue({
             _id: 'coupon-2',
             type: 'coupon',
             code: 'LIMITE10',
@@ -78,8 +72,8 @@ describe('promotion.service — cupons de desconto', () => {
             currentBudgetUsed: 95,
             rules: {},
         });
-        userModel.findById.mockResolvedValue({ _id: 'user-1', totalRides: 0 });
-        promotionUsageModel.countDocuments.mockResolvedValue(0);
+        findUser.mockResolvedValue({ _id: 'user-1', totalRides: 0 });
+        countPromotionUses.mockResolvedValue(0);
 
         await expect(promotionService.findApplicablePromotion({
             code: 'LIMITE10',

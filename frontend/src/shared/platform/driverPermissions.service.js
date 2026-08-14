@@ -130,10 +130,11 @@ export async function requestBackgroundLocationPermission() {
 }
 
 /** Precisa mostrar o card? (nativo + ainda não dispensado + algo pendente ou Xiaomi). */
-export async function shouldShowOemPermissionsCard() {
+export async function shouldShowOemPermissionsCard(statusOverride = null) {
     if (!isNativePlatform()) return false
     if (hasSeenOemPermissionsOnboarding()) return false
-    const status = await getDriverPermissionStatus()
+    const status = statusOverride || await getDriverPermissionStatus()
+    if (status.hasForegroundLocation === false) return true
     if (!status.canUseFullScreenIntent) return true
     if (!status.ignoringBatteryOptimizations) return true
     if (status.hasNotificationPolicyAccess === false) return true

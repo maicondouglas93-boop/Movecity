@@ -16,17 +16,26 @@ vi.mock('@/shared/services/session', () => ({
 vi.mock('@/shared/services/axios', () => ({
     refreshAccessToken: (...args) => refreshAccessTokenMock(...args),
 }))
+vi.mock('@/shared/services/deviceIdentity', () => ({
+    getDeviceId: () => 'device-id-1234567890',
+}))
 
 const { joinWithRetry } = await import('@/shared/services/socketAuth')
 
 const makeSocket = (acks) => {
     let call = 0
+    const listeners = new Map()
     return {
         emit: vi.fn((event, payload, callback) => {
             const ack = acks[call] ?? acks[acks.length - 1]
             call += 1
             callback(ack)
         }),
+        on: vi.fn((event, handler) => listeners.set(event, handler)),
+        off: vi.fn((event, handler) => {
+            if (listeners.get(event) === handler) listeners.delete(event)
+        }),
+        trigger: (event, payload) => listeners.get(event)?.(payload),
     }
 }
 
@@ -46,7 +55,7 @@ describe('joinWithRetry', () => {
         expect(socket.emit).toHaveBeenCalledTimes(1)
         expect(socket.emit).toHaveBeenCalledWith(
             'join',
-            { userId: 'u1', userType: 'user', token: 'token-atual' },
+            { userId: 'u1', userType: 'user', token: 'token-atual', deviceId: 'device-id-1234567890' },
             expect.any(Function)
         )
         expect(refreshAccessTokenMock).not.toHaveBeenCalled()
@@ -66,7 +75,7 @@ describe('joinWithRetry', () => {
         expect(socket.emit).toHaveBeenNthCalledWith(
             2,
             'join',
-            { userId: 'c1', userType: 'captain', token: 'token-novo' },
+            { userId: 'c1', userType: 'captain', token: 'token-novo', deviceId: 'device-id-1234567890' },
             expect.any(Function)
         )
     })
@@ -83,5 +92,29 @@ describe('joinWithRetry', () => {
 
         expect(socket.emit).toHaveBeenCalledTimes(1)
         expect(onSuccess).not.toHaveBeenCalled()
+    })
+
+    it('access token expirado no socket renova e refaz o join da mesma identidade', async () => {
+        const socket = makeSocket([{ ok: true }, { ok: true }])
+        refreshAccessTokenMock.mockResolvedValue('token-apos-expiracao')
+        const onSuccess = vi.fn()
+
+        joinWithRetry(socket, { userId: 'u1', userType: 'user' }, onSuccess)
+        await vi.waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
+        socket.trigger('reauth-required', { code: 'ACCESS_TOKEN_EXPIRED' })
+
+        await vi.waitFor(() => expect(socket.emit).toHaveBeenCalledTimes(2))
+        expect(refreshAccessTokenMock).toHaveBeenCalledWith('user')
+        expect(socket.emit).toHaveBeenNthCalledWith(
+            2,
+            'join',
+            {
+                userId: 'u1',
+                userType: 'user',
+                token: 'token-apos-expiracao',
+                deviceId: 'device-id-1234567890',
+            },
+            expect.any(Function)
+        )
     })
 })

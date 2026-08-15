@@ -1,6 +1,5 @@
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import { vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import Home from '@/passenger/pages/Home';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
@@ -43,6 +42,10 @@ vi.mock('@/shared/services/vehicleCategoriesApi', () => ({
 vi.mock('@/shared/services/axios', () => ({
   default: { get: vi.fn(), post: vi.fn() },
   refreshAccessToken: vi.fn(),
+}));
+
+vi.mock('@/shared/services/deviceIdentity', () => ({
+  getDeviceId: () => 'test-device-home-0001',
 }));
 
 // Header.jsx (renderizado dentro de Home) passou a usar PwaUpdateContext (2026-08-04)
@@ -104,10 +107,10 @@ const mockGeolocation = {
   clearWatch: vi.fn(),
 };
 
-global.navigator.geolocation = mockGeolocation;
+globalThis.navigator.geolocation = mockGeolocation;
 
 // Notification API mock
-global.Notification = {
+globalThis.Notification = {
   requestPermission: vi.fn().mockResolvedValue('granted'),
   permission: 'granted',
 };
@@ -178,7 +181,12 @@ describe('Home Component', () => {
     await waitFor(() => {
       expect(mockSocket.emit).toHaveBeenCalledWith(
         'join',
-        { userType: 'user', userId: 'mock-user-id', token: null },
+        {
+          userType: 'user',
+          userId: 'mock-user-id',
+          token: null,
+          deviceId: 'test-device-home-0001',
+        },
         expect.any(Function)
       );
     });

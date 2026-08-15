@@ -1,7 +1,8 @@
-import React, { useContext, useEffect } from 'react'
+import { useContext, useEffect } from 'react'
 import api from '@/shared/services/axios'
 import { useNavigate } from 'react-router-dom'
-import { getRefreshToken, clearSession } from '@/shared/services/session'
+import { clearSession } from '@/shared/services/session'
+import { getNativeCaptainRefreshToken } from '@/shared/platform/nativeSession.service'
 import { clearTokenInSW } from '@/shared/services/swCommunication'
 import { unregisterPush } from '@/shared/platform/notification.service'
 import { stopForegroundTracking } from '@/shared/platform/location.service'
@@ -16,18 +17,16 @@ export const CaptainLogout = () => {
     const { socket } = useContext(SocketContext)
 
     useEffect(() => {
-        const refreshToken = getRefreshToken('captain')
-
         // A3 da auditoria de push (2026-08-02): sem isto, o próximo motorista a usar o
         // mesmo aparelho continuaria recebendo ofertas de corrida de quem saiu.
         Promise.all([
             unregisterPush().catch(() => {}),
             stopForegroundTracking().catch(() => {}),
-            api.get('/captains/logout', {
-                params: refreshToken ? { refreshToken } : {},
-            }).catch(() => {
-                // Sair não pode depender do servidor responder.
-            })
+            getNativeCaptainRefreshToken()
+                .then(refreshToken => api.post('/captains/logout', refreshToken ? { refreshToken } : {}))
+                .catch(() => {
+                    // Sair não pode depender do servidor responder.
+                })
         ]).finally(() => {
             clearTokenInSW()
             clearSession('captain')
@@ -39,7 +38,7 @@ export const CaptainLogout = () => {
             socket.connect()
             navigate('/captain-login', { replace: true })
         })
-    }, [])
+    }, [navigate, socket])
 
     return <SessionSplash label="Saindo..." />
 }

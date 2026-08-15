@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const adminUserModel = require('../models/adminUser.model');
 const adminLogModel = require('../models/adminLog.model');
 const rideModel = require('../models/ride.model');
@@ -10,7 +9,6 @@ const payoutModel = require('../models/payout.model');
 const walletModel = require('../models/wallet.model');
 const parcelModel = require('../models/parcel.model');
 const { deleteByPrefix } = require('../cache/cache');
-const { disconnectSocket } = require('../socket');
 const uploadService = require('./upload.service');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
@@ -57,7 +55,13 @@ module.exports.login = async (email, password) => {
 module.exports.refreshAccessToken = async (refreshToken) => {
     const authService = require('./auth.service');
 
-    const rotated = await authService.rotateRefreshToken({ refreshToken });
+    const rotated = await authService.rotateRefreshToken({
+        refreshToken,
+        expectedUserType: 'admin',
+    });
+    if (rotated.userType !== 'admin') {
+        throw new Error('Refresh token inválido para administrador');
+    }
 
     const admin = await adminUserModel.findById(rotated.userId);
     if (!admin || !admin.active) {
@@ -70,7 +74,7 @@ module.exports.refreshAccessToken = async (refreshToken) => {
         throw new Error('Refresh token inválido');
     }
 
-    const token = authService.generateAccessToken(admin._id, { role: admin.role });
+    const token = authService.generateAccessToken(admin._id, 'admin', { role: admin.role });
 
     return { admin, token, refreshToken: rotated.refreshToken };
 };
@@ -437,9 +441,6 @@ module.exports.toggleUserBlock = async (userId, isBlocked, reason, admin, ip) =>
     // continuava sendo rejeitado pelo mesmo motivo, na direção contrária.
     deleteByPrefix(`profile:user:${userId}`);
     if (isBlocked) {
-        if (user.socketId) {
-            disconnectSocket(user.socketId);
-        }
         // Auditoria de sessão persistente (2026-08-02): com refresh token de longa
         // duração, bloquear sem revogar deixaria o usuário renovando a sessão para
         // sempre. O middleware já barra o acesso (403), mas a sessão em si precisa
@@ -484,6 +485,13 @@ module.exports.bulkActionUsers = async (userIds, actionType, reason, admin, ip) 
         // Mesmo motivo do toggleUserBlock individual (P3.2 da auditoria de concorrência):
         // sem isso, cada usuário bloqueado em lote continuaria autenticando por até 10min.
         userIds.forEach(id => deleteByPrefix(`profile:user:${id}`));
+
+        const authService = require('./auth.service');
+        await Promise.all(userIds.map((id) => authService.revokeAllForUser({
+            userId: id,
+            userType: 'user',
+            reason: 'blocked',
+        })));
 
         await Promise.all(userIds.map((id) => module.exports.logAction({
             adminId: admin._id,
@@ -759,9 +767,6 @@ module.exports.toggleCaptainBlock = async (captainId, isBlocked, reason, admin, 
     deleteByPrefix(`profile:captain:${captainId}`);
     if (isBlocked) {
         deleteByPrefix('drivers:'); // cache de busca de motoristas por raio
-        if (captain.socketId) {
-            disconnectSocket(captain.socketId);
-        }
         // Ver o comentário equivalente em toggleUserBlock.
         const authService = require('./auth.service');
         await authService.revokeAllForUser({ userId: captainId, userType: 'captain', reason: 'blocked' });

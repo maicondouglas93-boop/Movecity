@@ -129,6 +129,7 @@ public final class RideOfferAcceptHelper {
             conn.setConnectTimeout(12000);
             conn.setReadTimeout(12000);
             conn.setDoOutput(true);
+            conn.setRequestProperty("X-MoveCity-Client", "android-driver");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
             byte[] body = ("{\"refreshToken\":" + JSONObject.quote(refresh) + "}")

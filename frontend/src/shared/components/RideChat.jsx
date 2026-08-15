@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+/* eslint-disable react/prop-types -- componente legado; tipagem completa fica fora da COR-2005 */
+import { useState, useEffect, useRef, useContext, useCallback } from 'react';
 import api from '@/shared/services/axios';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { getAccessToken } from '@/shared/services/session';
+import { getDeviceId } from '@/shared/services/deviceIdentity';
 
 const RIDE_ACTIVE = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing'];
 const PARCEL_ACTIVE = [
@@ -40,19 +42,20 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
     const doc = subject || ride;
     const type = subjectType === 'parcel' ? 'parcel' : 'ride';
     const subjectId = doc?._id;
-    const token = getAccessToken(currentUserType === 'captain' ? 'captain' : 'user');
+    const actorType = currentUserType === 'captain' ? 'captain' : 'user';
+    const currentToken = useCallback(() => getAccessToken(actorType), [actorType]);
 
-    const socketPayload = () => (
+    const socketPayload = useCallback(() => (
         type === 'parcel'
-            ? { subjectType: 'parcel', subjectId, token }
-            : { subjectType: 'ride', subjectId, rideId: subjectId, token }
-    );
+            ? { subjectType: 'parcel', subjectId, token: currentToken(), deviceId: getDeviceId() }
+            : { subjectType: 'ride', subjectId, rideId: subjectId, token: currentToken(), deviceId: getDeviceId() }
+    ), [currentToken, subjectId, type]);
 
-    const restSubjectBody = () => (
+    const restSubjectBody = useCallback(() => (
         type === 'parcel'
             ? { subjectType: 'parcel', subjectId }
             : { subjectType: 'ride', subjectId, rideId: subjectId }
-    );
+    ), [subjectId, type]);
 
     const quickMessagesCaptain = type === 'parcel'
         ? ['📍 Estou chegando.', '📍 Estou no local.', '⏳ Aguarde 2 minutos.', '📦 Objeto coletado.', '👍 Ok.']
@@ -67,7 +70,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         : (type === 'parcel' ? 'Cliente' : 'Passageiro');
 
     useEffect(() => {
-        if (!isOpen || !doc || !subjectId) return;
+        if (!isOpen || !subjectId) return;
 
         const fetchMessages = async () => {
             setLoading(true);
@@ -76,12 +79,12 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
                     ? `${import.meta.env.VITE_BASE_URL}/chat/parcel/${subjectId}`
                     : `${import.meta.env.VITE_BASE_URL}/chat/${subjectId}`;
                 const response = await api.get(path, {
-                    headers: { Authorization: `Bearer ${token}` }
+                    headers: { Authorization: `Bearer ${currentToken()}` }
                 });
                 if (response.data.messages) {
                     setMessages(response.data.messages);
                     await api.patch(`${import.meta.env.VITE_BASE_URL}/chat/read`, restSubjectBody(), {
-                        headers: { Authorization: `Bearer ${token}` }
+                        headers: { Authorization: `Bearer ${currentToken()}` }
                     });
                 }
             } catch (err) {
@@ -94,7 +97,8 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
 
         fetchMessages();
 
-        socket.emit('join-chat', socketPayload());
+        const rejoinChat = () => socket.emit('join-chat', socketPayload());
+        rejoinChat();
 
         const handleReceiveMessage = (message) => {
             setMessages(prev => (
@@ -126,14 +130,16 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
         socket.on('receive-message', handleReceiveMessage);
         socket.on('typing-start', handleTypingStart);
         socket.on('typing-stop', handleTypingStop);
+        socket.on('identity-restored', rejoinChat);
 
         return () => {
             socket.emit('leave-chat', socketPayload());
             socket.off('receive-message', handleReceiveMessage);
             socket.off('typing-start', handleTypingStart);
             socket.off('typing-stop', handleTypingStop);
+            socket.off('identity-restored', rejoinChat);
         };
-    }, [isOpen, subjectId, type, socket, token, currentUserType]);
+    }, [isOpen, subjectId, type, socket, currentUserType, currentToken, restSubjectBody, socketPayload]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -176,7 +182,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
                 type: 'text',
                 ...(operationalType ? { operationalType } : {}),
             }, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${currentToken()}` }
             });
 
             setMessages(prev => prev.map(msg => msg._id === tempId ? response.data : msg));

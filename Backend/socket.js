@@ -1,10 +1,18 @@
 const socketIo = require('socket.io');
-const jwt = require('jsonwebtoken');
+const crypto = require('node:crypto');
+const authService = require('./services/auth.service');
 const userModel = require('./models/user.model');
 const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
 const parcelModel = require('./models/parcel.model');
 const adminUserModel = require('./models/adminUser.model');
+const socketSessionModel = require('./models/socketSession.model');
+const {
+    INSTANCE_ID,
+    registerRevocationHandler,
+    startRevocationSubscriber,
+    stopRevocationSubscriber,
+} = require('./services/sessionRevocation.service');
 const mapService = require('./services/maps.service');
 const notificationDispatcher = require('./notification/notificationDispatcher.service');
 const {
@@ -15,6 +23,228 @@ const { processRideTrackingPoint } = require('./services/rideTracking.service');
 const { calculateLiveRideFare } = require('./services/liveRideFare.service');
 
 let io;
+
+const SOCKET_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const SOCKET_IDENTITY_REVALIDATE_MS = Math.max(
+    5000,
+    Number(process.env.SOCKET_IDENTITY_REVALIDATE_MS) || 30000
+);
+
+const actorRoom = (actorType, actorId) => `actor:${actorType}:${actorId}`;
+
+function deviceIdHash(deviceId, jti) {
+    const safeDeviceId = typeof deviceId === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(deviceId)
+        ? deviceId
+        : `access-jti:${jti}`;
+    return crypto.createHash('sha256').update(safeDeviceId).digest('hex');
+}
+
+function eventTargetsIdentity(event, identity) {
+    if (!event || !identity) return false;
+    if (event.actorType !== identity.type || String(event.actorId) !== String(identity.id)) return false;
+    return event.scope === 'account' || event.jti === identity.jti;
+}
+
+function disconnectRevokedSockets(event, ioServer = io) {
+    if (!ioServer?.sockets?.sockets) return 0;
+    let disconnected = 0;
+    for (const socket of ioServer.sockets.sockets.values()) {
+        if (!eventTargetsIdentity(event, socket.data?.identity)) continue;
+        socket.emit('session-revoked', { code: 'SESSION_REVOKED', reason: event.reason });
+        socket.disconnect(true);
+        disconnected += 1;
+    }
+    return disconnected;
+}
+
+registerRevocationHandler(async (event) => {
+    const disconnected = disconnectRevokedSockets(event);
+    // O campo socketId permanece apenas como ponteiro legado. Numa revogação de conta,
+    // duas rotinas de disconnect podem terminar fora de ordem e apontar uma para a
+    // sessão já encerrada da outra; limpar depois de iniciar todas as desconexões evita
+    // esse estado sem voltar a usá-lo como fonte de verdade.
+    if (disconnected > 0 && event.scope === 'account') {
+        const model = event.actorType === 'user'
+            ? userModel
+            : (event.actorType === 'captain' ? captainModel : null);
+        if (model) await model.updateOne({ _id: event.actorId }, { $set: { socketId: null } });
+    }
+    return disconnected;
+});
+
+async function findReplacementSocket(identity, excludedSocketId) {
+    if (!identity || identity.type === 'admin') return null;
+    return socketSessionModel.findOne({
+        actorType: identity.type,
+        actorId: identity.id,
+        socketId: { $ne: excludedSocketId },
+        disconnectedAt: null,
+        tokenExpiresAt: { $gt: new Date() },
+    }).sort({ lastValidatedAt: -1 }).lean();
+}
+
+async function releaseSocketIdentity(socket, reason = 'disconnected') {
+    const identity = socket.data?.identity;
+    clearTimeout(socket.data?.identityExpiryTimer);
+    clearInterval(socket.data?.identityValidationTimer);
+    socket.data.identityExpiryTimer = null;
+    socket.data.identityValidationTimer = null;
+
+    if (!identity) return null;
+    // Expiração e revalidação periódica podem disparar quase no mesmo instante. Retirar
+    // a identidade antes do primeiro await torna a liberação idempotente e impede dois
+    // fluxos concorrentes de remover presença ou reescrever o ponteiro legado duas vezes.
+    socket.data.identity = null;
+
+    if (socket.data.chatIdentities) {
+        for (const [key, chatIdentity] of socket.data.chatIdentities.entries()) {
+            removeChatPresence(key, chatIdentity.type);
+        }
+    }
+    socket.data.authorizedChats = new Set();
+    socket.data.chatIdentities = new Map();
+    socket.data.chatSubjects = new Map();
+    for (const room of [...socket.rooms]) {
+        if (room !== socket.id) socket.leave(room);
+    }
+
+    await socketSessionModel.updateOne({ socketId: socket.id, disconnectedAt: null }, {
+        $set: {
+            disconnectedAt: new Date(),
+            disconnectReason: reason,
+            purgeAt: new Date(Date.now() + SOCKET_SESSION_RETENTION_MS),
+        }
+    }).catch((error) => console.error('[SocketSession] Failed to close session:', error.message));
+
+    const replacement = await findReplacementSocket(identity, socket.id);
+    if (identity.type === 'user') {
+        await userModel.updateOne(
+            { _id: identity.id, socketId: socket.id },
+            { $set: { socketId: replacement?.socketId || null } }
+        );
+    } else if (identity.type === 'captain') {
+        const captainBefore = await captainModel.findOneAndUpdate(
+            { _id: identity.id, socketId: socket.id },
+            { $set: { socketId: replacement?.socketId || null } }
+        );
+        if (!replacement && captainBefore?.isOnline) {
+            const captainService = require('./services/captain.service');
+            await captainService.endOnlineSession(captainBefore._id);
+            const { deleteByPrefix } = require('./cache/cache');
+            deleteByPrefix(`profile:captain:${captainBefore._id}`);
+            deleteByPrefix('drivers:');
+        }
+    }
+    return identity;
+}
+
+async function accountIsActive(identity) {
+    if (identity.type === 'user') {
+        const account = await userModel.findById(identity.id).select('_id isBlocked').lean();
+        return Boolean(account && !account.isBlocked);
+    }
+    if (identity.type === 'captain') {
+        const account = await captainModel.findById(identity.id).select('_id isBlocked').lean();
+        return Boolean(account && !account.isBlocked);
+    }
+    if (identity.type === 'admin') {
+        const account = await adminUserModel.findById(identity.id).select('_id active').lean();
+        return Boolean(account?.active);
+    }
+    return false;
+}
+
+async function revalidateSocketIdentity(socket, expectedType = null, { force = false } = {}) {
+    const identity = socket.data?.identity;
+    if (!identity || (expectedType && identity.type !== expectedType)) return false;
+
+    if (identity.tokenExpiresAt.getTime() <= Date.now()) {
+        await releaseSocketIdentity(socket, 'access_token_expired');
+        socket.emit('reauth-required', { code: 'ACCESS_TOKEN_EXPIRED' });
+        return false;
+    }
+
+    if (!force && Date.now() - identity.lastValidatedAt < SOCKET_IDENTITY_REVALIDATE_MS) return true;
+    const active = await accountIsActive(identity);
+    if (!active) {
+        socket.emit('session-revoked', { code: 'ACCOUNT_INACTIVE' });
+        socket.disconnect(true);
+        return false;
+    }
+
+    identity.lastValidatedAt = Date.now();
+    await socketSessionModel.updateOne({ socketId: socket.id, disconnectedAt: null }, {
+        $set: { lastValidatedAt: new Date(identity.lastValidatedAt) }
+    }).catch((error) => console.error('[SocketSession] Failed to touch session:', error.message));
+    return true;
+}
+
+function scheduleSocketIdentityChecks(socket) {
+    clearTimeout(socket.data.identityExpiryTimer);
+    clearInterval(socket.data.identityValidationTimer);
+    const expiresIn = Math.max(0, socket.data.identity.tokenExpiresAt.getTime() - Date.now());
+    socket.data.identityExpiryTimer = setTimeout(() => {
+        revalidateSocketIdentity(socket, null, { force: true }).catch((error) => {
+            console.error('[SocketSession] Expiry check failed:', error.message);
+            socket.disconnect(true);
+        });
+    }, expiresIn + 25);
+    socket.data.identityExpiryTimer.unref?.();
+
+    socket.data.identityValidationTimer = setInterval(() => {
+        revalidateSocketIdentity(socket, null, { force: true }).catch((error) => {
+            console.error('[SocketSession] Periodic validation failed:', error.message);
+            socket.disconnect(true);
+        });
+    }, SOCKET_IDENTITY_REVALIDATE_MS);
+    socket.data.identityValidationTimer.unref?.();
+}
+
+async function bindSocketIdentity(socket, { decoded, actorType, actorId, token, deviceId }) {
+    const jti = decoded.jti || `legacy:${authService.hashToken(token).slice(0, 32)}`;
+    const tokenExpiresAt = new Date(Number(decoded.exp || 0) * 1000);
+    if (!Number.isFinite(tokenExpiresAt.getTime()) || tokenExpiresAt.getTime() <= Date.now()) {
+        throw new Error('Access token expirado.');
+    }
+
+    const previous = socket.data?.identity;
+    if (previous && (
+        previous.type !== actorType
+        || String(previous.id) !== String(actorId)
+        || previous.jti !== jti
+    )) {
+        await releaseSocketIdentity(socket, 'identity_replaced');
+    }
+
+    const identity = {
+        type: actorType,
+        id: String(actorId),
+        jti,
+        legacy: decoded.legacy,
+        tokenExpiresAt,
+        lastValidatedAt: Date.now(),
+    };
+    socket.data.identity = identity;
+    socket.join(actorRoom(actorType, actorId));
+
+    await socketSessionModel.findOneAndUpdate({ socketId: socket.id }, {
+        $set: {
+            actorType,
+            actorId,
+            jti,
+            deviceIdHash: deviceIdHash(deviceId, jti),
+            instanceId: INSTANCE_ID,
+            tokenExpiresAt,
+            lastValidatedAt: new Date(identity.lastValidatedAt),
+            disconnectedAt: null,
+            disconnectReason: '',
+            purgeAt: new Date(tokenExpiresAt.getTime() + SOCKET_SESSION_RETENTION_MS),
+        },
+        $setOnInsert: { connectedAt: new Date() },
+    }, { upsert: true, new: true, setDefaultsOnInsert: true });
+    scheduleSocketIdentityChecks(socket);
+    return identity;
+}
 
 // A7 da auditoria de push (2026-08-02): "quem está de fato olhando este chat agora" —
 // contagem por corrida/encomenda e por tipo (não por socket, pra suportar a mesma pessoa com duas
@@ -109,11 +339,16 @@ function initializeSocket(server) {
         }
     });
 
+    startRevocationSubscriber();
+    server.once('close', () => {
+        stopRevocationSubscriber().catch(() => {});
+    });
+
     io.on('connection', (socket) => {
         console.log(`[AUDIT] Client connected: ${socket.id}`);
 
         socket.on('join', async (data, ack) => {
-            const { userId, userType, token } = data;
+            const { userId, userType, token, deviceId } = data || {};
             console.log(`[AUDIT] User ${userId} (${userType}) solicitou JOIN no socket ${socket.id}`);
 
             // Auditoria PWA (2026-08-03, C1/C2): antes, `join` de user/captain confiava
@@ -144,20 +379,32 @@ function initializeSocket(server) {
                 }
                 let decoded;
                 try {
-                    decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    decoded = authService.verifyAccessToken(token, userType);
                 } catch (err) {
                     console.log(`[AUDIT] JOIN ${userType} rejeitado (token inválido) no socket ${socket.id}`);
                     return reject('Token inválido');
                 }
-                const authenticatedId = decoded._id;
+                const authenticatedId = decoded.subjectId;
+                const authenticatedType = decoded.actorType || userType;
 
-                if (userType === 'user') {
+                if (authenticatedType === 'user') {
                     const user = await userModel.findById(authenticatedId);
                     if (!user || user.isBlocked) {
                         console.log(`[AUDIT] JOIN user rejeitado (inválido/bloqueado) no socket ${socket.id}`);
                         return reject('Usuário inválido');
                     }
-                    socket.data.identity = { type: 'user', id: authenticatedId };
+                    try {
+                        await bindSocketIdentity(socket, {
+                            decoded,
+                            actorType: 'user',
+                            actorId: authenticatedId,
+                            token,
+                            deviceId,
+                        });
+                    } catch (error) {
+                        console.error('[SocketSession] Falha ao registrar usuário:', error.message);
+                        return reject('Não foi possível registrar a sessão do socket');
+                    }
                     await userModel.findByIdAndUpdate(authenticatedId, { socketId: socket.id });
                     console.log(`[AUDIT] User ${authenticatedId} atualizou socketId para ${socket.id}`);
 
@@ -181,7 +428,18 @@ function initializeSocket(server) {
                         console.log(`[AUDIT] JOIN captain rejeitado (inválido/bloqueado) no socket ${socket.id}`);
                         return reject('Motorista inválido');
                     }
-                    socket.data.identity = { type: 'captain', id: authenticatedId };
+                    try {
+                        await bindSocketIdentity(socket, {
+                            decoded,
+                            actorType: 'captain',
+                            actorId: authenticatedId,
+                            token,
+                            deviceId,
+                        });
+                    } catch (error) {
+                        console.error('[SocketSession] Falha ao registrar motorista:', error.message);
+                        return reject('Não foi possível registrar a sessão do socket');
+                    }
 
                     // Separação disponibilidade x conexão (2026-08-03): `lastSeenAt` é o
                     // heartbeat que mantém o motorista no despacho. Reconectar conta como
@@ -232,27 +490,36 @@ function initializeSocket(server) {
                 // em tempo real de toda a frota. Sem checar o token aqui, qualquer cliente
                 // de socket podia entrar mandando { userType: 'admin' } e escutar a
                 // localização de todos os motoristas online.
-                const { token } = data;
                 if (!token) {
                     console.log(`[AUDIT] JOIN admin rejeitado (sem token) no socket ${socket.id}`);
                     return reject('Token de admin ausente');
                 }
                 try {
-                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                    const admin = await adminUserModel.findById(decoded._id);
+                    const decoded = authService.verifyAccessToken(token, 'admin');
+                    const admin = await adminUserModel.findById(decoded.subjectId);
                     if (!admin || !admin.active) {
                         console.log(`[AUDIT] JOIN admin rejeitado (inativo/inexistente) no socket ${socket.id}`);
                         return reject('Admin inválido');
                     }
+                    await bindSocketIdentity(socket, {
+                        decoded,
+                        actorType: 'admin',
+                        actorId: decoded.subjectId,
+                        token,
+                        deviceId,
+                    });
                     socket.join('admin_room');
                     console.log(`[AUDIT] Admin ${admin.email} entrou em admin_room via socket ${socket.id}`);
                 } catch (err) {
                     console.log(`[AUDIT] JOIN admin rejeitado (token inválido) no socket ${socket.id}`);
                     return reject('Token de admin inválido');
                 }
+            } else {
+                return reject('Tipo de usuário inválido');
             }
 
             if (typeof ack === 'function') ack({ ok: true });
+            socket.emit('identity-restored', { actorType: socket.data.identity?.type });
         });
 
 
@@ -267,6 +534,10 @@ function initializeSocket(server) {
                 console.log(`[AUDIT] update-location-captain rejeitado (sem identidade de captain autenticada) no socket ${socket.id}`);
                 if (typeof ack === 'function') ack({ ok: false, code: 'UNAUTHORIZED' });
                 return socket.emit('unauthorized', { message: 'Não autenticado' });
+            }
+            if (!await revalidateSocketIdentity(socket, 'captain')) {
+                if (typeof ack === 'function') ack({ ok: false, code: 'SESSION_INVALID' });
+                return;
             }
             const userId = socket.data.identity.id;
             const { location } = data || {};
@@ -372,8 +643,8 @@ function initializeSocket(server) {
                     ...(liveFare ? { liveFare } : {}),
                 };
 
-                if (ride.user && ride.user.socketId) {
-                    io.to(ride.user.socketId).emit('captain-location-updated', locationUpdate);
+                if (ride.user?._id) {
+                    io.to(actorRoom('user', ride.user._id)).emit('captain-location-updated', locationUpdate);
                 }
                 // Also send back to the captain's socket to update their local map in real time
                 socket.emit('captain-location-updated', locationUpdate);
@@ -384,8 +655,8 @@ function initializeSocket(server) {
                     parcelId: parcel._id.toString(),
                     subjectType: 'parcel',
                 };
-                if (parcel.user && parcel.user.socketId) {
-                    io.to(parcel.user.socketId).emit('captain-location-updated', locPayload);
+                if (parcel.user?._id) {
+                    io.to(actorRoom('user', parcel.user._id)).emit('captain-location-updated', locPayload);
                 }
                 socket.emit('captain-location-updated', locPayload);
             }
@@ -463,16 +734,23 @@ function initializeSocket(server) {
         // é dado sensível: sem essa checagem, qualquer socket anônimo poderia assistir
         // a localização de todos os motoristas online.
         socket.on('subscribe-drivers-map', async (data) => {
-            const { token } = data || {};
+            const { token, deviceId } = data || {};
             if (!token) {
                 return socket.emit('unauthorized', { message: 'Token ausente' });
             }
             try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                const viewer = await userModel.findById(decoded._id).select('_id isBlocked');
+                const decoded = authService.verifyAccessToken(token, 'user');
+                const viewer = await userModel.findById(decoded.subjectId).select('_id isBlocked');
                 if (!viewer || viewer.isBlocked) {
                     return socket.emit('unauthorized', { message: 'Usuário inválido' });
                 }
+                await bindSocketIdentity(socket, {
+                    decoded,
+                    actorType: 'user',
+                    actorId: decoded.subjectId,
+                    token,
+                    deviceId,
+                });
                 socket.join('map-viewers');
             } catch (err) {
                 socket.emit('unauthorized', { message: 'Token inválido' });
@@ -494,11 +772,33 @@ function initializeSocket(server) {
         const resolveChatIdentity = async (token) => {
             if (!token) return null;
             try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                const identifiedUser = await userModel.findById(decoded._id).select('_id');
-                if (identifiedUser) return { type: 'user', id: identifiedUser._id.toString() };
-                const identifiedCaptain = await captainModel.findById(decoded._id).select('_id');
-                if (identifiedCaptain) return { type: 'captain', id: identifiedCaptain._id.toString() };
+                const decoded = authService.verifyAccessToken(token, ['user', 'captain']);
+                if (decoded.actorType === 'user') {
+                    const account = await userModel.findById(decoded.subjectId).select('_id isBlocked');
+                    if (account && !account.isBlocked) {
+                        return { type: 'user', id: account._id.toString(), decoded };
+                    }
+                    return null;
+                }
+                if (decoded.actorType === 'captain') {
+                    const account = await captainModel.findById(decoded.subjectId).select('_id isBlocked');
+                    if (account && !account.isBlocked) {
+                        return { type: 'captain', id: account._id.toString(), decoded };
+                    }
+                    return null;
+                }
+
+                // Compatibilidade temporária: tokens legados não carregam ator. Só
+                // durante a janela explícita de migração ainda é necessário descobrir
+                // a coleção, preservando o comportamento anterior até expirarem.
+                const legacyUser = await userModel.findById(decoded.subjectId).select('_id isBlocked');
+                if (legacyUser && !legacyUser.isBlocked) {
+                    return { type: 'user', id: legacyUser._id.toString(), decoded };
+                }
+                const legacyCaptain = await captainModel.findById(decoded.subjectId).select('_id isBlocked');
+                if (legacyCaptain && !legacyCaptain.isBlocked) {
+                    return { type: 'captain', id: legacyCaptain._id.toString(), decoded };
+                }
             } catch (err) {
                 return null;
             }
@@ -526,6 +826,13 @@ function initializeSocket(server) {
 
         const hasChatAccess = (key) => !!(key && socket.data.authorizedChats && socket.data.authorizedChats.has(key));
 
+        const hasLiveChatAccess = async (key) => {
+            if (!hasChatAccess(key)) return false;
+            const chatIdentity = socket.data.chatIdentities?.get(key);
+            if (!chatIdentity) return false;
+            return revalidateSocketIdentity(socket, chatIdentity.type);
+        };
+
         socket.on('join-chat', async (data) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const subjectId = data?.subjectId || data?.rideId;
@@ -541,14 +848,27 @@ function initializeSocket(server) {
                 return socket.emit('unauthorized', { message: 'Sem acesso a este chat' });
             }
 
+            try {
+                await bindSocketIdentity(socket, {
+                    decoded: identity.decoded,
+                    actorType: identity.type,
+                    actorId: identity.id,
+                    token,
+                    deviceId: data?.deviceId,
+                });
+            } catch (error) {
+                return socket.emit('unauthorized', { message: 'Sessão do chat inválida' });
+            }
+
             if (!socket.data.authorizedChats) socket.data.authorizedChats = new Set();
             if (!socket.data.chatIdentities) socket.data.chatIdentities = new Map();
             if (!socket.data.chatSubjects) socket.data.chatSubjects = new Map();
+            const wasAuthorized = socket.data.authorizedChats.has(key);
             socket.data.authorizedChats.add(key);
-            socket.data.chatIdentities.set(key, identity);
+            socket.data.chatIdentities.set(key, { type: identity.type, id: identity.id });
             socket.data.chatSubjects.set(key, { subjectType, subjectId: (subjectId || '').toString(), rideId: rideId?.toString?.() });
             socket.join(chatRoomName(key));
-            addChatPresence(key, identity.type);
+            if (!wasAuthorized) addChatPresence(key, identity.type);
         });
 
         socket.on('leave-chat', (data) => {
@@ -574,90 +894,66 @@ function initializeSocket(server) {
             // publicada pelo POST /chat/send. Não retransmitimos payload vindo do
             // cliente, pois isso duplicava eventos/push e permitia forjar mensagens.
             if (typeof ack === 'function') {
-                ack({ ok: hasChatAccess(key), relayedBy: 'http' });
+                ack({ ok: await hasLiveChatAccess(key), relayedBy: 'http' });
             }
         });
 
-        socket.on('message-delivered', (data) => {
+        socket.on('message-delivered', async (data) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
             const { messageId } = data || {};
-            if (hasChatAccess(key)) {
+            if (await hasLiveChatAccess(key)) {
                 socket.to(chatRoomName(key)).emit('message-delivered', { messageId });
             }
         });
 
-        socket.on('message-read', (data) => {
+        socket.on('message-read', async (data) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
             const { messageId } = data || {};
-            if (hasChatAccess(key)) {
+            if (await hasLiveChatAccess(key)) {
                 socket.to(chatRoomName(key)).emit('message-read', { messageId });
             }
         });
 
-        socket.on('typing-start', (data) => {
+        socket.on('typing-start', async (data) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
             const { senderType } = data || {};
-            if (hasChatAccess(key)) {
+            if (await hasLiveChatAccess(key)) {
                 socket.to(chatRoomName(key)).emit('typing-start', { senderType });
             }
         });
 
-        socket.on('typing-stop', (data) => {
+        socket.on('typing-stop', async (data) => {
             const subjectType = data?.subjectType === 'parcel' ? 'parcel' : 'ride';
             const key = chatRoomKey({ subjectType, subjectId: data?.subjectId || data?.rideId, rideId: data?.rideId });
             const { senderType } = data || {};
-            if (hasChatAccess(key)) {
+            if (await hasLiveChatAccess(key)) {
                 socket.to(chatRoomName(key)).emit('typing-stop', { senderType });
             }
         });
 
         socket.on('disconnect', async () => {
             console.log(`[AUDIT] Client disconnected: ${socket.id}`);
-
-            // A7: sem isto, um socket que caiu sem emitir 'leave-chat' (fechar o app,
-            // perder conexão) deixaria a presença de chat "presa" achando que ele ainda
-            // está olhando a tela — e o outro lado nunca mais receberia push nenhum.
-            if (socket.data.chatIdentities) {
-                for (const [key, identity] of socket.data.chatIdentities.entries()) {
-                    removeChatPresence(key, identity.type);
-                }
-            }
-
-            await userModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
-
-            // findOneAndUpdate sem { new: true } retorna o documento ANTES do update,
-            // então dá pra saber se esse motorista estava online quando desconectou.
-            const captainBeforeUpdate = await captainModel.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
-            if (captainBeforeUpdate && captainBeforeUpdate.isOnline) {
-                // Separação disponibilidade x conexão (2026-08-03): o tempo online mede
-                // tempo realmente CONECTADO, então a sessão é fechada aqui como sempre
-                // foi — sem isso ela contaria para sempre.
-                //
-                // O que MUDOU: `isOnline` não é mais zerado. Ele passou a significar só a
-                // intenção do motorista ("quero receber corridas"), e fechar o app não é
-                // desistir de receber corridas. Zerá-lo aqui era exatamente o que tirava
-                // o motorista do despacho ao fechar o app e tornava a push de corrida
-                // nova inalcançável. Quem cuida de "sumiu de vez" agora é o TTL de
-                // lastSeenAt em captainService.availabilityFilter().
-                const captainService = require('./services/captain.service');
-                await captainService.endOnlineSession(captainBeforeUpdate._id);
-
-                const { deleteByPrefix } = require('./cache/cache');
-                deleteByPrefix(`profile:captain:${captainBeforeUpdate._id}`);
-                deleteByPrefix('drivers:');
-            }
+            // Remove presença, registro por JTI/dispositivo e somente substitui o
+            // socketId legado se este era o ponteiro atual. Outra aba ativa assume o
+            // ponteiro, em vez de ser apagada pelo disconnect da aba mais recente.
+            await releaseSocketIdentity(socket, 'transport_disconnect');
         });
     });
+
+    return io;
 }
 
 const sendMessageToSocketId = (socketId, messageObject) => {
     console.log(`[AUDIT] Socket emit '${messageObject.event}' para socketId: ${socketId}`);
 
     if (io) {
-        io.to(socketId).emit(messageObject.event, messageObject.data);
+        const target = io.sockets.sockets.get(socketId);
+        const identity = target?.data?.identity;
+        const destination = identity ? actorRoom(identity.type, identity.id) : socketId;
+        io.to(destination).emit(messageObject.event, messageObject.data);
     } else {
         console.log('[AUDIT] ERROR: Socket.io not initialized.');
     }
@@ -668,8 +964,14 @@ const addSocketToRoom = (socketId, roomName) => {
     if (io) {
         const socket = io.sockets.sockets.get(socketId);
         if (socket) {
-            socket.join(roomName);
-            console.log(`[AUDIT] socketId ${socketId} entrou na sala ${roomName} com sucesso`);
+            const identity = socket.data?.identity;
+            const actorSocketIds = identity
+                ? io.sockets.adapter.rooms.get(actorRoom(identity.type, identity.id)) || new Set([socketId])
+                : new Set([socketId]);
+            for (const actorSocketId of actorSocketIds) {
+                io.sockets.sockets.get(actorSocketId)?.join(roomName);
+            }
+            console.log(`[AUDIT] ${actorSocketIds.size} socket(s) do ator entraram na sala ${roomName}`);
         } else {
             console.log(`[AUDIT] ERROR: Socket ${socketId} não encontrado no momento do JOIN na sala ${roomName}`);
         }
@@ -741,4 +1043,9 @@ module.exports = {
     disconnectSocket,
     emitDriverMapUpdate,
     clearDriverMapState,
+    actorRoom,
+    bindSocketIdentity,
+    revalidateSocketIdentity,
+    disconnectRevokedSockets,
+    eventTargetsIdentity,
 };

@@ -1,5 +1,8 @@
 import { getAccessToken } from '@/shared/services/session'
 import { refreshAccessToken } from '@/shared/services/axios'
+import { getDeviceId } from '@/shared/services/deviceIdentity'
+
+const reauthHandlers = new WeakMap()
 
 // Auditoria de regressão de push (2026-08-03, docs/plans/2026-08-03-auditoria-regressao-push.md).
 //
@@ -17,8 +20,22 @@ import { refreshAccessToken } from '@/shared/services/axios'
 // já cuida de deslogar nesse caso.
 export function joinWithRetry(socket, { userId, userType }, onSuccess) {
     const emitJoin = (token) => new Promise((resolve) => {
-        socket.emit('join', { userId, userType, token }, resolve)
+        socket.emit('join', { userId, userType, token, deviceId: getDeviceId() }, resolve)
     })
+
+    const previousHandler = reauthHandlers.get(socket)
+    if (previousHandler) socket.off('reauth-required', previousHandler)
+    const handleReauthRequired = async () => {
+        try {
+            const freshToken = await refreshAccessToken(userType)
+            const ack = await emitJoin(freshToken)
+            if (ack?.ok) onSuccess?.()
+        } catch {
+            // O refresh compartilhado encerra a sessão somente em 401/403.
+        }
+    }
+    reauthHandlers.set(socket, handleReauthRequired)
+    socket.on('reauth-required', handleReauthRequired)
 
     emitJoin(getAccessToken(userType))
         .then(async (ack) => {
@@ -31,7 +48,7 @@ export function joinWithRetry(socket, { userId, userType }, onSuccess) {
                 const freshToken = await refreshAccessToken(userType)
                 const retryAck = await emitJoin(freshToken)
                 if (retryAck?.ok) onSuccess?.()
-            } catch (err) {
+            } catch {
                 // Sessão realmente inválida — refreshAccessToken já desloga.
             }
         })

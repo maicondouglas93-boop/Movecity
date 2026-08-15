@@ -1,6 +1,5 @@
 import { registerPlugin } from '@capacitor/core'
 import { isNativePlatform } from '@/shared/platform/platform'
-import { getAccessToken, getRefreshToken } from '@/shared/services/session'
 
 const NativeSession = registerPlugin('NativeSession')
 
@@ -12,19 +11,26 @@ export async function syncNativeCaptainSession({ token, refreshToken } = {}) {
     if (!isNativePlatform()) return
     try {
         const apiBase = import.meta.env.VITE_BASE_URL || ''
-        const access = token || getAccessToken('captain')
-        const refresh = refreshToken || getRefreshToken('captain')
-        if (access) {
+        if (token) {
             await NativeSession.save({
-                token: access,
-                refreshToken: refresh || '',
+                token,
+                ...(refreshToken ? { refreshToken } : {}),
                 apiBase,
             })
-        } else {
-            await NativeSession.clear()
         }
     } catch (err) {
         console.warn('[nativeSession] sync failed:', err?.message || err)
+    }
+}
+
+export async function getNativeCaptainRefreshToken() {
+    if (!isNativePlatform()) return null
+    try {
+        const result = await NativeSession.get()
+        return result?.refreshToken || null
+    } catch (err) {
+        console.warn('[nativeSession] read failed:', err?.message || err)
+        return null
     }
 }
 

@@ -6,6 +6,7 @@ import UserLogin from '@/passenger/pages/UserLogin';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
 import { getGoogleIdToken } from '@/shared/services/googleAuth';
+import { clearAllSessions } from '@/shared/services/session';
 
 // Mock dependências externas — Fase 1 (C1): a página migrou do axios cru para a
 // instância configurada (@/shared/services/axios), então é ela que precisa ser mockada.
@@ -38,6 +39,7 @@ describe('UserLogin Component', () => {
     // Login bem-sucedido grava token via saveSession; sem limpar, o useEffect
     // de UserLogin redireciona para /home nos testes seguintes.
     localStorage.clear();
+    clearAllSessions();
   });
 
   const renderWithProviders = (ui) => {

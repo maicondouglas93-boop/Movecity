@@ -1,5 +1,5 @@
 const socketIo = require('socket.io');
-const jwt = require('jsonwebtoken');
+const authService = require('./services/auth.service');
 const userModel = require('./models/user.model');
 const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
@@ -144,20 +144,26 @@ function initializeSocket(server) {
                 }
                 let decoded;
                 try {
-                    decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    decoded = authService.verifyAccessToken(token, userType);
                 } catch (err) {
                     console.log(`[AUDIT] JOIN ${userType} rejeitado (token inválido) no socket ${socket.id}`);
                     return reject('Token inválido');
                 }
-                const authenticatedId = decoded._id;
+                const authenticatedId = decoded.subjectId;
+                const authenticatedType = decoded.actorType || userType;
 
-                if (userType === 'user') {
+                if (authenticatedType === 'user') {
                     const user = await userModel.findById(authenticatedId);
                     if (!user || user.isBlocked) {
                         console.log(`[AUDIT] JOIN user rejeitado (inválido/bloqueado) no socket ${socket.id}`);
                         return reject('Usuário inválido');
                     }
-                    socket.data.identity = { type: 'user', id: authenticatedId };
+                    socket.data.identity = {
+                        type: decoded.actorType || 'user',
+                        id: authenticatedId,
+                        jti: decoded.jti,
+                        legacy: decoded.legacy,
+                    };
                     await userModel.findByIdAndUpdate(authenticatedId, { socketId: socket.id });
                     console.log(`[AUDIT] User ${authenticatedId} atualizou socketId para ${socket.id}`);
 
@@ -181,7 +187,12 @@ function initializeSocket(server) {
                         console.log(`[AUDIT] JOIN captain rejeitado (inválido/bloqueado) no socket ${socket.id}`);
                         return reject('Motorista inválido');
                     }
-                    socket.data.identity = { type: 'captain', id: authenticatedId };
+                    socket.data.identity = {
+                        type: decoded.actorType || 'captain',
+                        id: authenticatedId,
+                        jti: decoded.jti,
+                        legacy: decoded.legacy,
+                    };
 
                     // Separação disponibilidade x conexão (2026-08-03): `lastSeenAt` é o
                     // heartbeat que mantém o motorista no despacho. Reconectar conta como
@@ -238,8 +249,8 @@ function initializeSocket(server) {
                     return reject('Token de admin ausente');
                 }
                 try {
-                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                    const admin = await adminUserModel.findById(decoded._id);
+                    const decoded = authService.verifyAccessToken(token, 'admin');
+                    const admin = await adminUserModel.findById(decoded.subjectId);
                     if (!admin || !admin.active) {
                         console.log(`[AUDIT] JOIN admin rejeitado (inativo/inexistente) no socket ${socket.id}`);
                         return reject('Admin inválido');
@@ -468,8 +479,8 @@ function initializeSocket(server) {
                 return socket.emit('unauthorized', { message: 'Token ausente' });
             }
             try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                const viewer = await userModel.findById(decoded._id).select('_id isBlocked');
+                const decoded = authService.verifyAccessToken(token, 'user');
+                const viewer = await userModel.findById(decoded.subjectId).select('_id isBlocked');
                 if (!viewer || viewer.isBlocked) {
                     return socket.emit('unauthorized', { message: 'Usuário inválido' });
                 }
@@ -494,11 +505,29 @@ function initializeSocket(server) {
         const resolveChatIdentity = async (token) => {
             if (!token) return null;
             try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                const identifiedUser = await userModel.findById(decoded._id).select('_id');
-                if (identifiedUser) return { type: 'user', id: identifiedUser._id.toString() };
-                const identifiedCaptain = await captainModel.findById(decoded._id).select('_id');
-                if (identifiedCaptain) return { type: 'captain', id: identifiedCaptain._id.toString() };
+                const decoded = authService.verifyAccessToken(token, ['user', 'captain']);
+                if (decoded.actorType === 'user') {
+                    const account = await userModel.findById(decoded.subjectId).select('_id isBlocked');
+                    if (account && !account.isBlocked) return { type: 'user', id: account._id.toString() };
+                    return null;
+                }
+                if (decoded.actorType === 'captain') {
+                    const account = await captainModel.findById(decoded.subjectId).select('_id isBlocked');
+                    if (account && !account.isBlocked) return { type: 'captain', id: account._id.toString() };
+                    return null;
+                }
+
+                // Compatibilidade temporária: tokens legados não carregam ator. Só
+                // durante a janela explícita de migração ainda é necessário descobrir
+                // a coleção, preservando o comportamento anterior até expirarem.
+                const legacyUser = await userModel.findById(decoded.subjectId).select('_id isBlocked');
+                if (legacyUser && !legacyUser.isBlocked) {
+                    return { type: 'user', id: legacyUser._id.toString() };
+                }
+                const legacyCaptain = await captainModel.findById(decoded.subjectId).select('_id isBlocked');
+                if (legacyCaptain && !legacyCaptain.isBlocked) {
+                    return { type: 'captain', id: legacyCaptain._id.toString() };
+                }
             } catch (err) {
                 return null;
             }

@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 
 
 const userSchema = new mongoose.Schema({
@@ -102,8 +101,8 @@ userSchema.index({ city: 1 });
 userSchema.index({ totalRides: -1 });
 
 userSchema.methods.generateAuthToken = function () {
-    const token = jwt.sign({ _id: this._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    return token;
+    const { generateAccessToken } = require('../services/auth.service');
+    return generateAccessToken(this._id, 'user');
 }
 
 userSchema.methods.comparePassword = async function (password) {

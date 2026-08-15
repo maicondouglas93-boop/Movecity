@@ -1,3 +1,10 @@
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'testsecret';
+process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'test-access-secret';
+process.env.JWT_ADMIN_SECRET = process.env.JWT_ADMIN_SECRET || 'test-admin-secret';
+process.env.JWT_SHARE_SECRET = process.env.JWT_SHARE_SECRET || 'test-share-secret';
+process.env.JWT_ACCEPT_LEGACY_TOKENS = 'true';
+process.env.JWT_LEGACY_ACCEPT_UNTIL = '2099-01-01T00:00:00.000Z';
+
 const mongoose = require('mongoose');
 const { MongoMemoryReplSet } = require('mongodb-memory-server');
 

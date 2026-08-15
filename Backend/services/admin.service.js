@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const adminUserModel = require('../models/adminUser.model');
 const adminLogModel = require('../models/adminLog.model');
 const rideModel = require('../models/ride.model');
@@ -57,7 +56,13 @@ module.exports.login = async (email, password) => {
 module.exports.refreshAccessToken = async (refreshToken) => {
     const authService = require('./auth.service');
 
-    const rotated = await authService.rotateRefreshToken({ refreshToken });
+    const rotated = await authService.rotateRefreshToken({
+        refreshToken,
+        expectedUserType: 'admin',
+    });
+    if (rotated.userType !== 'admin') {
+        throw new Error('Refresh token inválido para administrador');
+    }
 
     const admin = await adminUserModel.findById(rotated.userId);
     if (!admin || !admin.active) {
@@ -70,7 +75,7 @@ module.exports.refreshAccessToken = async (refreshToken) => {
         throw new Error('Refresh token inválido');
     }
 
-    const token = authService.generateAccessToken(admin._id, { role: admin.role });
+    const token = authService.generateAccessToken(admin._id, 'admin', { role: admin.role });
 
     return { admin, token, refreshToken: rotated.refreshToken };
 };

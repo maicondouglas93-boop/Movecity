@@ -104,33 +104,41 @@ describe('Sessão persistente — passageiro', () => {
     // componentes buscando dados ao mesmo tempo quando o app volta do segundo plano)
     // reapresentando o token quase ao mesmo tempo derrubavam a sessão inteira, mesmo
     // sem nenhum roubo de verdade. Ver docs/plans/2026-08-03-auditoria-persistencia-
-    // login.md. Duas cobranças agora, no lugar de uma: reuso DENTRO da janela de
-    // tolerância (a corrida legítima) é tolerado; reuso FORA da janela (roubo de
-    // verdade) continua derrubando tudo, exatamente como antes.
+    // login.md. Reuso DENTRO da janela de tolerância (a corrida legítima) é tolerado,
+    // mas só uma requisição cria refresh sucessor; as demais recebem access token sem
+    // abrir ramificações. Reuso FORA da janela (roubo real) revoga a família.
     it('8a. Reuso DENTRO da janela de tolerância (corrida entre abas) não derruba a sessão', async () => {
         const loginRes = await loginUser();
         const originalToken = loginRes.body.refreshToken;
 
-        // Aba A renova.
-        const rotatedByA = await request(app).post('/users/refresh').send({ refreshToken: originalToken });
-        expect(rotatedByA.statusCode).toBe(200);
+        const responses = await Promise.all(Array.from({ length: 20 }, () => (
+            request(app).post('/users/refresh').send({ refreshToken: originalToken })
+        )));
+        expect(responses.every((response) => response.statusCode === 200)).toBe(true);
 
-        // Aba B tinha lido o token original antes de A terminar, e só agora manda a
-        // requisição — reapresenta um token que já foi rotacionado, mas a corrida é
-        // legítima, não roubo.
-        const rotatedByB = await request(app).post('/users/refresh').send({ refreshToken: originalToken });
-        expect(rotatedByB.statusCode).toBe(200);
-        expect(rotatedByB.body.refreshToken).not.toBe(rotatedByA.body.refreshToken);
+        const durable = responses.filter((response) => response.body.refreshToken);
+        const accessOnly = responses.filter((response) => !response.body.refreshToken);
+        expect(durable).toHaveLength(1);
+        expect(accessOnly).toHaveLength(19);
+        expect(accessOnly.every((response) => response.body.token)).toBe(true);
 
-        // As duas abas continuam com sessão válida — nenhuma foi punida pela corrida da outra.
-        const aStillWorks = await request(app).post('/users/refresh').send({ refreshToken: rotatedByA.body.refreshToken });
-        expect(aStillWorks.statusCode).toBe(200);
+        const original = await refreshTokenModel.findOne({ tokenHash: authService.hashToken(originalToken) });
+        const successors = await refreshTokenModel.find({ familyId: original.familyId });
+        expect(successors).toHaveLength(2); // token original + exatamente um sucessor
+        expect(successors.filter((token) => !token.revokedAt)).toHaveLength(1);
 
-        const bStillWorks = await request(app).post('/users/refresh').send({ refreshToken: rotatedByB.body.refreshToken });
-        expect(bStillWorks.statusCode).toBe(200);
+        // O access-only funciona e o único refresh durável continua rotacionável.
+        const profile = await request(app)
+            .get('/users/profile')
+            .set('Authorization', `Bearer ${accessOnly[0].body.token}`);
+        expect(profile.statusCode).toBe(200);
+        const next = await request(app)
+            .post('/users/refresh')
+            .send({ refreshToken: durable[0].body.refreshToken });
+        expect(next.statusCode).toBe(200);
     });
 
-    it('8b. Reuso FORA da janela de tolerância continua sendo tratado como roubo e derruba TODAS as sessões', async () => {
+    it('8b. Reuso FORA da janela de tolerância é tratado como roubo e derruba a família', async () => {
         const loginRes = await loginUser();
         const stolenToken = loginRes.body.refreshToken;
 

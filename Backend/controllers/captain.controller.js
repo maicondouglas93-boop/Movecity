@@ -160,10 +160,14 @@ module.exports.loginCaptain = async (req, res, next) => {
 module.exports.refreshCaptainSession = async (req, res) => {
     try {
         const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
-        const { userId, refreshToken } = await authService.rotateRefreshToken({
+        const { userId, userType, refreshToken } = await authService.rotateRefreshToken({
             refreshToken: presentedToken,
+            expectedUserType: 'captain',
             ip: req.ip
         });
+        if (userType !== 'captain') {
+            return res.status(401).json({ message: 'Sessão emitida para outro tipo de conta' });
+        }
 
         const captain = await captainService.getCaptainProfile(userId);
         if (!captain) {
@@ -174,9 +178,11 @@ module.exports.refreshCaptainSession = async (req, res) => {
             return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
         }
 
-        const accessToken = authService.generateAccessToken(userId);
+        const accessToken = authService.generateAccessToken(userId, 'captain');
         res.cookie('token', accessToken, COOKIE_OPTIONS());
-        res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        if (refreshToken) {
+            res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        }
 
         return res.status(200).json({ token: accessToken, refreshToken, captain });
     } catch (err) {

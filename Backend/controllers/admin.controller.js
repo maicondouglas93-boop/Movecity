@@ -1,5 +1,6 @@
 ﻿const adminService = require('../services/admin.service');
 const { validationResult } = require('express-validator');
+const { toAdminRideDTO, toAdminParcelDTO } = require('../utils/actorDtos');
 
 module.exports.login = async (req, res, next) => {
     try {
@@ -778,12 +779,12 @@ module.exports.getManualRideDispatchStatus = async (req, res, next) => {
 module.exports.relaunchManualRide = async (req, res, next) => {
     if (manualRideValidationError(req, res)) return;
     try {
-        const ride = await require('../services/manualRideDispatch.service').relaunchManualRide({
+        const rideResponse = await require('../services/manualRideDispatch.service').relaunchManualRide({
             rideId: req.params.id,
             admin: req.admin,
             ip: req.ip,
         });
-        return res.status(200).json(ride);
+        return res.status(200).json(rideResponse);
     } catch (error) {
         if (error.statusCode) {
             return res.status(error.statusCode).json({
@@ -1120,7 +1121,7 @@ module.exports.cancelRide = async (req, res, next) => {
             console.error('[ADMIN] Falha ao emitir cancel de corrida via socket:', socketErr.message);
         }
 
-        res.status(200).json(result);
+        res.status(200).json(toAdminRideDTO(result));
     } catch (error) {
         next(error);
     }
@@ -1151,7 +1152,7 @@ module.exports.reassignRide = async (req, res, next) => {
             });
         }
 
-        res.status(200).json(ride);
+        res.status(200).json(toAdminRideDTO(ride));
     } catch (error) {
         if (error.message === 'Corrida não encontrada' || error.message === 'Ride not found') {
             return res.status(404).json({ message: error.message });
@@ -1511,7 +1512,7 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
             console.error('[PARCEL] Falha ao emitir cancel admin via socket:', socketErr.message);
         }
 
-        res.status(200).json(parcel);
+        res.status(200).json(toAdminParcelDTO(parcel));
     } catch (error) {
         if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         if (error.message === 'PARCEL_NOT_CANCELLABLE') return res.status(400).json({ message: error.message });
@@ -1623,7 +1624,7 @@ module.exports.finalizeRide = async (req, res, next) => {
             observation: req.body.observation,
             ip: req.ip,
         });
-        res.status(200).json(ride);
+        res.status(200).json(toAdminRideDTO(ride));
     } catch (error) {
         const status = error.statusCode || (error.message?.includes('não') ? 409 : 500);
         res.status(status).json({ message: error.message });

@@ -1,6 +1,7 @@
 const Ride = require('../models/ride.model');
 const adminService = require('./admin.service');
 const { OFFER_HIGHLIGHT_TTL_MS, computeOfferExpiresAt } = require('../config/offerPolicy');
+const { toAdminRideDTO } = require('../utils/actorDtos');
 
 function manualDispatchState(ride, now = new Date()) {
     const expiresAt = computeOfferExpiresAt(ride);
@@ -18,8 +19,9 @@ function manualDispatchState(ride, now = new Date()) {
 }
 
 function manualRideResponse(ride, manualDispatch = {}) {
-    const doc = ride?.toObject ? ride.toObject() : ride;
-    const state = manualDispatchState(doc);
+    const raw = ride?.toObject ? ride.toObject() : ride;
+    const doc = toAdminRideDTO(raw, { includeOtp: true });
+    const state = manualDispatchState(raw);
     return {
         ...doc,
         offerExpiresAt: state.offerExpiresAt,

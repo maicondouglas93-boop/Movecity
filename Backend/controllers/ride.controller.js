@@ -7,39 +7,22 @@ const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const { calculateLiveRideFare } = require('../services/liveRideFare.service');
 const jwt = require('jsonwebtoken');
-const {
-    sanitizeCaptainFinance,
-    computeDriverAmount,
-} = require('../utils/financePrivacy');
+const { computeDriverAmount } = require('../utils/financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const {
+    toRideOfferDTO,
+    toRideCaptainDTO,
+    toRidePassengerDTO,
+    toRideCaptainHistoryDTO,
+    toRidePassengerHistoryDTO,
+} = require('../utils/actorDtos');
 
 /** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
 function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
     if (!ride) return ride;
-    const sanitized = sanitizeCaptainFinance(ride);
-    // Corrida criada pelo ADM pode ter passageiro sem conta. Entregar uma identidade
-    // sintética mantém as telas do motorista funcionando; telefone só aparece depois
-    // do aceite, seguindo a mesma privacidade aplicada aos passageiros cadastrados.
-    if (!sanitized.user && sanitized.source === 'admin' && sanitized.adminPassenger?.name) {
-        sanitized.user = {
-            fullname: { firstname: sanitized.adminPassenger.name },
-            ...(sanitized.status !== 'requested' && sanitized.adminPassenger.phone
-                ? { phone: sanitized.adminPassenger.phone }
-                : {}),
-            isGuest: true,
-        };
-    }
-    const isPresential = sanitized.source === 'driver_initiated';
-    if (!(keepPresentialOtp && isPresential)) {
-        delete sanitized.otp;
-    }
-    // Auditoria PWA (2026-08-07, P1): só faz sentido enquanto a corrida ainda é
-    // uma oferta em aberto — depois de aceita/finalizada/cancelada o campo some
-    // sozinho (o popup de oferta não deve reagir a mais nada nesse estado).
-    if (sanitized.status === 'requested') {
-        sanitized.offerExpiresAt = computeOfferExpiresAt(sanitized);
-    }
-    return sanitized;
+    const raw = typeof ride.toObject === 'function' ? ride.toObject() : ride;
+    if (raw.status === 'requested') return toRideOfferDTO(raw);
+    return toRideCaptainDTO(raw, { includePresentialOtp: keepPresentialOtp });
 }
 
 function sanitizeCaptainRideHistoryPayload(data) {
@@ -48,7 +31,7 @@ function sanitizeCaptainRideHistoryPayload(data) {
         ...data,
         activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide, { keepPresentialOtp: true }) : null,
         pendingOffers: (data.pendingOffers || []).map((ride) => toCaptainRideResponse(ride)),
-        rides: (data.rides || []).map((ride) => toCaptainRideResponse(ride)),
+        rides: (data.rides || []).map((ride) => toRideCaptainHistoryDTO(ride)),
     };
 }
 
@@ -82,7 +65,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         { _id: ride._id },
         { pickupCoordinates: { lat: resolvedPickupCoordinates.lat, lng: resolvedPickupCoordinates.lng } },
         { new: true }
-    ).populate('user');
+    ).populate('user', 'fullname');
 
     matchingCaptains.forEach(captain => {
         // Put captain in a room for this specific ride
@@ -170,7 +153,7 @@ module.exports.createRide = async (req, res) => {
         // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
-        res.status(201).json({ ...ride.toObject(), promoError });
+        res.status(201).json({ ...toRidePassengerDTO(ride), promoError });
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
@@ -231,7 +214,10 @@ async function performAcceptRide(rideId, captain, res) {
         console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${captain._id}.`);
 
         if (ride.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, { event: 'ride-confirmed', data: ride });
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-confirmed',
+                data: toRidePassengerDTO(ride),
+            });
         }
         if (ride.user?._id) {
             notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
@@ -448,7 +434,7 @@ module.exports.startRide = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'ride-started',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -483,7 +469,10 @@ module.exports.updateRideStatus = async (req, res) => {
         const ride = await rideService.updateRideStatus({ rideId, captain: req.captain, status });
 
         if (ride.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, { event: 'ride-status-updated', data: ride });
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-status-updated',
+                data: toRidePassengerDTO(ride),
+            });
         }
 
         // A5 da auditoria de push (2026-08-02): "motorista chegou" é justamente o
@@ -552,7 +541,7 @@ module.exports.endRide = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'ride-ended',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -643,7 +632,7 @@ module.exports.payRide = async (req, res) => {
         }
 
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toRidePassengerDTO(ride));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -664,7 +653,7 @@ module.exports.confirmPaymentReceived = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'payment-confirmed',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -735,13 +724,13 @@ module.exports.getRideHistory = async (req, res) => {
 
         const total = await rideModel.countDocuments(query);
         const rides = await rideModel.find(query)
-            .populate('captain')
+            .populate('captain', 'fullname profilePicture rating vehicle vehicleAuthorization')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
 
         const responseData = {
-            rides,
+            rides: rides.map((ride) => toRidePassengerHistoryDTO(ride)),
             page,
             limit,
             total,
@@ -781,7 +770,7 @@ module.exports.getCurrentRide = async (req, res) => {
             console.error('Erro reconciliando valor ao vivo da corrida:', fareError);
         }
 
-        const payload = typeof ride.toObject === 'function' ? ride.toObject() : ride;
+        const payload = toRidePassengerDTO(ride);
         return res.status(200).json(liveFare ? { ...payload, liveFare } : payload);
     } catch (err) {
         return res.status(500).json({ message: err.message });
@@ -1004,7 +993,7 @@ module.exports.cancelRide = async (req, res) => {
         // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toRidePassengerDTO(ride));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });

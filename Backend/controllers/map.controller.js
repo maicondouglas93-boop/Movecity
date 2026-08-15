@@ -1,6 +1,11 @@
 const mapService = require('../services/maps.service');
 const { validationResult } = require('express-validator');
 const { deriveLegacyAuthorization } = require('../services/vehicleAuthorization.service');
+const {
+    PUBLIC_DRIVER_MAP_RADIUS_KM,
+    createPublicMapSubscription,
+    toPublicDriver,
+} = require('../utils/publicDriverMap');
 
 
 module.exports.getCoordinates = async (req, res, next) => {
@@ -114,8 +119,8 @@ module.exports.getPlaceDetails = async (req, res, next) => {
 // driver-location/driver-busy/driver-offline (socket.js); este endpoint reconstrói o
 // estado completo na abertura, no reconnect e na volta do background — a mesma filosofia
 // do RideContext: REST reconstrói, socket só atualiza.
-// Retorna APENAS { id, vehicleType, location } — nada pessoal (nome, placa, foto,
-// telefone) vaza pra quem só está olhando o mapa.
+// Retorna identidade efêmera e posição aproximada. A assinatura curta enviada no
+// header vincula o Socket.IO ao mesmo centro/raio deste snapshot.
 module.exports.getNearbyDrivers = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -126,25 +131,51 @@ module.exports.getNearbyDrivers = async (req, res) => {
 
     try {
         const rideModel = require('../models/ride.model');
+        const parcelModel = require('../models/parcel.model');
+        const dispatchService = require('../services/dispatch.service');
+        const center = { lat: parseFloat(lat), lng: parseFloat(lng) };
+        const subscription = createPublicMapSubscription({
+            userId: req.user._id,
+            center,
+        });
         // Mesmo raio e mesmos critérios de disponibilidade do despacho.
-        const captains = await mapService.getCaptainsInTheRadius(parseFloat(lat), parseFloat(lng), 15);
+        const captains = await mapService.getCaptainsInTheRadius(
+            center.lat,
+            center.lng,
+            PUBLIC_DRIVER_MAP_RADIUS_KM
+        );
 
-        // Disponível ≠ em corrida: um motorista com corrida ativa não deve aparecer
-        // como "livre" no mapa (Uber/99 escondem ocupados).
-        const activeRides = await rideModel.find({
-            captain: { $in: captains.map(c => c._id) },
-            status: { $in: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'] }
-        }).select('captain');
-        const busyIds = new Set(activeRides.map(r => r.captain.toString()));
+        // Disponível ≠ ocupado: corrida e encomenda usam a mesma exclusão mútua do
+        // despacho. O snapshot anterior verificava só corridas e podia mostrar como
+        // livre um motorista que estava fazendo entrega.
+        const captainIds = captains.map((captain) => captain._id);
+        const [activeRides, activeParcels] = await Promise.all([
+            rideModel.find({
+                captain: { $in: captainIds },
+                status: { $in: dispatchService.ACTIVE_RIDE_STATUSES },
+            }).select('captain'),
+            parcelModel.find({
+                captain: { $in: captainIds },
+                status: { $in: dispatchService.ACTIVE_PARCEL_STATUSES },
+            }).select('captain'),
+        ]);
+        const busyIds = new Set(
+            [...activeRides, ...activeParcels].map((work) => work.captain.toString())
+        );
 
         const drivers = captains
-            .filter(c => !busyIds.has(c._id.toString()) && c.location && c.location.ltd != null && c.location.lng != null)
-            .map(c => ({
-                id: c._id,
-                vehicleType: c.vehicle?.vehicleType || 'car',
-                vehicleAuthorization: deriveLegacyAuthorization(c),
-                location: { ltd: c.location.ltd, lng: c.location.lng }
-            }));
+            .filter((captain) => !captain.busyLock && !busyIds.has(captain._id.toString()))
+            .map((captain) => toPublicDriver({
+                _id: captain._id,
+                vehicle: captain.vehicle,
+                vehicleAuthorization: deriveLegacyAuthorization(captain),
+                location: captain.location,
+            }, subscription.nonce))
+            .filter(Boolean);
+
+        res.setHeader('X-Driver-Map-Subscription', subscription.token);
+        res.setHeader('X-Driver-Map-Expires-At', new Date(subscription.expiresAt).toISOString());
+        res.setHeader('Cache-Control', 'private, no-store');
 
         return res.status(200).json(drivers);
     } catch (err) {

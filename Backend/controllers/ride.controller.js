@@ -12,6 +12,11 @@ const {
     computeDriverAmount,
 } = require('../utils/financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const {
+    PAYMENT_REPORTED_EVENT,
+    buildCaptainPaymentReportPayload,
+    buildPassengerPaymentReportResponse,
+} = require('../utils/paymentReportContract');
 
 /** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
 function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
@@ -627,24 +632,39 @@ module.exports.payRide = async (req, res) => {
     const { rideId } = req.body;
 
     try {
-        const ride = await rideService.payRide({ rideId, user: req.user });
+        const { ride, reportStatus, shouldNotify } = await rideService.payRide({ rideId, user: req.user });
 
-        // Notify captain that payment was completed
-        if (ride.captain?.socketId) {
+        // "Passageiro informou" não é "pagamento recebido". Somente a primeira
+        // chamada emite aviso; retries recebem 200 sem duplicar socket/push.
+        if (shouldNotify && ride.captain?.socketId) {
             sendMessageToSocketId(ride.captain.socketId, {
-                event: 'payment-completed',
-                data: toCaptainRideResponse(ride)
+                event: PAYMENT_REPORTED_EVENT,
+                data: buildCaptainPaymentReportPayload(ride)
             });
         }
-        // Fase 5 da auditoria de push (2026-08-02): antes só socket — motorista sem o
-        // app aberto no instante do pagamento nunca era avisado.
-        if (ride.captain?._id) {
-            notificationService.sendPaymentCompleted(ride.captain._id, { rideId: ride._id.toString() }).catch(console.error);
+        if (shouldNotify && ride.captain?._id) {
+            notificationService.sendPaymentReported(ride.captain._id, {
+                rideId: ride._id.toString(),
+            }).catch(console.error);
         }
 
-
-        return res.status(200).json(ride);
+        return res.status(200).json(buildPassengerPaymentReportResponse(ride, reportStatus));
     } catch (err) {
+        if (err.code === 'RIDE_NOT_FOUND') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.code === 'RIDE_NOT_FINISHED') {
+            return res.status(409).json({ message: 'A corrida ainda não foi finalizada.' });
+        }
+        if (err.code === 'PAYMENT_REPORT_NOT_ALLOWED') {
+            return res.status(409).json({ message: 'Este meio de pagamento não aceita confirmação manual do passageiro.' });
+        }
+        if (err.code === 'PAYMENT_NOT_PENDING') {
+            return res.status(409).json({ message: 'Este pagamento não está pendente.' });
+        }
+        if (err.code === 'PAYMENT_REPORT_CONFLICT') {
+            return res.status(409).json({ message: 'Não foi possível registrar agora. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }

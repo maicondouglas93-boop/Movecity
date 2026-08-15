@@ -292,6 +292,12 @@ const rideSchema = new mongoose.Schema({
         enum: [ 'pending', 'paid', 'failed', 'refunded' ],
         default: 'pending',
     },
+    // Momento em que o passageiro informou ter pago cash/Pix. Isto NÃO representa
+    // liquidação: paymentStatus só vira paid em confirmPaymentReceived.
+    paymentReportedAt: {
+        type: Date,
+        default: null,
+    },
     paymentMethod: {
         type: String,
         enum: [ 'card', 'cash', 'pix', 'carteira' ],

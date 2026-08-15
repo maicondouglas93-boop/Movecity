@@ -37,10 +37,12 @@ export default defineConfig({
       // supertest + MongoMemoryReplSet), mesmo motivo de tests/sockets acima — não é o
       // gate do CI, roda via `npm run test:movecity`.
       'tests/e2e-simulator/**',
+      // Contratos críticos usam o runner nativo do Node para não depender de banco.
+      // Cada contrato entra no CI pelo script dedicado correspondente.
+      'tests/critical/**',
       'tests/auth.test.js',
       'tests/performance/**',
     ],
   },
 });
-
 

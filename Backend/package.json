@@ -15,6 +15,7 @@
     "test:integration": "jest tests/integration",
     "test:sockets": "jest tests/sockets",
     "test:security": "jest tests/security",
+    "test:critical:csrf": "node --test tests/critical/csrf-logout-contract.test.js",
     "test:load": "artillery run tests/performance/load.yml",
     "test:movecity": "jest tests/e2e-simulator --runInBand --forceExit --verbose",
     "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",

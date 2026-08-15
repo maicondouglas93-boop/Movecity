@@ -34,6 +34,10 @@ jobs:
         run: npm run test:critical:payment
       - name: Contrato crítico de privacidade do compartilhamento de corrida
         run: npm run test:critical:ride-share-privacy
+      - name: Contratos críticos de reconciliação de cancelamento
+        run: npm run test:critical:cancellation-reconciliation
+      - name: Integração transacional de cancelamento
+        run: npm run test:integration:cancellation-reconciliation
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

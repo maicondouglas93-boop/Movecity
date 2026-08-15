@@ -1333,23 +1333,33 @@ module.exports.cancelRide = async (id, reason, admin, ip) => {
     if (!ride) throw new Error('Corrida não encontrada');
     if (ride.status === 'finished') throw new Error('Corrida já finalizada');
 
+    const rideService = require('./ride.service');
     const dispatchService = require('./dispatch.service');
     const alreadyCancelled = ride.status === 'cancelled';
     const captainId = ride.captain;
+    let updatedRide;
+
+    try {
+        // Também passa cancelamentos legados já terminais pelo orquestrador: assim um
+        // replay administrativo repara wallet/pagamento/promoção sem duplicar efeitos.
+        updatedRide = await rideService.cancelRideByAdmin({
+            rideId: id,
+            reason,
+            admin,
+            extraSet: reason ? { observation: reason } : undefined,
+        });
+    } catch (error) {
+        if (error.code === 'RIDE_NOT_FOUND') throw new Error('Corrida não encontrada');
+        if (error.code === 'RIDE_NOT_CANCELLABLE') throw new Error('Corrida já finalizada');
+        throw error;
+    }
 
     if (!alreadyCancelled) {
-        ride.status = 'cancelled';
-        ride.cancelledBy = 'admin';
-        ride.cancelledAt = new Date();
-        ride.cancellationReason = reason || 'Cancelada pelo painel admin';
-        if (reason) ride.observation = reason;
-        await ride.save();
-
         await module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
             action: 'cancel_ride',
-            targetId: ride._id.toString(),
+            targetId: updatedRide._id.toString(),
             targetModel: 'Ride',
             reason: reason || 'Cancelada pelo painel admin',
             ipAddress: ip || '0.0.0.0'
@@ -1366,7 +1376,7 @@ module.exports.cancelRide = async (id, reason, admin, ip) => {
         dispatchService.releaseCaptainBusyLockIfIdle(captainId).catch(console.error);
     }
 
-    return ride;
+    return updatedRide;
 };
 
 // Auditoria de concorrência do painel administrativo (2026-08-02, Bloco E, achados
@@ -1412,30 +1422,32 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) 
     let updatedCount = 0;
     
     if (actionType === 'cancel') {
+        const rideService = require('./ride.service');
         const affectedRideIds = await rideModel.distinct('_id', {
             _id: { $in: rideIds },
             status: { $nin: ['finished', 'cancelled'] }
         });
-        const affectedCaptainIds = await rideModel.distinct('captain', {
-            _id: { $in: affectedRideIds },
-            captain: { $ne: null }
-        });
-
-        // Auditoria de UX/produção (2026-08-10): alinhado ao cancelamento individual
-        // (cancelRide, acima) — antes só setava status+observation; sem
-        // cancellationReason/cancelledBy/cancelledAt, o bloco RESUMO/STATUS do drawer
-        // de corrida não mostrava motivo nenhum pras corridas canceladas em lote.
-        const result = await rideModel.updateMany(
-            { _id: { $in: affectedRideIds } },
-            { $set: {
-                status: 'cancelled',
-                observation: reason,
-                cancelledBy: 'admin',
-                cancelledAt: new Date(),
-                cancellationReason: reason || 'Cancelada pelo painel admin (lote)',
-            } }
-        );
-        updatedCount = result.modifiedCount;
+        const cancelledRideIds = [];
+        const affectedCaptainIds = new Set();
+        for (const rideId of affectedRideIds) {
+            try {
+                const cancelled = await rideService.cancelRideByAdmin({
+                    rideId,
+                    reason: reason || 'Cancelada pelo painel admin (lote)',
+                    admin,
+                    extraSet: reason ? { observation: reason } : undefined,
+                });
+                cancelledRideIds.push(cancelled._id);
+                if (cancelled.captain) {
+                    affectedCaptainIds.add(String(cancelled.captain._id || cancelled.captain));
+                }
+            } catch (error) {
+                // O estado pode mudar entre o distinct e a transação. Nessa disputa,
+                // só não contabiliza a corrida que já ficou terminal por outro fluxo.
+                if (!['RIDE_NOT_FOUND', 'RIDE_NOT_CANCELLABLE'].includes(error.code)) throw error;
+            }
+        }
+        updatedCount = cancelledRideIds.length;
 
         const captainService = require('./captain.service');
         const dispatchService = require('./dispatch.service');
@@ -1447,7 +1459,7 @@ module.exports.bulkActionRides = async (rideIds, actionType, reason, admin, ip) 
         // Mesmo motivo do bulkActionUsers, acima: log por corrida (com targetId), não
         // um único log solto sem alvo — senão a corrida nunca aparece no seu próprio
         // bloco de Auditoria (getRideTimeline).
-        await Promise.all(affectedRideIds.map((id) => module.exports.logAction({
+        await Promise.all(cancelledRideIds.map((id) => module.exports.logAction({
             adminId: admin._id,
             adminName: admin.name,
             action: 'bulk_cancel_rides',

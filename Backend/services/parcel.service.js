@@ -817,23 +817,15 @@ module.exports.finalizeStuckDelivered = async (parcelId) => {
 };
 
 module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' }) => {
-    const historyBy = by === 'passenger' ? 'user' : by;
-    const updated = await transitionParcel(
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    const updated = await reconcileParcelCancellation({
         parcelId,
-        'cancelled',
-        { user },
-        {
-            cancelledBy: by,
-            cancellationReason: reason || '',
-            cancelledAt: new Date(),
-        },
-        historyBy
-    );
-    if (!updated) {
-        const exists = await parcelModel.exists({ _id: parcelId, user });
-        if (!exists) throw new Error('PARCEL_NOT_FOUND');
-        throw new Error('PARCEL_NOT_CANCELLABLE');
-    }
+        actor: by,
+        userId: user,
+        requestedBy: user,
+        reason,
+        allowedOrigins: VALID_ORIGINS_BY_TARGET.cancelled,
+    });
 
     // Só libera lock se a transição venceu e o motorista ficou ocioso.
     if (updated.captain) {
@@ -845,31 +837,27 @@ module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' 
 
 /** Cancelamento interno (ex.: falha de despacho após create). */
 module.exports.cancelParcelSystem = async (parcelId, reason = 'dispatch_failed') => {
-    const existing = await parcelModel.findById(parcelId).select('status captain');
-    if (!existing) return null;
-    if (['finished', 'cancelled'].includes(existing.status)) return existing;
-
-    const updated = await transitionParcel(
-        parcelId,
-        'cancelled',
-        {},
-        {
-            cancelledBy: 'system',
-            cancellationReason: reason,
-            cancelledAt: new Date(),
-        },
-        'system',
-        { originsOverride: CANCEL_ORIGINS_FORCE }
-    );
-    if (!updated) {
-        // Outra operação venceu (ex.: accept/finish) — não mexer no lock.
-        return parcelModel.findById(parcelId).populate('user').populate('captain');
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    let updated;
+    try {
+        updated = await reconcileParcelCancellation({
+            parcelId,
+            actor: 'system',
+            reason,
+            allowedOrigins: CANCEL_ORIGINS_FORCE,
+        });
+    } catch (err) {
+        if (err.code === 'PARCEL_NOT_FOUND') return null;
+        if (err.code === 'PARCEL_NOT_CANCELLABLE') {
+            return parcelModel.findById(parcelId).populate('user').populate('captain');
+        }
+        throw err;
     }
 
     if (updated.captain) {
         await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
-    return parcelModel.findById(parcelId).populate('user').populate('captain');
+    return updated;
 };
 
 module.exports.declineParcel = async ({ parcelId, captain }) => {
@@ -1219,30 +1207,20 @@ module.exports.listParcelsAdmin = async ({ status, limit = 50, skip = 0 } = {}) 
     return { items, total };
 };
 
-module.exports.adminCancelParcel = async ({ parcelId, reason }) => {
-    const exists = await parcelModel.exists({ _id: parcelId });
-    if (!exists) throw new Error('PARCEL_NOT_FOUND');
-
-    const updated = await transitionParcel(
+module.exports.adminCancelParcel = async ({ parcelId, reason, admin }) => {
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    const updated = await reconcileParcelCancellation({
         parcelId,
-        'cancelled',
-        {},
-        {
-            cancelledBy: 'admin',
-            cancellationReason: reason || 'Cancelado pelo admin',
-            cancelledAt: new Date(),
-        },
-        'admin',
-        { originsOverride: CANCEL_ORIGINS_FORCE }
-    );
-    if (!updated) {
-        throw new Error('PARCEL_NOT_CANCELLABLE');
-    }
+        actor: 'admin',
+        requestedBy: admin?._id || admin,
+        reason: reason || 'Cancelado pelo admin',
+        allowedOrigins: CANCEL_ORIGINS_FORCE,
+    });
 
     if (updated.captain) {
         await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
-    return parcelModel.findById(parcelId).populate('user').populate('captain');
+    return updated;
 };
 
 // Prefill helper for UI

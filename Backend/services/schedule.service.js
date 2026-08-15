@@ -4,6 +4,10 @@ const parcelModel = require('../models/parcel.model');
 const captainModel = require('../models/captain.model');
 const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
+const {
+    reconcileRideCancellation,
+    reconcileParcelCancellation,
+} = require('./cancellationReconciliation.service');
 
 const MIN_AHEAD_MS = 15 * 60 * 1000;
 const MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
@@ -104,19 +108,22 @@ function notifyScheduleTerminalCancel(doc, kind, reason) {
 }
 
 async function cancelRideSystem(rideId, reason, extraSet = {}) {
-    const updated = await rideModel.findOneAndUpdate(
-        { _id: rideId, status: { $in: ['scheduled', 'requested'] } },
-        {
-            $set: {
-                status: 'cancelled',
-                cancelledBy: 'system',
-                cancellationReason: reason,
-                cancelledAt: new Date(),
-                ...extraSet,
-            },
-        },
-        { new: true }
-    );
+    let updated;
+    try {
+        updated = await reconcileRideCancellation({
+            rideId,
+            actor: 'system',
+            reason,
+            allowedOrigins: ['scheduled', 'requested'],
+            extraSet,
+        });
+    } catch (error) {
+        if (['RIDE_NOT_FOUND', 'RIDE_NOT_CANCELLABLE'].includes(error.code)) return null;
+        throw error;
+    }
+    if (updated?.captain) {
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain._id || updated.captain);
+    }
     if (updated) {
         scheduleLog(reason === 'no_drivers' ? 'no_drivers_final' : 'dispatch_failed_final', {
             kind: 'ride',
@@ -129,10 +136,21 @@ async function cancelRideSystem(rideId, reason, extraSet = {}) {
 }
 
 async function cancelParcelSystemNoDrivers(parcelId, reason, extraSet = {}) {
-    const parcelService = require('./parcel.service');
-    const updated = await parcelService.cancelParcelSystem(parcelId, reason);
-    if (updated && Object.keys(extraSet).length) {
-        await parcelModel.updateOne({ _id: parcelId }, { $set: extraSet });
+    let updated;
+    try {
+        updated = await reconcileParcelCancellation({
+            parcelId,
+            actor: 'system',
+            reason,
+            allowedOrigins: ['scheduled', 'awaiting_provider'],
+            extraSet,
+        });
+    } catch (error) {
+        if (['PARCEL_NOT_FOUND', 'PARCEL_NOT_CANCELLABLE'].includes(error.code)) return null;
+        throw error;
+    }
+    if (updated?.captain) {
+        await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain._id || updated.captain);
     }
     if (updated) {
         scheduleLog(reason === 'no_drivers' ? 'no_drivers_final' : 'dispatch_failed_final', {
@@ -309,56 +327,65 @@ module.exports.listUserScheduled = async (userId) => {
 
 module.exports.cancelUserScheduled = async ({ userId, kind, id }) => {
     if (kind === 'ride') {
-        const updated = await rideModel.findOneAndUpdate(
-            {
-                _id: id,
-                user: userId,
-                scheduledAt: { $ne: null },
-                status: { $in: ['scheduled', 'requested'] },
-            },
-            {
-                $set: {
-                    status: 'cancelled',
-                    cancelledBy: 'passenger',
-                    cancellationReason: 'scheduled_cancelled',
-                    cancelledAt: new Date(),
-                },
-            },
-            { new: true }
-        );
-        if (!updated) {
+        const exists = await rideModel.exists({
+            _id: id,
+            user: userId,
+            scheduledAt: { $ne: null },
+            status: { $in: ['scheduled', 'requested'] },
+        });
+        if (!exists) {
             const err = new Error('SCHEDULED_NOT_FOUND');
             err.code = 'SCHEDULED_NOT_FOUND';
             throw err;
+        }
+        let updated;
+        try {
+            updated = await reconcileRideCancellation({
+                rideId: id,
+                actor: 'passenger',
+                userId,
+                reason: 'scheduled_cancelled',
+                allowedOrigins: ['scheduled', 'requested'],
+            });
+        } catch (error) {
+            if (['RIDE_NOT_FOUND', 'RIDE_NOT_CANCELLABLE'].includes(error.code)) {
+                const err = new Error('SCHEDULED_NOT_FOUND');
+                err.code = 'SCHEDULED_NOT_FOUND';
+                throw err;
+            }
+            throw error;
         }
         return { kind: 'ride', item: updated };
     }
 
     if (kind === 'parcel') {
-        const updated = await parcelModel.findOneAndUpdate(
-            {
-                _id: id,
-                user: userId,
-                scheduledAt: { $ne: null },
-                status: { $in: ['scheduled', 'awaiting_provider'] },
-            },
-            {
-                $set: {
-                    status: 'cancelled',
-                    cancelledBy: 'passenger',
-                    cancellationReason: 'scheduled_cancelled',
-                    cancelledAt: new Date(),
-                },
-                $push: {
-                    statusHistory: { status: 'cancelled', at: new Date(), by: 'user' },
-                },
-            },
-            { new: true }
-        );
-        if (!updated) {
+        const exists = await parcelModel.exists({
+            _id: id,
+            user: userId,
+            scheduledAt: { $ne: null },
+            status: { $in: ['scheduled', 'awaiting_provider'] },
+        });
+        if (!exists) {
             const err = new Error('SCHEDULED_NOT_FOUND');
             err.code = 'SCHEDULED_NOT_FOUND';
             throw err;
+        }
+        let updated;
+        try {
+            updated = await reconcileParcelCancellation({
+                parcelId: id,
+                actor: 'passenger',
+                userId,
+                reason: 'scheduled_cancelled',
+                allowedOrigins: ['scheduled', 'awaiting_provider'],
+            });
+        } catch (error) {
+            if (['PARCEL_NOT_FOUND', 'PARCEL_NOT_CANCELLABLE'].includes(error.code)) {
+                const err = new Error('SCHEDULED_NOT_FOUND');
+                err.code = 'SCHEDULED_NOT_FOUND';
+                throw err;
+            }
+            throw error;
         }
         return { kind: 'parcel', item: updated };
     }

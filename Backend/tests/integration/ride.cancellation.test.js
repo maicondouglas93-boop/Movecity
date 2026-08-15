@@ -157,7 +157,7 @@ describe('Cancelamento — campos de auditoria (cancelledBy/cancellationReason/c
         expect(persisted.cancellationReason).toBe('Mudei de ideia');
     });
 
-    it('CANCELLED é terminal: não aceita novo cancelamento, nem aceite, nem início', async () => {
+    it('CANCELLED é terminal para aceite/início e replay de cancelamento é idempotente', async () => {
         const user = await createUser();
         const userToken = generateAuthToken(user, 'user');
         const captain = await createCaptain();
@@ -170,7 +170,8 @@ describe('Cancelamento — campos de auditoria (cancelledBy/cancellationReason/c
             .post('/rides/cancel')
             .set('Authorization', `Bearer ${userToken}`)
             .send({ rideId: ride._id.toString() });
-        expect(cancelAgain.statusCode).toBe(409);
+        expect(cancelAgain.statusCode).toBe(200);
+        expect(cancelAgain.body.status).toBe('cancelled');
 
         const acceptAttempt = await request(app)
             .post(`/rides/${ride._id}/accept`)

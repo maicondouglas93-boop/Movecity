@@ -1021,6 +1021,12 @@ module.exports.captainCancelRide = async (req, res) => {
         if (err.message === 'Cancellation reason is required at this stage') {
             return res.status(400).json({ message: 'Informe o motivo do cancelamento.' });
         }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento financeiro está pendente. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -1062,6 +1068,12 @@ module.exports.cancelRide = async (req, res) => {
         }
         if (err.message === 'Ride cannot be cancelled at this stage') {
             return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
+        }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento financeiro está pendente. Tente novamente.' });
         }
         return res.status(500).json({ message: err.message });
     }

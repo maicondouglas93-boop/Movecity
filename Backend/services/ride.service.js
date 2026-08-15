@@ -708,6 +708,56 @@ async function calculateRideFare({
 // Exportada para reuso (admin recálculo) e testes unitários.
 module.exports.calculateRideFare = calculateRideFare;
 
+// Corrida presencial de um motorista autorizado a carro E moto (vehicleAuthorization
+// 'car_motorcycle'): o veículo cadastrado (`vehicle.vehicleType`) é UM só, então sem
+// escolha explícita o preço saía sempre na categoria do cadastro — normalmente moto.
+// O motorista informa no app qual veículo está usando naquela corrida; aqui o pedido
+// é revalidado contra as categorias que o ADM de fato autorizou.
+async function resolvePresentialVehicleType(freshCaptain, requestedVehicleType) {
+    const registered = freshCaptain.vehicle?.vehicleType;
+    const requested = requestedVehicleType ? String(requestedVehicleType).trim() : null;
+    if (!requested || requested === registered) {
+        if (!registered) throw new Error('Captain vehicle category is required');
+        return registered;
+    }
+    const allowed = await require('./vehicleAuthorization.service')
+        .getAuthorizedVehicleTypesForCaptain(freshCaptain, 'ride');
+    if (!allowed.includes(requested)) {
+        const err = new Error('VEHICLE_NOT_AUTHORIZED');
+        err.code = 'VEHICLE_NOT_AUTHORIZED';
+        throw err;
+    }
+    return requested;
+}
+
+// Categorias que o motorista pode usar numa corrida presencial. Uma só = o app não
+// pergunta nada; duas ou mais = ele escolhe antes de estimar a tarifa.
+module.exports.listPresentialVehicleOptions = async ({ captain }) => {
+    const captainModel = require('../models/captain.model');
+    const freshCaptain = await captainModel.findById(captain._id);
+    if (!freshCaptain) throw new Error('Captain not found');
+
+    const allowed = await require('./vehicleAuthorization.service')
+        .getAuthorizedVehicleTypesForCaptain(freshCaptain, 'ride');
+    const names = allowed.length > 0
+        ? allowed
+        : [ freshCaptain.vehicle?.vehicleType ].filter(Boolean);
+    if (names.length === 0) return [];
+
+    const vehicleCategoryModel = require('../models/vehicleCategory.model');
+    const categories = await vehicleCategoryModel
+        .find({ name: { $in: names } })
+        .select('name displayName iconKey')
+        .sort({ sortOrder: 1, displayName: 1 })
+        .lean();
+
+    return categories.map((category) => ({
+        name: category.name,
+        displayName: category.displayName || category.name,
+        iconKey: category.iconKey || 'car',
+    }));
+};
+
 // Corrida presencial iniciada pelo motorista — reutiliza PricingEngine/OTP/busyLock/
 // índice de corrida ativa. Nunca despacha (source=driver_initiated + status=accepted).
 module.exports.createPresentialRide = async ({
@@ -718,6 +768,7 @@ module.exports.createPresentialRide = async ({
     passengerPhone = null,
     clientLat = null,
     clientLng = null,
+    vehicleType: requestedVehicleType = null,
 }) => {
     if (!captain) {
         throw new Error('Captain is required');
@@ -756,10 +807,7 @@ module.exports.createPresentialRide = async ({
         throw err;
     }
 
-    const vehicleType = freshCaptain.vehicle?.vehicleType;
-    if (!vehicleType) {
-        throw new Error('Captain vehicle category is required');
-    }
+    const vehicleType = await resolvePresentialVehicleType(freshCaptain, requestedVehicleType);
 
     const origin = resolveCaptainOrigin(freshCaptain, clientLat, clientLng);
     if (!origin) {
@@ -992,7 +1040,7 @@ module.exports.createPresentialRide = async ({
     }
 };
 
-module.exports.estimatePresentialFare = async ({ captain, destination, clientLat = null, clientLng = null }) => {
+module.exports.estimatePresentialFare = async ({ captain, destination, clientLat = null, clientLng = null, vehicleType: requestedVehicleType = null }) => {
     if (!captain || !destination) {
         throw new Error('Captain and destination are required');
     }
@@ -1007,8 +1055,7 @@ module.exports.estimatePresentialFare = async ({ captain, destination, clientLat
         throw err;
     }
 
-    const vehicleType = freshCaptain.vehicle?.vehicleType;
-    if (!vehicleType) throw new Error('Captain vehicle category is required');
+    const vehicleType = await resolvePresentialVehicleType(freshCaptain, requestedVehicleType);
 
     const pricingSnapshot = await PricingEngine.buildConfigSnapshot({
         vehicleType,

@@ -13,6 +13,7 @@ import { getAccessToken } from '@/shared/services/session'
 import {
   createPresentialRide,
   estimatePresentialFare,
+  getPresentialVehicleOptions,
   startPresentialRide,
 } from '@/shared/services/presentialRideApi'
 import { formatBRL } from '@/shared/utils/currency'
@@ -23,6 +24,11 @@ const STEPS = {
   CONFIRM: 'confirm',
   PIN: 'pin',
 }
+
+const vehicleIcon = (iconKey) =>
+  ['moto', 'motorcycle'].includes(String(iconKey || '').toLowerCase())
+    ? 'ri-motorbike-fill'
+    : 'ri-car-fill'
 
 function formatKm(meters) {
   if (meters == null) return '—'
@@ -51,6 +57,33 @@ const CaptainPresentialRide = () => {
   const [loading, setLoading] = useState(false)
   const [passengerPhone, setPassengerPhone] = useState('')
   const [passengerConsent, setPassengerConsent] = useState(false)
+  // Motorista autorizado a carro E moto tem um único veículo cadastrado — sem esta
+  // escolha o preço saía sempre na categoria do cadastro, independente do que ele
+  // estivesse dirigindo. Com uma categoria só, nada é perguntado.
+  const [vehicleOptions, setVehicleOptions] = useState([])
+  const [vehicleType, setVehicleType] = useState(null)
+
+  const needsVehicleChoice = vehicleOptions.length > 1
+
+  useEffect(() => {
+    let cancelled = false
+    getPresentialVehicleOptions()
+      .then((options) => {
+        if (cancelled) return
+        const list = Array.isArray(options) ? options : []
+        setVehicleOptions(list)
+        if (list.length === 1) setVehicleType(list[0].name)
+      })
+      .catch(() => {
+        // Sem a lista, o backend resolve pela categoria do cadastro (comportamento antigo).
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const selectVehicle = (name) => {
+    setVehicleType(name)
+    setEstimate(null)
+  }
 
   const GPS_MAX_AGE_MS = 60_000
   const hasFreshGps = () => {
@@ -129,6 +162,7 @@ const CaptainPresentialRide = () => {
     try {
       const data = await estimatePresentialFare({
         destination: resolved,
+        vehicleType,
         ...coordsPayload(),
       })
       setEstimate(data)
@@ -149,11 +183,16 @@ const CaptainPresentialRide = () => {
       addToast('Aguardando GPS atualizado. Ative a localização e tente de novo.', 'error')
       return
     }
+    if (needsVehicleChoice && !vehicleType) {
+      addToast('Escolha o veículo desta corrida.', 'error')
+      return
+    }
     setLoading(true)
     try {
       const payload = {
         destinationPending,
         paymentMethod: 'cash',
+        ...(vehicleType ? { vehicleType } : {}),
         ...coordsPayload(),
       }
       if (!destinationPending) {
@@ -241,10 +280,40 @@ const CaptainPresentialRide = () => {
             <p className="text-sm text-ink-600 mb-4">
               Use quando o passageiro já estiver com você. A corrida não aparece para outros motoristas.
             </p>
+
+            {needsVehicleChoice && (
+              <div className="mb-4">
+                <p className="text-sm font-medium text-ink-600 mb-2">Qual veículo você está usando agora?</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {vehicleOptions.map((option) => {
+                    const selected = vehicleType === option.name
+                    return (
+                      <button
+                        key={option.name}
+                        type="button"
+                        onClick={() => selectVehicle(option.name)}
+                        aria-pressed={selected}
+                        className={`flex flex-col items-center gap-1 rounded-panel border-2 p-3 min-h-[88px] justify-center transition-transform active:scale-[0.98] ${
+                          selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
+                        }`}
+                      >
+                        <i className={`${vehicleIcon(option.iconKey)} text-2xl ${selected ? 'text-brand-600' : 'text-ink-600'}`} aria-hidden="true" />
+                        <span className="text-sm font-semibold text-ink-900 text-center leading-tight">
+                          {option.displayName}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-ink-400 mt-2">A tarifa é calculada pela categoria escolhida.</p>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={chooseNow}
-              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+              disabled={needsVehicleChoice && !vehicleType}
+              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform disabled:opacity-50 disabled:active:scale-100"
             >
               <p className="text-base font-semibold text-ink-900 flex items-center gap-2">
                 <i className="ri-map-pin-2-fill text-brand-500" aria-hidden="true" />
@@ -255,7 +324,8 @@ const CaptainPresentialRide = () => {
             <button
               type="button"
               onClick={chooseLater}
-              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform"
+              disabled={needsVehicleChoice && !vehicleType}
+              className="w-full text-left bg-surface border border-line rounded-panel p-4 active:scale-[0.99] transition-transform disabled:opacity-50 disabled:active:scale-100"
             >
               <p className="text-base font-semibold text-ink-900 flex items-center gap-2">
                 <i className="ri-route-fill text-brand-500" aria-hidden="true" />
@@ -300,6 +370,24 @@ const CaptainPresentialRide = () => {
           <div className="space-y-4">
             <div className="bg-surface border border-line rounded-panel p-4 space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-600">Resumo</p>
+              {needsVehicleChoice && (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-ink-900 flex items-center gap-2">
+                    <i
+                      className={`${vehicleIcon(vehicleOptions.find((o) => o.name === vehicleType)?.iconKey)} text-brand-600`}
+                      aria-hidden="true"
+                    />
+                    {vehicleOptions.find((o) => o.name === vehicleType)?.displayName || vehicleType}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setStep(STEPS.CHOICE)}
+                    className="text-xs font-semibold text-brand-600 underline"
+                  >
+                    Trocar
+                  </button>
+                </div>
+              )}
               {destinationPending ? (
                 <p className="text-sm text-ink-900">
                   Destino: <span className="font-semibold">será definido ao finalizar</span>

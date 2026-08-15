@@ -1,11 +1,16 @@
 import api from '@/shared/services/axios'
 
-export function estimatePresentialFare({ destination, lat, lng }) {
+export function getPresentialVehicleOptions() {
+  return api.get('/rides/presential/vehicle-types').then((r) => r.data)
+}
+
+export function estimatePresentialFare({ destination, lat, lng, vehicleType }) {
   return api.get('/rides/presential/estimate', {
     params: {
       destination,
       ...(lat != null ? { lat } : {}),
       ...(lng != null ? { lng } : {}),
+      ...(vehicleType ? { vehicleType } : {}),
     },
   }).then((r) => r.data)
 }

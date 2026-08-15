@@ -329,6 +329,7 @@ module.exports.createPresentialRide = async (req, res) => {
         passengerPhone,
         lat,
         lng,
+        vehicleType,
     } = req.body;
 
     try {
@@ -340,6 +341,7 @@ module.exports.createPresentialRide = async (req, res) => {
             passengerPhone: passengerPhone || null,
             clientLat: lat != null ? Number(lat) : null,
             clientLng: lng != null ? Number(lng) : null,
+            vehicleType: vehicleType || null,
         });
 
         if (ride.user) {
@@ -361,6 +363,9 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.code === 'PRESENTIAL_CASH_ONLY') {
             return res.status(400).json({ message: 'Corrida presencial aceita apenas pagamento em dinheiro.' });
         }
+        if (err.code === 'VEHICLE_NOT_AUTHORIZED') {
+            return res.status(403).json({ message: 'Você não está autorizado a rodar nesta categoria de veículo.' });
+        }
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.code === 'USER_HAS_ACTIVE_RIDE') {
             return res.status(409).json({ message: 'O passageiro informado já possui um serviço em andamento.' });
         }
@@ -381,7 +386,7 @@ module.exports.estimatePresentialFare = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { destination, lat, lng } = req.query;
+    const { destination, lat, lng, vehicleType } = req.query;
 
     try {
         const estimate = await rideService.estimatePresentialFare({
@@ -389,6 +394,7 @@ module.exports.estimatePresentialFare = async (req, res) => {
             destination,
             clientLat: lat != null ? Number(lat) : null,
             clientLng: lng != null ? Number(lng) : null,
+            vehicleType: vehicleType || null,
         });
         // Motorista vê o valor a cobrar do passageiro; sem fareBreakdown/comissão.
         const driverAmount = computeDriverAmount({
@@ -406,9 +412,21 @@ module.exports.estimatePresentialFare = async (req, res) => {
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
         }
+        if (err.code === 'VEHICLE_NOT_AUTHORIZED') {
+            return res.status(403).json({ message: 'Você não está autorizado a rodar nesta categoria de veículo.' });
+        }
         if (err.code === 'ROUTE_CALCULATION_FAILED') {
             return res.status(502).json({ message: 'Não foi possível calcular a rota até o destino. Tente novamente.' });
         }
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.listPresentialVehicleOptions = async (req, res) => {
+    try {
+        const options = await rideService.listPresentialVehicleOptions({ captain: req.captain });
+        return res.status(200).json(options);
+    } catch (err) {
         return res.status(500).json({ message: err.message });
     }
 };

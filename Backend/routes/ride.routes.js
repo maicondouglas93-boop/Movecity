@@ -31,6 +31,7 @@ router.post('/presential',
     body('passengerPhone').optional().isString().isLength({ max: 20 }),
     body('lat').optional().isFloat({ min: -90, max: 90 }),
     body('lng').optional().isFloat({ min: -180, max: 180 }),
+    body('vehicleType').optional().isString().isLength({ min: 1, max: 60 }),
     rideController.createPresentialRide
 )
 
@@ -39,7 +40,14 @@ router.get('/presential/estimate',
     query('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination'),
     query('lat').optional().isFloat({ min: -90, max: 90 }),
     query('lng').optional().isFloat({ min: -180, max: 180 }),
+    query('vehicleType').optional().isString().isLength({ min: 1, max: 60 }),
     rideController.estimatePresentialFare
+)
+
+// Categorias que ESTE motorista pode usar na corrida presencial (car / moto / ambas).
+router.get('/presential/vehicle-types',
+    authMiddleware.authCaptain,
+    rideController.listPresentialVehicleOptions
 )
 
 router.get('/current',

@@ -204,24 +204,13 @@ const CaptainRiding = () => {
     useEffect(() => {
         if (!socket) return undefined
 
-        // Auditoria do app do motorista (2026-08-11, P1): o evento já traz a corrida
-        // atualizada do backend (com finalPrice correto) — usar isso em vez de
-        // rideData?.fare (estado local que nunca é atualizado depois que a corrida sai
-        // de 'started', então sempre mostrava a ESTIMATIVA, não o valor final cobrado).
-        const handlePaymentCompleted = (data) => {
-            const amount = Number(data?.finalPrice ?? data?.fare ?? rideData?.finalPrice ?? rideData?.fare ?? 0)
-            const passengerName = data?.user?.fullname?.firstname || rideData?.user?.fullname?.firstname || 'passageiro'
-            addToast(`Pagamento recebido! ${formatBRL(amount)}`, 'success')
+        const handlePaymentReported = (data) => {
+            if (rideData?._id && data?.rideId && String(data.rideId) !== String(rideData._id)) return
+            addToast('O passageiro informou que pagou. Confirme somente após receber o valor.', 'info', 7000)
             showBrowserNotification(
-                'Pagamento Recebido! 💰',
-                `${formatBRL(amount)} recebido de ${passengerName}`
+                'Passageiro informou pagamento',
+                'Confira o recebimento e confirme no app.'
             )
-            // Fase A da experiência de corrida ativa (2026-08-03): limpa o RideContext
-            // antes de voltar pra Home — sem isso, o contexto ficava com a corrida
-            // 'started' obsoleta e a Home mostraria "corrida em andamento" até a
-            // próxima sincronização com o backend.
-            setCaptainRide(null)
-            setTimeout(() => navigate('/captain-home'), 3500)
         }
         
         const handleReceiveMessage = (msg) => {
@@ -256,12 +245,12 @@ const CaptainRiding = () => {
             navigate('/captain-home', { replace: true })
         }
         
-        socket.on('payment-completed', handlePaymentCompleted)
+        socket.on('payment-reported', handlePaymentReported)
         socket.on('receive-message', handleReceiveMessage)
         socket.on('ride-cancelled', handleRideCancelled)
         
         return () => {
-            socket.off('payment-completed', handlePaymentCompleted)
+            socket.off('payment-reported', handlePaymentReported)
             socket.off('receive-message', handleReceiveMessage)
             socket.off('ride-cancelled', handleRideCancelled)
         }

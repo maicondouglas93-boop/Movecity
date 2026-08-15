@@ -30,6 +30,8 @@ jobs:
         run: npm run test:critical:csrf
       - name: Contrato crítico de privacidade do mapa
         run: npm run test:critical:map-privacy
+      - name: Contrato crítico de informe de pagamento
+        run: npm run test:critical:payment
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

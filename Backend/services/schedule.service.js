@@ -476,18 +476,39 @@ async function activateDueRides() {
     let dispatch_count = 0;
     for (const ride of due) {
         const now = new Date();
-        const claimed = await rideModel.findOneAndUpdate(
-            { _id: ride._id, status: 'scheduled' },
-            {
-                $set: {
-                    status: 'requested',
-                    activatedAt: now,
-                    dispatchLastAttemptAt: now,
-                    dispatchLeaseUntil: new Date(now.getTime() + DISPATCH_LEASE_MS),
+        let claimed;
+        try {
+            claimed = await rideModel.findOneAndUpdate(
+                { _id: ride._id, status: 'scheduled' },
+                {
+                    $set: {
+                        status: 'requested',
+                        activatedAt: now,
+                        dispatchLastAttemptAt: now,
+                        dispatchLeaseUntil: new Date(now.getTime() + DISPATCH_LEASE_MS),
+                        dispatchLastError: null,
+                    },
                 },
-            },
-            { new: true }
-        );
+                { new: true }
+            );
+        } catch (err) {
+            // O índice parcial mantém o agendamento intacto enquanto o passageiro
+            // ainda está em outra corrida. Um próximo tick tenta novamente.
+            const activeRideConflict = err?.code === 11000 && (
+                String(err?.message || '').includes('passenger_active_ride_unique')
+                || (err?.keyPattern?.user === 1 && !err?.keyPattern?.idempotencyKey)
+            );
+            if (!activeRideConflict) throw err;
+            await rideModel.updateOne(
+                { _id: ride._id, status: 'scheduled' },
+                { $set: { dispatchLastError: 'USER_HAS_ACTIVE_RIDE' } }
+            );
+            scheduleLog('activation_deferred_active_ride', {
+                kind: 'ride',
+                id: String(ride._id),
+            });
+            continue;
+        }
         if (!claimed) continue;
         notifyScheduleActivated(claimed, 'ride');
         scheduleLog('activated', { kind: 'ride', id: String(claimed._id) });

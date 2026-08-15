@@ -87,6 +87,7 @@ describe('Fluxo de push de nova corrida (Fase 1: C1, C2, C3, C5)', () => {
         const rideRes = await request(app)
             .post('/rides/create')
             .set('Authorization', `Bearer ${userToken}`)
+            .set('Idempotency-Key', '30000000-0000-4000-8000-000000000005')
             .send({
                 pickup: 'Avenida Paulista, 1000',
                 destination: 'Avenida Faria Lima, 2000',

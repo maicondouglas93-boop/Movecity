@@ -34,4 +34,9 @@ const paymentSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+paymentSchema.index(
+    { rideId: 1 },
+    { name: 'ride_payment_unique', unique: true }
+);
+
 module.exports = mongoose.model('payment', paymentSchema);

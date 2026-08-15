@@ -77,6 +77,7 @@ describe('SIMULADOR E2E — Cenário 1: corrida imediata', () => {
             const createRes = await sim.request(sim.app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000006')
                 .send({
                     pickup: 'Avenida Paulista, São Paulo',
                     destination: 'Avenida Brigadeira Faria Lima, São Paulo',

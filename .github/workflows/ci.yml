@@ -26,6 +26,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './Backend/package-lock.json'
       - run: npm ci
+      - name: Contrato crítico de criação atômica
+        run: npm run test:critical:atomic-ride-creation
+      - name: Concorrência e rollback da criação de corrida
+        run: npm run test:integration:atomic-ride-creation
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

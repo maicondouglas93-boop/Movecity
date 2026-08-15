@@ -29,5 +29,9 @@ const promotionUsageSchema = new mongoose.Schema({
 
 promotionUsageSchema.index({ promotionId: 1, userId: 1 });
 promotionUsageSchema.index({ promotionId: 1, createdAt: 1 });
+promotionUsageSchema.index(
+    { rideId: 1 },
+    { name: 'promotion_usage_ride_unique', unique: true }
+);
 
 module.exports = mongoose.model('PromotionUsage', promotionUsageSchema);

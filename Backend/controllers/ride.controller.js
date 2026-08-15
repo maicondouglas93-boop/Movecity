@@ -138,7 +138,8 @@ module.exports.createRide = async (req, res) => {
         // Bloco H (2026-08-02): createRide agora devolve { ride, promoError } — um cupom
         // inválido não impede a corrida de ser criada, só não aplica desconto; o motivo
         // vai junto na resposta pro app do passageiro decidir como avisar.
-        const { ride, promoError } = await rideService.createRide({
+        const idempotencyKey = req.get('Idempotency-Key');
+        const { ride, promoError, replayed } = await rideService.createRide({
             user: req.user._id,
             pickup,
             destination,
@@ -150,32 +151,45 @@ module.exports.createRide = async (req, res) => {
             requestFemaleDriver,
             promoCode,
             scheduledAt,
+            idempotencyKey,
         });
 
         const TRACE_ID = `Ride:${ride._id}`;
         console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
-        // Agendada: sem despacho agora — o cron ativa perto do horário.
-        if (ride.status === 'scheduled') {
-            notificationService.sendScheduleCreated(req.user._id, {
-                kind: 'ride',
-                id: ride._id.toString(),
-                rideId: ride._id.toString(),
-                scheduledAt: ride.scheduledAt,
-            });
-        } else {
-            await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+        // Replay confirma o recurso já criado, sem repetir push/despacho. Corridas
+        // requested continuam visíveis no pull dos motoristas se a conexão anterior
+        // tiver caído entre o commit e a emissão por socket.
+        if (!replayed) {
+            // Agendada: sem despacho agora — o cron ativa perto do horário.
+            if (ride.status === 'scheduled') {
+                notificationService.sendScheduleCreated(req.user._id, {
+                    kind: 'ride',
+                    id: ride._id.toString(),
+                    rideId: ride._id.toString(),
+                    scheduledAt: ride.scheduledAt,
+                });
+            } else {
+                await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+            }
         }
 
         // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
-        res.status(201).json({ ...ride.toObject(), promoError });
+        res.set('Idempotency-Replayed', String(Boolean(replayed)));
+        res.status(replayed ? 200 : 201).json({ ...ride.toObject(), promoError });
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
+        }
+        if (err.code === 'USER_HAS_ACTIVE_RIDE' || err.message === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({
+                message: 'Você já possui uma corrida em andamento.',
+                activeRideId: err.activeRideId,
+            });
         }
         if (err.code === 'SCHEDULE_TOO_SOON') {
             return res.status(400).json({ message: 'Agende com pelo menos 15 minutos de antecedência.' });

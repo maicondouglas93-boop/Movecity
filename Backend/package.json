@@ -20,7 +20,8 @@
     "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",
     "test:movecity:delivery": "jest tests/e2e-simulator/parcel.immediate.test.js --forceExit",
     "test:movecity:scheduled-ride": "jest tests/e2e-simulator/ride.scheduled.test.js --forceExit",
-    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit"
+    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit",
+    "test:critical:token-actor-purpose": "node tests/critical/token-actor-purpose-contract.node.js && node tests/critical/token-policy.behavior.node.js && jest --config jest.critical.config.js --runInBand"
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,14 @@
 const mongoose = require('mongoose');
 
+const rideShareAccessSchema = new mongoose.Schema({
+    // Somente o SHA-256 do identificador aleatório é persistido. Quem obtiver uma
+    // cópia do banco não ganha, por isso, um link público utilizável.
+    tokenHash: { type: String, required: true },
+    createdAt: { type: Date, required: true },
+    expiresAt: { type: Date, required: true },
+    revokedAt: { type: Date, default: null },
+}, { _id: false });
+
 
 const rideSchema = new mongoose.Schema({
     user: {
@@ -61,6 +70,25 @@ const rideSchema = new mongoose.Schema({
         type: String,
         enum: [ 'scheduled', 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'finished', 'cancelled' ],
         default: 'requested',
+    },
+    // Uma corrida possui no máximo um compartilhamento válido. Criar outro troca
+    // o hash de forma atômica (o link anterior deixa de funcionar); `select:false`
+    // impede que o material de revogação apareça nas respostas normais da corrida.
+    shareAccess: {
+        type: rideShareAccessSchema,
+        default: undefined,
+        select: false,
+    },
+    // GPS vinculado ao link desta corrida. Diferente de captain.location, deixa de ser
+    // atualizado quando a corrida termina/revoga/expira e não segue o motorista depois.
+    shareLocation: {
+        type: new mongoose.Schema({
+            lat: Number,
+            lng: Number,
+            capturedAt: Date,
+        }, { _id: false }),
+        default: undefined,
+        select: false,
     },
     // Preenchido quando status === 'scheduled'; despacho ocorre perto do horário.
     scheduledAt: {
@@ -300,6 +328,12 @@ const rideSchema = new mongoose.Schema({
         type: String,
         enum: [ 'pending', 'paid', 'failed', 'refund_pending', 'refunded', 'cancelled' ],
         default: 'pending',
+    },
+    // Momento em que o passageiro informou ter pago cash/Pix. Isto NÃO representa
+    // liquidação: paymentStatus só vira paid em confirmPaymentReceived.
+    paymentReportedAt: {
+        type: Date,
+        default: null,
     },
     paymentMethod: {
         type: String,

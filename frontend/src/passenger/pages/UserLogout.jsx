@@ -20,7 +20,8 @@ import { unregisterPush } from '@/shared/platform/notification.service'
 // Usa axios puro de propósito (não a instância com interceptor): um 401 aqui não deve
 // disparar renovação silenciosa — estamos justamente encerrando a sessão.
 // Fase 1 (C1, 2026-08-05): exceção mantida na auditoria de axios cru — só o timeout
-// da instância é espelhado abaixo, pra saída nunca ficar pendurada num request.
+// da instância é espelhado abaixo, pra saída nunca ficar pendurada num request. O
+// refresh token segue no corpo do POST, nunca na URL.
 export const UserLogout = () => {
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
@@ -44,9 +45,9 @@ export const UserLogout = () => {
         // Desvincula o FCM antes de revogar a sessão; em paralelo havia uma corrida
         // em que /users/logout podia invalidar o JWT antes do DELETE do token.
         unregisterPushToken()
-            .then(() => axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
+            .then(() => axios.post(`${import.meta.env.VITE_BASE_URL}/users/logout`,
+                refreshToken ? { refreshToken } : {}, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
-                params: refreshToken ? { refreshToken } : {},
                 withCredentials: true,
                 timeout: 10000,
             }).catch(() => {
@@ -67,7 +68,7 @@ export const UserLogout = () => {
                 socket.connect()
                 navigate('/login', { replace: true })
             })
-    }, [])
+    }, [navigate, socket])
 
     return <SessionSplash label="Saindo..." />
 }

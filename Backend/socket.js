@@ -13,6 +13,13 @@ const {
 } = require('./utils/captainLocationValidation');
 const { processRideTrackingPoint } = require('./services/rideTracking.service');
 const { calculateLiveRideFare } = require('./services/liveRideFare.service');
+const { ACTIVE_SHARED_RIDE_STATUSES } = require('./utils/rideShareAccess');
+const {
+    verifyPublicMapSubscription,
+    publicDriverId,
+    toPublicLocation,
+    isWithinPublicMapRadius,
+} = require('./utils/publicDriverMap');
 
 let io;
 
@@ -305,7 +312,7 @@ function initializeSocket(server) {
             // Find active ride for this captain and emit update to the rider
             const ride = await rideModel.findOne({
                 captain: userId,
-                status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
+                status: { $in: ACTIVE_SHARED_RIDE_STATUSES }
             }).populate('user');
 
             const dispatchService = require('./services/dispatch.service');
@@ -318,6 +325,24 @@ function initializeSocket(server) {
             let trackingAck = null;
 
             if (ride) {
+                // O link público acompanha uma posição pertencente a esta corrida,
+                // não captain.location. O filtro atômico impede uma atualização que
+                // concorra com finalização/revogação/expiração de sobreviver.
+                await rideModel.updateOne({
+                    _id: ride._id,
+                    status: { $in: ACTIVE_SHARED_RIDE_STATUSES },
+                    'shareAccess.tokenHash': { $exists: true },
+                    'shareAccess.revokedAt': null,
+                    'shareAccess.expiresAt': { $gt: new Date() },
+                }, {
+                    $set: {
+                        shareLocation: {
+                            lat: captainLocation.lat,
+                            lng: captainLocation.lng,
+                            capturedAt: new Date(),
+                        },
+                    },
+                });
                 let currentDistance = ride.actualDistance || 0;
                 let liveFare = null;
 
@@ -457,30 +482,37 @@ function initializeSocket(server) {
             }
         });
 
-        // Fase C (2026-08-03): entrada na sala que recebe os motoristas disponíveis em
-        // tempo real. Exige o JWT do passageiro no próprio evento (mesmo padrão do
-        // join-chat) em vez de depender da ordem do 'join' — e porque posição de frota
-        // é dado sensível: sem essa checagem, qualquer socket anônimo poderia assistir
-        // a localização de todos os motoristas online.
-        socket.on('subscribe-drivers-map', async (data) => {
-            const { token } = data || {};
-            if (!token) {
-                return socket.emit('unauthorized', { message: 'Token ausente' });
+        // Assinatura curta emitida pelo snapshot REST. Ela fixa passageiro, centro e
+        // raio por cinco minutos; não existe mais uma sala global de frota.
+        socket.on('subscribe-drivers-map', async (data, ack) => {
+            const { subscriptionToken } = data || {};
+            if (!subscriptionToken) {
+                if (typeof ack === 'function') ack({ ok: false, code: 'MAP_SUBSCRIPTION_REQUIRED' });
+                return socket.emit('unauthorized', { message: 'Assinatura do mapa ausente' });
             }
             try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                const viewer = await userModel.findById(decoded._id).select('_id isBlocked');
+                const subscription = verifyPublicMapSubscription(subscriptionToken);
+                const viewer = await userModel.findById(subscription.userId).select('_id isBlocked');
                 if (!viewer || viewer.isBlocked) {
+                    if (typeof ack === 'function') ack({ ok: false, code: 'INVALID_VIEWER' });
                     return socket.emit('unauthorized', { message: 'Usuário inválido' });
                 }
-                socket.join('map-viewers');
+                socket.data.driverMapSubscription = {
+                    ...subscription,
+                    visibleDrivers: new Set(),
+                };
+                if (typeof ack === 'function') {
+                    ack({ ok: true, expiresAt: subscription.expiresAt });
+                }
             } catch (err) {
-                socket.emit('unauthorized', { message: 'Token inválido' });
+                delete socket.data.driverMapSubscription;
+                if (typeof ack === 'function') ack({ ok: false, code: 'INVALID_MAP_SUBSCRIPTION' });
+                socket.emit('unauthorized', { message: 'Assinatura do mapa inválida' });
             }
         });
 
         socket.on('unsubscribe-drivers-map', () => {
-            socket.leave('map-viewers');
+            delete socket.data.driverMapSubscription;
         });
 
         // A10 da auditoria de push (2026-08-02): antes, qualquer socket conectado
@@ -684,12 +716,70 @@ const sendMessageToRoom = (roomName, messageObject) => {
     }
 }
 
-// Último estado que a sala 'map-viewers' já recebeu de cada motorista. Existe para não
-// repetir informação: o cliente manda posição a cada 5–10s, mas o mapa do passageiro só
-// precisa saber quando algo MUDA (ficou ocupado, voltou a ficar livre) ou quando o
-// motorista de fato andou. Uma entrada por motorista ativo, liberada no toggle offline.
+// Estado exato permanece somente no servidor para decidir quais assinaturas geográficas
+// podem receber a atualização. O payload público usa posição aproximada e id efêmero.
 const driverMapState = new Map();
-const DRIVER_LOCATION_MIN_INTERVAL_MS = 4000;
+const DRIVER_LOCATION_MIN_INTERVAL_MS = 10000;
+
+const getActiveDriverMapSubscription = (socket) => {
+    const subscription = socket?.data?.driverMapSubscription;
+    if (!subscription) return null;
+    if (subscription.expiresAt <= Date.now()) {
+        delete socket.data.driverMapSubscription;
+        socket.emit('drivers-map-expired');
+        return null;
+    }
+    return subscription;
+};
+
+const emitScopedDriverRemoval = (driverId, event, location) => {
+    if (!io) return;
+    const key = String(driverId);
+    for (const viewerSocket of io.sockets.sockets.values()) {
+        const subscription = getActiveDriverMapSubscription(viewerSocket);
+        if (!subscription) continue;
+        const wasVisible = subscription.visibleDrivers.has(key);
+        const belongsToRadius = location
+            ? isWithinPublicMapRadius(subscription.center, location)
+            : false;
+        if (!wasVisible && !belongsToRadius) continue;
+        viewerSocket.emit(event, {
+            driverId: publicDriverId(key, subscription.nonce),
+        });
+        subscription.visibleDrivers.delete(key);
+    }
+};
+
+const emitScopedDriverLocation = (driverId, state) => {
+    if (!io || !state?.location) return;
+    const key = String(driverId);
+    const publicLocation = toPublicLocation(state.location);
+    if (!publicLocation) return;
+
+    for (const viewerSocket of io.sockets.sockets.values()) {
+        const subscription = getActiveDriverMapSubscription(viewerSocket);
+        if (!subscription) continue;
+        const isInside = isWithinPublicMapRadius(subscription.center, state.location);
+        const wasVisible = subscription.visibleDrivers.has(key);
+        const ephemeralId = publicDriverId(key, subscription.nonce);
+
+        if (!isInside) {
+            if (wasVisible) {
+                viewerSocket.emit('driver-offline', { driverId: ephemeralId });
+                subscription.visibleDrivers.delete(key);
+            }
+            continue;
+        }
+
+        subscription.visibleDrivers.add(key);
+        viewerSocket.emit('driver-location', {
+            driverId: ephemeralId,
+            vehicleType: state.vehicleType,
+            vehicleAuthorization: state.vehicleAuthorization,
+            location: publicLocation,
+        });
+    }
+};
 
 const emitDriverMapUpdate = (driverId, { busy, vehicleType, vehicleAuthorization, location }) => {
     if (!io) return;
@@ -698,8 +788,12 @@ const emitDriverMapUpdate = (driverId, { busy, vehicleType, vehicleAuthorization
 
     if (busy) {
         if (previous && previous.busy) return;
-        driverMapState.set(key, { busy: true, lastEmitAt: Date.now() });
-        io.to('map-viewers').emit('driver-busy', { driverId: key });
+        driverMapState.set(key, {
+            ...previous,
+            busy: true,
+            lastEmitAt: Date.now(),
+        });
+        emitScopedDriverRemoval(key, 'driver-busy', previous?.location);
         return;
     }
 
@@ -708,9 +802,23 @@ const emitDriverMapUpdate = (driverId, { busy, vehicleType, vehicleAuthorization
     const becameAvailable = !previous || previous.busy;
     if (!becameAvailable && Date.now() - previous.lastEmitAt < DRIVER_LOCATION_MIN_INTERVAL_MS) return;
 
-    driverMapState.set(key, { busy: false, lastEmitAt: Date.now() });
-    io.to('map-viewers').emit('driver-location', { driverId: key, vehicleType, vehicleAuthorization, location });
+    const next = {
+        busy: false,
+        lastEmitAt: Date.now(),
+        vehicleType: vehicleType || previous?.vehicleType || 'car',
+        vehicleAuthorization: vehicleAuthorization || previous?.vehicleAuthorization,
+        location: location || previous?.location,
+    };
+    driverMapState.set(key, next);
+    emitScopedDriverLocation(key, next);
 }
+
+const emitDriverMapOffline = (driverId, location) => {
+    const key = String(driverId);
+    const previous = driverMapState.get(key);
+    emitScopedDriverRemoval(key, 'driver-offline', location || previous?.location);
+    driverMapState.delete(key);
+};
 
 // Chamado quando o motorista sai do ar ou é liberado de uma corrida: esquece o último
 // estado para que o próximo evento seja emitido imediatamente, sem cair no throttle nem
@@ -740,5 +848,6 @@ module.exports = {
     publishPersistedChatMessage,
     disconnectSocket,
     emitDriverMapUpdate,
+    emitDriverMapOffline,
     clearDriverMapState,
 };

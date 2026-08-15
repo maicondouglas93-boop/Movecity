@@ -26,6 +26,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './Backend/package-lock.json'
       - run: npm ci
+      - name: Contrato crítico de privacidade do compartilhamento de corrida
+        run: npm run test:critical:ride-share-privacy
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

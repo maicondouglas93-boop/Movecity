@@ -120,7 +120,7 @@ const parcelSchema = new mongoose.Schema({
     },
     paymentStatus: {
         type: String,
-        enum: ['pending', 'paid'],
+        enum: ['pending', 'paid', 'cancelled', 'refunded'],
         default: 'pending',
     },
     commissionPercent: { type: Number, default: 0 },
@@ -131,6 +131,11 @@ const parcelSchema = new mongoose.Schema({
     },
     cancellationReason: String,
     cancelledAt: Date,
+    cancellationReconciliationStatus: {
+        type: String,
+        enum: ['not_required', 'processing', 'retry_required', 'completed'],
+        default: 'not_required',
+    },
     passengerReviewSkippedAt: { type: Date, default: null },
     captainReviewSkippedAt: { type: Date, default: null },
 }, { timestamps: true });

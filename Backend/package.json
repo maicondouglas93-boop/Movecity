@@ -20,7 +20,9 @@
     "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",
     "test:movecity:delivery": "jest tests/e2e-simulator/parcel.immediate.test.js --forceExit",
     "test:movecity:scheduled-ride": "jest tests/e2e-simulator/ride.scheduled.test.js --forceExit",
-    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit"
+    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit",
+    "test:critical:cancellation-reconciliation": "node tests/critical/cancellation-reconciliation-contract.node.js",
+    "test:integration:cancellation-reconciliation": "jest tests/integration/cancellation.reconciliation.test.js --runInBand --forceExit"
   },
   "keywords": [],
   "author": "",

@@ -240,6 +240,15 @@ const rideSchema = new mongoose.Schema({
     cancelledAt: {
         type: Date,
     },
+    cancellationReconciliationStatus: {
+        type: String,
+        enum: ['not_required', 'processing', 'external_pending', 'retry_required', 'completed'],
+        default: 'not_required',
+    },
+    walletRefundedAmount: {
+        type: Number,
+        default: 0,
+    },
     // Histórico de motoristas que desistiram desta corrida ANTES de iniciá-la (volta pro
     // despacho, a corrida em si continua ativa) — diferente de cancelledBy/cancelledAt
     // acima, que só existem numa corrida efetivamente CANCELLED. Sem isso não haveria
@@ -289,7 +298,7 @@ const rideSchema = new mongoose.Schema({
     },
     paymentStatus: {
         type: String,
-        enum: [ 'pending', 'paid', 'failed', 'refunded' ],
+        enum: [ 'pending', 'paid', 'failed', 'refund_pending', 'refunded', 'cancelled' ],
         default: 'pending',
     },
     paymentMethod: {

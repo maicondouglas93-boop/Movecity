@@ -24,7 +24,15 @@ const promotionUsageSchema = new mongoose.Schema({
     discountAmount: {
         type: Number,
         required: true
-    }
+    },
+    // Reversão preserva a trilha: uso cancelado deixa de consumir limites, mas o
+    // documento original continua disponível para auditoria e reconciliação.
+    reversedAt: { type: Date, default: null },
+    reversalReason: String,
+    cancellationReconciliationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'CancellationReconciliation',
+    },
 }, { timestamps: true });
 
 promotionUsageSchema.index({ promotionId: 1, userId: 1 });

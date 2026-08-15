@@ -1930,12 +1930,21 @@ module.exports.getCurrentRide = async ({ user }) => {
         const clock = ride.dispatchLastAttemptAt || ride.activatedAt || ride.createdAt;
         const diffInMinutes = (Date.now() - new Date(clock).getTime()) / 60000;
         if (diffInMinutes > 10) {
-            await transitionRide(ride._id, 'cancelled', {}, {
-                cancelledBy: 'system',
-                cancellationReason: 'Nenhum motorista aceitou a corrida a tempo',
-                cancelledAt: new Date(),
-            });
-            ride = null;
+            const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+            try {
+                await reconcileRideCancellation({
+                    rideId: ride._id,
+                    actor: 'system',
+                    reason: 'Nenhum motorista aceitou a corrida a tempo',
+                    allowedOrigins: ['requested'],
+                });
+                ride = null;
+            } catch (error) {
+                if (!['CANCELLATION_IN_PROGRESS', 'CANCELLATION_RETRY_REQUIRED'].includes(error.code)) {
+                    throw error;
+                }
+                console.error('[RIDE] Autoexpiração aguarda reconciliação:', error.code, String(ride._id));
+            }
         }
     }
 
@@ -2124,24 +2133,24 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
         if (!presentialOrigins.includes(ride.status)) {
             throw new Error('Ride cannot be cancelled at this stage');
         }
-        const cancelled = await rideModel.findOneAndUpdate(
-            { _id: rideId, captain, status: { $in: presentialOrigins }, source: 'driver_initiated' },
-            {
-                $set: {
-                    status: 'cancelled',
-                    cancelledBy: 'captain',
-                    cancellationReason: reason?.trim() || 'Cancelamento de corrida presencial',
-                    cancelledAt: new Date(),
-                },
-            },
-            { new: true }
-        );
-        if (!cancelled) {
-            throw new Error('Ride cannot be cancelled at this stage');
+        const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+        let cancelled;
+        try {
+            cancelled = await reconcileRideCancellation({
+                rideId,
+                actor: 'captain',
+                captainId: captain,
+                reason: reason?.trim() || 'Cancelamento de corrida presencial',
+                allowedOrigins: presentialOrigins,
+            });
+        } catch (err) {
+            if (err.code === 'RIDE_NOT_FOUND') throw new Error('Ride not found');
+            if (err.code === 'RIDE_NOT_CANCELLABLE') throw new Error('Ride cannot be cancelled at this stage');
+            throw err;
         }
         const dispatchService = require('./dispatch.service');
         await dispatchService.releaseCaptainBusyLock(captain._id || captain);
-        return rideModel.findById(cancelled._id).populate('user');
+        return cancelled;
     }
 
     if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
@@ -2165,7 +2174,7 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     }
 
     const dispatchService = require('./dispatch.service');
-    await dispatchService.releaseCaptainBusyLock(captain._id);
+    await dispatchService.releaseCaptainBusyLock(captain._id || captain);
 
     // Implementação do sistema de cancelamento (2026-08-04): quem chama precisa do
     // socketId do passageiro pra avisar em tempo real (sendMessageToSocketId, não a
@@ -2228,42 +2237,20 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
         throw new Error('Ride id and user are required');
     }
 
-    // Pré-checagem só pra mensagem de erro e pra decidir a taxa de cancelamento a partir
-    // do status atual — a garantia real de concorrência é o findOneAndUpdate atômico
-    // abaixo (P2.1 da auditoria: sem isso, um `cancel` e um `start`/`confirm` simultâneos
-    // podiam ambos passar pela checagem em memória e produzir um estado impossível).
-    const ride = await rideModel.findOne({
-        _id: rideId,
-        user
-    });
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    if (!VALID_ORIGINS_BY_TARGET.cancelled.includes(ride.status)) {
-        throw new Error('Ride cannot be cancelled at this stage');
-    }
-
-    // Taxa de cancelamento: só se aplica quando já existe um motorista comprometido
-    // com a corrida (aceitou e está a caminho/esperando) — cancelar antes de qualquer
-    // motorista aceitar não gera taxa. Valor vem do pricingSnapshot (contrato),
-    // não da config live do painel.
-    const capturedByDriver = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status);
-    let cancellationFeeCharged = 0;
-    if (capturedByDriver && ride.captain) {
-        const tariffSetting = await resolveTariffSetting(ride);
-        cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
-    }
-
-    const updated = await transitionRide(rideId, 'cancelled', { user }, {
-        cancellationFeeCharged,
-        cancelledBy: 'passenger',
-        cancellationReason: reason || undefined,
-        cancelledAt: new Date(),
-    });
-    if (!updated) {
-        throw new Error('Ride cannot be cancelled at this stage');
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    let updated;
+    try {
+        updated = await reconcileRideCancellation({
+            rideId,
+            actor: 'passenger',
+            userId: user,
+            reason,
+            allowedOrigins: VALID_ORIGINS_BY_TARGET.cancelled,
+        });
+    } catch (err) {
+        if (err.code === 'RIDE_NOT_FOUND') throw new Error('Ride not found');
+        if (err.code === 'RIDE_NOT_CANCELLABLE') throw new Error('Ride cannot be cancelled at this stage');
+        throw err;
     }
 
     if (updated.captain) {
@@ -2275,6 +2262,28 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
 
     return updated;
 }
+
+module.exports.cancelRideByAdmin = async ({ rideId, reason, admin, extraSet }) => {
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    return reconcileRideCancellation({
+        rideId,
+        actor: 'admin',
+        requestedBy: admin?._id || admin,
+        reason: reason || 'Cancelada pelo painel admin',
+        extraSet,
+    });
+};
+
+module.exports.cancelRideBySystem = async ({ rideId, reason, allowedOrigins, extraSet }) => {
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    return reconcileRideCancellation({
+        rideId,
+        actor: 'system',
+        reason,
+        allowedOrigins,
+        extraSet,
+    });
+};
 
 module.exports.submitReview = async ({ rideId, user, rating, comment, issueCategory }) => {
     if (!rideId || !user || !rating) {

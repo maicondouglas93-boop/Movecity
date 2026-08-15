@@ -6,7 +6,7 @@ const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const { calculateLiveRideFare } = require('../services/liveRideFare.service');
-const jwt = require('jsonwebtoken');
+const authService = require('../services/auth.service');
 const {
     sanitizeCaptainFinance,
     computeDriverAmount,
@@ -806,11 +806,11 @@ module.exports.createRideShareLink = async (req, res) => {
 
         // Link temporário e somente-leitura. O token não contém telefone, nome ou
         // localização; apenas autoriza o endpoint público a devolver a visão sanitizada.
-        const token = jwt.sign({
-            scope: 'ride_share',
+        const token = authService.signShareToken({
             rideId: ride._id.toString(),
             userId: req.user._id.toString(),
-        }, process.env.JWT_SECRET, { expiresIn: '6h' });
+            expiresIn: '6h',
+        });
         const frontendOrigin = String(process.env.FRONTEND_URL || req.get('origin') || '').replace(/\/$/, '');
         const path = `/track/${encodeURIComponent(token)}`;
 
@@ -826,7 +826,7 @@ module.exports.createRideShareLink = async (req, res) => {
 
 module.exports.getSharedRide = async (req, res) => {
     try {
-        const payload = jwt.verify(req.params.token, process.env.JWT_SECRET);
+        const payload = authService.verifyShareToken(req.params.token);
         if (payload?.scope !== 'ride_share' || !payload?.rideId || !payload?.userId) {
             return res.status(401).json({ message: 'Compartilhamento inválido.' });
         }

@@ -1,7 +1,5 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 
 const adminUserSchema = new mongoose.Schema({
     name: {
@@ -54,16 +52,12 @@ adminUserSchema.methods.comparePassword = async function(candidatePassword) {
 };
 
 adminUserSchema.methods.generateAuthToken = function() {
-    const token = jwt.sign({ _id: this._id, role: this.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
-    return token;
+    const { generateAccessToken } = require('../services/auth.service');
+    return generateAccessToken(this._id, 'admin', { role: this.role });
 };
 
 adminUserSchema.methods.generateRefreshToken = function() {
-    // jti garante um token diferente a cada chamada mesmo dentro do mesmo segundo (o
-    // "iat" do JWT só tem granularidade de segundo) — sem isso, duas rotações rápidas
-    // gerariam o mesmo token e a rotação não teria efeito nenhum.
-    const token = jwt.sign({ _id: this._id, jti: crypto.randomUUID() }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    return token;
+    throw new Error('Use authService.issueTokenPair: refresh tokens são opacos e persistidos por hash');
 };
 
 const adminUserModel = mongoose.model('AdminUser', adminUserSchema);

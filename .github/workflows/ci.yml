@@ -26,6 +26,16 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './Backend/package-lock.json'
       - run: npm ci
+      - name: Contratos críticos de ator e finalidade dos tokens
+        run: npm run test:critical:token-actor-purpose
+      - name: Rotação atômica e concorrente de refresh tokens
+        run: npm run test:critical:refresh-rotation
+      - name: Armazenamento seguro de sessão web e Android
+        run: npm run test:critical:refresh-storage
+      - name: Integração da rotação em Mongo replica set
+        run: npm run test:integration:refresh-rotation
+      - name: Contrato crítico de CSRF e logout
+        run: npm run test:critical:csrf
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

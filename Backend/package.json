@@ -15,12 +15,17 @@
     "test:integration": "jest tests/integration",
     "test:sockets": "jest tests/sockets",
     "test:security": "jest tests/security",
+    "test:critical:csrf": "node --test tests/critical/csrf-logout-contract.test.js",
     "test:load": "artillery run tests/performance/load.yml",
     "test:movecity": "jest tests/e2e-simulator --runInBand --forceExit --verbose",
     "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",
     "test:movecity:delivery": "jest tests/e2e-simulator/parcel.immediate.test.js --forceExit",
     "test:movecity:scheduled-ride": "jest tests/e2e-simulator/ride.scheduled.test.js --forceExit",
-    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit"
+    "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit",
+    "test:critical:token-actor-purpose": "node tests/critical/token-actor-purpose-contract.node.js && node tests/critical/token-policy.behavior.node.js && jest --config jest.critical.config.js --runInBand",
+    "test:critical:refresh-rotation": "node tests/critical/refresh-rotation-contract.node.js && node tests/critical/refresh-rotation.behavior.node.js",
+    "test:critical:refresh-storage": "node tests/critical/refresh-storage-contract.node.js",
+    "test:integration:refresh-rotation": "jest tests/integration/auth.session.test.js --runInBand --forceExit"
   },
   "keywords": [],
   "author": "",

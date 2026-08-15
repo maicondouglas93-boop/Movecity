@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { clearAdminSession, setAdminAccessToken } from '../services/api';
 import { requestAdminFCMToken, getCurrentAdminFcmToken } from '../services/fcm';
 
 const AuthContext = createContext();
@@ -19,14 +19,6 @@ export const AuthProvider = ({ children }) => {
     let cancelled = false;
 
     const restoreSession = async () => {
-      const storedToken = localStorage.getItem('adminToken');
-      const storedRefresh = localStorage.getItem('adminRefreshToken');
-
-      if (!storedToken && !storedRefresh) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
       // Mostra imediatamente o que está em cache pra não piscar a tela de login
       // enquanto a confirmação vai e volta; o valor é substituído pelo do servidor
       // logo em seguida (ou a sessão é descartada, se for inválida).
@@ -66,13 +58,9 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await api.post('/admin/login', { email, password });
-      const { admin, token, refreshToken } = response.data;
+      const { admin, token } = response.data;
 
-      localStorage.setItem('adminToken', token);
-      // Auditoria de sessão (2026-08-02, S6): antes o refresh token vinha na resposta
-      // do login e era descartado — sem ele guardado, não tinha como renovar o access
-      // token depois de 15min, e a sessão morria com reload duro no meio do trabalho.
-      localStorage.setItem('adminRefreshToken', refreshToken);
+      setAdminAccessToken(token);
       localStorage.setItem('adminUser', JSON.stringify(admin));
 
       setUser(admin);
@@ -97,14 +85,11 @@ export const AuthProvider = ({ children }) => {
       if (fcmToken) {
         await api.delete('/admin/notifications/token', { data: { token: fcmToken } }).catch(() => {});
       }
-      // Envia o refresh token pro backend revogar só esta sessão (sem ele, o backend
-      // encerra todas as sessões deste admin — ver invalidateRefreshToken).
-      await api.post('/admin/logout', { refreshToken: localStorage.getItem('adminRefreshToken') });
+      await api.post('/admin/logout', {});
     } catch (e) {
       console.error('Logout error', e);
     } finally {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminRefreshToken');
+      clearAdminSession();
       localStorage.removeItem('adminUser');
       setUser(null);
     }

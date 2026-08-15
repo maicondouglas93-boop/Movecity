@@ -6,12 +6,20 @@ const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const { calculateLiveRideFare } = require('../services/liveRideFare.service');
-const jwt = require('jsonwebtoken');
+const captainModel = require('../models/captain.model');
 const {
     sanitizeCaptainFinance,
     computeDriverAmount,
 } = require('../utils/financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const {
+    RIDE_SHARE_TTL_SECONDS,
+    ACTIVE_SHARED_RIDE_STATUSES,
+    createRideShareAccess,
+    verifyRideShareToken,
+    validateRideShareAccess,
+    toSharedRideResponse,
+} = require('../utils/rideShareAccess');
 const {
     PAYMENT_REPORTED_EVENT,
     buildCaptainPaymentReportPayload,
@@ -815,28 +823,29 @@ module.exports.createRideShareLink = async (req, res) => {
             return res.status(400).json({ message: errors.array()[0]?.msg || 'Corrida inválida' });
         }
 
-        const ride = await rideModel.findOne({
+        const access = createRideShareAccess({
+            rideId: req.body.rideId,
+            userId: req.user._id,
+        });
+        // A gravação e a validação de dono/estado são uma única operação.
+        // Criar outro link substitui o hash atual e revoga imediatamente o anterior.
+        const ride = await rideModel.findOneAndUpdate({
             _id: req.body.rideId,
             user: req.user._id,
-            status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
-        }).select('_id user');
+            status: { $in: ACTIVE_SHARED_RIDE_STATUSES },
+        }, {
+            $set: { shareAccess: access.record },
+        }, { new: true }).select('_id user');
         if (!ride) {
             return res.status(404).json({ message: 'Corrida ativa não encontrada.' });
         }
 
-        // Link temporário e somente-leitura. O token não contém telefone, nome ou
-        // localização; apenas autoriza o endpoint público a devolver a visão sanitizada.
-        const token = jwt.sign({
-            scope: 'ride_share',
-            rideId: ride._id.toString(),
-            userId: req.user._id.toString(),
-        }, process.env.JWT_SECRET, { expiresIn: '6h' });
         const frontendOrigin = String(process.env.FRONTEND_URL || req.get('origin') || '').replace(/\/$/, '');
-        const path = `/track/${encodeURIComponent(token)}`;
+        const path = `/track/${encodeURIComponent(access.token)}`;
 
         return res.status(201).json({
-            token,
-            expiresInSeconds: 6 * 60 * 60,
+            token: access.token,
+            expiresInSeconds: RIDE_SHARE_TTL_SECONDS,
             url: frontendOrigin ? `${frontendOrigin}${path}` : path,
         });
     } catch (err) {
@@ -846,41 +855,63 @@ module.exports.createRideShareLink = async (req, res) => {
 
 module.exports.getSharedRide = async (req, res) => {
     try {
-        const payload = jwt.verify(req.params.token, process.env.JWT_SECRET);
-        if (payload?.scope !== 'ride_share' || !payload?.rideId || !payload?.userId) {
-            return res.status(401).json({ message: 'Compartilhamento inválido.' });
-        }
-
+        const payload = verifyRideShareToken(req.params.token);
         const ride = await rideModel.findById(payload.rideId)
-            .populate('captain', 'fullname profilePicture rating vehicle location lastSeenAt')
-            .select('user status pickup destination vehicleType captain updatedAt');
+            .select('user status pickup destination captain lastLocation updatedAt +shareAccess +shareLocation');
         if (!ride || String(ride.user) !== String(payload.userId)) {
             return res.status(404).json({ message: 'Corrida compartilhada não encontrada.' });
         }
+        const access = validateRideShareAccess(payload, ride.shareAccess);
+        if (!access.valid) {
+            return res.status(410).json({ message: 'Este compartilhamento foi encerrado.' });
+        }
 
-        const captain = ride.captain;
-        return res.status(200).json({
-            rideId: ride._id,
-            status: ride.status,
-            pickup: ride.pickup,
-            destination: ride.destination,
-            updatedAt: ride.updatedAt,
-            captain: captain ? {
-                fullname: captain.fullname,
-                profilePicture: captain.profilePicture,
-                rating: captain.rating,
-                vehicle: captain.vehicle,
-                lastSeenAt: captain.lastSeenAt,
-            } : null,
-            location: captain?.location?.ltd != null && captain?.location?.lng != null
-                ? { lat: captain.location.ltd, lng: captain.location.lng }
-                : null,
-        });
+        // Não seleciona `location`: o endpoint público nunca consulta o GPS atual do
+        // motorista. A posição ativa vem do registro vinculado à corrida e some
+        // completamente no estado final.
+        const captain = ride.captain
+            ? await captainModel.findById(ride.captain)
+                .select('fullname profilePicture rating vehicle')
+            : null;
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.status(200).json(toSharedRideResponse({ ride, captain }));
     } catch (err) {
         if (err?.name === 'TokenExpiredError') {
             return res.status(410).json({ message: 'Este compartilhamento expirou.' });
         }
         return res.status(401).json({ message: 'Compartilhamento inválido.' });
+    }
+}
+
+module.exports.revokeRideShareLink = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: errors.array()[0]?.msg || 'Corrida inválida' });
+        }
+
+        const revoked = await rideModel.findOneAndUpdate({
+            _id: req.params.rideId,
+            user: req.user._id,
+            'shareAccess.tokenHash': { $exists: true },
+        }, {
+            $set: { 'shareAccess.revokedAt': new Date() },
+        }, { new: true }).select('_id');
+
+        if (!revoked) {
+            const ownedRide = await rideModel.exists({
+                _id: req.params.rideId,
+                user: req.user._id,
+            });
+            if (!ownedRide) {
+                return res.status(404).json({ message: 'Corrida não encontrada.' });
+            }
+        }
+
+        // Idempotente: encerrar novamente não revela se um link estava ativo.
+        return res.status(204).send();
+    } catch (err) {
+        return res.status(500).json({ message: 'Não foi possível encerrar o compartilhamento.' });
     }
 }
 

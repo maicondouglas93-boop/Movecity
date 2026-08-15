@@ -18,6 +18,7 @@
     "test:critical:csrf": "node --test tests/critical/csrf-logout-contract.test.js",
     "test:critical:map-privacy": "node --test tests/critical/public-driver-map-contract.node.js",
     "test:critical:payment": "node --test tests/critical/payment-report-contract.test.js",
+    "test:critical:ride-share-privacy": "node --test tests/critical/ride-share-privacy-contract.node.js",
     "test:load": "artillery run tests/performance/load.yml",
     "test:movecity": "jest tests/e2e-simulator --runInBand --forceExit --verbose",
     "test:movecity:ride": "jest tests/e2e-simulator/ride.immediate.test.js --forceExit",

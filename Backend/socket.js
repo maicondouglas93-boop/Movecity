@@ -13,6 +13,7 @@ const {
 } = require('./utils/captainLocationValidation');
 const { processRideTrackingPoint } = require('./services/rideTracking.service');
 const { calculateLiveRideFare } = require('./services/liveRideFare.service');
+const { ACTIVE_SHARED_RIDE_STATUSES } = require('./utils/rideShareAccess');
 const {
     verifyPublicMapSubscription,
     publicDriverId,
@@ -311,7 +312,7 @@ function initializeSocket(server) {
             // Find active ride for this captain and emit update to the rider
             const ride = await rideModel.findOne({
                 captain: userId,
-                status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
+                status: { $in: ACTIVE_SHARED_RIDE_STATUSES }
             }).populate('user');
 
             const dispatchService = require('./services/dispatch.service');
@@ -324,6 +325,24 @@ function initializeSocket(server) {
             let trackingAck = null;
 
             if (ride) {
+                // O link público acompanha uma posição pertencente a esta corrida,
+                // não captain.location. O filtro atômico impede uma atualização que
+                // concorra com finalização/revogação/expiração de sobreviver.
+                await rideModel.updateOne({
+                    _id: ride._id,
+                    status: { $in: ACTIVE_SHARED_RIDE_STATUSES },
+                    'shareAccess.tokenHash': { $exists: true },
+                    'shareAccess.revokedAt': null,
+                    'shareAccess.expiresAt': { $gt: new Date() },
+                }, {
+                    $set: {
+                        shareLocation: {
+                            lat: captainLocation.lat,
+                            lng: captainLocation.lng,
+                            capturedAt: new Date(),
+                        },
+                    },
+                });
                 let currentDistance = ride.actualDistance || 0;
                 let liveFare = null;
 

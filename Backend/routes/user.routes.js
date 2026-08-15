@@ -42,7 +42,7 @@ router.put('/profile',
 // token já expirou. A autenticação aqui é o próprio refresh token.
 router.post('/refresh', userController.refreshUserSession)
 
-router.get('/logout', authMiddleware.authUser, userController.logoutUser)
+router.post('/logout', authMiddleware.authUser, userController.logoutUser)
 
 router.post('/account-deletion',
     authMiddleware.authUser,

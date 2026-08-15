@@ -700,12 +700,18 @@ const Home = () => {
                     Authorization: `Bearer ${getAccessToken('user')}`
                 }
             });
+            const walletRefundedAmount = Number(response.data?.walletRefundedAmount || 0);
+            const walletRefundText = walletRefundedAmount > 0
+                ? ` ${formatCurrencyBRL(walletRefundedAmount)} foram devolvidos à sua carteira.`
+                : '';
             if (response.data?.cancellationFeeCharged > 0) {
                 addToast(
-                    `Corrida cancelada. Como o motorista já estava a caminho, uma taxa de ${formatCurrencyBRL(response.data.cancellationFeeCharged)} pode ser cobrada — acerte diretamente com ele.`,
+                    `Corrida cancelada.${walletRefundText} Como o motorista já estava a caminho, uma taxa de ${formatCurrencyBRL(response.data.cancellationFeeCharged)} pode ser cobrada — acerte diretamente com ele.`,
                     'info',
                     8000
                 );
+            } else if (walletRefundedAmount > 0) {
+                addToast(`Corrida cancelada.${walletRefundText}`, 'success', 6000);
             } else {
                 addToast('Corrida cancelada.', 'success');
             }

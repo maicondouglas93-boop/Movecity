@@ -901,7 +901,6 @@ module.exports.createManualRide = async (req, res, next) => {
     if (manualRideValidationError(req, res)) return;
     const Ride = require('../models/ride.model');
     const User = require('../models/user.model');
-    const Payment = require('../models/payment.model');
     const rideService = require('../services/ride.service');
     const dispatchService = require('../services/dispatch.service');
     const { dispatchRideToCaptains } = require('./ride.controller');
@@ -1004,14 +1003,11 @@ module.exports.createManualRide = async (req, res, next) => {
 
         if (captainId && offeredCount !== 1) {
             const reason = 'Motorista selecionado ficou indisponível antes do despacho';
-            await Ride.updateOne(
-                { _id: ride._id, status: 'requested' },
-                {
-                    $set: { status: 'cancelled', cancelledBy: 'admin', cancellationReason: reason, cancelledAt: new Date() },
-                    $push: { statusHistory: { status: 'cancelled', at: new Date() } },
-                }
-            );
-            await Payment.deleteMany({ rideId: ride._id });
+            await rideService.cancelRideByAdmin({
+                rideId: ride._id,
+                reason,
+                admin: req.admin,
+            });
             await adminService.logAction({
                 adminId: req.admin._id,
                 adminName: req.admin.name,
@@ -1123,6 +1119,12 @@ module.exports.cancelRide = async (req, res, next) => {
 
         res.status(200).json(toAdminRideDTO(result));
     } catch (error) {
+        if (error.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: error.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (error.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: error.code, message: 'Cancelamento financeiro pendente; repita a operação para reconciliar.' });
+        }
         next(error);
     }
 };
@@ -1483,6 +1485,7 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
         const parcel = await parcelService.adminCancelParcel({
             parcelId: req.params.id,
             reason: req.body.reason,
+            admin: req.admin,
         });
 
         try {
@@ -1516,6 +1519,12 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
     } catch (error) {
         if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         if (error.message === 'PARCEL_NOT_CANCELLABLE') return res.status(400).json({ message: error.message });
+        if (error.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: error.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (error.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: error.code, message: 'Cancelamento pendente de reconciliação; repita a operação.' });
+        }
         next(error);
     }
 };

@@ -2,6 +2,7 @@ const rechargeModel = require('../models/recharge.model');
 const rideModel = require('../models/ride.model');
 const walletService = require('../services/wallet.service');
 const notificationService = require('../services/notification.service');
+const cancellationReconciliationService = require('../services/cancellationReconciliation.service');
 
 module.exports.handleAsaasWebhook = async (req, res) => {
     try {
@@ -19,6 +20,29 @@ module.exports.handleAsaasWebhook = async (req, res) => {
 
         if (!event || !event.event) {
             return res.status(400).send('Invalid webhook payload');
+        }
+
+        const refundEvents = [
+            'PAYMENT_REFUNDED',
+            'PAYMENT_PARTIALLY_REFUNDED',
+            'PAYMENT_REFUND_IN_PROGRESS',
+            'PAYMENT_REFUND_DENIED',
+        ];
+        if (refundEvents.includes(event.event)) {
+            const handled = await cancellationReconciliationService.handleAsaasRefundEvent({
+                eventId: event.id,
+                eventName: event.event,
+                payment: event.payment,
+            });
+            if (handled) {
+                return res.status(200).send('Cancellation refund reconciled');
+            }
+            if (event.event === 'PAYMENT_REFUND_DENIED') {
+                notificationService
+                    .sendPaymentProblemAlert(`Estorno ${event.payment?.id || 'sem id'} foi recusado pelo Asaas.`)
+                    .catch(console.error);
+            }
+            return res.status(200).send('Refund event not linked to cancellation');
         }
 
         if (event.event === 'PAYMENT_RECEIVED' || event.event === 'PAYMENT_CONFIRMED') {

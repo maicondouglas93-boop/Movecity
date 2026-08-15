@@ -53,3 +53,15 @@ module.exports.rideStartPinLimiter = rateLimit({
     },
     message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
 });
+
+// Snapshot pré-corrida: impede varredura automatizada de várias cidades/áreas por uma
+// conta autenticada. O cliente legítimo renova a assinatura curta a cada quatro minutos.
+module.exports.publicDriverMapLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 12,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: (req) => `public-driver-map:${req.user?._id?.toString?.() || req.ip || 'anon'}`,
+    message: { message: 'Muitas consultas ao mapa. Aguarde alguns minutos.' },
+});

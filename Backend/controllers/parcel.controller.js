@@ -409,6 +409,12 @@ module.exports.cancelParcel = async (req, res) => {
         if (err.message === 'PARCEL_NOT_CANCELLABLE') {
             return res.status(400).json({ message: 'Não é possível cancelar neste status' });
         }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento está pendente de reconciliação. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 };

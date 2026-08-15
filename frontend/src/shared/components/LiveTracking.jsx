@@ -509,6 +509,7 @@ const LiveTracking = (props) => {
     // atualizações incrementais. Ativo apenas quando props.showNearbyDrivers é true
     // (Home do passageiro sem corrida aceita); telas do motorista não ligam a camada.
     useEffect(() => {
+        let cancelled = false;
         const clearAllDrivers = () => {
             if (driversAnimRef.current) {
                 cancelAnimationFrame(driversAnimRef.current);
@@ -602,16 +603,17 @@ const LiveTracking = (props) => {
 
         const syncDrivers = async () => {
             const pos = currentPositionRef.current;
-            const token = getAccessToken('user');
-            if (!pos || !token) return;
+            const accessToken = getAccessToken('user');
+            if (!pos || !accessToken) return;
             try {
                 const response = await fetch(
                     `${import.meta.env.VITE_BASE_URL}/maps/nearby-drivers?lat=${pos.lat}&lng=${pos.lng}`,
-                    { headers: { Authorization: `Bearer ${token}` } }
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
                 );
-                if (!response.ok) return;
+                if (!response.ok || cancelled) return;
+                const subscriptionToken = response.headers.get('x-driver-map-subscription');
                 const drivers = await response.json();
-                if (!Array.isArray(drivers)) return;
+                if (!Array.isArray(drivers) || cancelled) return;
                 // Reconciliação incremental: remove quem saiu, atualiza/insere o resto.
                 const seen = new Set(drivers.map(d => String(d.id)));
                 for (const id of [...driversRef.current.keys()]) {
@@ -623,45 +625,51 @@ const LiveTracking = (props) => {
                     vehicleAuthorization: d.vehicleAuthorization,
                     location: d.location,
                 }));
+                // O access token autentica somente o snapshot REST. O stream usa esta
+                // assinatura curta, vinculada ao mesmo centro/raio e aos ids efêmeros.
+                if (subscriptionToken) {
+                    socket.emit('subscribe-drivers-map', { subscriptionToken });
+                }
             } catch (err) {
                 console.error('Erro ao sincronizar motoristas próximos:', err);
             }
         };
 
-        const subscribe = () => {
-            const token = getAccessToken('user');
-            if (token) socket.emit('subscribe-drivers-map', { token });
-        };
-
         const handleDriverLocation = (data) => upsertDriver(data || {});
         const handleDriverGone = (data) => removeDriver(data?.driverId);
         const handleConnect = () => {
-            // Reconexão zera as rooms no servidor — reentra e refaz o snapshot
-            // (eventos perdidos durante a queda não são reenviados).
-            subscribe();
+            // A conexão nova precisa de outro snapshot/assinatura; eventos perdidos
+            // durante a queda são reconciliados pela lista completa.
             syncDrivers();
         };
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
-                subscribe();
                 syncDrivers();
             }
         };
+        const handleSubscriptionExpired = () => {
+            clearAllDrivers();
+            syncDrivers();
+        };
 
-        subscribe();
         syncDrivers();
+        const subscriptionRefreshId = window.setInterval(syncDrivers, 4 * 60 * 1000);
         socket.on('connect', handleConnect);
         socket.on('driver-location', handleDriverLocation);
         socket.on('driver-busy', handleDriverGone);
         socket.on('driver-offline', handleDriverGone);
+        socket.on('drivers-map-expired', handleSubscriptionExpired);
         document.addEventListener('visibilitychange', handleVisibility);
 
         return () => {
+            cancelled = true;
+            window.clearInterval(subscriptionRefreshId);
             if (socket.connected) socket.emit('unsubscribe-drivers-map');
             socket.off('connect', handleConnect);
             socket.off('driver-location', handleDriverLocation);
             socket.off('driver-busy', handleDriverGone);
             socket.off('driver-offline', handleDriverGone);
+            socket.off('drivers-map-expired', handleSubscriptionExpired);
             document.removeEventListener('visibilitychange', handleVisibility);
             clearAllDrivers();
         };

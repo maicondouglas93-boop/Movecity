@@ -54,7 +54,7 @@ A config do Firebase chega ao service worker de push pela **query string da URL 
 ## Arquitetura em uma olhada
 
 - `src/passenger/` e `src/driver/` — telas de cada papel; `src/shared/` — serviços, contexts e UI comuns.
-- HTTP: **sempre** via `@/shared/services/axios` (timeout 10s, withCredentials, refresh em 401). Exceção deliberada: os dois logouts (ver comentário nos arquivos).
+- HTTP: via `@/shared/services/axios` (timeout 10s, withCredentials, refresh em 401). O logout do passageiro usa axios sem interceptor para não renovar a sessão durante a saída; ambos os logouts usam `POST` e enviam o refresh token no corpo.
 - Tempo real: singleton em `src/shared/contexts/SocketContext.jsx` com `joinWithRetry` autenticado.
 - Offline: fila de ações críticas em `src/shared/services/offlineQueue.js` (Dexie), reexecutada via HTTP na reconexão.
 - Erros de render: `AppErrorBoundary` no topo das duas entradas, integrado ao Sentry.

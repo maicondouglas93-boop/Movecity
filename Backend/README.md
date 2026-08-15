@@ -94,7 +94,7 @@ Logout the current user and blacklist the token provided in cookie or headers
 
 ### HTTP Method
 
-`GET`
+`POST`
 
 ### Authentication
 
@@ -246,7 +246,7 @@ Logout the current captain and blacklist the token provided in cookie or headers
 
 ### HTTP Method
 
-`GET`
+`POST`
 
 ### Authentication
 

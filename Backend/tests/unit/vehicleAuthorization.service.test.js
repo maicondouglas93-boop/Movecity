@@ -79,6 +79,7 @@ describe('Autorização de veículo do motorista', () => {
             fare: 20,
             vehicleType: 'car',
             status: 'requested',
+            otp: '123456',
         });
 
         await expect(rideService.acceptRideAtomic({ rideId: ride._id, captain }))

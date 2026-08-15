@@ -1,12 +1,16 @@
 const jwt = require('jsonwebtoken');
 const adminUserModel = require('../models/adminUser.model');
+const { resolveAccessToken } = require('../utils/authToken');
 
 module.exports.authAdmin = async (req, res, next) => {
-    const token = req.cookies.adminToken || req.headers.authorization?.split(' ')[ 1 ];
+    const { token, source } = resolveAccessToken(req, 'adminToken');
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+
+    req.authToken = token;
+    req.authSource = source;
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);

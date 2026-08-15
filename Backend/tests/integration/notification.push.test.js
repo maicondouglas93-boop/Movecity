@@ -333,12 +333,12 @@ describe('Fase 5: correções de funcionalidade (A5, A6, pagamento, carteira)', 
         expect(notification).toBeFalsy();
     });
 
-    it('Pagamento: passageiro pagar a corrida gera push para o motorista', async () => {
+    it('Pagamento cash/Pix: informe do passageiro gera push informativo para o motorista', async () => {
         const user = await createUser();
         const captain = await createCaptain();
         const ride = await createRide({
             user: user._id, captain: captain._id, status: 'finished',
-            paymentMethod: 'carteira', fare: 30, finalPrice: 30
+            paymentMethod: 'pix', fare: 30, finalPrice: 30
         });
         const userToken = generateAuthToken(user, 'user');
         const captainToken = generateAuthToken(captain, 'captain');

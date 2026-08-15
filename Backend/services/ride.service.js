@@ -1876,29 +1876,12 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain, allowWalletAut
     return updatedRide;
 }
 
-// Auditoria financeira (2026-08-08, CRÍTICO #3): antes gerava paymentID/orderId/
-// signature com crypto.randomBytes — nomes de campo que imitam retorno de gateway
-// real, mas 100% fabricados localmente, sem nenhuma chamada a gateway. Nada lê esses
-// valores de volta (nem o frontend, nem nenhum fluxo de conciliação real) — só
-// existiam pra criar um rastro que parecia de gateway e não era. Este endpoint é o
-// passageiro confirmando "já paguei" (dinheiro/Pix, fora do app); o efeito
-// financeiro real (crédito/comissão) só acontece em confirmPaymentReceived, do lado
-// do motorista. Aqui só confirma que a corrida existe e pertence a este passageiro.
 module.exports.payRide = async ({ rideId, user }) => {
-    if (!rideId) {
-        throw new Error('Ride id is required');
-    }
-
-    const ride = await rideModel.findOne({
-        _id: rideId,
-        user: user._id
-    }).populate('user').populate('captain');
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    return ride;
+    // O passageiro apenas informa pagamento cash/Pix. O serviço isolado aplica a
+    // guarda atômica/idempotente; liquidação continua exclusiva de
+    // confirmPaymentReceived, executada pelo motorista após conferir o recebimento.
+    const paymentReportService = require('./paymentReport.service');
+    return paymentReportService.reportPayment({ rideId, user });
 }
 
 module.exports.getCurrentRide = async ({ user }) => {

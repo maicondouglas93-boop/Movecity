@@ -293,11 +293,18 @@ const Riding = () => {
         setError('')
         setLoading(true)
         try {
-            await api.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
                 rideId: ride._id
             }, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             })
+            addToast(
+                response.data?.reportStatus === 'already_confirmed'
+                    ? 'O motorista já confirmou o recebimento.'
+                    : 'Informação enviada. O motorista ainda precisa confirmar o recebimento.',
+                'info',
+                6000,
+            )
             setModalStep('rating')
         } catch (err) {
             if (!navigator.onLine || err.message === 'Network Error') {
@@ -306,7 +313,7 @@ const Riding = () => {
                     rideId: ride._id,
                     payload: { rideId: ride._id }
                 }).catch(e => console.error(e));
-                addToast('Sem conexão — a confirmação será enviada assim que a internet voltar.', 'info', 6000);
+                addToast('Sem conexão — a informação de pagamento será enviada quando a internet voltar.', 'info', 6000);
                 setModalStep('rating')
             } else {
                 setError(getFriendlyErrorMessage(err, 'Não foi possível confirmar. Tente novamente.'))

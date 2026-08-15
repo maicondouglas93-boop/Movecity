@@ -1,8 +1,5 @@
-// Fase C da experiência de corrida ativa (2026-08-03): fluxo em tempo real do mapa do
-// passageiro. Valida a cadeia completa: passageiro entra na sala 'map-viewers' (com JWT),
-// motorista manda localização pelo pipeline que já existia (update-location-captain) e o
-// passageiro recebe 'driver-location' quando o motorista está livre — ou 'driver-busy'
-// quando ele tem corrida ativa. Escrito com async/await (callbacks `done` quebram no vitest).
+// Fluxo em tempo real do mapa pré-corrida: cada passageiro usa uma assinatura curta
+// vinculada ao próprio centro/raio e recebe ids efêmeros e coordenadas aproximadas.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'testsecret';
 
 const { createServer } = require('http');
@@ -10,8 +7,12 @@ const { io: Client } = require('socket.io-client');
 const { initializeSocket, emitDriverMapUpdate } = require('../../socket');
 const { createCaptain } = require('../factories/captain.factory');
 const { createUser } = require('../factories/user.factory');
-const { createRide } = require('../factories/ride.factory');
 const { generateAuthToken } = require('../setup/authHelper');
+const {
+    createPublicMapSubscription,
+    publicDriverId,
+    toPublicLocation,
+} = require('../../utils/publicDriverMap');
 
 const CAPTAIN_POS = { ltd: -23.5505, lng: -46.6333 };
 
@@ -59,14 +60,21 @@ describe('Mapa do passageiro em tempo real (Fase C)', () => {
 
     const waitFor = (socket, event) => new Promise((resolve) => socket.once(event, resolve));
 
+    const subscribeViewer = async (socket, user, center = { lat: CAPTAIN_POS.ltd, lng: CAPTAIN_POS.lng }) => {
+        const subscription = createPublicMapSubscription({ userId: user._id, center });
+        const ack = await socket.emitWithAck('subscribe-drivers-map', {
+            subscriptionToken: subscription.token,
+        });
+        expect(ack.ok).toBe(true);
+        return subscription;
+    };
+
     it('passageiro inscrito recebe driver-location quando um motorista livre atualiza a posição', async () => {
         const user = await createUser();
         const captain = await createCaptain({ isOnline: true });
 
         const viewerSocket = await connect();
-        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
-        // Sem ack no subscribe: espera curta pra sala registrar antes do broadcast.
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        const subscription = await subscribeViewer(viewerSocket, user);
 
         const captainSocket = await connectCaptain(captain);
 
@@ -74,51 +82,49 @@ describe('Mapa do passageiro em tempo real (Fase C)', () => {
         captainSocket.emit('update-location-captain', { location: CAPTAIN_POS });
 
         const payload = await received;
-        expect(payload.driverId).toBe(captain._id.toString());
+        expect(payload.driverId).toBe(publicDriverId(captain._id, subscription.nonce));
         expect(payload.vehicleType).toBe('car');
-        expect(payload.location).toEqual({ ltd: CAPTAIN_POS.ltd, lng: CAPTAIN_POS.lng });
+        expect(payload.location).toEqual(toPublicLocation(CAPTAIN_POS));
     });
 
-    it('motorista com corrida ativa vira driver-busy (some do mapa), não driver-location', async () => {
+    it('motorista visível que fica ocupado some com id efêmero, sem nova localização', async () => {
         const user = await createUser();
         const captain = await createCaptain({ isOnline: true });
-        await createRide({ user: user._id, captain: captain._id, status: 'started' });
 
         const viewerSocket = await connect();
-        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
-        await new Promise((resolve) => setTimeout(resolve, 150));
-
-        const captainSocket = await connectCaptain(captain);
+        const subscription = await subscribeViewer(viewerSocket, user);
+        const becameVisible = waitFor(viewerSocket, 'driver-location');
+        emitDriverMapUpdate(captain._id, { busy: false, vehicleType: 'car', location: CAPTAIN_POS });
+        await becameVisible;
 
         let leakedLocation = false;
         viewerSocket.on('driver-location', () => { leakedLocation = true; });
         const busy = waitFor(viewerSocket, 'driver-busy');
-        captainSocket.emit('update-location-captain', { location: CAPTAIN_POS });
+        emitDriverMapUpdate(captain._id, { busy: true });
 
         const payload = await busy;
-        expect(payload.driverId).toBe(captain._id.toString());
+        expect(payload.driverId).toBe(publicDriverId(captain._id, subscription.nonce));
         expect(leakedLocation).toBe(false);
     });
 
     it('não repete driver-busy a cada posição do motorista em corrida', async () => {
         const user = await createUser();
         const captain = await createCaptain({ isOnline: true });
-        await createRide({ user: user._id, captain: captain._id, status: 'started' });
 
         const viewerSocket = await connect();
-        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
-        await new Promise((resolve) => setTimeout(resolve, 150));
-
-        const captainSocket = await connectCaptain(captain);
+        await subscribeViewer(viewerSocket, user);
+        const becameVisible = waitFor(viewerSocket, 'driver-location');
+        emitDriverMapUpdate(captain._id, { busy: false, vehicleType: 'car', location: CAPTAIN_POS });
+        await becameVisible;
 
         let busyCount = 0;
         viewerSocket.on('driver-busy', () => { busyCount += 1; });
 
         // Em corrida a posição chega a cada ~5s; o passageiro já removeu o marcador na
         // primeira. Repetir só gastaria banda de todo mundo com o mapa aberto.
-        captainSocket.emit('update-location-captain', { location: CAPTAIN_POS });
+        emitDriverMapUpdate(captain._id, { busy: true });
         await new Promise((resolve) => setTimeout(resolve, 250));
-        captainSocket.emit('update-location-captain', { location: { ltd: CAPTAIN_POS.ltd + 0.001, lng: CAPTAIN_POS.lng } });
+        emitDriverMapUpdate(captain._id, { busy: true });
         await new Promise((resolve) => setTimeout(resolve, 250));
 
         expect(busyCount).toBe(1);
@@ -129,8 +135,7 @@ describe('Mapa do passageiro em tempo real (Fase C)', () => {
         const captain = await createCaptain({ isOnline: true });
 
         const viewerSocket = await connect();
-        viewerSocket.emit('subscribe-drivers-map', { token: generateAuthToken(user) });
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        const subscription = await subscribeViewer(viewerSocket, user);
 
         const driverId = captain._id.toString();
         emitDriverMapUpdate(driverId, { busy: true });
@@ -141,16 +146,35 @@ describe('Mapa do passageiro em tempo real (Fase C)', () => {
         emitDriverMapUpdate(driverId, { busy: false, vehicleType: 'car', location: CAPTAIN_POS });
 
         const payload = await received;
-        expect(payload.driverId).toBe(driverId);
-        expect(payload.location).toEqual(CAPTAIN_POS);
+        expect(payload.driverId).toBe(publicDriverId(driverId, subscription.nonce));
+        expect(payload.location).toEqual(toPublicLocation(CAPTAIN_POS));
     });
 
-    it('subscribe sem token válido não entra na sala (posição de frota é dado sensível)', async () => {
+    it('passageiro fora do raio não recebe movimento de outra cidade', async () => {
+        const nearUser = await createUser();
+        const farUser = await createUser();
+        const captain = await createCaptain({ isOnline: true });
+        const nearSocket = await connect();
+        const farSocket = await connect();
+        await subscribeViewer(nearSocket, nearUser);
+        await subscribeViewer(farSocket, farUser, { lat: -22.9068, lng: -43.1729 });
+
+        let leakedToFarViewer = false;
+        farSocket.on('driver-location', () => { leakedToFarViewer = true; });
+        const receivedNear = waitFor(nearSocket, 'driver-location');
+        emitDriverMapUpdate(captain._id, { busy: false, vehicleType: 'car', location: CAPTAIN_POS });
+
+        await receivedNear;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(leakedToFarViewer).toBe(false);
+    });
+
+    it('subscribe sem assinatura válida não recebe posição de frota', async () => {
         const captain = await createCaptain({ isOnline: true });
 
         const intruderSocket = await connect();
         const rejected = waitFor(intruderSocket, 'unauthorized');
-        intruderSocket.emit('subscribe-drivers-map', { token: 'token-falso' });
+        intruderSocket.emit('subscribe-drivers-map', { subscriptionToken: 'token-falso' });
         await rejected;
 
         const captainSocket = await connectCaptain(captain);

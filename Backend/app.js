@@ -39,7 +39,12 @@ app.use(csrfProtection);
 
 app.use(cors({
     origin: corsOriginCallback,
-    credentials: true
+    credentials: true,
+    exposedHeaders: [
+        'X-Maps-Session-Token',
+        'X-Driver-Map-Subscription',
+        'X-Driver-Map-Expires-At',
+    ],
 }));
 
 app.use(helmet());

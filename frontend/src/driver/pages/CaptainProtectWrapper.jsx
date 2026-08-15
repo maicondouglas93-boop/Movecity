@@ -1,16 +1,15 @@
-import React, { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
-import { useNavigate } from 'react-router-dom'
-import api from '@/shared/services/axios'
-import { getAccessToken, getRefreshToken } from '@/shared/services/session'
+import api, { refreshAccessToken } from '@/shared/services/axios'
+import { getAccessToken } from '@/shared/services/session'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import Button from '@/shared/components/ui/Button'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
 // Mesmo raciocínio de UserProtectWrapper — e aqui o impacto era ainda pior: um
 // motorista perdendo a sessão por instabilidade de rede no meio de uma corrida.
+// eslint-disable-next-line react/prop-types
 const CaptainProtectWrapper = ({ children }) => {
-    const navigate = useNavigate()
     const { setCaptain } = useContext(CaptainDataContext)
     const [ status, setStatus ] = useState('checking') // checking | authenticated | network-error
     const [ attempt, setAttempt ] = useState(0)
@@ -18,13 +17,11 @@ const CaptainProtectWrapper = ({ children }) => {
     useEffect(() => {
         let cancelled = false
 
-        if (!getAccessToken('captain') && !getRefreshToken('captain')) {
-            navigate('/captain-login', { replace: true })
-            return
-        }
-
         setStatus('checking')
-        api.get('/captains/profile')
+        const bootstrap = getAccessToken('captain')
+            ? Promise.resolve()
+            : refreshAccessToken('captain')
+        bootstrap.then(() => api.get('/captains/profile'))
             .then(response => {
                 if (cancelled) return
                 setCaptain(response.data.captain)
@@ -41,7 +38,7 @@ const CaptainProtectWrapper = ({ children }) => {
             })
 
         return () => { cancelled = true }
-    }, [ attempt ])
+    }, [ attempt, setCaptain ])
 
     if (status === 'checking') {
         return <SessionSplash label="Entrando..." />

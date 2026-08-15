@@ -8,10 +8,12 @@ function validationMessage(req) {
     return errors.isEmpty() ? null : errors.array()[0]?.msg;
 }
 
-function clearSessionCookies(res) {
-    const refreshOptions = authService.clearCookieOptions();
-    res.clearCookie('token', refreshOptions);
-    res.clearCookie('refreshToken', refreshOptions);
+function clearSessionCookies(res, accountType) {
+    const { maxAge, ...accessOptions } = authService.accessCookieOptions();
+    res.clearCookie(authService.ACCESS_COOKIE_BY_ACTOR[accountType], accessOptions);
+    res.clearCookie(authService.REFRESH_COOKIE_BY_ACTOR[accountType], authService.clearCookieOptions(accountType));
+    res.clearCookie('token', accessOptions);
+    res.clearCookie('refreshToken', { ...accessOptions, path: '/' });
 }
 
 function handleError(res, error) {
@@ -42,14 +44,14 @@ async function requestAuthenticated(req, res, accountType) {
 
     try {
         const account = accountType === 'captain' ? req.captain : req.user;
-        const accessToken = req.cookies?.token || req.headers.authorization?.split(' ')[1];
+        const accessToken = req.authToken;
         const request = await accountDeletionService.requestAuthenticated({
             account,
             accountType,
             confirmation: req.body.confirmation,
             accessToken,
         });
-        clearSessionCookies(res);
+        clearSessionCookies(res, accountType);
         return res.status(202).json({
             message: 'Conta desativada. Seus dados pessoais serão removidos ou anonimizados em até 30 dias.',
             processAfter: request.processAfter,

@@ -106,4 +106,42 @@ describe('UserSignup Component', () => {
       expect(screen.getByText('Erro no Google: Não foi possível abrir o login Google.')).toBeInTheDocument();
     });
   });
+
+  it('confirma vínculo de conta existente sem enviar senha no primeiro login Google', async () => {
+    getGoogleIdToken.mockResolvedValue('google-id-token');
+    api.post
+      .mockRejectedValueOnce({
+        response: { data: { code: 'GOOGLE_LINK_PASSWORD_REQUIRED' } }
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          token: 'access-token',
+          user: { fullname: { firstname: 'Pessoa' } },
+        }
+      });
+
+    renderWithProviders(<UserSignup />);
+    fireEvent.change(screen.getByPlaceholderText('senha'), { target: { value: 'senha-atual' } });
+    const googleButton = screen.getByRole('button', { name: /entrar com o google/i });
+    fireEvent.click(googleButton);
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenNthCalledWith(
+        1,
+        `${import.meta.env.VITE_BASE_URL}/users/google-login`,
+        { idToken: 'google-id-token' }
+      );
+    });
+
+    fireEvent.click(googleButton);
+    await waitFor(() => {
+      expect(api.post).toHaveBeenNthCalledWith(
+        2,
+        `${import.meta.env.VITE_BASE_URL}/users/google-login`,
+        { idToken: 'google-id-token', password: 'senha-atual' }
+      );
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
+    });
+  });
 });

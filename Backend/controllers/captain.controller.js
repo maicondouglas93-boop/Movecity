@@ -7,29 +7,29 @@ const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const { deriveLegacyAuthorization } = require('../services/vehicleAuthorization.service');
 
-// Auditoria de sessão (2026-08-02): ver o comentário equivalente em user.controller.js.
-// O motorista tinha exatamente o mesmo problema — token de 24h e nenhuma renovação.
-const COOKIE_OPTIONS = () => {
-    const isProduction = process.env.NODE_ENV === 'production';
-    return {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: authService.ACCESS_TOKEN_TTL_SECONDS * 1000
-    };
-};
+const ACTOR = 'captain';
 
-async function respondWithCaptainSession(res, { captain, ip, statusCode = 200 }) {
+function clearLegacyCookies(res) {
+    const { maxAge, ...accessOptions } = authService.accessCookieOptions();
+    res.clearCookie('token', accessOptions);
+    res.clearCookie('refreshToken', { ...accessOptions, path: '/' });
+}
+
+async function respondWithCaptainSession(req, res, { captain, ip, statusCode = 200 }) {
     const { accessToken, refreshToken } = await authService.issueTokenPair({
         userId: captain._id,
         userType: 'captain',
         ip
     });
 
-    res.cookie('token', accessToken, COOKIE_OPTIONS());
-    res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+    res.cookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessToken, authService.accessCookieOptions());
+    res.cookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], refreshToken, authService.refreshCookieOptions(ACTOR));
+    clearLegacyCookies(res);
 
-    return res.status(statusCode).json({ token: accessToken, refreshToken, captain });
+    const refreshPayload = authService.shouldExposeRefreshToken(req, ACTOR, { newSession: true })
+        ? { refreshToken }
+        : {};
+    return res.status(statusCode).json({ token: accessToken, ...refreshPayload, captain });
 }
 
 
@@ -83,7 +83,7 @@ module.exports.registerCaptain = async (req, res, next) => {
     // o perfil, e o push chega mesmo com o app fechado.
     notificationService.sendCaptainRegistered(captain._id, { documentDeadline: captain.documentDeadline }).catch(console.error);
 
-    return await respondWithCaptainSession(res, { captain, ip: req.ip, statusCode: 201 });
+    return await respondWithCaptainSession(req, res, { captain, ip: req.ip, statusCode: 201 });
 
 }
 
@@ -151,7 +151,7 @@ module.exports.loginCaptain = async (req, res, next) => {
         return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
     }
 
-    return await respondWithCaptainSession(res, { captain, ip: req.ip });
+    return await respondWithCaptainSession(req, res, { captain, ip: req.ip });
 }
 
 // Auditoria de sessão (2026-08-02): endpoint novo — o motorista não tinha renovação
@@ -159,11 +159,15 @@ module.exports.loginCaptain = async (req, res, next) => {
 // trabalho.
 module.exports.refreshCaptainSession = async (req, res) => {
     try {
-        const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
-        const { userId, refreshToken } = await authService.rotateRefreshToken({
+        const presentedToken = authService.resolveRefreshToken(req, ACTOR);
+        const { userId, userType, refreshToken } = await authService.rotateRefreshToken({
             refreshToken: presentedToken,
+            expectedUserType: 'captain',
             ip: req.ip
         });
+        if (userType !== 'captain') {
+            return res.status(401).json({ message: 'Sessão emitida para outro tipo de conta' });
+        }
 
         const captain = await captainService.getCaptainProfile(userId);
         if (!captain) {
@@ -174,11 +178,17 @@ module.exports.refreshCaptainSession = async (req, res) => {
             return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
         }
 
-        const accessToken = authService.generateAccessToken(userId);
-        res.cookie('token', accessToken, COOKIE_OPTIONS());
-        res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        const accessToken = authService.generateAccessToken(userId, 'captain');
+        res.cookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessToken, authService.accessCookieOptions());
+        if (refreshToken) {
+            res.cookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], refreshToken, authService.refreshCookieOptions(ACTOR));
+        }
+        clearLegacyCookies(res);
 
-        return res.status(200).json({ token: accessToken, refreshToken, captain });
+        const refreshPayload = authService.shouldExposeRefreshToken(req, ACTOR) && refreshToken
+            ? { refreshToken }
+            : {};
+        return res.status(200).json({ token: accessToken, ...refreshPayload, captain });
     } catch (err) {
         return res.status(401).json({ message: err.message || 'Sessão inválida' });
     }
@@ -232,25 +242,32 @@ module.exports.updateDocument = async (req, res, next) => {
 }
 
 module.exports.logoutCaptain = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const token = req.authToken;
 
     if (token) {
         await blackListTokenModel.create({ token }).catch(() => {});
     }
 
-    const { maxAge, ...accessClearOptions } = COOKIE_OPTIONS();
-    res.clearCookie('token', accessClearOptions);
-    res.clearCookie('refreshToken', authService.clearCookieOptions());
+    const { maxAge, ...accessClearOptions } = authService.accessCookieOptions();
+    res.clearCookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessClearOptions);
+    res.clearCookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], authService.clearCookieOptions(ACTOR));
+    clearLegacyCookies(res);
 
-    // Auditoria de sessão (2026-08-02): sem isto, o refresh token sobrevivia ao logout
-    // e podia gerar access tokens novos depois do "Sair".
-    // Rota GET — ver comentário equivalente em user.controller.js: logoutUser.
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+    // Nunca aceitar refresh token na URL: query strings aparecem em logs, histórico e
+    // Referer. POST envia o segredo somente no corpo ou no cookie HttpOnly.
+    const refreshToken = authService.resolveRefreshToken(req, ACTOR);
     if (refreshToken) {
         await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
     } else if (req.captain?._id) {
         await authService.revokeAllForUser({ userId: req.captain._id, userType: 'captain', reason: 'logout' });
     }
+
+    await authService.revokeAccessSession({
+        userId: req.captain?._id,
+        userType: 'captain',
+        jti: req.auth?.jti,
+        reason: 'logout',
+    });
 
     res.status(200).json({ message: 'Logout successfully' });
 }

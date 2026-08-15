@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { getAdminAccessToken, refreshAdminAccessToken } from '../services/api';
+import { getDeviceId } from '../services/deviceIdentity';
 
 const SocketContext = createContext();
 
@@ -36,10 +38,41 @@ export const SocketProvider = ({ children }) => {
         transports: ['polling', 'websocket'],
       });
 
-      newSocket.on('connect', () => {
+      const joinAdminRoom = (token) => new Promise((resolve) => {
+        newSocket.emit('join', {
+          userId: user._id,
+          userType: 'admin',
+          token,
+          deviceId: getDeviceId(),
+        }, resolve);
+      });
+
+      const joinAdminWithRetry = async () => {
+        let ack = await joinAdminRoom(getAdminAccessToken());
+        if (!ack?.ok) {
+          const token = await refreshAdminAccessToken();
+          ack = await joinAdminRoom(token);
+        }
+        return ack;
+      };
+
+      newSocket.on('connect', async () => {
         console.log('Connected to socket', newSocket.id);
         // Join admin room (token exigido pelo backend — ver socket.js, S1 da auditoria)
-        newSocket.emit('join', { userId: user._id, userType: 'admin', token: localStorage.getItem('adminToken') });
+        try {
+          await joinAdminWithRetry();
+        } catch {
+          // O serviço de API redireciona para login quando o refresh é inválido.
+        }
+      });
+
+      newSocket.on('reauth-required', async () => {
+        try {
+          const token = await refreshAdminAccessToken();
+          await joinAdminRoom(token);
+        } catch {
+          // O serviço de API redireciona para login quando o refresh é inválido.
+        }
       });
 
       setSocket(newSocket);

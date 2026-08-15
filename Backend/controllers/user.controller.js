@@ -4,27 +4,39 @@ const { validationResult } = require('express-validator');
 const blackListTokenModel = require('../models/blacklistToken.model');
 const authService = require('../services/auth.service');
 const { getAuth } = require('firebase-admin/auth');
+const crypto = require('node:crypto');
+const {
+    normalizeEmail,
+    validateGoogleIdentityClaims,
+    isLegacyGoogleEmailLinkEnabled,
+    confirmExistingGoogleAccountLink,
+} = require('../utils/googleIdentity');
 
-// Configuração padronizada e segura para os Cookies JWT.
-// Auditoria de sessão (2026-08-02): sameSite era 'strict', o que impedia o cookie de
-// ser enviado quando frontend e backend estão em domínios diferentes (o caso desta
-// infra) — o cookie existia mas nunca era usado. Agora usa a mesma política do refresh
-// token (none+secure em produção, lax em dev) e a validade acompanha o access token.
-const COOKIE_OPTIONS = () => {
-    const isProduction = process.env.NODE_ENV === 'production';
-    return {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: authService.ACCESS_TOKEN_TTL_SECONDS * 1000
-    };
-};
+const ACTOR = 'user';
 
-// Emite o par de tokens e entrega o refresh em cookie httpOnly (quando o navegador
-// aceitar) E no corpo da resposta. O backend aceita os dois na renovação — sem o
-// fallback no corpo, usuários de navegadores que bloqueiam cookie de terceiros
-// (Safari/ITP) ficariam sem conseguir manter a sessão.
-async function respondWithSession(res, { userDoc, userType, extraClaims = {}, ip, statusCode = 200, payload = {} }) {
+function googleErrorResponse(res, error) {
+    return res.status(error.statusCode || 401).json({
+        code: error.code || 'GOOGLE_AUTH_FAILED',
+        message: error.message || 'Não foi possível autenticar com o Google.',
+    });
+}
+
+function legacyGoogleEmailLinkEnabled() {
+    return isLegacyGoogleEmailLinkEnabled({
+        allowLegacyEmailLink: process.env.GOOGLE_ALLOW_LEGACY_EMAIL_LINK,
+        legacyLinkUntil: process.env.GOOGLE_LEGACY_LINK_UNTIL,
+    });
+}
+
+function clearLegacyCookies(res) {
+    const { maxAge, ...accessOptions } = authService.accessCookieOptions();
+    res.clearCookie('token', accessOptions);
+    res.clearCookie('refreshToken', { ...accessOptions, path: '/' });
+}
+
+// O navegador recebe o refresh exclusivamente no cookie HttpOnly específico do ator.
+// Somente transportes explicitamente seguros/testes podem receber o segredo no JSON.
+async function respondWithSession(req, res, { userDoc, userType, extraClaims = {}, ip, statusCode = 200, payload = {} }) {
     const { accessToken, refreshToken } = await authService.issueTokenPair({
         userId: userDoc._id,
         userType,
@@ -32,10 +44,12 @@ async function respondWithSession(res, { userDoc, userType, extraClaims = {}, ip
         ip
     });
 
-    res.cookie('token', accessToken, COOKIE_OPTIONS());
-    res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+    res.cookie(authService.ACCESS_COOKIE_BY_ACTOR[userType], accessToken, authService.accessCookieOptions());
+    res.cookie(authService.REFRESH_COOKIE_BY_ACTOR[userType], refreshToken, authService.refreshCookieOptions(userType));
+    clearLegacyCookies(res);
 
-    return res.status(statusCode).json({ token: accessToken, refreshToken, ...payload });
+    const refreshPayload = authService.shouldExposeRefreshToken(req, userType) ? { refreshToken } : {};
+    return res.status(statusCode).json({ token: accessToken, ...refreshPayload, ...payload });
 }
 
 module.exports.respondWithSession = respondWithSession;
@@ -47,9 +61,10 @@ module.exports.registerUser = async (req, res, next) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { fullname, email, password, cpf, phone } = req.body;
+        const { fullname, password, cpf, phone } = req.body;
+        const email = normalizeEmail(req.body.email);
 
-        const isUserAlready = await userModel.findOne({ email });
+        const isUserAlready = await userService.findUserByNormalizedEmail(email);
         if (isUserAlready) {
             return res.status(400).json({ message: 'O usuário já existe' });
         }
@@ -65,7 +80,7 @@ module.exports.registerUser = async (req, res, next) => {
             phone
         });
 
-        return await respondWithSession(res, {
+        return await respondWithSession(req, res, {
             userDoc: user,
             userType: 'user',
             ip: req.ip,
@@ -73,6 +88,9 @@ module.exports.registerUser = async (req, res, next) => {
             payload: { user }
         });
     } catch (err) {
+        if (err.code === 11000) {
+            return res.status(409).json({ message: 'O usuário já existe' });
+        }
         console.error('Error in registerUser:', err);
         return res.status(500).json({ message: 'Erro interno do servidor' });
     }
@@ -85,9 +103,10 @@ module.exports.loginUser = async (req, res, next) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { email, password } = req.body;
+        const { password } = req.body;
+        const email = normalizeEmail(req.body.email);
 
-        const user = await userModel.findOne({ email }).select('+password');
+        const user = await userService.findUserByNormalizedEmail(email, '+password');
         if (!user) {
             return res.status(401).json({ message: 'E-mail ou senha inválidos' });
         }
@@ -102,7 +121,7 @@ module.exports.loginUser = async (req, res, next) => {
             return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
         }
 
-        return await respondWithSession(res, {
+        return await respondWithSession(req, res, {
             userDoc: user,
             userType: 'user',
             ip: req.ip,
@@ -157,12 +176,15 @@ module.exports.updateUserProfile = async (req, res) => {
 
 module.exports.logoutUser = async (req, res, next) => {
     try {
-        const { maxAge, ...accessClearOptions } = COOKIE_OPTIONS();
-        res.clearCookie('token', accessClearOptions);
-        res.clearCookie('refreshToken', authService.clearCookieOptions());
+        const { maxAge, ...accessClearOptions } = authService.accessCookieOptions();
+        res.clearCookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessClearOptions);
+        res.clearCookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], authService.clearCookieOptions(ACTOR));
+        clearLegacyCookies(res);
 
-        // Prevenção de crash usando encadeamento opcional (?.)
-        const token = req.cookies?.token || req.headers?.authorization?.split(' ')[1];
+        // O middleware conserva exatamente o token que autenticou a requisição. Bearer
+        // tem prioridade sobre cookie para não deixar um cookie antigo mascarar uma
+        // sessão válida do app nativo.
+        const token = req.authToken;
 
         if (token) {
             // create pode falhar por chave duplicada se o mesmo token for deslogado
@@ -170,12 +192,9 @@ module.exports.logoutUser = async (req, res, next) => {
             await blackListTokenModel.create({ token }).catch(() => {});
         }
 
-        // Auditoria de sessão (2026-08-02): antes o logout só invalidava o access token
-        // (blacklist). O refresh token continuava válido — quem tivesse uma cópia dele
-        // poderia gerar um access token novo depois do "logout".
-        // A rota de logout é GET (contrato pré-existente), então o refresh token pode
-        // chegar por query string — req.body está sempre vazio num GET.
-        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+        // Refresh token só é aceito no corpo ou em cookie HttpOnly. Query string foi
+        // removida porque URLs vazam em histórico, logs, observabilidade e Referer.
+        const refreshToken = authService.resolveRefreshToken(req, ACTOR);
         if (refreshToken) {
             await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
         } else if (req.user?._id) {
@@ -183,6 +202,13 @@ module.exports.logoutUser = async (req, res, next) => {
             // melhor um logout amplo demais do que uma sessão sobrevivendo ao "Sair".
             await authService.revokeAllForUser({ userId: req.user._id, userType: 'user', reason: 'logout' });
         }
+
+        await authService.revokeAccessSession({
+            userId: req.user?._id,
+            userType: 'user',
+            jti: req.auth?.jti,
+            reason: 'logout',
+        });
 
         return res.status(200).json({ message: 'Deslogado com sucesso' });
     } catch (err) {
@@ -195,11 +221,15 @@ module.exports.logoutUser = async (req, res, next) => {
 // pro passageiro, então a sessão simplesmente morria quando o token de 24h expirava.
 module.exports.refreshUserSession = async (req, res) => {
     try {
-        const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
-        const { userId, refreshToken } = await authService.rotateRefreshToken({
+        const presentedToken = authService.resolveRefreshToken(req, ACTOR);
+        const { userId, userType, refreshToken } = await authService.rotateRefreshToken({
             refreshToken: presentedToken,
+            expectedUserType: 'user',
             ip: req.ip
         });
+        if (userType !== 'user') {
+            return res.status(401).json({ message: 'Sessão emitida para outro tipo de conta' });
+        }
 
         const user = await userService.getUserProfile(userId);
         if (!user) {
@@ -210,11 +240,17 @@ module.exports.refreshUserSession = async (req, res) => {
             return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
         }
 
-        const accessToken = authService.generateAccessToken(userId);
-        res.cookie('token', accessToken, COOKIE_OPTIONS());
-        res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        const accessToken = authService.generateAccessToken(userId, 'user');
+        res.cookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessToken, authService.accessCookieOptions());
+        if (refreshToken) {
+            res.cookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], refreshToken, authService.refreshCookieOptions(ACTOR));
+        }
+        clearLegacyCookies(res);
 
-        return res.status(200).json({ token: accessToken, refreshToken, user });
+        const refreshPayload = authService.shouldExposeRefreshToken(req, ACTOR) && refreshToken
+            ? { refreshToken }
+            : {};
+        return res.status(200).json({ token: accessToken, ...refreshPayload, user });
     } catch (err) {
         return res.status(401).json({ message: err.message || 'Sessão inválida' });
     }
@@ -222,22 +258,51 @@ module.exports.refreshUserSession = async (req, res) => {
 
 module.exports.googleLogin = async (req, res, next) => {
     try {
+        if (String(process.env.GOOGLE_LOGIN_ENABLED).toLowerCase() === 'false') {
+            return res.status(503).json({
+                code: 'GOOGLE_LOGIN_DISABLED',
+                message: 'Login com Google temporariamente indisponível.',
+            });
+        }
+
         const { idToken } = req.body;
         if (!idToken) {
             return res.status(400).json({ message: 'ID token não fornecido' });
         }
 
-        let decodedToken;
+        let identity;
         try {
-            decodedToken = await getAuth().verifyIdToken(idToken);
+            const decodedToken = await getAuth().verifyIdToken(idToken, true);
+            identity = validateGoogleIdentityClaims(decodedToken);
         } catch (error) {
-            console.error('Error verifying Firebase ID token:', error);
-            return res.status(401).json({ message: 'ID token inválido' });
+            if (typeof error.code === 'string' && error.code.startsWith('GOOGLE_')) {
+                return googleErrorResponse(res, error);
+            }
+            console.error('Error verifying Firebase ID token:', error.code || error.message);
+            return res.status(401).json({ code: 'GOOGLE_ID_TOKEN_INVALID', message: 'ID token inválido' });
         }
 
-        const { email, name, picture } = decodedToken;
+        const { uid, email, name, picture } = identity;
 
-        let user = await userModel.findOne({ email });
+        // O UID verificado é a identidade primária. E-mail é usado apenas para localizar
+        // uma conta local ainda não vinculada, que exige confirmação explícita.
+        let user = await userModel.findOne({ firebaseUid: uid }).select('+firebaseUid +password');
+        if (user && normalizeEmail(user.email) !== email) {
+            return res.status(409).json({
+                code: 'GOOGLE_IDENTITY_CONFLICT',
+                message: 'O e-mail da identidade Google diverge da conta vinculada. Contate o suporte.',
+            });
+        }
+
+        if (!user) {
+            user = await userService.findUserByNormalizedEmail(email, '+firebaseUid +password');
+            if (user?.firebaseUid && user.firebaseUid !== uid) {
+                return res.status(409).json({
+                    code: 'GOOGLE_IDENTITY_CONFLICT',
+                    message: 'Este e-mail já está vinculado a outra identidade Google.',
+                });
+            }
+        }
 
         if (user?.isBlocked) {
             await authService.revokeAllForUser({ userId: user._id, userType: 'user', reason: 'blocked' });
@@ -250,7 +315,7 @@ module.exports.googleLogin = async (req, res, next) => {
             const lastname = nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'User';
 
             // Senha aleatória criptografada para usuários OAuth
-            const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
+            const randomPassword = crypto.randomBytes(32).toString('hex');
             const hashedPassword = await userModel.hashPassword(randomPassword);
 
             user = await userService.createUser({
@@ -258,20 +323,49 @@ module.exports.googleLogin = async (req, res, next) => {
                 lastname,
                 email,
                 password: hashedPassword,
-                profilePicture: picture || ''
+                profilePicture: picture || '',
+                firebaseUid: uid,
             });
+        } else if (!user.firebaseUid) {
+            const linkMethod = await confirmExistingGoogleAccountLink({
+                user,
+                password: req.body.password,
+                allowLegacyLink: legacyGoogleEmailLinkEnabled(),
+            });
+            if (linkMethod === 'legacy-window') {
+                console.warn(JSON.stringify({
+                    tag: 'AUTH_GOOGLE_LEGACY_EMAIL_LINK',
+                    at: new Date().toISOString(),
+                }));
+            }
+            user.firebaseUid = uid;
+            user.email = email;
+            if (picture) user.profilePicture = picture;
+            await user.save();
         } else if (picture && user.profilePicture !== picture) {
             user.profilePicture = picture;
             await user.save();
         }
 
-        return await respondWithSession(res, {
+        return await respondWithSession(req, res, {
             userDoc: user,
             userType: 'user',
             ip: req.ip,
             payload: { user }
         });
     } catch (err) {
+        if (err.code === 'GOOGLE_LINK_PASSWORD_REQUIRED') {
+            return googleErrorResponse(res, err);
+        }
+        if (typeof err.code === 'string' && err.code.startsWith('GOOGLE_')) {
+            return googleErrorResponse(res, err);
+        }
+        if (err.code === 11000) {
+            return res.status(409).json({
+                code: 'GOOGLE_IDENTITY_CONFLICT',
+                message: 'Não foi possível vincular a identidade sem conflito de conta.',
+            });
+        }
         console.error('Error in googleLogin:', err);
         return res.status(500).json({ message: 'Erro interno do servidor' });
     }

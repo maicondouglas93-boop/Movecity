@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const { normalizeEmail } = require('../utils/googleIdentity');
 
 
 const userSchema = new mongoose.Schema({
@@ -18,7 +18,17 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
+        trim: true,
+        lowercase: true,
+        set: normalizeEmail,
         minlength: [ 5, 'Email must be at least 5 characters long' ],
+    },
+    firebaseUid: {
+        type: String,
+        unique: true,
+        sparse: true,
+        select: false,
+        trim: true,
     },
     profilePicture: {
         type: String,
@@ -91,10 +101,18 @@ const userSchema = new mongoose.Schema({
         text: String,
         createdAt: { type: Date, default: Date.now }
     }],
-}, { timestamps: true });
+}, {
+    timestamps: true,
+    toJSON: {
+        transform: (_doc, ret) => {
+            delete ret.password;
+            delete ret.firebaseUid;
+            return ret;
+        }
+    }
+});
 
 // Indexes for performance
-userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ isBlocked: 1 });
@@ -102,8 +120,8 @@ userSchema.index({ city: 1 });
 userSchema.index({ totalRides: -1 });
 
 userSchema.methods.generateAuthToken = function () {
-    const token = jwt.sign({ _id: this._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    return token;
+    const { generateAccessToken } = require('../services/auth.service');
+    return generateAccessToken(this._id, 'user');
 }
 
 userSchema.methods.comparePassword = async function (password) {

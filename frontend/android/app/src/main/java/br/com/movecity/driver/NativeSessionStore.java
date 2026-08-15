@@ -42,11 +42,14 @@ public final class NativeSessionStore {
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 );
                 migrateFromLegacy(app, cached);
+                // Apaga eventual fallback plaintext criado por versões anteriores.
+                app.getSharedPreferences(PREFS + "_fallback", Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .apply();
             } catch (Exception e) {
-                // Fallback controlado: melhor aceite nativo com prefs privadas do que crash.
-                Log.e(TAG, "EncryptedSharedPreferences indisponível — fallback MODE_PRIVATE", e);
-                cached = app.getSharedPreferences(PREFS + "_fallback", Context.MODE_PRIVATE);
-                migrateFromLegacy(app, cached);
+                Log.e(TAG, "EncryptedSharedPreferences indisponível — sessão não será persistida", e);
+                throw new IllegalStateException("Secure session storage unavailable", e);
             }
             return cached;
         }
@@ -80,6 +83,11 @@ public final class NativeSessionStore {
         // Garante que o legado não fica com cópia.
         context.getApplicationContext()
             .getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .apply();
+        context.getApplicationContext()
+            .getSharedPreferences(PREFS + "_fallback", Context.MODE_PRIVATE)
             .edit()
             .clear()
             .apply();

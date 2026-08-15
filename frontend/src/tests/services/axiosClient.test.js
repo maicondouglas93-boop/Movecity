@@ -11,7 +11,12 @@ vi.mock('@/shared/services/swCommunication', () => ({
     clearTokenInSW: vi.fn(),
 }))
 
-const { default: api } = await import('@/shared/services/axios')
+const { default: api, refreshAccessToken } = await import('@/shared/services/axios')
+const {
+    clearAllSessions,
+    getAccessToken,
+    saveSession,
+} = await import('@/shared/services/session')
 
 const originalAdapter = api.defaults.adapter
 
@@ -43,6 +48,7 @@ const authHeaderOf = (config) =>
 describe('cliente axios configurado (Fase 1 — C1)', () => {
     beforeEach(() => {
         localStorage.clear()
+        clearAllSessions()
     })
 
     afterEach(() => {
@@ -55,7 +61,7 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
     })
 
     it('injeta o token da sessão certa quando o chamador não passa Authorization', async () => {
-        localStorage.setItem('token', 'user-token')
+        saveSession('user', { token: 'user-token' })
         const adapter = vi.fn(async (config) => okResponse(config))
         api.defaults.adapter = adapter
 
@@ -68,8 +74,8 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         // Cenário real: motorista e passageiro logados no mesmo navegador; a rota
         // /wallet não é classificável por sessionKindForUrl e o fallback preferiria
         // o token de USER. O header explícito do chamador tem que vencer.
-        localStorage.setItem('token', 'user-token')
-        localStorage.setItem('captain-token', 'captain-token')
+        saveSession('user', { token: 'user-token' })
+        saveSession('captain', { token: 'captain-token' })
         const adapter = vi.fn(async (config) => okResponse(config))
         api.defaults.adapter = adapter
 
@@ -81,8 +87,7 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
     })
 
     it('401 dispara UM refresh e repete a requisição original com o token novo', async () => {
-        localStorage.setItem('token', 'token-vencido')
-        localStorage.setItem('refreshToken', 'refresh-valido')
+        saveSession('user', { token: 'token-vencido' })
 
         const calls = []
         api.defaults.adapter = vi.fn(async (config) => {
@@ -102,11 +107,35 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         // original (401) → refresh → retry: exatamente 3 chamadas, sem loop
         expect(calls).toHaveLength(3)
         expect(calls[1]).toContain('/users/refresh')
-        expect(localStorage.getItem('token')).toBe('token-novo')
+        expect(getAccessToken('user')).toBe('token-novo')
+        expect(localStorage.getItem('token')).toBeNull()
+        expect(localStorage.getItem('refreshToken')).toBeNull()
+    })
+
+    it('renova passageiro e motorista em filas independentes sem trocar os tokens', async () => {
+        const refreshCalls = []
+        api.defaults.adapter = vi.fn(async (config) => {
+            refreshCalls.push(config.url)
+            if (config.url.includes('/captains/refresh')) {
+                return okResponse(config, { token: 'captain-novo' })
+            }
+            return okResponse(config, { token: 'user-novo' })
+        })
+
+        const [userToken, captainToken] = await Promise.all([
+            refreshAccessToken('user'),
+            refreshAccessToken('captain'),
+        ])
+
+        expect(userToken).toBe('user-novo')
+        expect(captainToken).toBe('captain-novo')
+        expect(getAccessToken('user')).toBe('user-novo')
+        expect(getAccessToken('captain')).toBe('captain-novo')
+        expect(refreshCalls).toEqual(expect.arrayContaining(['/users/refresh', '/captains/refresh']))
     })
 
     it('erro de rede (sem resposta HTTP) NÃO desloga e devolve friendlyMessage', async () => {
-        localStorage.setItem('token', 'user-token')
+        saveSession('user', { token: 'user-token' })
         api.defaults.adapter = vi.fn(async (config) => {
             throw networkError(config)
         })
@@ -115,7 +144,17 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
             friendlyMessage: expect.any(String),
         })
         // A sessão sobrevive à instabilidade de rede — era o bug antigo.
-        expect(localStorage.getItem('token')).toBe('user-token')
+        expect(getAccessToken('user')).toBe('user-token')
+    })
+
+    it('falha de rede durante o refresh não apaga a sessão nem o token em memória', async () => {
+        saveSession('user', { token: 'user-token-curto' })
+        api.defaults.adapter = vi.fn(async (config) => {
+            throw networkError(config)
+        })
+
+        await expect(refreshAccessToken('user')).rejects.toBeTruthy()
+        expect(getAccessToken('user')).toBe('user-token-curto')
     })
 
     it('401 no login não tenta refresh (credencial errada não é sessão expirada)', async () => {

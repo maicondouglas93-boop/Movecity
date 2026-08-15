@@ -6,6 +6,7 @@ import UserLogin from '@/passenger/pages/UserLogin';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { ToastProvider } from '@/shared/contexts/ToastContext';
 import { getGoogleIdToken } from '@/shared/services/googleAuth';
+import { clearAllSessions } from '@/shared/services/session';
 
 // Mock dependências externas — Fase 1 (C1): a página migrou do axios cru para a
 // instância configurada (@/shared/services/axios), então é ela que precisa ser mockada.
@@ -38,6 +39,7 @@ describe('UserLogin Component', () => {
     // Login bem-sucedido grava token via saveSession; sem limpar, o useEffect
     // de UserLogin redireciona para /home nos testes seguintes.
     localStorage.clear();
+    clearAllSessions();
   });
 
   const renderWithProviders = (ui) => {
@@ -125,6 +127,50 @@ describe('UserLogin Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Erro no Google: Login Google cancelado ou indisponível.')).toBeInTheDocument();
+    });
+  });
+
+  it('só envia a senha ao Google depois que o backend solicita confirmação do vínculo', async () => {
+    getGoogleIdToken.mockResolvedValue('google-id-token');
+    api.post
+      .mockRejectedValueOnce({
+        response: {
+          data: {
+            code: 'GOOGLE_LINK_PASSWORD_REQUIRED',
+            message: 'Confirme a senha atual.',
+          }
+        }
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          token: 'access-token',
+          user: { fullname: { firstname: 'Pessoa' } },
+        }
+      });
+
+    renderWithProviders(<UserLogin />);
+    fireEvent.change(screen.getByPlaceholderText('senha'), { target: { value: 'senha-atual' } });
+    const googleButton = screen.getByRole('button', { name: /entrar com o google/i });
+    fireEvent.click(googleButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/esta conta já existe/i)).toBeInTheDocument();
+      expect(api.post).toHaveBeenNthCalledWith(
+        1,
+        `${import.meta.env.VITE_BASE_URL}/users/google-login`,
+        { idToken: 'google-id-token' }
+      );
+    });
+
+    fireEvent.click(googleButton);
+    await waitFor(() => {
+      expect(api.post).toHaveBeenNthCalledWith(
+        2,
+        `${import.meta.env.VITE_BASE_URL}/users/google-login`,
+        { idToken: 'google-id-token', password: 'senha-atual' }
+      );
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
   });
 });

@@ -19,6 +19,16 @@ public class NativeSessionPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void get(PluginCall call) {
+        JSObject ret = new JSObject();
+        String token = NativeSessionStore.getToken(getContext());
+        String refreshToken = NativeSessionStore.getRefreshToken(getContext());
+        if (token != null) ret.put("token", token);
+        if (refreshToken != null) ret.put("refreshToken", refreshToken);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void clear(PluginCall call) {
         NativeSessionStore.clear(getContext());
         call.resolve();

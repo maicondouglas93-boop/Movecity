@@ -1,22 +1,27 @@
-const jwt = require('jsonwebtoken');
 const adminUserModel = require('../models/adminUser.model');
+const authService = require('../services/auth.service');
+const { resolveAccessToken } = require('../utils/authToken');
 
 module.exports.authAdmin = async (req, res, next) => {
-    const token = req.cookies.adminToken || req.headers.authorization?.split(' ')[ 1 ];
+    const { token, source } = resolveAccessToken(req, ['adminAccessToken', 'adminToken']);
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
+    req.authToken = token;
+    req.authSource = source;
+
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const admin = await adminUserModel.findById(decoded._id);
+        const decoded = authService.verifyAccessToken(token, 'admin');
+        const admin = await adminUserModel.findById(decoded.subjectId);
 
         if (!admin || !admin.active) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
 
         req.admin = admin;
+        req.auth = decoded;
 
         return next();
 

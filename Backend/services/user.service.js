@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const userModel = require('../models/user.model');
 const { getCache, setCache, deleteCache } = require('../cache/cache');
+const { normalizeEmail } = require('../utils/googleIdentity');
 
 const normalizePhone = (phone) => {
     if (phone == null || phone === '') return null;
@@ -18,9 +19,10 @@ const normalizeCpf = (cpf) => {
 };
 
 module.exports.createUser = async ({
-    firstname, lastname, email, password, profilePicture, cpf, phone
+    firstname, lastname, email, password, profilePicture, cpf, phone, firebaseUid
 }) => {
-    if (!firstname || !email || !password) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!firstname || !normalizedEmail || !password) {
         throw new Error('All fields are required');
     }
     const user = userModel.create({
@@ -28,15 +30,27 @@ module.exports.createUser = async ({
             firstname,
             lastname
         },
-        email,
+        email: normalizedEmail,
         password,
         profilePicture,
         cpf,
-        phone
+        phone,
+        firebaseUid,
     })
 
     return user;
 }
+
+module.exports.findUserByNormalizedEmail = async (email, selectFields = '') => {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) return null;
+
+    const query = userModel
+        .findOne({ email: normalizedEmail })
+        .collation({ locale: 'en', strength: 2 });
+    if (selectFields) query.select(selectFields);
+    return query;
+};
 
 // Espelha captainService.recalculateRating — auditoria de UX do motorista
 // (2026-08-02, Etapa 7): o schema de review já suportava 'driver_to_passenger' desde

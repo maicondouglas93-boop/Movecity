@@ -3,7 +3,8 @@ import { API_BASE_URL } from './apiBase';
 import { getFriendlyErrorMessage } from './errorMessages';
 import {
     getAccessToken,
-    getRefreshToken,
+    getLegacyRefreshToken,
+    discardLegacyRefreshToken,
     saveSession,
     clearSession,
     clearAllSessions,
@@ -11,6 +12,8 @@ import {
     LOGIN_ROUTE,
 } from './session';
 import { syncTokenWithSW } from './swCommunication';
+import { getAppRole, isNativePlatform } from '@/shared/platform/platform';
+import { getNativeCaptainRefreshToken } from '@/shared/platform/nativeSession.service';
 
 const api = axios.create({
     baseURL: API_BASE_URL || undefined,
@@ -22,6 +25,9 @@ const api = axios.create({
 
 // Interceptor de Requisição: Injeta o token se existir
 api.interceptors.request.use((config) => {
+    if (isNativePlatform() && getAppRole() === 'driver') {
+        config.headers['X-MoveCity-Client'] = 'android-driver';
+    }
     // Fase 1 da auditoria de production readiness (C1, 2026-08-05): as chamadas
     // migradas do axios cru podem trazer Authorization explícito — em rotas que
     // sessionKindForUrl não classifica (ex: /captains/wallet vem com o prefixo
@@ -54,19 +60,9 @@ api.interceptors.request.use((config) => {
 // memória). Como o access token durava 24h e não existia renovação nenhuma, todo
 // usuário era deslogado pelo menos uma vez por dia.
 //
-// Agora: um 401 dispara UMA tentativa de renovação silenciosa; só desloga se a
-// renovação também falhar (sessão comprovadamente inválida). isRefreshing + a fila
-// garantem que N requisições falhando juntas disparem um único refresh.
-let isRefreshing = false;
-let refreshQueue = [];
-
-const flushQueue = (error, token = null) => {
-    refreshQueue.forEach(({ resolve, reject }) => {
-        if (error) reject(error);
-        else resolve(token);
-    });
-    refreshQueue = [];
-};
+// Agora: um 401 dispara UMA renovação silenciosa por ator. Passageiro e motorista
+// podem coexistir na mesma aba sem compartilhar fila ou receber o token um do outro.
+const refreshPromises = { user: null, captain: null };
 
 const forceLogout = (kind) => {
     if (kind) {
@@ -124,7 +120,10 @@ api.interceptors.response.use((response) => response, async (error) => {
         return Promise.reject(error);
     }
 
-    const refreshKind = kind || (getRefreshToken('user') ? 'user' : 'captain');
+    const refreshKind = kind
+        || (getAccessToken('captain') ? 'captain' : null)
+        || (getAccessToken('user') ? 'user' : null)
+        || (getAppRole() === 'driver' ? 'captain' : 'user');
 
     try {
         const newToken = await refreshAccessToken(refreshKind);
@@ -132,7 +131,7 @@ api.interceptors.response.use((response) => response, async (error) => {
         config.headers.Authorization = `Bearer ${newToken}`;
         return api(config);
     } catch (refreshError) {
-        return Promise.reject(error);
+        return Promise.reject(refreshError);
     }
 });
 
@@ -142,39 +141,42 @@ api.interceptors.response.use((response) => response, async (error) => {
 // da auditoria PWA), mas nada nas telas de espera de corrida faz chamada REST
 // periódica, então o token pode ficar vencido por tempo indefinido sem nenhum 401
 // pra disparar a renovação de dentro do interceptor — o motorista caía fora do
-// despacho silenciosamente numa reconexão de socket com token vencido. Mantém a MESMA
-// fila (`isRefreshing`/`refreshQueue`) do interceptor, então uma renovação disparada
-// pelo socket e uma disparada por uma chamada REST concorrente nunca duplicam a
-// chamada ao backend.
+// despacho silenciosamente numa reconexão de socket com token vencido. A Promise por
+// ator também é reutilizada pelo interceptor, sem misturar passageiro e motorista.
 export async function refreshAccessToken(kind) {
-    if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-            refreshQueue.push({ resolve, reject });
+    if (!refreshPromises[kind]) {
+        refreshPromises[kind] = (async () => {
+            const nativeDriver = kind === 'captain' && isNativePlatform() && getAppRole() === 'driver';
+            const refreshToken = nativeDriver
+                ? await getNativeCaptainRefreshToken()
+                : getLegacyRefreshToken(kind);
+            const endpoint = kind === 'captain' ? '/captains/refresh' : '/users/refresh';
+            const headers = refreshToken && !nativeDriver
+                ? { 'X-MoveCity-Refresh-Migration': 'v1' }
+                : {};
+            try {
+                const { data } = await api.post(endpoint, refreshToken ? { refreshToken } : {}, { headers });
+
+                if (refreshToken && !nativeDriver) discardLegacyRefreshToken(kind);
+                saveSession(kind, { token: data.token, refreshToken: data.refreshToken });
+                // O Service Worker só consegue aceitar corrida em segundo plano se tiver
+                // um access token curto e atual no IndexedDB.
+                syncTokenWithSW(data.token);
+                return data.token;
+            } catch (refreshError) {
+                const status = refreshError.response?.status;
+                if (status === 401 || status === 403) {
+                    if (refreshToken && !nativeDriver) discardLegacyRefreshToken(kind);
+                    forceLogout(kind);
+                }
+                throw refreshError;
+            }
+        })().finally(() => {
+            refreshPromises[kind] = null;
         });
     }
 
-    isRefreshing = true;
-    try {
-        const refreshToken = getRefreshToken(kind);
-        const endpoint = kind === 'captain' ? '/captains/refresh' : '/users/refresh';
-        // Sem refresh token no localStorage ainda vale tentar: ele pode estar no cookie
-        // httpOnly, que o JS não enxerga mas o navegador envia (withCredentials).
-        const { data } = await api.post(endpoint, refreshToken ? { refreshToken } : {});
-
-        saveSession(kind, { token: data.token, refreshToken: data.refreshToken });
-        // C1 da auditoria de push (2026-08-02): o Service Worker do motorista só consegue
-        // aceitar corrida em segundo plano se tiver um access token válido no IndexedDB —
-        // sem sincronizar aqui, ele ficaria com o token antigo até a próxima abertura do app.
-        syncTokenWithSW(data.token);
-        isRefreshing = false;
-        flushQueue(null, data.token);
-        return data.token;
-    } catch (refreshError) {
-        isRefreshing = false;
-        flushQueue(refreshError);
-        forceLogout(kind);
-        throw refreshError;
-    }
+    return refreshPromises[kind];
 }
 
 export default api;

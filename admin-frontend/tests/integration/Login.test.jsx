@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '../../src/contexts/AuthContext';
 import Login from '../../src/pages/Login';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { clearAdminSession, getAdminAccessToken } from '../../src/services/api';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -24,10 +25,11 @@ const renderWithProviders = (ui) => {
 // Fase 2 (H4, 2026-08-05): o teste estava quebrado há tempo — procurava placeholders
 // (/Email/i, /Senha/i), botão ("Entrar no Painel") e chave de storage ('token') que a
 // tela e o AuthContext não usam mais. Atualizado para o contrato atual: placeholders
-// reais, botão "Entrar no Sistema" e 'adminToken' no localStorage.
+// reais e botão "Entrar no Sistema". O JWT agora fica somente em memória.
 describe('Testes de Integração da Tela de Login', () => {
   beforeEach(() => {
     localStorage.clear();
+    clearAdminSession();
   });
 
   it('Deve mostrar erro de credenciais inválidas', async () => {
@@ -43,7 +45,7 @@ describe('Testes de Integração da Tela de Login', () => {
     });
   });
 
-  it('Deve fazer login com sucesso e armazenar token', async () => {
+  it('Deve fazer login com sucesso sem persistir token', async () => {
     renderWithProviders(<Login />);
 
     fireEvent.change(screen.getByPlaceholderText('admin@movecity.com'), { target: { value: 'test@test.com' } });
@@ -52,7 +54,9 @@ describe('Testes de Integração da Tela de Login', () => {
     fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/i }));
 
     await waitFor(() => {
-      expect(localStorage.getItem('adminToken')).toBe('fake-jwt-token-123');
+      expect(getAdminAccessToken()).toBe('fake-jwt-token-123');
+      expect(localStorage.getItem('adminToken')).toBeNull();
+      expect(localStorage.getItem('adminRefreshToken')).toBeNull();
     });
   });
 });

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { getAdminAccessToken } from '../services/api';
 
 const SocketContext = createContext();
 
@@ -39,7 +40,7 @@ export const SocketProvider = ({ children }) => {
       newSocket.on('connect', () => {
         console.log('Connected to socket', newSocket.id);
         // Join admin room (token exigido pelo backend — ver socket.js, S1 da auditoria)
-        newSocket.emit('join', { userId: user._id, userType: 'admin', token: localStorage.getItem('adminToken') });
+        newSocket.emit('join', { userId: user._id, userType: 'admin', token: getAdminAccessToken() });
       });
 
       setSocket(newSocket);

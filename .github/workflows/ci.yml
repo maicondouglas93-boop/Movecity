@@ -26,6 +26,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './Backend/package-lock.json'
       - run: npm ci
+      - name: Contrato crítico de CSRF e logout
+        run: npm run test:critical:csrf
       - name: Contrato crítico de privacidade do mapa
         run: npm run test:critical:map-privacy
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).

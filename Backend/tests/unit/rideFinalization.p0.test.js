@@ -58,6 +58,7 @@ async function createFinancialRide() {
         fare: 0,
         vehicleType: 'car',
         paymentMethod: 'cash',
+        otp: '123456',
         status: 'started',
         startedAt: new Date(Date.now() - 150 * 60 * 1000),
         actualDistance: 80000,

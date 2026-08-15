@@ -232,7 +232,7 @@ module.exports.updateDocument = async (req, res, next) => {
 }
 
 module.exports.logoutCaptain = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const token = req.authToken;
 
     if (token) {
         await blackListTokenModel.create({ token }).catch(() => {});
@@ -242,10 +242,9 @@ module.exports.logoutCaptain = async (req, res, next) => {
     res.clearCookie('token', accessClearOptions);
     res.clearCookie('refreshToken', authService.clearCookieOptions());
 
-    // Auditoria de sessão (2026-08-02): sem isto, o refresh token sobrevivia ao logout
-    // e podia gerar access tokens novos depois do "Sair".
-    // Rota GET — ver comentário equivalente em user.controller.js: logoutUser.
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+    // Nunca aceitar refresh token na URL: query strings aparecem em logs, histórico e
+    // Referer. POST envia o segredo somente no corpo ou no cookie HttpOnly.
+    const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
     if (refreshToken) {
         await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
     } else if (req.captain?._id) {

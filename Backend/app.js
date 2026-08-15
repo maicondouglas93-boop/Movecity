@@ -30,6 +30,12 @@ const adminRoutes = require('./routes/admin.routes');
 const appVersionRoutes = require('./routes/appVersion.routes');
 
 const { corsOriginCallback } = require('./config/corsOrigins');
+const { csrfProtection } = require('./middlewares/csrfProtection.middleware');
+
+// A validação de origem precisa enxergar os cookies antes do CORS. Assim, uma
+// mutação cross-site autenticada por cookie recebe 403 antes de chegar às rotas.
+app.use(cookieParser());
+app.use(csrfProtection);
 
 app.use(cors({
     origin: corsOriginCallback,
@@ -52,7 +58,6 @@ const limiter = rateLimit({
 app.use(limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 if (process.env.NODE_ENV !== 'test') {
     connectToDb();

@@ -1,6 +1,5 @@
 const mongoose = require('mongoose')
 const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
 
 const captainSchema = new mongoose.Schema({
     fullname: {
@@ -271,8 +270,8 @@ captainSchema.index({ locationGeoJSON: '2dsphere' });
 
 
 captainSchema.methods.generateAuthToken = function () {
-    const token = jwt.sign({ _id: this._id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    return token;
+    const { generateAccessToken } = require('../services/auth.service');
+    return generateAccessToken(this._id, 'captain');
 }
 
 

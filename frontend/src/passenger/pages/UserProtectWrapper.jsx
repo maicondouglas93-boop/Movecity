@@ -1,8 +1,7 @@
-import React, { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { UserDataContext } from '@/passenger/contexts/UserContext'
-import { useNavigate } from 'react-router-dom'
-import api from '@/shared/services/axios'
-import { getAccessToken, getRefreshToken } from '@/shared/services/session'
+import api, { refreshAccessToken } from '@/shared/services/axios'
+import { getAccessToken } from '@/shared/services/session'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import Button from '@/shared/components/ui/Button'
 
@@ -16,8 +15,8 @@ import Button from '@/shared/components/ui/Button'
 // Agora: 401/403 (sessão comprovadamente inválida) é o ÚNICO caso que encerra a sessão —
 // e mesmo o 401 só chega aqui depois de o interceptor ter tentado renovar
 // silenciosamente. Erro de rede/servidor mantém a sessão e oferece "Tentar de novo".
+// eslint-disable-next-line react/prop-types
 const UserProtectWrapper = ({ children }) => {
-    const navigate = useNavigate()
     const { setUser } = useContext(UserDataContext)
     const [ status, setStatus ] = useState('checking') // checking | authenticated | network-error
     const [ attempt, setAttempt ] = useState(0)
@@ -25,15 +24,11 @@ const UserProtectWrapper = ({ children }) => {
     useEffect(() => {
         let cancelled = false
 
-        // Sem nenhum vestígio de sessão, nem tenta o request: vai direto pro login,
-        // sem piscar a interface autenticada.
-        if (!getAccessToken('user') && !getRefreshToken('user')) {
-            navigate('/login', { replace: true })
-            return
-        }
-
         setStatus('checking')
-        api.get('/users/profile')
+        const bootstrap = getAccessToken('user')
+            ? Promise.resolve()
+            : refreshAccessToken('user')
+        bootstrap.then(() => api.get('/users/profile'))
             .then(response => {
                 if (cancelled) return
                 setUser(response.data)
@@ -52,7 +47,7 @@ const UserProtectWrapper = ({ children }) => {
             })
 
         return () => { cancelled = true }
-    }, [ attempt ])
+    }, [ attempt, setUser ])
 
     if (status === 'checking') {
         return <SessionSplash label="Entrando..." />

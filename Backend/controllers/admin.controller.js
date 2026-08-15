@@ -1,5 +1,17 @@
 ﻿const adminService = require('../services/admin.service');
 const { validationResult } = require('express-validator');
+const authService = require('../services/auth.service');
+
+const ACTOR = 'admin';
+
+function setSessionCookies(res, accessToken, refreshToken) {
+    res.cookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessToken, authService.accessCookieOptions());
+    if (refreshToken) {
+        res.cookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], refreshToken, authService.refreshCookieOptions(ACTOR));
+    }
+    const { maxAge, ...accessOptions } = authService.accessCookieOptions();
+    res.clearCookie('adminToken', accessOptions);
+}
 
 module.exports.login = async (req, res, next) => {
     try {
@@ -10,11 +22,7 @@ module.exports.login = async (req, res, next) => {
 
         const { admin, token, refreshToken } = await adminService.login(email, password);
 
-        res.cookie('adminToken', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            maxAge: 15 * 60 * 1000 // 15 minutes
-        });
+        setSessionCookies(res, token, refreshToken);
 
         res.status(200).json({
             message: 'Logged in successfully',
@@ -25,7 +33,7 @@ module.exports.login = async (req, res, next) => {
                 role: admin.role,
             },
             token,
-            refreshToken
+            ...(authService.shouldExposeRefreshToken(req, ACTOR) ? { refreshToken } : {})
         });
     } catch (error) {
         if (error.message === 'Invalid email or password' || error.message === 'Admin account is deactivated') {
@@ -37,14 +45,10 @@ module.exports.login = async (req, res, next) => {
 
 module.exports.refresh = async (req, res, next) => {
     try {
-        const { refreshToken } = req.body;
+        const refreshToken = authService.resolveRefreshToken(req, ACTOR);
         const { admin, token, refreshToken: newRefreshToken } = await adminService.refreshAccessToken(refreshToken);
 
-        res.cookie('adminToken', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            maxAge: 15 * 60 * 1000 // 15 minutes
-        });
+        setSessionCookies(res, token, newRefreshToken);
 
         res.status(200).json({
             admin: {
@@ -54,7 +58,9 @@ module.exports.refresh = async (req, res, next) => {
                 role: admin.role,
             },
             token,
-            refreshToken: newRefreshToken
+            ...(authService.shouldExposeRefreshToken(req, ACTOR) && newRefreshToken
+                ? { refreshToken: newRefreshToken }
+                : {})
         });
     } catch (error) {
         return res.status(401).json({ message: error.message || 'Refresh token inválido' });
@@ -81,12 +87,14 @@ module.exports.logout = async (req, res, next) => {
     try {
         // Revoga só a sessão deste dispositivo quando o refresh token vem junto; sem
         // ele, encerra todas as sessões do admin (ver invalidateRefreshToken).
-        const refreshToken = req.cookies?.adminRefreshToken || req.body?.refreshToken;
+        const refreshToken = authService.resolveRefreshToken(req, ACTOR);
         if (req.admin) {
             await adminService.invalidateRefreshToken(req.admin._id, refreshToken);
         }
-        res.clearCookie('adminToken');
-        res.clearCookie('adminRefreshToken');
+        const { maxAge, ...accessOptions } = authService.accessCookieOptions();
+        res.clearCookie(authService.ACCESS_COOKIE_BY_ACTOR[ACTOR], accessOptions);
+        res.clearCookie(authService.REFRESH_COOKIE_BY_ACTOR[ACTOR], authService.clearCookieOptions(ACTOR));
+        res.clearCookie('adminToken', accessOptions);
         res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
         next(error);

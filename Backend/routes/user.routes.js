@@ -7,7 +7,7 @@ const { loginLimiter } = require('../middlewares/rateLimiter');
 
 
 router.post('/register', loginLimiter, [
-    body('email').isEmail().withMessage('Invalid Email'),
+    body('email').trim().toLowerCase().isEmail().withMessage('Invalid Email'),
     body('fullname.firstname').isLength({ min: 3 }).withMessage('First name must be at least 3 characters long'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
     body('cpf').isLength({ min: 11, max: 11 }).withMessage('CPF must be 11 digits long'),
@@ -19,7 +19,7 @@ router.post('/register', loginLimiter, [
 router.post('/google-login', loginLimiter, userController.googleLogin);
 
 router.post('/login', loginLimiter, [
-    body('email').isEmail().withMessage('Invalid Email'),
+    body('email').trim().toLowerCase().isEmail().withMessage('Invalid Email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long')
 ],
     userController.loginUser
@@ -42,7 +42,7 @@ router.put('/profile',
 // token já expirou. A autenticação aqui é o próprio refresh token.
 router.post('/refresh', userController.refreshUserSession)
 
-router.get('/logout', authMiddleware.authUser, userController.logoutUser)
+router.post('/logout', authMiddleware.authUser, userController.logoutUser)
 
 router.post('/account-deletion',
     authMiddleware.authUser,

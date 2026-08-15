@@ -21,6 +21,7 @@ const UserSignup = () => {
   const [ phone, setPhone ] = useState('')
   const [ loading, setLoading ] = useState(false)
   const [ googleLoading, setGoogleLoading ] = useState(false)
+  const [ googleLinkConfirmationRequired, setGoogleLinkConfirmationRequired ] = useState(false)
 
   const navigate = useNavigate()
   const { setUser } = useContext(UserDataContext)
@@ -37,13 +38,18 @@ const UserSignup = () => {
 
   const handleGoogleLogin = async () => {
     if (googleLoading) return
+    if (googleLinkConfirmationRequired && !password) {
+      addToast('Digite a senha atual no campo Senha para confirmar o vínculo com o Google.', 'error')
+      return
+    }
     setGoogleLoading(true)
 
     try {
       const idToken = await getGoogleIdToken(auth, provider)
 
       const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
-        idToken: idToken
+        idToken: idToken,
+        ...(googleLinkConfirmationRequired && password ? { password } : {})
       })
 
       if (response.status === 200 || response.status === 201) {
@@ -51,12 +57,19 @@ const UserSignup = () => {
         setUser(data.user)
         saveSession('user', data)
         syncTokenWithSW(data.token)
+        setGoogleLinkConfirmationRequired(false)
         addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
         navigate('/home')
       }
     } catch (error) {
       console.error('Google login error:', error);
       if (error.code !== 'auth/popup-closed-by-user') {
+        const backendCode = error.response?.data?.code
+        if (backendCode === 'GOOGLE_LINK_PASSWORD_REQUIRED') {
+          setGoogleLinkConfirmationRequired(true)
+          addToast('Esta conta já existe. Digite a senha atual no campo Senha e toque em Entrar com o Google novamente.', 'error')
+          return
+        }
         const backendError = error.response?.data?.error || error.response?.data?.message || error.message
         addToast(`Erro no Google: ${backendError}`, 'error');
       }

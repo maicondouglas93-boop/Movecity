@@ -69,7 +69,7 @@ router.patch('/documents',
     captainController.updateDocument
 )
 
-router.get('/logout', authMiddleware.authCaptain, captainController.logoutCaptain)
+router.post('/logout', authMiddleware.authCaptain, captainController.logoutCaptain)
 
 router.post('/account-deletion',
     authMiddleware.authCaptain,

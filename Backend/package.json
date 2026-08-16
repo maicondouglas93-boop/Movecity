@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "migrate:vehicle-authorization": "node scripts/backfill-captain-vehicle-authorization.js",
     "start": "node server.js",

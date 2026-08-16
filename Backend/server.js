@@ -1,5 +1,6 @@
 const http = require('http');
 const app = require('./app');
+const connectToDb = require('./db/db');
 const { initializeSocket } = require('./socket');
 const port = process.env.PORT || 3000;
 
@@ -35,6 +36,19 @@ server.on('error', (error) => {
     process.exit(1);
 });
 
-server.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-});
+// Plano de correção (Fase 2.3, 2026-08-16, Passo 3): antes, connectToDb() era
+// disparado sem await dentro de app.js e server.listen() rodava logo em seguida —
+// o processo aceitava requisição HTTP antes do Mongo estar conectado. Como o
+// Mongoose enfileira comandos por padrão, essas requisições não falhavam rápido:
+// ficavam penduradas até o timeout de seleção de servidor, pior que uma falha clara.
+// Agora a porta só abre depois que o banco conecta de verdade.
+connectToDb()
+    .then(() => {
+        server.listen(port, () => {
+            console.log(`Server is running on port ${port}`);
+        });
+    })
+    .catch((err) => {
+        console.error('[BOOT] Falha ao conectar ao banco antes de iniciar o servidor:', err);
+        process.exit(1);
+    });

@@ -67,6 +67,13 @@ router.post('/share',
     rideController.createRideShareLink
 )
 
+// Revoga o identificador persistido; chamadas repetidas são idempotentes.
+router.delete('/share/:rideId',
+    authMiddleware.authUser,
+    param('rideId').isMongoId().withMessage('Corrida inválida'),
+    rideController.revokeRideShareLink
+)
+
 // Link temporário compartilhado pelo próprio passageiro. Somente leitura e payload
 // sanitizado; o token assinado substitui autenticação de conta nesta rota específica.
 router.get('/share/:token', rideController.getSharedRide)

@@ -88,17 +88,28 @@ module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, pay
     }
 
     if (promotion.globalUsageLimit !== undefined) {
-        const totalUses = await promotionUsageModel.countDocuments({ promotionId: promotion._id });
+        const totalUses = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            reversedAt: null,
+        });
         if (totalUses >= promotion.globalUsageLimit) return { error: 'Este cupom atingiu o limite total de usos' };
     }
     if (promotion.usagePerUserLimit !== undefined) {
-        const userUses = await promotionUsageModel.countDocuments({ promotionId: promotion._id, userId });
+        const userUses = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            userId,
+            reversedAt: null,
+        });
         if (userUses >= promotion.usagePerUserLimit) return { error: 'Você já utilizou este cupom o número máximo de vezes' };
     }
     if (promotion.usagePerDayLimit !== undefined) {
         const startOfDay = new Date(now);
         startOfDay.setHours(0, 0, 0, 0);
-        const usesToday = await promotionUsageModel.countDocuments({ promotionId: promotion._id, createdAt: { $gte: startOfDay } });
+        const usesToday = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            createdAt: { $gte: startOfDay },
+            reversedAt: null,
+        });
         if (usesToday >= promotion.usagePerDayLimit) return { error: 'Este cupom atingiu o limite de usos de hoje' };
     }
 

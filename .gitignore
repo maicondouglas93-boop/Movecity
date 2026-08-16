@@ -28,3 +28,6 @@ dist-ssr
 *.sw?
 
 Backend/config/firebase-service-account.json
+
+# Dumps de banco (dados reais de produção — nunca versionar)
+Backend/backups/

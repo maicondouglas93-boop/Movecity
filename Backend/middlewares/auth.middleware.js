@@ -5,14 +5,18 @@ const blackListTokenModel = require('../models/blacklistToken.model');
 const captainModel = require('../models/captain.model');
 const userService = require('../services/user.service');
 const captainService = require('../services/captain.service');
+const { resolveAccessToken } = require('../utils/authToken');
 
 
 module.exports.authUser = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const { token, source } = resolveAccessToken(req, 'token');
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+
+    req.authToken = token;
+    req.authSource = source;
 
 
     const isBlacklisted = await blackListTokenModel.findOne({ token: token });
@@ -44,12 +48,15 @@ module.exports.authUser = async (req, res, next) => {
 }
 
 module.exports.authCaptain = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const { token, source } = resolveAccessToken(req, 'token');
 
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+
+    req.authToken = token;
+    req.authSource = source;
 
     const isBlacklisted = await blackListTokenModel.findOne({ token: token });
 
@@ -82,11 +89,14 @@ module.exports.authCaptain = async (req, res, next) => {
 }
 
 module.exports.authBoth = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const { token, source } = resolveAccessToken(req, 'token');
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+
+    req.authToken = token;
+    req.authSource = source;
 
     const isBlacklisted = await blackListTokenModel.findOne({ token: token });
 

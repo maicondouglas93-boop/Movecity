@@ -12,6 +12,7 @@ const STATUS = {
     finished: 'Corrida finalizada',
     cancelled: 'Corrida cancelada',
 }
+const TERMINAL_STATUSES = new Set(['finished', 'cancelled'])
 
 const SharedRideTracking = () => {
     const { token } = useParams()
@@ -22,6 +23,7 @@ const SharedRideTracking = () => {
     useEffect(() => {
         let cancelled = false
         let interval
+        let terminal = false
 
         const load = async () => {
             try {
@@ -31,6 +33,10 @@ const SharedRideTracking = () => {
                 if (!cancelled) {
                     setRide(data)
                     setError('')
+                    if (TERMINAL_STATUSES.has(data.status)) {
+                        terminal = true
+                        clearInterval(interval)
+                    }
                 }
             } catch (err) {
                 if (!cancelled) setError(err.message || 'Acompanhamento indisponível.')
@@ -39,8 +45,11 @@ const SharedRideTracking = () => {
             }
         }
 
-        load()
-        interval = setInterval(load, 10_000)
+        const start = async () => {
+            await load()
+            if (!cancelled && !terminal) interval = setInterval(load, 10_000)
+        }
+        start()
         return () => {
             cancelled = true
             clearInterval(interval)
@@ -77,7 +86,7 @@ const SharedRideTracking = () => {
                     <div className="space-y-3">
                         <section className="rounded-panel border border-brand-200 bg-brand-50 p-4 shadow-raised" aria-live="polite">
                             <div className="flex items-center gap-3">
-                                <span className={`h-3 w-3 rounded-full ${['finished', 'cancelled'].includes(ride.status) ? 'bg-ink-400' : 'bg-brand-500 animate-pulse'}`} />
+                                <span className={`h-3 w-3 rounded-full ${TERMINAL_STATUSES.has(ride.status) ? 'bg-ink-400' : 'bg-brand-500 animate-pulse'}`} />
                                 <div>
                                     <p className="text-xs text-ink-500">Situação atual</p>
                                     <p className="font-bold text-ink-900">{STATUS[ride.status] || 'Atualizando corrida'}</p>
@@ -106,7 +115,7 @@ const SharedRideTracking = () => {
                             </div>
                         </section>
 
-                        {locationUrl && !['finished', 'cancelled'].includes(ride.status) && (
+                        {locationUrl && !TERMINAL_STATUSES.has(ride.status) && (
                             <a
                                 href={locationUrl}
                                 target="_blank"
@@ -118,7 +127,11 @@ const SharedRideTracking = () => {
                             </a>
                         )}
 
-                        <p className="text-center text-xs text-ink-400">Atualização automática a cada 10 segundos.</p>
+                        <p className="text-center text-xs text-ink-400">
+                            {TERMINAL_STATUSES.has(ride.status)
+                                ? 'Acompanhamento encerrado. Nenhuma localização será atualizada.'
+                                : 'Atualização automática a cada 10 segundos.'}
+                        </p>
                     </div>
                 )}
             </main>

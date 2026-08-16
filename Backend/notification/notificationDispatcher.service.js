@@ -542,13 +542,12 @@ module.exports.sendChatMessageToUser = async (userId, preview, data) => {
     return queue.enqueue(() => sendToUser(userId, 'Nova mensagem do motorista', preview, 'CHAT', { ...data, deepLink }));
 };
 
-// Pagamento/carteira (Fase 5 da correção do sistema de push, 2026-08-02): antes só
-// socket ("payment-completed") — sem push, o motorista só sabia que o passageiro pagou
-// se estivesse com o app aberto naquele instante.
-module.exports.sendPaymentCompleted = async (captainId, data) => {
-    const title = 'Pagamento Recebido';
-    const message = 'O passageiro confirmou o pagamento da corrida.';
-    queue.enqueue(() => sendToCaptain(captainId, title, message, 'PAYMENT', { ...data, deepLink: DEEP_LINK.captainHome }));
+// Aviso informativo: não representa liquidação e não pode encerrar a corrida no app
+// do motorista. A confirmação financeira permanece em /rides/confirm-payment.
+module.exports.sendPaymentReported = async (captainId, data) => {
+    const title = 'Passageiro informou pagamento';
+    const message = 'Confira o recebimento e confirme no app somente quando o valor estiver com você.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'PAYMENT', { ...data, deepLink: DEEP_LINK.captainRiding }));
 };
 
 module.exports.sendRechargeApproved = async (captainId, data) => {

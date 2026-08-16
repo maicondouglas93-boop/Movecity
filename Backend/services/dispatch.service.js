@@ -7,8 +7,7 @@ const {
     isCaptainAuthorizedForVehicleType,
     vehicleFamilyFromCategory,
 } = require('./vehicleAuthorization.service');
-
-const CAPTAIN_SEARCH_RADIUS_KM = 15;
+const { CAPTAIN_SEARCH_RADIUS_KM } = require('../config/dispatchPolicy');
 
 const ACTIVE_RIDE_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'];
 const ACTIVE_PARCEL_STATUSES = [

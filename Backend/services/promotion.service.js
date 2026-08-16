@@ -88,17 +88,28 @@ module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, pay
     }
 
     if (promotion.globalUsageLimit !== undefined) {
-        const totalUses = await promotionUsageModel.countDocuments({ promotionId: promotion._id });
+        const totalUses = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            reversedAt: null,
+        });
         if (totalUses >= promotion.globalUsageLimit) return { error: 'Este cupom atingiu o limite total de usos' };
     }
     if (promotion.usagePerUserLimit !== undefined) {
-        const userUses = await promotionUsageModel.countDocuments({ promotionId: promotion._id, userId });
+        const userUses = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            userId,
+            reversedAt: null,
+        });
         if (userUses >= promotion.usagePerUserLimit) return { error: 'Você já utilizou este cupom o número máximo de vezes' };
     }
     if (promotion.usagePerDayLimit !== undefined) {
         const startOfDay = new Date(now);
         startOfDay.setHours(0, 0, 0, 0);
-        const usesToday = await promotionUsageModel.countDocuments({ promotionId: promotion._id, createdAt: { $gte: startOfDay } });
+        const usesToday = await promotionUsageModel.countDocuments({
+            promotionId: promotion._id,
+            createdAt: { $gte: startOfDay },
+            reversedAt: null,
+        });
         if (usesToday >= promotion.usagePerDayLimit) return { error: 'Este cupom atingiu o limite de usos de hoje' };
     }
 
@@ -113,13 +124,20 @@ module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, pay
 
 // Registra o uso e credita o gasto de orçamento/métricas da promoção. Chamado na
 // criação da corrida (não na finalização) — ver decisão de escopo no plano do Bloco H.
-module.exports.recordPromotionUsage = async ({ promotionId, userId, rideId, discountAmount }) => {
-    await promotionUsageModel.create({ promotionId, userId, rideId, discountAmount });
+module.exports.recordPromotionUsage = async ({ promotionId, userId, rideId, discountAmount, session }) => {
+    if (session) {
+        await promotionUsageModel.create(
+            [{ promotionId, userId, rideId, discountAmount }],
+            { session }
+        );
+    } else {
+        await promotionUsageModel.create({ promotionId, userId, rideId, discountAmount });
+    }
     await promotionModel.findByIdAndUpdate(promotionId, {
         $inc: {
             currentBudgetUsed: discountAmount,
             'metrics.uses': 1,
             'metrics.totalDiscountGiven': discountAmount
         }
-    });
+    }, session ? { session } : undefined);
 };

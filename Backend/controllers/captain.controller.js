@@ -238,7 +238,7 @@ module.exports.updateDocument = async (req, res, next) => {
 }
 
 module.exports.logoutCaptain = async (req, res, next) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
+    const token = req.authToken;
 
     if (token) {
         await blackListTokenModel.create({ token }).catch(() => {});
@@ -248,10 +248,9 @@ module.exports.logoutCaptain = async (req, res, next) => {
     res.clearCookie('token', accessClearOptions);
     res.clearCookie('refreshToken', authService.clearCookieOptions());
 
-    // Auditoria de sessão (2026-08-02): sem isto, o refresh token sobrevivia ao logout
-    // e podia gerar access tokens novos depois do "Sair".
-    // Rota GET — ver comentário equivalente em user.controller.js: logoutUser.
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+    // Nunca aceitar refresh token na URL: query strings aparecem em logs, histórico e
+    // Referer. POST envia o segredo somente no corpo ou no cookie HttpOnly.
+    const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
     if (refreshToken) {
         await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
     } else if (req.captain?._id) {
@@ -391,16 +390,11 @@ module.exports.toggleOnline = async (req, res, next) => {
         // apareceria no próximo update de localização, ~10s). Um motorista que ficar
         // online no meio de uma corrida é corrigido pelo 'driver-busy' do fluxo de
         // localização logo em seguida.
-        const { sendMessageToRoom, emitDriverMapUpdate, clearDriverMapState } = require('../socket');
+        const { sendMessageToRoom, emitDriverMapUpdate, emitDriverMapOffline } = require('../socket');
         if (!isOnline) {
-            // Esquece o último estado publicado: quando este motorista voltar, o primeiro
-            // evento dele precisa sair na hora em vez de ser deduplicado contra o estado
-            // de antes de sair do ar.
-            clearDriverMapState(captain._id);
-            sendMessageToRoom('map-viewers', {
-                event: 'driver-offline',
-                data: { driverId: captain._id.toString() }
-            });
+            // Remove somente dos espectadores cujo raio continha este motorista; o id
+            // real nunca trafega para o mapa pré-corrida.
+            emitDriverMapOffline(captain._id, captain.location);
             // Painel admin /rides: remove o marcador na hora do toggle offline.
             sendMessageToRoom('admin_room', {
                 event: 'admin-captain-offline',

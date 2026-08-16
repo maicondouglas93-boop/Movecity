@@ -4,6 +4,7 @@ const dispatchService = require('../services/dispatch.service');
 const parcelModel = require('../models/parcel.model');
 const { sendMessageToSocketId, addSocketToRoom, sendMessageToRoom, emitDriverMapUpdate } = require('../socket');
 const notificationService = require('../services/notification.service');
+const { toParcelPassengerDTO } = require('../utils/actorDtos');
 
 async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID, excludeCaptainId } = {}) {
     const { pickupCoordinates, captains } = await dispatchService.findCaptainsNearPickup(
@@ -22,7 +23,7 @@ async function dispatchParcelToCaptains(parcel, { pickup, vehicleType, TRACE_ID,
         { _id: parcel._id },
         { pickupCoordinates },
         { new: true }
-    ).populate('user');
+    ).populate('user', 'fullname');
 
     const offerPayload = parcelService.toParcelOfferDTO(parcelWithUser);
 
@@ -136,7 +137,7 @@ module.exports.createParcel = async (req, res) => {
         }
 
         const withPin = await parcelModel.findById(parcel._id).select('+deliveryPin').populate('captain');
-        return res.status(201).json({ ...withPin.toObject(), warnings });
+        return res.status(201).json({ ...toParcelPassengerDTO(withPin), warnings });
     } catch (err) {
         if (err.code === 'VEHICLE_INCOMPATIBLE') {
             return res.status(400).json({ message: err.message });
@@ -170,9 +171,9 @@ module.exports.createParcel = async (req, res) => {
 module.exports.getCurrent = async (req, res) => {
     try {
         const parcel = await parcelService.getCurrentParcelForUser(req.user._id);
-        if (!parcel) return res.status(200).json(parcel);
+        if (!parcel) return res.status(200).json(null);
         const requireDeliveryPin = await parcelService.getRequireDeliveryPin(parcel.vehicleType || 'moto');
-        return res.status(200).json({ ...parcel.toObject(), requireDeliveryPin });
+        return res.status(200).json(toParcelPassengerDTO(parcel, { requireDeliveryPin }));
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }
@@ -222,7 +223,7 @@ module.exports.acceptParcel = async (req, res) => {
             addSocketToRoom(parcel.user.socketId, `parcel_${parcelId}`);
             sendMessageToSocketId(parcel.user.socketId, {
                 event: 'parcel-confirmed',
-                data: parcel,
+                data: toParcelPassengerDTO(parcel),
             });
         }
         if (req.captain.socketId) {
@@ -293,7 +294,7 @@ module.exports.updateStatus = async (req, res) => {
         if (parcel.user?.socketId) {
             sendMessageToSocketId(parcel.user.socketId, {
                 event: 'parcel-status-updated',
-                data: { ...(parcel.toObject ? parcel.toObject() : parcel), requireDeliveryPin },
+                data: toParcelPassengerDTO(parcel, { requireDeliveryPin }),
             });
         }
 
@@ -320,11 +321,11 @@ module.exports.confirmDelivery = async (req, res) => {
         if (parcel.user?.socketId) {
             sendMessageToSocketId(parcel.user.socketId, {
                 event: 'parcel-delivered',
-                data: parcel,
+                data: toParcelPassengerDTO(parcel),
             });
             sendMessageToSocketId(parcel.user.socketId, {
                 event: 'parcel-ended',
-                data: parcel,
+                data: toParcelPassengerDTO(parcel),
             });
         }
 
@@ -400,13 +401,19 @@ module.exports.cancelParcel = async (req, res) => {
             }
         }
 
-        return res.status(200).json(parcel);
+        return res.status(200).json(toParcelPassengerDTO(parcel));
     } catch (err) {
         if (err.message === 'PARCEL_NOT_FOUND') {
             return res.status(404).json({ message: 'Encomenda não encontrada' });
         }
         if (err.message === 'PARCEL_NOT_CANCELLABLE') {
             return res.status(400).json({ message: 'Não é possível cancelar neste status' });
+        }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento está pendente de reconciliação. Tente novamente.' });
         }
         return res.status(500).json({ message: err.message });
     }

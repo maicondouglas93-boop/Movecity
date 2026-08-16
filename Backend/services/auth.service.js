@@ -49,6 +49,10 @@ module.exports.TOKEN_ISSUER = TOKEN_ISSUER;
 module.exports.AUDIENCE_BY_ACTOR = AUDIENCE_BY_ACTOR;
 module.exports.hashToken = hashToken;
 module.exports.getTokenPolicyMetrics = () => ({ ...tokenPolicyMetrics });
+// Mesma política de segredo dedicado usada por signShareToken/verifyShareToken —
+// exportada para que outras implementações de link de compartilhamento (ex.:
+// utils/rideShareAccess.js) nunca caiam de volta no JWT_SECRET genérico por engano.
+module.exports.shareTokenSecret = () => secretFor(null, 'share');
 
 function tokenError(code, message = code) {
     const error = new Error(message);

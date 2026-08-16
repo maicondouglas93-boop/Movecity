@@ -5,7 +5,10 @@ import { ToastProvider } from '@/shared/contexts/ToastContext'
 import api from '@/shared/services/axios'
 
 vi.mock('@/shared/services/axios', () => ({
-    default: { post: vi.fn().mockResolvedValue({ data: { ticket: {} } }) },
+    default: {
+        post: vi.fn().mockResolvedValue({ data: { ticket: {} } }),
+        delete: vi.fn().mockResolvedValue({}),
+    },
 }))
 
 const ride = {
@@ -81,5 +84,28 @@ describe('Central de segurança do passageiro', () => {
         await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({
             url: 'https://www.moovecity.com.br/track/token-seguro',
         })))
+    })
+
+    it('permite encerrar imediatamente o link compartilhado', async () => {
+        const share = vi.fn().mockResolvedValue()
+        Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+        api.post.mockResolvedValueOnce({ data: { url: 'https://www.moovecity.com.br/track/token-revogavel' } })
+
+        render(
+            <ToastProvider>
+                <PassengerSafetyCenter ride={ride} />
+            </ToastProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /abrir central de segurança/i }))
+        fireEvent.click(screen.getByRole('button', { name: /compartilhar acompanhamento/i }))
+        const revokeButton = await screen.findByRole('button', { name: /encerrar compartilhamento/i })
+        fireEvent.click(revokeButton)
+
+        await waitFor(() => expect(api.delete).toHaveBeenCalledWith(
+            `/rides/share/${ride._id}`,
+            expect.any(Object)
+        ))
+        await waitFor(() => expect(screen.queryByRole('button', { name: /encerrar compartilhamento/i })).not.toBeInTheDocument())
     })
 })

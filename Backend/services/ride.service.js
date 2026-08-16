@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const rideModel = require('../models/ride.model');
 const userModel = require('../models/user.model');
 const paymentModel = require('../models/payment.model');
+const userWalletTransactionModel = require('../models/userWalletTransaction.model');
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
@@ -11,6 +12,10 @@ const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCachedTariffSetting } = require('./tariffSettingCache.service');
 const { processRideTrackingPoint } = require('./rideTracking.service');
+const {
+    PASSENGER_ACTIVE_RIDE_STATUSES,
+    RIDE_CREATION_INDEXES,
+} = require('../config/rideCreationPolicy');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -233,6 +238,44 @@ function getOtp(num) {
     return generateOtp(num);
 }
 
+function normalizeIdempotencyKey(idempotencyKey) {
+    const normalized = String(idempotencyKey || '').trim().toLowerCase();
+    return normalized || null;
+}
+
+async function findRideByIdempotencyKey({ user, source, createdBy, idempotencyKey, session }) {
+    if (!idempotencyKey) return null;
+
+    const filter = source === 'admin'
+        ? { source: 'admin', createdBy, idempotencyKey }
+        : { source: 'passenger_requested', user, idempotencyKey };
+    let query = rideModel.findOne(filter).select('+otp');
+    if (session) query = query.session(session);
+    return query;
+}
+
+function duplicateKeyMatches(err, indexName) {
+    return err?.code === 11000 && (
+        err?.index === indexName
+        || err?.constraint === indexName
+        || String(err?.message || '').includes(indexName)
+    );
+}
+
+async function activePassengerRideError(user) {
+    if (!user) return null;
+    const activeRide = await rideModel.findOne({
+        user,
+        status: { $in: PASSENGER_ACTIVE_RIDE_STATUSES },
+    }).select('_id status');
+    if (!activeRide) return null;
+
+    const err = new Error('USER_HAS_ACTIVE_RIDE');
+    err.code = 'USER_HAS_ACTIVE_RIDE';
+    err.activeRideId = activeRide._id;
+    return err;
+}
+
 module.exports.createRide = async ({
     user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null, scheduledAt = null,
     source = 'passenger_requested', createdBy, createdByRole, adminPassenger, idempotencyKey,
@@ -240,6 +283,17 @@ module.exports.createRide = async ({
 }) => {
     if ((!user && source !== 'admin') || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
+    }
+
+    const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+    const priorRide = await findRideByIdempotencyKey({
+        user,
+        source,
+        createdBy,
+        idempotencyKey: normalizedIdempotencyKey,
+    });
+    if (priorRide) {
+        return { ride: priorRide, promoError: null, replayed: true };
     }
 
     let parsedSchedule = null;
@@ -372,25 +426,6 @@ module.exports.createRide = async ({
         }
     }
 
-    let walletAmountUsed = 0;
-
-    if (useWalletBalance) {
-        const userData = await userModel.findById(user);
-        if (userData && userData.walletBalance > 0) {
-            if (userData.walletBalance >= finalPrice) {
-                walletAmountUsed = finalPrice;
-                paymentMethod = 'carteira'; // Fully paid with wallet
-            } else {
-                walletAmountUsed = userData.walletBalance;
-            }
-            userData.walletBalance -= walletAmountUsed;
-            await userData.save();
-        }
-    }
-
-    // Amount to be paid via normal method
-    const paymentAmount = finalPrice - walletAmountUsed;
-
     // Agendadas: coords cedo para upcoming por raio (SCH-C3 / Fase 2.4). Imediatas: despacho grava.
     let pickupCoordinates = suppliedPickupCoordinates;
     let destinationCoordinates = suppliedDestinationCoordinates;
@@ -409,70 +444,171 @@ module.exports.createRide = async ({
         }
     }
 
-    const ride = await rideModel.create({
-        user,
-        pickup,
-        destination,
-        otp: getOtp(6),
-        fare: pricing.finalFare,
-        finalPrice: finalPrice,
-        promotionApplied,
-        discountAmount,
-        walletAmountUsed,
-        walletAmountDebited: walletAmountUsed,
-        paymentMethod,
-        optionals: processedOptionals,
-        observation,
-        requestFemaleDriver,
-        vehicleType,
-        source,
-        createdBy,
-        createdByRole,
-        adminPassenger,
-        idempotencyKey,
-        destinationPending: false,
-        status: parsedSchedule ? 'scheduled' : 'requested',
-        scheduledAt: parsedSchedule,
-        promoCodeScheduled,
-        useWalletScheduled,
-        pickupCoordinates,
-        destinationCoordinates,
-        estimatedDistance: distance,
-        estimatedTime: time,
-        estimatedPriceMin: pricing.finalFare,
-        estimatedPriceMax: pricing.finalFare,
-        commissionPercent: pricing.commissionPercent ?? 0,
-        commissionAmount: pricing.commissionAmount,
-        fareBreakdown: pricing.fareBreakdown,
-        pricingSnapshot,
-        distance,
-        duration: time
-    });
+    const basePaymentMethod = paymentMethod;
+    const session = await mongoose.startSession();
+    let ride = null;
+    let replayed = false;
 
-    // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
-    if (!parsedSchedule) {
-        if (user && (paymentAmount > 0 || walletAmountUsed > 0)) {
-            await paymentModel.create({
-                rideId: ride._id,
-                userId: user,
-                amount: finalPrice,
-                method: paymentMethod,
-                status: paymentMethod === 'carteira' ? 'approved' : 'pending'
+    try {
+        await session.withTransaction(async () => {
+            // O callback pode ser repetido pelo driver em transient transaction errors.
+            ride = null;
+            replayed = false;
+            const existingRide = await findRideByIdempotencyKey({
+                user,
+                source,
+                createdBy,
+                idempotencyKey: normalizedIdempotencyKey,
+                session,
             });
+            if (existingRide) {
+                ride = existingRide;
+                replayed = true;
+                return;
+            }
+
+            let walletAmountUsed = 0;
+            let walletBalanceBefore = 0;
+            let resolvedPaymentMethod = basePaymentMethod;
+            if (useWalletBalance && user) {
+                const userData = await userModel.findById(user)
+                    .select('walletBalance')
+                    .session(session);
+                walletBalanceBefore = Number(userData?.walletBalance) || 0;
+                if (walletBalanceBefore > 0) {
+                    walletAmountUsed = Math.min(walletBalanceBefore, finalPrice);
+                    if (walletAmountUsed >= finalPrice) {
+                        resolvedPaymentMethod = 'carteira';
+                    }
+                }
+            }
+            const paymentAmount = finalPrice - walletAmountUsed;
+
+            // A corrida vem primeiro: se a restrição de corrida ativa/idempotência
+            // rejeitar a inserção, nenhum saldo chegou a ser alterado.
+            [ride] = await rideModel.create([{
+                user,
+                pickup,
+                destination,
+                otp: getOtp(6),
+                fare: pricing.finalFare,
+                finalPrice,
+                promotionApplied,
+                discountAmount,
+                walletAmountUsed,
+                walletAmountDebited: walletAmountUsed,
+                paymentMethod: resolvedPaymentMethod,
+                optionals: processedOptionals,
+                observation,
+                requestFemaleDriver,
+                vehicleType,
+                source,
+                createdBy,
+                createdByRole,
+                adminPassenger,
+                idempotencyKey: normalizedIdempotencyKey,
+                destinationPending: false,
+                status: parsedSchedule ? 'scheduled' : 'requested',
+                scheduledAt: parsedSchedule,
+                promoCodeScheduled,
+                useWalletScheduled,
+                pickupCoordinates,
+                destinationCoordinates,
+                estimatedDistance: distance,
+                estimatedTime: time,
+                estimatedPriceMin: pricing.finalFare,
+                estimatedPriceMax: pricing.finalFare,
+                commissionPercent: pricing.commissionPercent ?? 0,
+                commissionAmount: pricing.commissionAmount,
+                fareBreakdown: pricing.fareBreakdown,
+                pricingSnapshot,
+                distance,
+                duration: time,
+            }], { session });
+
+            if (walletAmountUsed > 0) {
+                const walletUpdate = await userModel.updateOne(
+                    { _id: user, walletBalance: walletBalanceBefore },
+                    { $inc: { walletBalance: -walletAmountUsed } },
+                    { session }
+                );
+                if (walletUpdate.modifiedCount !== 1) {
+                    const err = new Error('WALLET_BALANCE_CHANGED');
+                    err.code = 'WALLET_BALANCE_CHANGED';
+                    throw err;
+                }
+                await userWalletTransactionModel.create([{
+                    userId: user,
+                    rideId: ride._id,
+                    type: 'ride_debit',
+                    amount: walletAmountUsed,
+                    balanceBefore: walletBalanceBefore,
+                    balanceAfter: walletBalanceBefore - walletAmountUsed,
+                    idempotencyKey: normalizedIdempotencyKey,
+                }], { session });
+            }
+
+            // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
+            if (!parsedSchedule) {
+                if (user && (paymentAmount > 0 || walletAmountUsed > 0)) {
+                    await paymentModel.create([{
+                        rideId: ride._id,
+                        userId: user,
+                        amount: finalPrice,
+                        method: resolvedPaymentMethod,
+                        status: resolvedPaymentMethod === 'carteira' ? 'approved' : 'pending',
+                    }], { session });
+                }
+
+                if (promotionApplied) {
+                    const promotionService = require('./promotion.service');
+                    await promotionService.recordPromotionUsage({
+                        promotionId: promotionApplied,
+                        userId: user,
+                        rideId: ride._id,
+                        discountAmount,
+                        session,
+                    });
+                }
+            }
+        });
+    } catch (err) {
+        // Outra requisição com a mesma chave pode ter confirmado enquanto esta
+        // transação aguardava o índice. Nesse caso o resultado correto é replay.
+        const existingRide = await findRideByIdempotencyKey({
+            user,
+            source,
+            createdBy,
+            idempotencyKey: normalizedIdempotencyKey,
+        });
+        if (existingRide && (
+            err?.code === 11000
+            || duplicateKeyMatches(err, RIDE_CREATION_INDEXES.PASSENGER_IDEMPOTENCY)
+        )) {
+            return { ride: existingRide, promoError: null, replayed: true };
         }
 
-        if (promotionApplied) {
-            const promotionService = require('./promotion.service');
-            await promotionService.recordPromotionUsage({
-                promotionId: promotionApplied,
-                userId: user,
-                rideId: ride._id,
-                discountAmount
-            });
+        const activePassengerDuplicate = duplicateKeyMatches(
+            err,
+            RIDE_CREATION_INDEXES.ACTIVE_PASSENGER
+        ) || (
+            err?.code === 11000
+            && err?.keyPattern?.user === 1
+            && !err?.keyPattern?.idempotencyKey
+        );
+        if (activePassengerDuplicate) {
+            const conflict = await activePassengerRideError(user);
+            if (conflict) throw conflict;
         }
+        throw err;
+    } finally {
+        await session.endSession();
     }
 
-    return { ride, promoError };
+    // Não deixar o documento carregar uma sessão já encerrada: controladores ADM
+    // ainda podem enriquecer e salvar a corrida após o retorno deste serviço.
+    ride?.$session?.(null);
+    return { ride, promoError, replayed };
 }
 
 /**
@@ -1876,29 +2012,12 @@ module.exports.confirmPaymentReceived = async ({ rideId, captain, allowWalletAut
     return updatedRide;
 }
 
-// Auditoria financeira (2026-08-08, CRÍTICO #3): antes gerava paymentID/orderId/
-// signature com crypto.randomBytes — nomes de campo que imitam retorno de gateway
-// real, mas 100% fabricados localmente, sem nenhuma chamada a gateway. Nada lê esses
-// valores de volta (nem o frontend, nem nenhum fluxo de conciliação real) — só
-// existiam pra criar um rastro que parecia de gateway e não era. Este endpoint é o
-// passageiro confirmando "já paguei" (dinheiro/Pix, fora do app); o efeito
-// financeiro real (crédito/comissão) só acontece em confirmPaymentReceived, do lado
-// do motorista. Aqui só confirma que a corrida existe e pertence a este passageiro.
 module.exports.payRide = async ({ rideId, user }) => {
-    if (!rideId) {
-        throw new Error('Ride id is required');
-    }
-
-    const ride = await rideModel.findOne({
-        _id: rideId,
-        user: user._id
-    }).populate('user').populate('captain');
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    return ride;
+    // O passageiro apenas informa pagamento cash/Pix. O serviço isolado aplica a
+    // guarda atômica/idempotente; liquidação continua exclusiva de
+    // confirmPaymentReceived, executada pelo motorista após conferir o recebimento.
+    const paymentReportService = require('./paymentReport.service');
+    return paymentReportService.reportPayment({ rideId, user });
 }
 
 module.exports.getCurrentRide = async ({ user }) => {
@@ -1930,12 +2049,21 @@ module.exports.getCurrentRide = async ({ user }) => {
         const clock = ride.dispatchLastAttemptAt || ride.activatedAt || ride.createdAt;
         const diffInMinutes = (Date.now() - new Date(clock).getTime()) / 60000;
         if (diffInMinutes > 10) {
-            await transitionRide(ride._id, 'cancelled', {}, {
-                cancelledBy: 'system',
-                cancellationReason: 'Nenhum motorista aceitou a corrida a tempo',
-                cancelledAt: new Date(),
-            });
-            ride = null;
+            const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+            try {
+                await reconcileRideCancellation({
+                    rideId: ride._id,
+                    actor: 'system',
+                    reason: 'Nenhum motorista aceitou a corrida a tempo',
+                    allowedOrigins: ['requested'],
+                });
+                ride = null;
+            } catch (error) {
+                if (!['CANCELLATION_IN_PROGRESS', 'CANCELLATION_RETRY_REQUIRED'].includes(error.code)) {
+                    throw error;
+                }
+                console.error('[RIDE] Autoexpiração aguarda reconciliação:', error.code, String(ride._id));
+            }
         }
     }
 
@@ -2003,7 +2131,7 @@ module.exports.getCaptainRideHistory = async ({ captain, page = 1, limit = 20 })
     const [ total, rides ] = await Promise.all([
         rideModel.countDocuments(historyQuery),
         rideModel.find(historyQuery)
-            .populate('user', 'fullname phone email')
+            .populate('user', 'fullname profilePicture rating')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(safeLimit),
@@ -2124,24 +2252,24 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
         if (!presentialOrigins.includes(ride.status)) {
             throw new Error('Ride cannot be cancelled at this stage');
         }
-        const cancelled = await rideModel.findOneAndUpdate(
-            { _id: rideId, captain, status: { $in: presentialOrigins }, source: 'driver_initiated' },
-            {
-                $set: {
-                    status: 'cancelled',
-                    cancelledBy: 'captain',
-                    cancellationReason: reason?.trim() || 'Cancelamento de corrida presencial',
-                    cancelledAt: new Date(),
-                },
-            },
-            { new: true }
-        );
-        if (!cancelled) {
-            throw new Error('Ride cannot be cancelled at this stage');
+        const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+        let cancelled;
+        try {
+            cancelled = await reconcileRideCancellation({
+                rideId,
+                actor: 'captain',
+                captainId: captain,
+                reason: reason?.trim() || 'Cancelamento de corrida presencial',
+                allowedOrigins: presentialOrigins,
+            });
+        } catch (err) {
+            if (err.code === 'RIDE_NOT_FOUND') throw new Error('Ride not found');
+            if (err.code === 'RIDE_NOT_CANCELLABLE') throw new Error('Ride cannot be cancelled at this stage');
+            throw err;
         }
         const dispatchService = require('./dispatch.service');
         await dispatchService.releaseCaptainBusyLock(captain._id || captain);
-        return rideModel.findById(cancelled._id).populate('user');
+        return cancelled;
     }
 
     if (!VALID_ORIGINS_BY_TARGET.requested.includes(ride.status)) {
@@ -2165,7 +2293,7 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     }
 
     const dispatchService = require('./dispatch.service');
-    await dispatchService.releaseCaptainBusyLock(captain._id);
+    await dispatchService.releaseCaptainBusyLock(captain._id || captain);
 
     // Implementação do sistema de cancelamento (2026-08-04): quem chama precisa do
     // socketId do passageiro pra avisar em tempo real (sendMessageToSocketId, não a
@@ -2228,42 +2356,20 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
         throw new Error('Ride id and user are required');
     }
 
-    // Pré-checagem só pra mensagem de erro e pra decidir a taxa de cancelamento a partir
-    // do status atual — a garantia real de concorrência é o findOneAndUpdate atômico
-    // abaixo (P2.1 da auditoria: sem isso, um `cancel` e um `start`/`confirm` simultâneos
-    // podiam ambos passar pela checagem em memória e produzir um estado impossível).
-    const ride = await rideModel.findOne({
-        _id: rideId,
-        user
-    });
-
-    if (!ride) {
-        throw new Error('Ride not found');
-    }
-
-    if (!VALID_ORIGINS_BY_TARGET.cancelled.includes(ride.status)) {
-        throw new Error('Ride cannot be cancelled at this stage');
-    }
-
-    // Taxa de cancelamento: só se aplica quando já existe um motorista comprometido
-    // com a corrida (aceitou e está a caminho/esperando) — cancelar antes de qualquer
-    // motorista aceitar não gera taxa. Valor vem do pricingSnapshot (contrato),
-    // não da config live do painel.
-    const capturedByDriver = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'].includes(ride.status);
-    let cancellationFeeCharged = 0;
-    if (capturedByDriver && ride.captain) {
-        const tariffSetting = await resolveTariffSetting(ride);
-        cancellationFeeCharged = tariffSetting?.cancellationFee || 0;
-    }
-
-    const updated = await transitionRide(rideId, 'cancelled', { user }, {
-        cancellationFeeCharged,
-        cancelledBy: 'passenger',
-        cancellationReason: reason || undefined,
-        cancelledAt: new Date(),
-    });
-    if (!updated) {
-        throw new Error('Ride cannot be cancelled at this stage');
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    let updated;
+    try {
+        updated = await reconcileRideCancellation({
+            rideId,
+            actor: 'passenger',
+            userId: user,
+            reason,
+            allowedOrigins: VALID_ORIGINS_BY_TARGET.cancelled,
+        });
+    } catch (err) {
+        if (err.code === 'RIDE_NOT_FOUND') throw new Error('Ride not found');
+        if (err.code === 'RIDE_NOT_CANCELLABLE') throw new Error('Ride cannot be cancelled at this stage');
+        throw err;
     }
 
     if (updated.captain) {
@@ -2275,6 +2381,28 @@ module.exports.cancelRide = async ({ rideId, user, reason }) => {
 
     return updated;
 }
+
+module.exports.cancelRideByAdmin = async ({ rideId, reason, admin, extraSet }) => {
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    return reconcileRideCancellation({
+        rideId,
+        actor: 'admin',
+        requestedBy: admin?._id || admin,
+        reason: reason || 'Cancelada pelo painel admin',
+        extraSet,
+    });
+};
+
+module.exports.cancelRideBySystem = async ({ rideId, reason, allowedOrigins, extraSet }) => {
+    const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
+    return reconcileRideCancellation({
+        rideId,
+        actor: 'system',
+        reason,
+        allowedOrigins,
+        extraSet,
+    });
+};
 
 module.exports.submitReview = async ({ rideId, user, rating, comment, issueCategory }) => {
     if (!rideId || !user || !rating) {

@@ -81,8 +81,9 @@ describe('Sessão persistente — passageiro', () => {
         const loginRes = await loginUser();
 
         const logoutRes = await request(app)
-            .get('/users/logout')
-            .set('Authorization', `Bearer ${loginRes.body.token}`);
+            .post('/users/logout')
+            .set('Authorization', `Bearer ${loginRes.body.token}`)
+            .send({ refreshToken: loginRes.body.refreshToken });
         expect(logoutRes.statusCode).toBe(200);
 
         const afterLogout = await request(app).post('/users/refresh').send({ refreshToken: loginRes.body.refreshToken });

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { body, query, param } = require('express-validator');
+const { body, query, param, header } = require('express-validator');
 const rideController = require('../controllers/ride.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
 const { rideStartPinLimiter } = require('../middlewares/rateLimiter');
@@ -8,6 +8,12 @@ const { rideStartPinLimiter } = require('../middlewares/rateLimiter');
 
 router.post('/create',
     authMiddleware.authUser,
+    header('Idempotency-Key')
+        .exists({ checkFalsy: true })
+        .withMessage('Idempotency-Key is required')
+        .bail()
+        .isUUID()
+        .withMessage('Invalid Idempotency-Key'),
     body('pickup').isString().isLength({ min: 3 }).withMessage('Invalid pickup address'),
     body('destination').isString().isLength({ min: 3 }).withMessage('Invalid destination address'),
     body('vehicleType').isString().isLength({ min: 1 }).withMessage('Invalid vehicle type'),
@@ -59,6 +65,13 @@ router.post('/share',
     authMiddleware.authUser,
     body('rideId').isMongoId().withMessage('Corrida inválida'),
     rideController.createRideShareLink
+)
+
+// Revoga o identificador persistido; chamadas repetidas são idempotentes.
+router.delete('/share/:rideId',
+    authMiddleware.authUser,
+    param('rideId').isMongoId().withMessage('Corrida inválida'),
+    rideController.revokeRideShareLink
 )
 
 // Link temporário compartilhado pelo próprio passageiro. Somente leitura e payload

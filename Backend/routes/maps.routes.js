@@ -3,6 +3,7 @@ const router = express.Router();
 const authMiddleware = require('../middlewares/auth.middleware');
 const mapController = require('../controllers/map.controller');
 const { query } = require('express-validator');
+const { publicDriverMapLimiter } = require('../middlewares/rateLimiter');
 
 router.get('/get-coordinates',
     authMiddleware.authBoth,
@@ -44,6 +45,7 @@ router.get('/place-details',
 
 router.get('/nearby-drivers',
     authMiddleware.authUser,
+    publicDriverMapLimiter,
     query('lat').isNumeric(),
     query('lng').isNumeric(),
     mapController.getNearbyDrivers

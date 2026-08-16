@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const refreshTokenModel = require('../models/refreshToken.model');
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
@@ -28,10 +29,14 @@ const RESERVED_CLAIMS = new Set([
     '_id', 'sub', 'iss', 'aud', 'iat', 'exp', 'nbf', 'jti',
     'actorType', 'tokenType', 'ver',
 ]);
-const legacyTokenMetrics = {
+const tokenPolicyMetrics = {
     acceptedAccess: 0,
     acceptedShare: 0,
     lastAcceptedAt: null,
+    refreshRotated: 0,
+    refreshGraceAccessOnly: 0,
+    refreshReuseDetected: 0,
+    refreshConflicts: 0,
 };
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
@@ -43,7 +48,7 @@ module.exports.TOKEN_VERSION = TOKEN_VERSION;
 module.exports.TOKEN_ISSUER = TOKEN_ISSUER;
 module.exports.AUDIENCE_BY_ACTOR = AUDIENCE_BY_ACTOR;
 module.exports.hashToken = hashToken;
-module.exports.getTokenPolicyMetrics = () => ({ ...legacyTokenMetrics });
+module.exports.getTokenPolicyMetrics = () => ({ ...tokenPolicyMetrics });
 // Mesma política de segredo dedicado usada por signShareToken/verifyShareToken —
 // exportada para que outras implementações de link de compartilhamento (ex.:
 // utils/rideShareAccess.js) nunca caiam de volta no JWT_SECRET genérico por engano.
@@ -100,15 +105,22 @@ function legacyTokensEnabled() {
 }
 
 function recordLegacyAcceptance(purpose, expectedActors = []) {
-    if (purpose === 'share') legacyTokenMetrics.acceptedShare += 1;
-    else legacyTokenMetrics.acceptedAccess += 1;
-    legacyTokenMetrics.lastAcceptedAt = new Date().toISOString();
+    if (purpose === 'share') tokenPolicyMetrics.acceptedShare += 1;
+    else tokenPolicyMetrics.acceptedAccess += 1;
+    tokenPolicyMetrics.lastAcceptedAt = new Date().toISOString();
     console.warn(JSON.stringify({
         tag: 'AUTH_LEGACY_TOKEN_ACCEPTED',
         purpose,
         expectedActors,
-        at: legacyTokenMetrics.lastAcceptedAt,
+        at: tokenPolicyMetrics.lastAcceptedAt,
     }));
+}
+
+function recordRefreshEvent(metric, tag, actorType) {
+    tokenPolicyMetrics[metric] += 1;
+    if (tag) {
+        console.warn(JSON.stringify({ tag, actorType, at: new Date().toISOString() }));
+    }
 }
 
 module.exports.generateAccessToken = (userId, userType, extraClaims = {}) => {
@@ -240,6 +252,7 @@ module.exports.issueTokenPair = async ({ userId, userType, extraClaims = {}, ip 
         tokenHash: hashToken(refreshToken),
         userId,
         userType,
+        familyId: crypto.randomUUID(),
         expiresAt,
         createdByIp: ip
     });
@@ -258,112 +271,203 @@ module.exports.issueTokenPair = async ({ userId, userType, extraClaims = {}, ip 
 // acabado de receber legitimamente. Confirmado empiricamente antes da correção.
 //
 // Trade-off de segurança, deliberado e documentado: um token reapresentado dentro desta
-// janela depois de já ter sido rotacionado deixa de derrubar a sessão inteira — em vez
-// disso, gera mais um elo na mesma cadeia de rotação (o servidor nunca guarda o token em
-// texto claro, só o hash, então não há como devolver de volta o mesmo token que a outra
-// aba já recebeu). Fora da janela, o comportamento de antes continua idêntico: reuso é
-// tratado como roubo e derruba tudo. Mesmo padrão recomendado por implementações de
-// referência de rotação de refresh token (Auth0, OIDC) para tolerar exatamente esta
-// concorrência sem abrir mão de detectar reuso de verdade.
+// janela depois de já ter sido rotacionado deixa de derrubar a sessão inteira, mas NÃO
+// cria outro refresh. A requisição concorrente recebe somente um access token curto; o
+// cookie/localStorage compartilhado já recebe o único sucessor criado pela vencedora.
+// Fora da janela, o comportamento continua sendo tratar o reuso como roubo e revogar a
+// família comprometida.
 const REUSE_GRACE_MS = 30 * 1000;
+const ROTATION_TRANSACTION_OPTIONS = Object.freeze({
+    readConcern: { level: 'snapshot' },
+    writeConcern: { w: 'majority' },
+    readPreference: 'primary',
+});
+module.exports.REUSE_GRACE_MS = REUSE_GRACE_MS;
 
 // Segue a cadeia de rotação a partir de um token já substituído até achar o elo
 // atualmente válido. Devolve `null` se a cadeia estiver cortada (um elo intermediário
 // foi revogado por outro motivo, ex: logout explícito no meio da janela) — nesse caso
 // não há elo seguro pra continuar, e quem chamou deve tratar como reuso de verdade.
-async function walkToCurrent(stored) {
+async function walkToCurrent(stored, session) {
     let current = stored;
     const seen = new Set([current.tokenHash]);
     while (current.replacedBy) {
         if (seen.has(current.replacedBy)) return null; // ciclo — nunca deveria existir
         seen.add(current.replacedBy);
-        const next = await refreshTokenModel.findOne({ tokenHash: current.replacedBy });
+        const next = await refreshTokenModel.findOne(
+            { tokenHash: current.replacedBy },
+            null,
+            { session }
+        );
         if (!next) return null;
         if (next.revokedAt && !next.replacedBy) return null; // revogado sem suceder ninguém (ex: logout)
+        if (String(next.userId) !== String(stored.userId) || next.userType !== stored.userType) return null;
         current = next;
     }
     return current;
 }
 
-// Troca um refresh token por um par novo, rotacionando (o antigo é marcado como usado e
-// aponta pro substituto). Lança erro com `code` legível pro controller decidir a resposta.
+function rotationError(code, message) {
+    return { kind: 'error', code, message };
+}
+
+// Troca um refresh token por outro com claim CAS e criação do sucessor na mesma
+// transação. Assim, duas instâncias não conseguem confirmar dois sucessores e uma falha
+// depois do claim não deixa a sessão permanentemente quebrada.
 module.exports.rotateRefreshToken = async ({ refreshToken, expectedUserType, ip }) => {
     if (!refreshToken) {
-        const err = new Error('Refresh token ausente');
-        err.code = 'MISSING_REFRESH_TOKEN';
-        throw err;
+        throw tokenError('MISSING_REFRESH_TOKEN', 'Refresh token ausente');
     }
 
     const tokenHash = hashToken(refreshToken);
-    let stored = await refreshTokenModel.findOne({ tokenHash });
+    const preflight = await refreshTokenModel.findOne({ tokenHash });
 
-    if (!stored) {
-        const err = new Error('Sessão inválida');
-        err.code = 'INVALID_REFRESH_TOKEN';
-        throw err;
+    if (!preflight) {
+        throw tokenError('INVALID_REFRESH_TOKEN', 'Sessão inválida');
     }
 
-    if (expectedUserType && stored.userType !== expectedUserType) {
-        const err = new Error('Refresh token emitido para outro ator');
-        err.code = 'REFRESH_ACTOR_MISMATCH';
-        throw err;
-    }
-
-    if (stored.revokedAt || stored.replacedBy) {
-        // A janela só vale para revogação por ROTAÇÃO (`replacedBy` preenchido — existe
-        // um sucessor de verdade pra seguir). Logout, bloqueio administrativo e reuso já
-        // detectado revogam sem definir `replacedBy` — são intencionais e definitivos,
-        // nunca devem ganhar tolerância, não importa o quão recentes.
-        const withinGrace = stored.replacedBy && stored.revokedAt
-            && (Date.now() - stored.revokedAt.getTime()) < REUSE_GRACE_MS;
-        const current = withinGrace ? await walkToCurrent(stored) : null;
-
-        if (!current) {
-            await module.exports.revokeAllForUser({
-                userId: stored.userId,
-                userType: stored.userType,
-                reason: 'reuse_detected'
-            });
-            const err = new Error('Sessão inválida — por segurança, todas as sessões foram encerradas');
-            err.code = 'REFRESH_TOKEN_REUSE';
-            throw err;
-        }
-
-        // Dentro da janela e a cadeia leva a um elo vivo: rotaciona a partir dele, como
-        // se fosse o token apresentado — a outra aba mantém o que já tinha, esta ganha
-        // seu próprio elo novo.
-        stored = current;
-    }
-
-    if (stored.expiresAt < new Date()) {
-        const err = new Error('Sessão expirada');
-        err.code = 'EXPIRED_REFRESH_TOKEN';
-        throw err;
+    if (expectedUserType && preflight.userType !== expectedUserType) {
+        throw tokenError('REFRESH_ACTOR_MISMATCH', 'Refresh token emitido para outro ator');
     }
 
     const newRefreshToken = crypto.randomBytes(48).toString('hex');
     const newHash = hashToken(newRefreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const familyId = preflight.familyId || crypto.randomUUID();
+    const session = await mongoose.startSession();
 
-    await refreshTokenModel.create({
-        tokenHash: newHash,
-        userId: stored.userId,
-        userType: stored.userType,
-        expiresAt,
-        createdByIp: ip
-    });
+    try {
+        // O retry externo cobre um CAS perdido sem erro transitório (útil também em
+        // doubles de teste). WriteConflict real é repetido pelo próprio withTransaction.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            let outcome;
 
-    stored.replacedBy = newHash;
-    stored.revokedAt = new Date();
-    stored.revokedReason = 'rotated';
-    await stored.save();
+            await session.withTransaction(async () => {
+                const stored = await refreshTokenModel.findOne({ tokenHash }, null, { session });
 
-    return {
-        userId: stored.userId,
-        userType: stored.userType,
-        refreshToken: newRefreshToken,
-        refreshTokenExpiresAt: expiresAt
-    };
+                if (!stored) {
+                    outcome = rotationError('INVALID_REFRESH_TOKEN', 'Sessão inválida');
+                    return;
+                }
+                if (expectedUserType && stored.userType !== expectedUserType) {
+                    outcome = rotationError('REFRESH_ACTOR_MISMATCH', 'Refresh token emitido para outro ator');
+                    return;
+                }
+
+                if (stored.revokedAt || stored.replacedBy) {
+                    const withinGrace = Boolean(
+                        stored.replacedBy
+                        && stored.revokedAt
+                        && (now.getTime() - stored.revokedAt.getTime()) < REUSE_GRACE_MS
+                    );
+                    const current = withinGrace ? await walkToCurrent(stored, session) : null;
+
+                    if (current && current.expiresAt > now) {
+                        outcome = {
+                            kind: 'grace',
+                            userId: stored.userId,
+                            userType: stored.userType,
+                            refreshTokenExpiresAt: current.expiresAt,
+                        };
+                        return;
+                    }
+
+                    const familyFilter = stored.familyId
+                        ? { familyId: stored.familyId, revokedAt: null }
+                        : { userId: stored.userId, userType: stored.userType, revokedAt: null };
+                    await refreshTokenModel.updateMany(
+                        familyFilter,
+                        { $set: { revokedAt: now, revokedReason: 'reuse_detected' } },
+                        { session }
+                    );
+                    outcome = rotationError(
+                        'REFRESH_TOKEN_REUSE',
+                        'Sessão inválida — por segurança, a família comprometida foi encerrada'
+                    );
+                    return;
+                }
+
+                if (stored.expiresAt <= now) {
+                    outcome = rotationError('EXPIRED_REFRESH_TOKEN', 'Sessão expirada');
+                    return;
+                }
+
+                const claimed = await refreshTokenModel.findOneAndUpdate(
+                    {
+                        _id: stored._id,
+                        tokenHash,
+                        userType: stored.userType,
+                        revokedAt: null,
+                        replacedBy: null,
+                        expiresAt: { $gt: now },
+                    },
+                    {
+                        $set: {
+                            familyId,
+                            replacedBy: newHash,
+                            revokedAt: now,
+                            revokedReason: 'rotated',
+                        },
+                    },
+                    { new: true, session }
+                );
+
+                if (!claimed) {
+                    outcome = { kind: 'retry' };
+                    return;
+                }
+
+                await refreshTokenModel.create([{
+                    tokenHash: newHash,
+                    userId: stored.userId,
+                    userType: stored.userType,
+                    familyId,
+                    expiresAt,
+                    createdByIp: ip,
+                }], { session });
+
+                outcome = {
+                    kind: 'rotated',
+                    userId: stored.userId,
+                    userType: stored.userType,
+                };
+            }, ROTATION_TRANSACTION_OPTIONS);
+
+            if (outcome?.kind === 'retry') continue;
+            if (outcome?.kind === 'error') {
+                if (outcome.code === 'REFRESH_TOKEN_REUSE') {
+                    recordRefreshEvent('refreshReuseDetected', 'AUTH_REFRESH_TOKEN_REUSE', preflight.userType);
+                }
+                throw tokenError(outcome.code, outcome.message);
+            }
+            if (outcome?.kind === 'grace') {
+                recordRefreshEvent('refreshGraceAccessOnly', null, outcome.userType);
+                return {
+                    userId: outcome.userId,
+                    userType: outcome.userType,
+                    refreshToken: null,
+                    refreshTokenExpiresAt: outcome.refreshTokenExpiresAt,
+                    graceAccessOnly: true,
+                };
+            }
+            if (outcome?.kind === 'rotated') {
+                recordRefreshEvent('refreshRotated', null, outcome.userType);
+                return {
+                    userId: outcome.userId,
+                    userType: outcome.userType,
+                    refreshToken: newRefreshToken,
+                    refreshTokenExpiresAt: expiresAt,
+                    graceAccessOnly: false,
+                };
+            }
+        }
+
+        recordRefreshEvent('refreshConflicts', 'AUTH_REFRESH_ROTATION_CONFLICT', preflight.userType);
+        throw tokenError('REFRESH_ROTATION_CONFLICT', 'Não foi possível confirmar a rotação da sessão');
+    } finally {
+        await session.endSession();
+    }
 };
 
 module.exports.revokeRefreshToken = async ({ refreshToken, reason = 'logout' }) => {

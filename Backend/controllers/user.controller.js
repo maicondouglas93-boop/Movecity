@@ -215,7 +215,9 @@ module.exports.refreshUserSession = async (req, res) => {
 
         const accessToken = authService.generateAccessToken(userId, 'user');
         res.cookie('token', accessToken, COOKIE_OPTIONS());
-        res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        if (refreshToken) {
+            res.cookie('refreshToken', refreshToken, authService.refreshCookieOptions());
+        }
 
         return res.status(200).json({ token: accessToken, refreshToken, user });
     } catch (err) {

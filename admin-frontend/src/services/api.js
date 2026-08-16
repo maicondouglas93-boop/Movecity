@@ -79,10 +79,12 @@ api.interceptors.response.use(
       try {
         const { data } = await api.post('/admin/refresh', { refreshToken });
         localStorage.setItem('adminToken', data.token);
-        localStorage.setItem('adminRefreshToken', data.refreshToken);
+        // Uma requisição concorrente dentro da janela de graça recebe apenas access
+        // token; o único refresh sucessor já foi salvo pela requisição vencedora.
+        if (data.refreshToken) localStorage.setItem('adminRefreshToken', data.refreshToken);
         isRefreshing = false;
         onRefreshed(data.token);
-      } catch (refreshError) {
+      } catch {
         isRefreshing = false;
         refreshSubscribers = [];
         forceLogout();

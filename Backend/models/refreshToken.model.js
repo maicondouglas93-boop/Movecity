@@ -7,8 +7,8 @@ const mongoose = require('mongoose');
 //
 // O token cru NUNCA é gravado: só o hash SHA-256. Um vazamento do banco não entrega
 // sessões utilizáveis. `replacedBy` liga a cadeia de rotação, o que permite detectar
-// reuso de um token já rotacionado (sinal clássico de token roubado) e derrubar a
-// família inteira de sessões daquele usuário.
+// reuso de um token já rotacionado (sinal clássico de token roubado) e derrubar apenas
+// a família iniciada pelo mesmo login.
 const refreshTokenSchema = new mongoose.Schema({
     tokenHash: {
         type: String,
@@ -24,6 +24,13 @@ const refreshTokenSchema = new mongoose.Schema({
         type: String,
         required: true,
         enum: ['user', 'captain', 'admin']
+    },
+    // Identifica apenas a cadeia iniciada por um login. Reuso confirmado revoga esta
+    // família, sem encerrar sessões legítimas abertas pelo mesmo usuário em outros
+    // dispositivos. Documentos antigos recebem o campo na primeira rotação.
+    familyId: {
+        type: String,
+        default: undefined
     },
     expiresAt: {
         type: Date,
@@ -52,6 +59,7 @@ const refreshTokenSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 refreshTokenSchema.index({ userId: 1, userType: 1 });
+refreshTokenSchema.index({ familyId: 1, revokedAt: 1 });
 // Limpeza automática: o documento some do banco 30 dias depois de expirar (janela de
 // folga pra investigar incidentes antes do registro sumir).
 refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });

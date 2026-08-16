@@ -3,7 +3,7 @@ const router = express.Router();
 const { body } = require("express-validator")
 const userController = require('../controllers/user.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
-const { loginLimiter } = require('../middlewares/rateLimiter');
+const { loginLimiter, changePasswordLimiter } = require('../middlewares/rateLimiter');
 
 
 router.post('/register', loginLimiter, [
@@ -36,6 +36,19 @@ router.put('/profile',
     body('birthDate').optional({ values: 'falsy' }).isString(),
     body('gender').optional({ values: 'falsy' }).isIn([ 'male', 'female', 'other', '' ]).withMessage('Gênero inválido'),
     userController.updateUserProfile
+)
+
+// Mesma política de senha forte já validada no frontend (ChangePassword.jsx) — exigir
+// aqui também porque o cliente nunca é a fonte de verdade da validação.
+router.put('/password',
+    authMiddleware.authUser,
+    changePasswordLimiter,
+    body('currentPassword').notEmpty().withMessage('Senha atual obrigatória'),
+    body('newPassword')
+        .isLength({ min: 8 }).withMessage('A nova senha deve ter pelo menos 8 caracteres')
+        .matches(/[0-9]/).withMessage('A nova senha deve conter números')
+        .matches(/[^a-zA-Z0-9]/).withMessage('A nova senha deve conter um símbolo especial'),
+    userController.changeUserPassword
 )
 
 // Sem authUser de propósito: o ponto do refresh é justamente renovar quando o access

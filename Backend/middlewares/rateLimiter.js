@@ -38,6 +38,18 @@ module.exports.accountDeletionLimiter = rateLimit({
     message: { message: 'Muitas solicitações. Tente novamente mais tarde.' }
 });
 
+// Plano de correção (Fase 1.2, 2026-08-16): troca de senha autenticada — mesmo padrão
+// do accountDeletionLimiter, pra não permitir brute-force da senha atual via este
+// endpoint (ele já autentica por JWT, mas ainda aceita tentativas repetidas de senha).
+module.exports.changePasswordLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { message: 'Muitas tentativas. Tente novamente mais tarde.' }
+});
+
 // PIN de entrega: limita brute-force por captain (4 dígitos).
 module.exports.parcelPinLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,

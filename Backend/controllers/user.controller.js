@@ -161,8 +161,10 @@ module.exports.logoutUser = async (req, res, next) => {
         res.clearCookie('token', accessClearOptions);
         res.clearCookie('refreshToken', authService.clearCookieOptions());
 
-        // Prevenção de crash usando encadeamento opcional (?.)
-        const token = req.cookies?.token || req.headers?.authorization?.split(' ')[1];
+        // O middleware conserva exatamente o token que autenticou a requisição. Bearer
+        // tem prioridade sobre cookie para não deixar um cookie antigo mascarar uma
+        // sessão válida do app nativo.
+        const token = req.authToken;
 
         if (token) {
             // create pode falhar por chave duplicada se o mesmo token for deslogado
@@ -170,12 +172,9 @@ module.exports.logoutUser = async (req, res, next) => {
             await blackListTokenModel.create({ token }).catch(() => {});
         }
 
-        // Auditoria de sessão (2026-08-02): antes o logout só invalidava o access token
-        // (blacklist). O refresh token continuava válido — quem tivesse uma cópia dele
-        // poderia gerar um access token novo depois do "logout".
-        // A rota de logout é GET (contrato pré-existente), então o refresh token pode
-        // chegar por query string — req.body está sempre vazio num GET.
-        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.query?.refreshToken;
+        // Refresh token só é aceito no corpo ou em cookie HttpOnly. Query string foi
+        // removida porque URLs vazam em histórico, logs, observabilidade e Referer.
+        const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken;
         if (refreshToken) {
             await authService.revokeRefreshToken({ refreshToken, reason: 'logout' });
         } else if (req.user?._id) {

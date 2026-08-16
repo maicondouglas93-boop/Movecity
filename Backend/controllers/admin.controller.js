@@ -1,5 +1,6 @@
 ﻿const adminService = require('../services/admin.service');
 const { validationResult } = require('express-validator');
+const { toAdminRideDTO, toAdminParcelDTO } = require('../utils/actorDtos');
 
 module.exports.login = async (req, res, next) => {
     try {
@@ -778,12 +779,12 @@ module.exports.getManualRideDispatchStatus = async (req, res, next) => {
 module.exports.relaunchManualRide = async (req, res, next) => {
     if (manualRideValidationError(req, res)) return;
     try {
-        const ride = await require('../services/manualRideDispatch.service').relaunchManualRide({
+        const rideResponse = await require('../services/manualRideDispatch.service').relaunchManualRide({
             rideId: req.params.id,
             admin: req.admin,
             ip: req.ip,
         });
-        return res.status(200).json(ride);
+        return res.status(200).json(rideResponse);
     } catch (error) {
         if (error.statusCode) {
             return res.status(error.statusCode).json({
@@ -900,7 +901,6 @@ module.exports.createManualRide = async (req, res, next) => {
     if (manualRideValidationError(req, res)) return;
     const Ride = require('../models/ride.model');
     const User = require('../models/user.model');
-    const Payment = require('../models/payment.model');
     const rideService = require('../services/ride.service');
     const dispatchService = require('../services/dispatch.service');
     const { dispatchRideToCaptains } = require('./ride.controller');
@@ -967,7 +967,7 @@ module.exports.createManualRide = async (req, res, next) => {
             }
         }
 
-        const { ride } = await rideService.createRide({
+        const { ride, replayed } = await rideService.createRide({
             user: user?._id,
             pickup: pickup.address.trim(),
             destination: destination.address.trim(),
@@ -988,6 +988,16 @@ module.exports.createManualRide = async (req, res, next) => {
             destinationCoordinates: { lat: Number(destination.lat), lng: Number(destination.lng) },
         });
 
+        // Duas instâncias podem ultrapassar o preflight ao mesmo tempo. O serviço
+        // resolve a corrida pela chave; a perdedora devolve o mesmo documento sem
+        // repetir despacho, log administrativo ou qualquer efeito financeiro.
+        if (replayed) {
+            if (manualRideCancellationWasDispatchFailure(ride)) {
+                return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
+            }
+            return res.status(200).json(manualRideResponse(ride, { reused: true }));
+        }
+
         // Marca o começo da janela exibida no painel e nos apps dos motoristas.
         // No relançamento este mesmo campo recebe um novo horário, sem criar outra corrida.
         ride.dispatchLastAttemptAt = new Date();
@@ -1003,14 +1013,11 @@ module.exports.createManualRide = async (req, res, next) => {
 
         if (captainId && offeredCount !== 1) {
             const reason = 'Motorista selecionado ficou indisponível antes do despacho';
-            await Ride.updateOne(
-                { _id: ride._id, status: 'requested' },
-                {
-                    $set: { status: 'cancelled', cancelledBy: 'admin', cancellationReason: reason, cancelledAt: new Date() },
-                    $push: { statusHistory: { status: 'cancelled', at: new Date() } },
-                }
-            );
-            await Payment.deleteMany({ rideId: ride._id });
+            await rideService.cancelRideByAdmin({
+                rideId: ride._id,
+                reason,
+                admin: req.admin,
+            });
             await adminService.logAction({
                 adminId: req.admin._id,
                 adminName: req.admin.name,
@@ -1058,6 +1065,9 @@ module.exports.createManualRide = async (req, res, next) => {
         }
         if (error?.code === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Esse passageiro já possui uma encomenda em andamento.' });
+        }
+        if (error?.code === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({ message: 'Esse passageiro já possui uma corrida em andamento.' });
         }
         if (error?.code === 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE') {
             return res.status(400).json({ message: 'A categoria selecionada não está habilitada para corridas.' });
@@ -1120,8 +1130,14 @@ module.exports.cancelRide = async (req, res, next) => {
             console.error('[ADMIN] Falha ao emitir cancel de corrida via socket:', socketErr.message);
         }
 
-        res.status(200).json(result);
+        res.status(200).json(toAdminRideDTO(result));
     } catch (error) {
+        if (error.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: error.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (error.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: error.code, message: 'Cancelamento financeiro pendente; repita a operação para reconciliar.' });
+        }
         next(error);
     }
 };
@@ -1151,7 +1167,7 @@ module.exports.reassignRide = async (req, res, next) => {
             });
         }
 
-        res.status(200).json(ride);
+        res.status(200).json(toAdminRideDTO(ride));
     } catch (error) {
         if (error.message === 'Corrida não encontrada' || error.message === 'Ride not found') {
             return res.status(404).json({ message: error.message });
@@ -1482,6 +1498,7 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
         const parcel = await parcelService.adminCancelParcel({
             parcelId: req.params.id,
             reason: req.body.reason,
+            admin: req.admin,
         });
 
         try {
@@ -1511,10 +1528,16 @@ module.exports.cancelParcelAdmin = async (req, res, next) => {
             console.error('[PARCEL] Falha ao emitir cancel admin via socket:', socketErr.message);
         }
 
-        res.status(200).json(parcel);
+        res.status(200).json(toAdminParcelDTO(parcel));
     } catch (error) {
         if (error.message === 'PARCEL_NOT_FOUND') return res.status(404).json({ message: 'Encomenda não encontrada' });
         if (error.message === 'PARCEL_NOT_CANCELLABLE') return res.status(400).json({ message: error.message });
+        if (error.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: error.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (error.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: error.code, message: 'Cancelamento pendente de reconciliação; repita a operação.' });
+        }
         next(error);
     }
 };
@@ -1623,7 +1646,7 @@ module.exports.finalizeRide = async (req, res, next) => {
             observation: req.body.observation,
             ip: req.ip,
         });
-        res.status(200).json(ride);
+        res.status(200).json(toAdminRideDTO(ride));
     } catch (error) {
         const status = error.statusCode || (error.message?.includes('não') ? 409 : 500);
         res.status(status).json({ message: error.message });

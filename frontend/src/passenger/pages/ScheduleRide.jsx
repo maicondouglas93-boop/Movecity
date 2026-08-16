@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import PageHeader from '@/shared/components/ui/PageHeader'
@@ -12,6 +12,7 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import { vehicleImages } from '@/shared/assets/vehicleAssets'
 import { formatCurrencyBRL } from '@/shared/utils/formatters'
+import { newIdempotencyKey } from '@/shared/utils/idempotency'
 
 const fieldClass =
   'w-full bg-surface-alt border border-line rounded-panel px-4 py-3.5 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20'
@@ -38,6 +39,7 @@ const ScheduleRide = () => {
   const [loading, setLoading] = useState(false)
   const [farePreview, setFarePreview] = useState(null)
   const [fareLoading, setFareLoading] = useState(false)
+  const rideCreationKeyRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -105,21 +107,38 @@ const ScheduleRide = () => {
     }
 
     setLoading(true)
+    const payload = {
+      pickup: pickup.trim(),
+      destination: destination.trim(),
+      vehicleType,
+      paymentMethod,
+      scheduledAt: at.toISOString(),
+    }
+    const requestFingerprint = JSON.stringify(payload)
+    if (rideCreationKeyRef.current?.fingerprint !== requestFingerprint) {
+      rideCreationKeyRef.current = {
+        fingerprint: requestFingerprint,
+        key: newIdempotencyKey(),
+      }
+    }
     try {
       await api.post(
         `${import.meta.env.VITE_BASE_URL}/rides/create`,
+        payload,
         {
-          pickup: pickup.trim(),
-          destination: destination.trim(),
-          vehicleType,
-          paymentMethod,
-          scheduledAt: at.toISOString(),
+          headers: {
+            Authorization: `Bearer ${getAccessToken('user')}`,
+            'Idempotency-Key': rideCreationKeyRef.current.key,
+          },
         },
-        { headers: { Authorization: `Bearer ${getAccessToken('user')}` } },
       )
+      rideCreationKeyRef.current = null
       addToast('Corrida agendada!', 'success')
       navigate('/scheduled')
     } catch (err) {
+      if (err.response?.status && err.response.status < 500) {
+        rideCreationKeyRef.current = null
+      }
       addToast(err.response?.data?.message || 'Não foi possível agendar', 'error')
     } finally {
       setLoading(false)

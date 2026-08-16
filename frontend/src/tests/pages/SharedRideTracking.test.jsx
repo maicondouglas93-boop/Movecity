@@ -38,4 +38,30 @@ describe('Acompanhamento compartilhado da corrida', () => {
         expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/rides/share/token-publico'))
         fetchMock.mockRestore()
     })
+
+    it('mostra o estado final sem localização e informa que o acompanhamento encerrou', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+            ok: true,
+            json: vi.fn().mockResolvedValue({
+                rideId: 'ride1',
+                status: 'finished',
+                pickup: 'Praça Central',
+                destination: 'Hospital Municipal',
+                captain: { fullname: { firstname: 'Maria' } },
+            }),
+        })
+
+        render(
+            <MemoryRouter initialEntries={['/track/token-finalizado']}>
+                <Routes>
+                    <Route path="/track/:token" element={<SharedRideTracking />} />
+                </Routes>
+            </MemoryRouter>
+        )
+
+        await waitFor(() => expect(screen.getByText('Corrida finalizada')).toBeInTheDocument())
+        expect(screen.queryByRole('link', { name: /ver localização atual/i })).not.toBeInTheDocument()
+        expect(screen.getByText(/acompanhamento encerrado/i)).toBeInTheDocument()
+        fetchMock.mockRestore()
+    })
 })

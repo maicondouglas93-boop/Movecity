@@ -33,7 +33,10 @@ beforeAll(async () => {
         createPixCharge: jest.fn().mockResolvedValue({ invoiceUrl: 'http://mock.pix', payload: 'mock_payload' }),
         createCreditCardCharge: jest.fn().mockResolvedValue({ status: 'CONFIRMED' }),
         createTransfer: jest.fn().mockResolvedValue({ status: 'PENDING' }),
-        checkPaymentStatus: jest.fn().mockResolvedValue({ status: 'RECEIVED' })
+        checkPaymentStatus: jest.fn().mockResolvedValue({ status: 'RECEIVED' }),
+        getPayment: jest.fn().mockResolvedValue({ status: 'PENDING', refunds: [] }),
+        refundPayment: jest.fn().mockResolvedValue({ status: 'REFUND_REQUESTED', refunds: [] }),
+        deletePayment: jest.fn().mockResolvedValue({ deleted: true }),
     }));
     
     await connect();

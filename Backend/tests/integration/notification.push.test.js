@@ -87,6 +87,7 @@ describe('Fluxo de push de nova corrida (Fase 1: C1, C2, C3, C5)', () => {
         const rideRes = await request(app)
             .post('/rides/create')
             .set('Authorization', `Bearer ${userToken}`)
+            .set('Idempotency-Key', '30000000-0000-4000-8000-000000000005')
             .send({
                 pickup: 'Avenida Paulista, 1000',
                 destination: 'Avenida Faria Lima, 2000',
@@ -333,12 +334,12 @@ describe('Fase 5: correções de funcionalidade (A5, A6, pagamento, carteira)', 
         expect(notification).toBeFalsy();
     });
 
-    it('Pagamento: passageiro pagar a corrida gera push para o motorista', async () => {
+    it('Pagamento cash/Pix: informe do passageiro gera push informativo para o motorista', async () => {
         const user = await createUser();
         const captain = await createCaptain();
         const ride = await createRide({
             user: user._id, captain: captain._id, status: 'finished',
-            paymentMethod: 'carteira', fare: 30, finalPrice: 30
+            paymentMethod: 'pix', fare: 30, finalPrice: 30
         });
         const userToken = generateAuthToken(user, 'user');
         const captainToken = generateAuthToken(captain, 'captain');

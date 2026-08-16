@@ -23,7 +23,7 @@ const paymentSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'approved', 'failed', 'refunded'],
+        enum: ['pending', 'approved', 'failed', 'refund_pending', 'refunded', 'cancelled'],
         default: 'pending'
     },
     gatewayTransactionId: {
@@ -33,5 +33,10 @@ const paymentSchema = new mongoose.Schema({
         type: String
     }
 }, { timestamps: true });
+
+paymentSchema.index(
+    { rideId: 1 },
+    { name: 'ride_payment_unique', unique: true }
+);
 
 module.exports = mongoose.model('payment', paymentSchema);

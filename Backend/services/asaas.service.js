@@ -63,3 +63,36 @@ module.exports.createCreditCardCharge = async (chargeData) => {
         throw error;
     }
 };
+
+module.exports.getPayment = async (paymentId) => {
+    try {
+        const response = await asaasApi.get(`/payments/${paymentId}`);
+        return response.data;
+    } catch (error) {
+        console.error('Asaas Get Payment Error:', error.response?.data || error.message);
+        throw error;
+    }
+};
+
+module.exports.refundPayment = async (paymentId, { value, description } = {}) => {
+    try {
+        const body = {};
+        if (Number(value) > 0) body.value = Number(value);
+        if (description) body.description = description;
+        const response = await asaasApi.post(`/payments/${paymentId}/refund`, body);
+        return response.data;
+    } catch (error) {
+        console.error('Asaas Refund Payment Error:', error.response?.data || error.message);
+        throw error;
+    }
+};
+
+module.exports.deletePayment = async (paymentId) => {
+    try {
+        const response = await asaasApi.delete(`/payments/${paymentId}`);
+        return response.data;
+    } catch (error) {
+        console.error('Asaas Delete Payment Error:', error.response?.data || error.message);
+        throw error;
+    }
+};

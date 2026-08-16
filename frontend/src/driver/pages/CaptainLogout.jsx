@@ -1,4 +1,4 @@
-import React, { useContext, useEffect } from 'react'
+import { useContext, useEffect } from 'react'
 import api from '@/shared/services/axios'
 import { useNavigate } from 'react-router-dom'
 import { getRefreshToken, clearSession } from '@/shared/services/session'
@@ -23,9 +23,7 @@ export const CaptainLogout = () => {
         Promise.all([
             unregisterPush().catch(() => {}),
             stopForegroundTracking().catch(() => {}),
-            api.get('/captains/logout', {
-                params: refreshToken ? { refreshToken } : {},
-            }).catch(() => {
+            api.post('/captains/logout', refreshToken ? { refreshToken } : {}).catch(() => {
                 // Sair não pode depender do servidor responder.
             })
         ]).finally(() => {
@@ -39,7 +37,7 @@ export const CaptainLogout = () => {
             socket.connect()
             navigate('/captain-login', { replace: true })
         })
-    }, [])
+    }, [navigate, socket])
 
     return <SessionSplash label="Saindo..." />
 }

@@ -41,6 +41,7 @@ describe('Ride API Integration Tests', () => {
             const res = await request(app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000001')
                 .send({
                     pickup: 'Avenida Paulista, 1000',
                     destination: 'Avenida Faria Lima, 2000',
@@ -187,10 +188,10 @@ describe('Ride API Integration Tests', () => {
     describe('GET /rides/history', () => {
         // Regression coverage for M8/M2: o filtro "ongoing" usava status que não existem
         // no enum ('pending', 'ongoing'), então só pegava 'accepted' de fato.
-        it('should include all in-progress statuses under the "ongoing" filter', async () => {
-            await createRide({ user: user._id, status: 'going_to_pickup' });
-            await createRide({ user: user._id, status: 'arrived' });
-            await createRide({ user: user._id, status: 'started' });
+        it.each(['going_to_pickup', 'arrived', 'started'])(
+          'should include the in-progress status %s under the "ongoing" filter',
+          async (activeStatus) => {
+            await createRide({ user: user._id, status: activeStatus });
             await createRide({ user: user._id, status: 'finished' });
             await createRide({ user: user._id, status: 'cancelled' });
 
@@ -200,9 +201,10 @@ describe('Ride API Integration Tests', () => {
                 .query({ status: 'ongoing' });
 
             expect(res.statusCode).toBe(200);
-            expect(res.body.rides.length).toBe(3);
-            expect(res.body.rides.every(r => ['going_to_pickup', 'arrived', 'started'].includes(r.status))).toBe(true);
-        });
+            expect(res.body.rides).toHaveLength(1);
+            expect(res.body.rides[0].status).toBe(activeStatus);
+          }
+        );
 
         it('should map the "completed" filter to the real "finished" status', async () => {
             await createRide({ user: user._id, status: 'finished' });

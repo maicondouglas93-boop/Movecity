@@ -17,12 +17,14 @@ const statusLabel = {
 
 const shortAddress = (value) => String(value || '').split(',')[0] || 'Destino não informado'
 
-const PassengerSafetyCenter = ({ ride, captainLocation }) => {
+const PassengerSafetyCenter = ({ ride }) => {
     const [open, setOpen] = useState(false)
     const [showReport, setShowReport] = useState(false)
     const [reportMessage, setReportMessage] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [sharing, setSharing] = useState(false)
+    const [shareActive, setShareActive] = useState(false)
+    const [revokingShare, setRevokingShare] = useState(false)
     const [confirmEmergency, setConfirmEmergency] = useState(false)
     const { addToast } = useToast()
 
@@ -31,13 +33,6 @@ const PassengerSafetyCenter = ({ ride, captainLocation }) => {
         const captainName = personName(ride.captain) || 'motorista não identificado'
         const vehicle = vehicleSummary(ride.captain, ride.vehicleType)
         const reference = String(ride._id || '').slice(-6).toUpperCase()
-        const location = captainLocation
-            || (ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
-                ? { lat: ride.captain.location.ltd, lng: ride.captain.location.lng }
-                : null)
-        const locationUrl = location?.lat != null && location?.lng != null
-            ? `https://maps.google.com/?q=${location.lat},${location.lng}`
-            : null
         const details = [
             `Estou em uma corrida MoveCity (#${reference}).`,
             `Motorista: ${captainName}.`,
@@ -45,11 +40,10 @@ const PassengerSafetyCenter = ({ ride, captainLocation }) => {
             vehicle.line ? `Veículo: ${vehicle.line}.` : null,
             `Destino: ${shortAddress(ride.destination)}.`,
             `Situação: ${statusLabel[ride.status] || 'corrida ativa'}.`,
-            locationUrl ? `Localização atual do veículo: ${locationUrl}` : null,
         ].filter(Boolean).join(' ')
 
         return { title: 'Minha corrida MoveCity', text: details }
-    }, [ride, captainLocation])
+    }, [ride])
 
     const shareRide = async () => {
         if (!sharePayload) return
@@ -60,6 +54,7 @@ const PassengerSafetyCenter = ({ ride, captainLocation }) => {
             })
             const rawUrl = response.data?.url
             const trackingUrl = rawUrl ? new URL(rawUrl, window.location.origin).toString() : null
+            setShareActive(Boolean(trackingUrl))
             const payload = {
                 ...sharePayload,
                 text: trackingUrl
@@ -79,6 +74,21 @@ const PassengerSafetyCenter = ({ ride, captainLocation }) => {
             }
         } finally {
             setSharing(false)
+        }
+    }
+
+    const revokeShare = async () => {
+        setRevokingShare(true)
+        try {
+            await api.delete(`/rides/share/${ride._id}`, {
+                headers: { Authorization: `Bearer ${getAccessToken('user')}` },
+            })
+            setShareActive(false)
+            addToast('Compartilhamento encerrado.', 'success')
+        } catch (err) {
+            addToast(err.response?.data?.message || 'Não foi possível encerrar o compartilhamento.', 'error')
+        } finally {
+            setRevokingShare(false)
         }
     }
 
@@ -173,6 +183,17 @@ const PassengerSafetyCenter = ({ ride, captainLocation }) => {
                                 Reportar problema
                             </button>
                         </div>
+
+                        {shareActive && (
+                            <button
+                                type="button"
+                                onClick={revokeShare}
+                                disabled={revokingShare}
+                                className="mt-2 min-h-[44px] w-full rounded-panel border border-danger-500/40 bg-danger-50 text-sm font-semibold text-danger-600"
+                            >
+                                {revokingShare ? 'Encerrando…' : 'Encerrar compartilhamento'}
+                            </button>
+                        )}
 
                         {showReport && (
                             <div className="mt-3 rounded-panel border border-line p-3">

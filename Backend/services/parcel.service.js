@@ -7,8 +7,13 @@ const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
-const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCache, setCache, deleteCache } = require('../cache/cache');
+const {
+    toParcelOfferDTO: buildParcelOfferDTO,
+    toParcelCaptainDTO: buildParcelCaptainDTO,
+    toParcelCaptainHistoryDTO,
+    toAdminParcelDTO,
+} = require('../utils/actorDtos');
 
 const ALLOWED_PAYMENT_METHODS = ['cash', 'pix'];
 
@@ -817,23 +822,15 @@ module.exports.finalizeStuckDelivered = async (parcelId) => {
 };
 
 module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' }) => {
-    const historyBy = by === 'passenger' ? 'user' : by;
-    const updated = await transitionParcel(
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    const updated = await reconcileParcelCancellation({
         parcelId,
-        'cancelled',
-        { user },
-        {
-            cancelledBy: by,
-            cancellationReason: reason || '',
-            cancelledAt: new Date(),
-        },
-        historyBy
-    );
-    if (!updated) {
-        const exists = await parcelModel.exists({ _id: parcelId, user });
-        if (!exists) throw new Error('PARCEL_NOT_FOUND');
-        throw new Error('PARCEL_NOT_CANCELLABLE');
-    }
+        actor: by,
+        userId: user,
+        requestedBy: user,
+        reason,
+        allowedOrigins: VALID_ORIGINS_BY_TARGET.cancelled,
+    });
 
     // Só libera lock se a transição venceu e o motorista ficou ocioso.
     if (updated.captain) {
@@ -845,31 +842,27 @@ module.exports.cancelParcel = async ({ parcelId, user, reason, by = 'passenger' 
 
 /** Cancelamento interno (ex.: falha de despacho após create). */
 module.exports.cancelParcelSystem = async (parcelId, reason = 'dispatch_failed') => {
-    const existing = await parcelModel.findById(parcelId).select('status captain');
-    if (!existing) return null;
-    if (['finished', 'cancelled'].includes(existing.status)) return existing;
-
-    const updated = await transitionParcel(
-        parcelId,
-        'cancelled',
-        {},
-        {
-            cancelledBy: 'system',
-            cancellationReason: reason,
-            cancelledAt: new Date(),
-        },
-        'system',
-        { originsOverride: CANCEL_ORIGINS_FORCE }
-    );
-    if (!updated) {
-        // Outra operação venceu (ex.: accept/finish) — não mexer no lock.
-        return parcelModel.findById(parcelId).populate('user').populate('captain');
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    let updated;
+    try {
+        updated = await reconcileParcelCancellation({
+            parcelId,
+            actor: 'system',
+            reason,
+            allowedOrigins: CANCEL_ORIGINS_FORCE,
+        });
+    } catch (err) {
+        if (err.code === 'PARCEL_NOT_FOUND') return null;
+        if (err.code === 'PARCEL_NOT_CANCELLABLE') {
+            return parcelModel.findById(parcelId).populate('user').populate('captain');
+        }
+        throw err;
     }
 
     if (updated.captain) {
         await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
-    return parcelModel.findById(parcelId).populate('user').populate('captain');
+    return updated;
 };
 
 module.exports.declineParcel = async ({ parcelId, captain }) => {
@@ -991,7 +984,7 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     const [total, parcels] = await Promise.all([
         parcelModel.countDocuments(historyQuery),
         parcelModel.find(historyQuery)
-            .populate('user', 'fullname phone email')
+            .populate('user', 'fullname profilePicture rating')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(safeLimit)
@@ -1001,7 +994,7 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     return {
         activeParcel: activeParcel ? await module.exports.toParcelCaptainDTO(activeParcel) : null,
         pendingOffers,
-        parcels: await Promise.all((parcels || []).map((p) => module.exports.toParcelCaptainDTO(p))),
+        parcels: (parcels || []).map((parcel) => toParcelCaptainHistoryDTO(parcel)),
         page: safePage,
         limit: safeLimit,
         total,
@@ -1062,43 +1055,12 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
 module.exports.getSettings = getSettings;
 
 module.exports.toParcelOfferDTO = (parcel) => {
-    const raw = typeof parcel.toObject === 'function' ? parcel.toObject() : { ...parcel };
-    const { computeDriverAmount } = require('../utils/financePrivacy');
-    const driverAmount = computeDriverAmount(raw);
-    return {
-        _id: raw._id,
-        vehicleType: raw.vehicleType,
-        pickup: raw.pickup,
-        destination: raw.destination,
-        pickupCoordinates: raw.pickupCoordinates,
-        destinationCoordinates: raw.destinationCoordinates,
-        itemName: raw.itemName,
-        category: raw.category,
-        weightKg: raw.weightKg,
-        size: raw.size,
-        description: raw.description,
-        notes: raw.notes,
-        // Oferta: valor que o passageiro paga + líquido (sem comissão/%).
-        fare: raw.fare,
-        driverAmount,
-        estimatedDistance: raw.estimatedDistance,
-        estimatedTime: raw.estimatedTime,
-        status: raw.status,
-        createdAt: raw.createdAt,
-        paymentMethod: raw.paymentMethod,
-        // Auditoria PWA (2026-08-07, P1): só enquanto ainda é uma oferta em aberto —
-        // espelha toCaptainRideResponse (ride.controller.js).
-        ...(raw.status === 'awaiting_provider' ? { offerExpiresAt: computeOfferExpiresAt(raw) } : {}),
-        // Sem telefones / nomes completos na oferta pré-aceite.
-    };
+    return buildParcelOfferDTO(parcel);
 };
 
 module.exports.toParcelCaptainDTO = async (parcel) => {
-    const { sanitizeCaptainFinance } = require('../utils/financePrivacy');
-    const raw = sanitizeCaptainFinance(parcel);
-    delete raw.deliveryPin;
-    raw.requireDeliveryPin = await getRequireDeliveryPin(parcel.vehicleType || 'moto');
-    return raw;
+    const requireDeliveryPin = await getRequireDeliveryPin(parcel.vehicleType || 'moto');
+    return buildParcelCaptainDTO(parcel, { requireDeliveryPin });
 };
 
 function mergeVehiclePricing(current, patch) {
@@ -1216,33 +1178,23 @@ module.exports.listParcelsAdmin = async ({ status, limit = 50, skip = 0 } = {}) 
             .sort({ createdAt: -1 }).skip(skip).limit(limit),
         parcelModel.countDocuments(filter),
     ]);
-    return { items, total };
+    return { items: items.map((parcel) => toAdminParcelDTO(parcel)), total };
 };
 
-module.exports.adminCancelParcel = async ({ parcelId, reason }) => {
-    const exists = await parcelModel.exists({ _id: parcelId });
-    if (!exists) throw new Error('PARCEL_NOT_FOUND');
-
-    const updated = await transitionParcel(
+module.exports.adminCancelParcel = async ({ parcelId, reason, admin }) => {
+    const { reconcileParcelCancellation } = require('./cancellationReconciliation.service');
+    const updated = await reconcileParcelCancellation({
         parcelId,
-        'cancelled',
-        {},
-        {
-            cancelledBy: 'admin',
-            cancellationReason: reason || 'Cancelado pelo admin',
-            cancelledAt: new Date(),
-        },
-        'admin',
-        { originsOverride: CANCEL_ORIGINS_FORCE }
-    );
-    if (!updated) {
-        throw new Error('PARCEL_NOT_CANCELLABLE');
-    }
+        actor: 'admin',
+        requestedBy: admin?._id || admin,
+        reason: reason || 'Cancelado pelo admin',
+        allowedOrigins: CANCEL_ORIGINS_FORCE,
+    });
 
     if (updated.captain) {
         await dispatchService.releaseCaptainBusyLockIfIdle(updated.captain);
     }
-    return parcelModel.findById(parcelId).populate('user').populate('captain');
+    return updated;
 };
 
 // Prefill helper for UI

@@ -6,40 +6,36 @@ const rideModel = require('../models/ride.model');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
 const { calculateLiveRideFare } = require('../services/liveRideFare.service');
-const authService = require('../services/auth.service');
-const {
-    sanitizeCaptainFinance,
-    computeDriverAmount,
-} = require('../utils/financePrivacy');
+const captainModel = require('../models/captain.model');
+const { computeDriverAmount } = require('../utils/financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const {
+    toRideOfferDTO,
+    toRideCaptainDTO,
+    toRidePassengerDTO,
+    toRideCaptainHistoryDTO,
+    toRidePassengerHistoryDTO,
+} = require('../utils/actorDtos');
+const {
+    RIDE_SHARE_TTL_SECONDS,
+    ACTIVE_SHARED_RIDE_STATUSES,
+    createRideShareAccess,
+    verifyRideShareToken,
+    validateRideShareAccess,
+    toSharedRideResponse,
+} = require('../utils/rideShareAccess');
+const {
+    PAYMENT_REPORTED_EVENT,
+    buildCaptainPaymentReportPayload,
+    buildPassengerPaymentReportResponse,
+} = require('../utils/paymentReportContract');
 
 /** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
 function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
     if (!ride) return ride;
-    const sanitized = sanitizeCaptainFinance(ride);
-    // Corrida criada pelo ADM pode ter passageiro sem conta. Entregar uma identidade
-    // sintética mantém as telas do motorista funcionando; telefone só aparece depois
-    // do aceite, seguindo a mesma privacidade aplicada aos passageiros cadastrados.
-    if (!sanitized.user && sanitized.source === 'admin' && sanitized.adminPassenger?.name) {
-        sanitized.user = {
-            fullname: { firstname: sanitized.adminPassenger.name },
-            ...(sanitized.status !== 'requested' && sanitized.adminPassenger.phone
-                ? { phone: sanitized.adminPassenger.phone }
-                : {}),
-            isGuest: true,
-        };
-    }
-    const isPresential = sanitized.source === 'driver_initiated';
-    if (!(keepPresentialOtp && isPresential)) {
-        delete sanitized.otp;
-    }
-    // Auditoria PWA (2026-08-07, P1): só faz sentido enquanto a corrida ainda é
-    // uma oferta em aberto — depois de aceita/finalizada/cancelada o campo some
-    // sozinho (o popup de oferta não deve reagir a mais nada nesse estado).
-    if (sanitized.status === 'requested') {
-        sanitized.offerExpiresAt = computeOfferExpiresAt(sanitized);
-    }
-    return sanitized;
+    const raw = typeof ride.toObject === 'function' ? ride.toObject() : ride;
+    if (raw.status === 'requested') return toRideOfferDTO(raw);
+    return toRideCaptainDTO(raw, { includePresentialOtp: keepPresentialOtp });
 }
 
 function sanitizeCaptainRideHistoryPayload(data) {
@@ -48,7 +44,7 @@ function sanitizeCaptainRideHistoryPayload(data) {
         ...data,
         activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide, { keepPresentialOtp: true }) : null,
         pendingOffers: (data.pendingOffers || []).map((ride) => toCaptainRideResponse(ride)),
-        rides: (data.rides || []).map((ride) => toCaptainRideResponse(ride)),
+        rides: (data.rides || []).map((ride) => toRideCaptainHistoryDTO(ride)),
     };
 }
 
@@ -82,7 +78,7 @@ async function dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID, exc
         { _id: ride._id },
         { pickupCoordinates: { lat: resolvedPickupCoordinates.lat, lng: resolvedPickupCoordinates.lng } },
         { new: true }
-    ).populate('user');
+    ).populate('user', 'fullname');
 
     matchingCaptains.forEach(captain => {
         // Put captain in a room for this specific ride
@@ -138,7 +134,8 @@ module.exports.createRide = async (req, res) => {
         // Bloco H (2026-08-02): createRide agora devolve { ride, promoError } — um cupom
         // inválido não impede a corrida de ser criada, só não aplica desconto; o motivo
         // vai junto na resposta pro app do passageiro decidir como avisar.
-        const { ride, promoError } = await rideService.createRide({
+        const idempotencyKey = req.get('Idempotency-Key');
+        const { ride, promoError, replayed } = await rideService.createRide({
             user: req.user._id,
             pickup,
             destination,
@@ -150,32 +147,45 @@ module.exports.createRide = async (req, res) => {
             requestFemaleDriver,
             promoCode,
             scheduledAt,
+            idempotencyKey,
         });
 
         const TRACE_ID = `Ride:${ride._id}`;
         console.log(`[AUDIT][${TRACE_ID}] Corrida criada no DB para usuário ${req.user._id}`);
 
-        // Agendada: sem despacho agora — o cron ativa perto do horário.
-        if (ride.status === 'scheduled') {
-            notificationService.sendScheduleCreated(req.user._id, {
-                kind: 'ride',
-                id: ride._id.toString(),
-                rideId: ride._id.toString(),
-                scheduledAt: ride.scheduledAt,
-            });
-        } else {
-            await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+        // Replay confirma o recurso já criado, sem repetir push/despacho. Corridas
+        // requested continuam visíveis no pull dos motoristas se a conexão anterior
+        // tiver caído entre o commit e a emissão por socket.
+        if (!replayed) {
+            // Agendada: sem despacho agora — o cron ativa perto do horário.
+            if (ride.status === 'scheduled') {
+                notificationService.sendScheduleCreated(req.user._id, {
+                    kind: 'ride',
+                    id: ride._id.toString(),
+                    rideId: ride._id.toString(),
+                    scheduledAt: ride.scheduledAt,
+                });
+            } else {
+                await dispatchRideToCaptains(ride, { pickup, vehicleType, TRACE_ID });
+            }
         }
 
         // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
-        res.status(201).json({ ...ride.toObject(), promoError });
+        res.set('Idempotency-Replayed', String(Boolean(replayed)));
+        res.status(replayed ? 200 : 201).json({ ...toRidePassengerDTO(ride), promoError });
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
+        }
+        if (err.code === 'USER_HAS_ACTIVE_RIDE' || err.message === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({
+                message: 'Você já possui uma corrida em andamento.',
+                activeRideId: err.activeRideId,
+            });
         }
         if (err.code === 'SCHEDULE_TOO_SOON') {
             return res.status(400).json({ message: 'Agende com pelo menos 15 minutos de antecedência.' });
@@ -231,7 +241,10 @@ async function performAcceptRide(rideId, captain, res) {
         console.log(`[AUDIT][${TRACE_ID}] Corrida aceita com sucesso pelo Captain ${captain._id}.`);
 
         if (ride.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, { event: 'ride-confirmed', data: ride });
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-confirmed',
+                data: toRidePassengerDTO(ride),
+            });
         }
         if (ride.user?._id) {
             notificationService.sendRideAccepted(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
@@ -448,7 +461,7 @@ module.exports.startRide = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'ride-started',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -483,7 +496,10 @@ module.exports.updateRideStatus = async (req, res) => {
         const ride = await rideService.updateRideStatus({ rideId, captain: req.captain, status });
 
         if (ride.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, { event: 'ride-status-updated', data: ride });
+            sendMessageToSocketId(ride.user.socketId, {
+                event: 'ride-status-updated',
+                data: toRidePassengerDTO(ride),
+            });
         }
 
         // A5 da auditoria de push (2026-08-02): "motorista chegou" é justamente o
@@ -552,7 +568,7 @@ module.exports.endRide = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'ride-ended',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -627,24 +643,39 @@ module.exports.payRide = async (req, res) => {
     const { rideId } = req.body;
 
     try {
-        const ride = await rideService.payRide({ rideId, user: req.user });
+        const { ride, reportStatus, shouldNotify } = await rideService.payRide({ rideId, user: req.user });
 
-        // Notify captain that payment was completed
-        if (ride.captain?.socketId) {
+        // "Passageiro informou" não é "pagamento recebido". Somente a primeira
+        // chamada emite aviso; retries recebem 200 sem duplicar socket/push.
+        if (shouldNotify && ride.captain?.socketId) {
             sendMessageToSocketId(ride.captain.socketId, {
-                event: 'payment-completed',
-                data: toCaptainRideResponse(ride)
+                event: PAYMENT_REPORTED_EVENT,
+                data: buildCaptainPaymentReportPayload(ride)
             });
         }
-        // Fase 5 da auditoria de push (2026-08-02): antes só socket — motorista sem o
-        // app aberto no instante do pagamento nunca era avisado.
-        if (ride.captain?._id) {
-            notificationService.sendPaymentCompleted(ride.captain._id, { rideId: ride._id.toString() }).catch(console.error);
+        if (shouldNotify && ride.captain?._id) {
+            notificationService.sendPaymentReported(ride.captain._id, {
+                rideId: ride._id.toString(),
+            }).catch(console.error);
         }
 
-
-        return res.status(200).json(ride);
+        return res.status(200).json(buildPassengerPaymentReportResponse(ride, reportStatus));
     } catch (err) {
+        if (err.code === 'RIDE_NOT_FOUND') {
+            return res.status(404).json({ message: 'Corrida não encontrada' });
+        }
+        if (err.code === 'RIDE_NOT_FINISHED') {
+            return res.status(409).json({ message: 'A corrida ainda não foi finalizada.' });
+        }
+        if (err.code === 'PAYMENT_REPORT_NOT_ALLOWED') {
+            return res.status(409).json({ message: 'Este meio de pagamento não aceita confirmação manual do passageiro.' });
+        }
+        if (err.code === 'PAYMENT_NOT_PENDING') {
+            return res.status(409).json({ message: 'Este pagamento não está pendente.' });
+        }
+        if (err.code === 'PAYMENT_REPORT_CONFLICT') {
+            return res.status(409).json({ message: 'Não foi possível registrar agora. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -664,7 +695,7 @@ module.exports.confirmPaymentReceived = async (req, res) => {
         if (ride.user?.socketId) {
             sendMessageToSocketId(ride.user.socketId, {
                 event: 'payment-confirmed',
-                data: ride
+                data: toRidePassengerDTO(ride)
             });
         }
         if (ride.user?._id) {
@@ -735,13 +766,13 @@ module.exports.getRideHistory = async (req, res) => {
 
         const total = await rideModel.countDocuments(query);
         const rides = await rideModel.find(query)
-            .populate('captain')
+            .populate('captain', 'fullname profilePicture rating vehicle vehicleAuthorization')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
 
         const responseData = {
-            rides,
+            rides: rides.map((ride) => toRidePassengerHistoryDTO(ride)),
             page,
             limit,
             total,
@@ -781,7 +812,7 @@ module.exports.getCurrentRide = async (req, res) => {
             console.error('Erro reconciliando valor ao vivo da corrida:', fareError);
         }
 
-        const payload = typeof ride.toObject === 'function' ? ride.toObject() : ride;
+        const payload = toRidePassengerDTO(ride);
         return res.status(200).json(liveFare ? { ...payload, liveFare } : payload);
     } catch (err) {
         return res.status(500).json({ message: err.message });
@@ -795,28 +826,29 @@ module.exports.createRideShareLink = async (req, res) => {
             return res.status(400).json({ message: errors.array()[0]?.msg || 'Corrida inválida' });
         }
 
-        const ride = await rideModel.findOne({
+        const access = createRideShareAccess({
+            rideId: req.body.rideId,
+            userId: req.user._id,
+        });
+        // A gravação e a validação de dono/estado são uma única operação.
+        // Criar outro link substitui o hash atual e revoga imediatamente o anterior.
+        const ride = await rideModel.findOneAndUpdate({
             _id: req.body.rideId,
             user: req.user._id,
-            status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
-        }).select('_id user');
+            status: { $in: ACTIVE_SHARED_RIDE_STATUSES },
+        }, {
+            $set: { shareAccess: access.record },
+        }, { new: true }).select('_id user');
         if (!ride) {
             return res.status(404).json({ message: 'Corrida ativa não encontrada.' });
         }
 
-        // Link temporário e somente-leitura. O token não contém telefone, nome ou
-        // localização; apenas autoriza o endpoint público a devolver a visão sanitizada.
-        const token = authService.signShareToken({
-            rideId: ride._id.toString(),
-            userId: req.user._id.toString(),
-            expiresIn: '6h',
-        });
         const frontendOrigin = String(process.env.FRONTEND_URL || req.get('origin') || '').replace(/\/$/, '');
-        const path = `/track/${encodeURIComponent(token)}`;
+        const path = `/track/${encodeURIComponent(access.token)}`;
 
         return res.status(201).json({
-            token,
-            expiresInSeconds: 6 * 60 * 60,
+            token: access.token,
+            expiresInSeconds: RIDE_SHARE_TTL_SECONDS,
             url: frontendOrigin ? `${frontendOrigin}${path}` : path,
         });
     } catch (err) {
@@ -826,41 +858,63 @@ module.exports.createRideShareLink = async (req, res) => {
 
 module.exports.getSharedRide = async (req, res) => {
     try {
-        const payload = authService.verifyShareToken(req.params.token);
-        if (payload?.scope !== 'ride_share' || !payload?.rideId || !payload?.userId) {
-            return res.status(401).json({ message: 'Compartilhamento inválido.' });
-        }
-
+        const payload = verifyRideShareToken(req.params.token);
         const ride = await rideModel.findById(payload.rideId)
-            .populate('captain', 'fullname profilePicture rating vehicle location lastSeenAt')
-            .select('user status pickup destination vehicleType captain updatedAt');
+            .select('user status pickup destination captain lastLocation updatedAt +shareAccess +shareLocation');
         if (!ride || String(ride.user) !== String(payload.userId)) {
             return res.status(404).json({ message: 'Corrida compartilhada não encontrada.' });
         }
+        const access = validateRideShareAccess(payload, ride.shareAccess);
+        if (!access.valid) {
+            return res.status(410).json({ message: 'Este compartilhamento foi encerrado.' });
+        }
 
-        const captain = ride.captain;
-        return res.status(200).json({
-            rideId: ride._id,
-            status: ride.status,
-            pickup: ride.pickup,
-            destination: ride.destination,
-            updatedAt: ride.updatedAt,
-            captain: captain ? {
-                fullname: captain.fullname,
-                profilePicture: captain.profilePicture,
-                rating: captain.rating,
-                vehicle: captain.vehicle,
-                lastSeenAt: captain.lastSeenAt,
-            } : null,
-            location: captain?.location?.ltd != null && captain?.location?.lng != null
-                ? { lat: captain.location.ltd, lng: captain.location.lng }
-                : null,
-        });
+        // Não seleciona `location`: o endpoint público nunca consulta o GPS atual do
+        // motorista. A posição ativa vem do registro vinculado à corrida e some
+        // completamente no estado final.
+        const captain = ride.captain
+            ? await captainModel.findById(ride.captain)
+                .select('fullname profilePicture rating vehicle')
+            : null;
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.status(200).json(toSharedRideResponse({ ride, captain }));
     } catch (err) {
         if (err?.name === 'TokenExpiredError') {
             return res.status(410).json({ message: 'Este compartilhamento expirou.' });
         }
         return res.status(401).json({ message: 'Compartilhamento inválido.' });
+    }
+}
+
+module.exports.revokeRideShareLink = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: errors.array()[0]?.msg || 'Corrida inválida' });
+        }
+
+        const revoked = await rideModel.findOneAndUpdate({
+            _id: req.params.rideId,
+            user: req.user._id,
+            'shareAccess.tokenHash': { $exists: true },
+        }, {
+            $set: { 'shareAccess.revokedAt': new Date() },
+        }, { new: true }).select('_id');
+
+        if (!revoked) {
+            const ownedRide = await rideModel.exists({
+                _id: req.params.rideId,
+                user: req.user._id,
+            });
+            if (!ownedRide) {
+                return res.status(404).json({ message: 'Corrida não encontrada.' });
+            }
+        }
+
+        // Idempotente: encerrar novamente não revela se um link estava ativo.
+        return res.status(204).send();
+    } catch (err) {
+        return res.status(500).json({ message: 'Não foi possível encerrar o compartilhamento.' });
     }
 }
 
@@ -970,6 +1024,12 @@ module.exports.captainCancelRide = async (req, res) => {
         if (err.message === 'Cancellation reason is required at this stage') {
             return res.status(400).json({ message: 'Informe o motivo do cancelamento.' });
         }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento financeiro está pendente. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }
@@ -1004,13 +1064,19 @@ module.exports.cancelRide = async (req, res) => {
         // Invalida cache de histórico do usuário
         deleteByPrefix(`history:${req.user._id}`);
 
-        return res.status(200).json(ride);
+        return res.status(200).json(toRidePassengerDTO(ride));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
         }
         if (err.message === 'Ride cannot be cancelled at this stage') {
             return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
+        }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento financeiro está pendente. Tente novamente.' });
         }
         return res.status(500).json({ message: err.message });
     }

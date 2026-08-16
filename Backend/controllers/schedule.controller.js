@@ -32,6 +32,12 @@ module.exports.cancelMine = async (req, res) => {
         if (err.code === 'INVALID_KIND') {
             return res.status(400).json({ message: 'Tipo inválido (ride ou parcel)' });
         }
+        if (err.code === 'CANCELLATION_IN_PROGRESS') {
+            return res.status(409).json({ code: err.code, message: 'Cancelamento já está sendo processado.' });
+        }
+        if (err.code === 'CANCELLATION_RETRY_REQUIRED') {
+            return res.status(503).json({ code: err.code, message: 'O cancelamento financeiro está pendente. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 };

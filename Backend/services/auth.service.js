@@ -15,26 +15,223 @@ const refreshTokenModel = require('../models/refreshToken.model');
 const ACCESS_TOKEN_TTL = '15m';
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const REFRESH_TOKEN_TTL_DAYS = 365;
+const TOKEN_VERSION = 2;
+const TOKEN_ISSUER = process.env.JWT_ISSUER || 'movecity-api';
+const ACTOR_TYPES = ['user', 'captain', 'admin'];
+const AUDIENCE_BY_ACTOR = Object.freeze({
+    user: 'movecity:user',
+    captain: 'movecity:captain',
+    admin: 'movecity:admin',
+});
+const SHARE_AUDIENCE = 'movecity:ride-share';
+const RESERVED_CLAIMS = new Set([
+    '_id', 'sub', 'iss', 'aud', 'iat', 'exp', 'nbf', 'jti',
+    'actorType', 'tokenType', 'ver',
+]);
+const legacyTokenMetrics = {
+    acceptedAccess: 0,
+    acceptedShare: 0,
+    lastAcceptedAt: null,
+};
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 module.exports.ACCESS_TOKEN_TTL = ACCESS_TOKEN_TTL;
 module.exports.ACCESS_TOKEN_TTL_SECONDS = ACCESS_TOKEN_TTL_SECONDS;
 module.exports.REFRESH_TOKEN_TTL_DAYS = REFRESH_TOKEN_TTL_DAYS;
+module.exports.TOKEN_VERSION = TOKEN_VERSION;
+module.exports.TOKEN_ISSUER = TOKEN_ISSUER;
+module.exports.AUDIENCE_BY_ACTOR = AUDIENCE_BY_ACTOR;
 module.exports.hashToken = hashToken;
+module.exports.getTokenPolicyMetrics = () => ({ ...legacyTokenMetrics });
+// Mesma política de segredo dedicado usada por signShareToken/verifyShareToken —
+// exportada para que outras implementações de link de compartilhamento (ex.:
+// utils/rideShareAccess.js) nunca caiam de volta no JWT_SECRET genérico por engano.
+module.exports.shareTokenSecret = () => secretFor(null, 'share');
 
-module.exports.generateAccessToken = (userId, extraClaims = {}) => {
-    return jwt.sign(
-        { _id: userId, ...extraClaims },
-        process.env.JWT_SECRET,
-        { expiresIn: ACCESS_TOKEN_TTL }
+function tokenError(code, message = code) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+}
+
+function assertActorType(actorType) {
+    if (!ACTOR_TYPES.includes(actorType)) {
+        throw tokenError('INVALID_TOKEN_ACTOR', 'Ator de autenticação inválido');
+    }
+    return actorType;
+}
+
+function secretFor(actorType, purpose = 'access') {
+    if (purpose === 'share') {
+        if (process.env.JWT_SHARE_SECRET) return process.env.JWT_SHARE_SECRET;
+        if (process.env.NODE_ENV === 'production') {
+            throw tokenError('TOKEN_SECRET_NOT_CONFIGURED', 'JWT_SHARE_SECRET obrigatório em produção');
+        }
+        return process.env.JWT_SECRET;
+    }
+    if (actorType === 'admin') {
+        if (process.env.JWT_ADMIN_SECRET) return process.env.JWT_ADMIN_SECRET;
+        if (process.env.NODE_ENV === 'production') {
+            throw tokenError('TOKEN_SECRET_NOT_CONFIGURED', 'JWT_ADMIN_SECRET obrigatório em produção');
+        }
+        return process.env.JWT_SECRET;
+    }
+    return process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET;
+}
+
+function safeExtraClaims(extraClaims = {}) {
+    return Object.fromEntries(
+        Object.entries(extraClaims).filter(([key]) => !RESERVED_CLAIMS.has(key))
     );
+}
+
+function normalizedExpectedActors(expectedActorTypes) {
+    const actors = Array.isArray(expectedActorTypes) ? expectedActorTypes : [expectedActorTypes];
+    if (!actors.length) throw tokenError('INVALID_TOKEN_ACTOR');
+    actors.forEach(assertActorType);
+    return actors;
+}
+
+function legacyTokensEnabled() {
+    if (process.env.JWT_ACCEPT_LEGACY_TOKENS !== 'true') return false;
+    const cutoff = new Date(process.env.JWT_LEGACY_ACCEPT_UNTIL || 'invalid');
+    return Number.isFinite(cutoff.getTime()) && cutoff.getTime() > Date.now();
+}
+
+function recordLegacyAcceptance(purpose, expectedActors = []) {
+    if (purpose === 'share') legacyTokenMetrics.acceptedShare += 1;
+    else legacyTokenMetrics.acceptedAccess += 1;
+    legacyTokenMetrics.lastAcceptedAt = new Date().toISOString();
+    console.warn(JSON.stringify({
+        tag: 'AUTH_LEGACY_TOKEN_ACCEPTED',
+        purpose,
+        expectedActors,
+        at: legacyTokenMetrics.lastAcceptedAt,
+    }));
+}
+
+module.exports.generateAccessToken = (userId, userType, extraClaims = {}) => {
+    const actorType = assertActorType(userType);
+    const subjectId = String(userId);
+    return jwt.sign(
+        {
+            _id: subjectId,
+            actorType,
+            tokenType: 'access',
+            ver: TOKEN_VERSION,
+            ...safeExtraClaims(extraClaims),
+        },
+        secretFor(actorType),
+        {
+            algorithm: 'HS256',
+            expiresIn: ACCESS_TOKEN_TTL,
+            subject: subjectId,
+            issuer: TOKEN_ISSUER,
+            audience: AUDIENCE_BY_ACTOR[actorType],
+            jwtid: crypto.randomUUID(),
+        }
+    );
+};
+
+module.exports.verifyAccessToken = (token, expectedActorTypes) => {
+    const expectedActors = normalizedExpectedActors(expectedActorTypes);
+    const untrusted = jwt.decode(token);
+    const looksLikeV2 = untrusted?.ver === TOKEN_VERSION
+        || untrusted?.actorType
+        || untrusted?.tokenType;
+
+    if (looksLikeV2) {
+        const actorType = assertActorType(untrusted?.actorType);
+        if (!expectedActors.includes(actorType)) {
+            throw tokenError('TOKEN_ACTOR_MISMATCH', 'Token emitido para outro ator');
+        }
+        const decoded = jwt.verify(token, secretFor(actorType), {
+            algorithms: ['HS256'],
+            issuer: TOKEN_ISSUER,
+            audience: AUDIENCE_BY_ACTOR[actorType],
+        });
+        if (decoded.ver !== TOKEN_VERSION || decoded.tokenType !== 'access') {
+            throw tokenError('TOKEN_PURPOSE_MISMATCH', 'Finalidade do token inválida');
+        }
+        if (!decoded.sub || String(decoded.sub) !== String(decoded._id)) {
+            throw tokenError('TOKEN_SUBJECT_MISMATCH', 'Subject do token inválido');
+        }
+        return {
+            ...decoded,
+            subjectId: String(decoded.sub),
+            actorType,
+            legacy: false,
+        };
+    }
+
+    if (!legacyTokensEnabled()) {
+        throw tokenError('LEGACY_TOKEN_REJECTED', 'Token legado fora da janela de migração');
+    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (!decoded?._id) throw tokenError('TOKEN_SUBJECT_MISMATCH');
+    recordLegacyAcceptance('access', expectedActors);
+    return {
+        ...decoded,
+        subjectId: String(decoded._id),
+        actorType: null,
+        tokenType: 'access',
+        legacy: true,
+    };
+};
+
+module.exports.signShareToken = ({ rideId, userId, expiresIn = '6h' }) => {
+    const subjectId = String(rideId);
+    return jwt.sign(
+        {
+            rideId: subjectId,
+            userId: String(userId),
+            scope: 'ride_share',
+            tokenType: 'share',
+            ver: TOKEN_VERSION,
+        },
+        secretFor(null, 'share'),
+        {
+            algorithm: 'HS256',
+            expiresIn,
+            subject: subjectId,
+            issuer: TOKEN_ISSUER,
+            audience: SHARE_AUDIENCE,
+            jwtid: crypto.randomUUID(),
+        }
+    );
+};
+
+module.exports.verifyShareToken = (token) => {
+    const untrusted = jwt.decode(token);
+    if (untrusted?.ver === TOKEN_VERSION || untrusted?.tokenType) {
+        const decoded = jwt.verify(token, secretFor(null, 'share'), {
+            algorithms: ['HS256'],
+            issuer: TOKEN_ISSUER,
+            audience: SHARE_AUDIENCE,
+        });
+        if (decoded.ver !== TOKEN_VERSION || decoded.tokenType !== 'share' || decoded.scope !== 'ride_share') {
+            throw tokenError('TOKEN_PURPOSE_MISMATCH', 'Compartilhamento inválido');
+        }
+        if (!decoded.sub || String(decoded.sub) !== String(decoded.rideId)) {
+            throw tokenError('TOKEN_SUBJECT_MISMATCH', 'Subject do compartilhamento inválido');
+        }
+        return decoded;
+    }
+    if (!legacyTokensEnabled()) throw tokenError('LEGACY_TOKEN_REJECTED');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (decoded?.scope !== 'ride_share' || !decoded?.rideId || !decoded?.userId) {
+        throw tokenError('TOKEN_PURPOSE_MISMATCH');
+    }
+    recordLegacyAcceptance('share');
+    return { ...decoded, legacy: true };
 };
 
 // Emite um par novo (login). O refresh token cru é devolvido pro chamador entregar ao
 // cliente; no banco fica só o hash.
 module.exports.issueTokenPair = async ({ userId, userType, extraClaims = {}, ip }) => {
-    const accessToken = module.exports.generateAccessToken(userId, extraClaims);
+    assertActorType(userType);
+    const accessToken = module.exports.generateAccessToken(userId, userType, extraClaims);
 
     const refreshToken = crypto.randomBytes(48).toString('hex');
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
@@ -90,7 +287,7 @@ async function walkToCurrent(stored) {
 
 // Troca um refresh token por um par novo, rotacionando (o antigo é marcado como usado e
 // aponta pro substituto). Lança erro com `code` legível pro controller decidir a resposta.
-module.exports.rotateRefreshToken = async ({ refreshToken, ip }) => {
+module.exports.rotateRefreshToken = async ({ refreshToken, expectedUserType, ip }) => {
     if (!refreshToken) {
         const err = new Error('Refresh token ausente');
         err.code = 'MISSING_REFRESH_TOKEN';
@@ -103,6 +300,12 @@ module.exports.rotateRefreshToken = async ({ refreshToken, ip }) => {
     if (!stored) {
         const err = new Error('Sessão inválida');
         err.code = 'INVALID_REFRESH_TOKEN';
+        throw err;
+    }
+
+    if (expectedUserType && stored.userType !== expectedUserType) {
+        const err = new Error('Refresh token emitido para outro ator');
+        err.code = 'REFRESH_ACTOR_MISMATCH';
         throw err;
     }
 

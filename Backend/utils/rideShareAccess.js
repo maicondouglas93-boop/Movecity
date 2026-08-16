@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { shareTokenSecret } = require('../services/auth.service');
 
 const RIDE_SHARE_TTL_SECONDS = 60 * 60;
 const ACTIVE_SHARED_RIDE_STATUSES = Object.freeze([
@@ -11,10 +12,10 @@ const ACTIVE_SHARED_RIDE_STATUSES = Object.freeze([
 ]);
 const TERMINAL_SHARED_RIDE_STATUSES = Object.freeze(['finished', 'cancelled']);
 
+// JWT_SHARE_SECRET dedicado (política em auth.service.js) — nunca cai de volta no
+// JWT_SECRET genérico compartilhado com passageiro/motorista/ADM.
 function signingSecret(secret) {
-    const value = secret || process.env.JWT_SECRET;
-    if (!value) throw new Error('JWT_SECRET is required for ride sharing');
-    return value;
+    return secret || shareTokenSecret();
 }
 
 function hashShareId(shareId) {

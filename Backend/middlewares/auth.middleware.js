@@ -1,10 +1,7 @@
-const userModel = require('../models/user.model');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const blackListTokenModel = require('../models/blacklistToken.model');
-const captainModel = require('../models/captain.model');
 const userService = require('../services/user.service');
 const captainService = require('../services/captain.service');
+const authService = require('../services/auth.service');
 const { resolveAccessToken } = require('../utils/authToken');
 
 
@@ -27,8 +24,8 @@ module.exports.authUser = async (req, res, next) => {
 
     try {
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await userService.getUserProfile(decoded._id);
+        const decoded = authService.verifyAccessToken(token, 'user');
+        const user = await userService.getUserProfile(decoded.subjectId);
 
         if (!user) {
             return res.status(401).json({ message: 'Unauthorized' });
@@ -39,6 +36,7 @@ module.exports.authUser = async (req, res, next) => {
         }
 
         req.user = user;
+        req.auth = decoded;
 
         return next();
 
@@ -67,8 +65,8 @@ module.exports.authCaptain = async (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const captain = await captainService.getCaptainProfile(decoded._id);
+        const decoded = authService.verifyAccessToken(token, 'captain');
+        const captain = await captainService.getCaptainProfile(decoded.subjectId);
 
         if (!captain) {
             return res.status(401).json({ message: 'Unauthorized' });
@@ -79,6 +77,7 @@ module.exports.authCaptain = async (req, res, next) => {
         }
 
         req.captain = captain;
+        req.auth = decoded;
 
         return next()
     } catch (err) {
@@ -105,24 +104,30 @@ module.exports.authBoth = async (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        const user = await userService.getUserProfile(decoded._id);
-        if (user) {
-            if (user.isBlocked) {
-                return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+        const decoded = authService.verifyAccessToken(token, ['user', 'captain']);
+
+        if (decoded.actorType === 'user' || decoded.legacy) {
+            const user = await userService.getUserProfile(decoded.subjectId);
+            if (user) {
+                if (user.isBlocked) {
+                    return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+                }
+                req.user = user;
+                req.auth = decoded;
+                return next();
             }
-            req.user = user;
-            return next();
         }
 
-        const captain = await captainService.getCaptainProfile(decoded._id);
-        if (captain) {
-            if (captain.isBlocked) {
-                return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+        if (decoded.actorType === 'captain' || decoded.legacy) {
+            const captain = await captainService.getCaptainProfile(decoded.subjectId);
+            if (captain) {
+                if (captain.isBlocked) {
+                    return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+                }
+                req.captain = captain;
+                req.auth = decoded;
+                return next();
             }
-            req.captain = captain;
-            return next();
         }
 
         return res.status(401).json({ message: 'Unauthorized' });

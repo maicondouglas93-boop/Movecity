@@ -256,25 +256,11 @@ async function connectToDb() {
         console.log('Connected to In-Memory MongoDB at', mongoUri);
     }
 
-    // Alinha índices com o schema (ex.: transaction rideId/parcelId com $type:objectId).
-    // createIndexes NÃO recria índice existente com as mesmas keys e opções diferentes;
-    // syncIndexes dropa o legado e aplica o partialFilterExpression atual — necessário
-    // pra não manter o E11000 { rideId:null, type:"commission" } em bases já deployadas.
-    try {
-        const transactionModel = require('../models/transaction.model');
-        await transactionModel.syncIndexes();
-        // Limpa nulls legados que o índice antigo indexava e que o $type:objectId ignora.
-        await transactionModel.collection.updateMany(
-            { rideId: null },
-            { $unset: { rideId: '' } }
-        );
-        await transactionModel.collection.updateMany(
-            { parcelId: null },
-            { $unset: { parcelId: '' } }
-        );
-    } catch (err) {
-        console.warn('Falha ao sincronizar índices de transaction:', err.message);
-    }
+    // Plano de correção (Fase 2.2, 2026-08-16): a sincronização de índices de
+    // transaction rodava aqui, automaticamente, em todo boot — sem versionamento nem
+    // log de quando foi aplicada. Confirmado manualmente (2026-08-16, produção já
+    // sincronizada, 0 alterações) e movida pra scripts/migrate-transaction-indexes.js,
+    // rodada manualmente quando necessário (ex.: depois de restaurar um backup).
 
     // Nunca popular o banco de produção com dados fictícios (motoristas, corridas e
     // avaliações inventados) — só roda em dev/teste, onde ajuda a ter dado pra trabalhar.

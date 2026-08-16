@@ -9,7 +9,14 @@ services:
     # Fase 2 da auditoria de production readiness (H5, 2026-08-05): sem health check,
     # o Render considerava o deploy "vivo" só porque o processo subiu — um backend
     # travado no boot (Mongo fora, env faltando) ficava no ar recebendo tráfego.
-    # /api/health é público e responde 200 sem tocar em auth (Backend/app.js).
     # Nota: o plano free hiberna após inatividade — o primeiro request paga o cold
     # start. Health de frontend fica com a Vercel (deploy checks do próprio painel).
-    healthCheckPath: /api/health
+    #
+    # Plano de correção (Fase 2.4, 2026-08-16, Passo 4/4): trocado de /api/health
+    # (sempre 200, mesmo com o Mongo caído — só confirma que o processo está vivo)
+    # pra /api/ready (503 se o Mongo não estiver conectado). /api/ready ficou em
+    # produção sozinho, sem nada depender dele, por ~45min/29 checagens antes desta
+    # troca (2 anomalias isoladas nos primeiros minutos, sem repetição — ver
+    # docs/plans/2026-08-15-plano-correcoes-reais-pos-auditoria.md). /api/health
+    # continua existindo, sem uso pelo Render a partir daqui.
+    healthCheckPath: /api/ready

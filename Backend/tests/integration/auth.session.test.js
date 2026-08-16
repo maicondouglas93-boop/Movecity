@@ -19,8 +19,24 @@ const authService = require('../../services/auth.service');
 describe('Sessão persistente — passageiro', () => {
     const LOGIN = { email: 'sessao@test.com', password: 'password123' };
 
+    // Upsert, não create: LOGIN é reaproveitado por todo teste deste describe (cada um
+    // chama loginUser() para logar de novo). Um create() puro deixava um documento
+    // duplicado por chamada e o isBlocked que o teste 7 liga nunca voltava a false —
+    // findOne({email}) podia calhar de achar uma dessas cópias bloqueada em qualquer
+    // teste posterior, sem relação nenhuma com o que ele estava testando.
     const loginUser = async () => {
-        await createUser({ email: LOGIN.email, password: await userModel.hashPassword(LOGIN.password) });
+        await userModel.findOneAndUpdate(
+            { email: LOGIN.email },
+            {
+                $set: { password: await userModel.hashPassword(LOGIN.password), isBlocked: false },
+                $setOnInsert: {
+                    fullname: { firstname: 'Sessao', lastname: 'Teste' },
+                    phone: '+5511999990000',
+                    cpf: '11111111111',
+                },
+            },
+            { upsert: true }
+        );
         const res = await request(app).post('/users/login').send(LOGIN);
         return res;
     };

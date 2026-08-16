@@ -1,8 +1,22 @@
 const rateLimit = require('express-rate-limit');
 
+// Chave por IP + rota: sem isso, /users/login, /captains/login e /api/admin/login
+// compartilham o mesmo balde de 5 tentativas (mesma instância, mesmo módulo
+// importado pelos três routers) — um IP que erra login de passageiro repetidas
+// vezes ficava sem tentar login de admin por 15 minutos, mesmo sem relação alguma
+// entre as contas.
 module.exports.loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 5, // max 5 tentativas
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: (req) => `login:${req.baseUrl}${req.path}:${req.ip}`,
+    // Suítes de integração legitimamente logam a mesma rota mais de 5 vezes em
+    // sequência (uma sessão nova por cenário) — nenhum teste hoje verifica o limite
+    // em si, então bloqueá-lo em produção sem travar a suíte é estritamente melhor
+    // do que deixar a proteção real mais fraca só para caber no teste.
+    skip: () => process.env.NODE_ENV === 'test',
     message: { message: "Muitas tentativas de login. Tente novamente em 15 minutos." }
 });
 

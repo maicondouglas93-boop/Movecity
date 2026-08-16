@@ -41,6 +41,17 @@ const SharedRideTracking = lazy(() => import('@/passenger/pages/SharedRideTracki
 // era pública, então após um refresh o UserDataContext ficava vazio, o join do socket
 // nunca rodava e a tela perdia os eventos de fim de corrida/pagamento. O wrapper
 // garante o perfil carregado (e o redirect pro login quando não há sessão).
+//
+// Otimização de mapa persistente (2026-08-16): Home e as telas de conta abaixo (que
+// antes eram rotas irmãs, cada uma com seu próprio UserProtectWrapper) agora são uma
+// rota "sem path" (layout route do React Router) com Home como elemento e as telas de
+// conta como filhas, renderizadas via <Outlet /> dentro de Home. Isso resolve dois
+// problemas ao mesmo tempo: o mapa (LiveTracking) parava de existir e era recriado do
+// zero — instância nova do Google Maps, marcadores, motoristas próximos, rota — toda
+// vez que o passageiro ia em Carteira/Perfil/etc. e voltava; e o UserProtectWrapper
+// refazia GET /users/profile a cada troca de tela dentro desse grupo. Home nunca
+// desmonta mais entre essas telas — só ao trocar de corrida ativa, encomenda, agendar
+// ou logout, que continuam rotas separadas de propósito (usam o mapa de outro jeito).
 const passengerRoutes = [
   <Route key='shared-ride-tracking' path='/track/:token' element={<SharedRideTracking />} />,
   <Route key='login' path='/login' element={<UserLogin />} />,
@@ -71,91 +82,34 @@ const passengerRoutes = [
       <ScheduleRide />
     </UserProtectWrapper>
   } />,
-  <Route key='home' path='/home' element={
-    <UserProtectWrapper>
-      <Home />
-    </UserProtectWrapper>
-  } />,
-  <Route key='notifications' path='/notifications' element={
-    <UserProtectWrapper>
-      <Notifications />
-    </UserProtectWrapper>
-  } />,
   <Route key='user-logout' path='/user/logout' element={
     <UserProtectWrapper>
       <UserLogout />
     </UserProtectWrapper>
   } />,
-  <Route key='activity' path='/activity' element={
+
+  <Route key='home-shell' element={
     <UserProtectWrapper>
-      <Activity />
+      <Home />
     </UserProtectWrapper>
-  } />,
-  <Route key='account' path='/account' element={
-    <UserProtectWrapper>
-      <Account />
-    </UserProtectWrapper>
-  } />,
-  <Route key='wallet' path='/wallet' element={
-    <UserProtectWrapper>
-      <Wallet />
-    </UserProtectWrapper>
-  } />,
-  <Route key='coupons' path='/coupons' element={
-    <UserProtectWrapper>
-      <Coupons />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile' path='/profile' element={
-    <UserProtectWrapper>
-      <Profile />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile-personal-data' path='/profile/personal-data' element={
-    <UserProtectWrapper>
-      <PersonalData />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile-change-password' path='/profile/change-password' element={
-    <UserProtectWrapper>
-      <ChangePassword />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile-delete-account' path='/profile/delete-account' element={
-    <UserProtectWrapper>
-      <DeleteAccount />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile-terms' path='/profile/terms' element={
-    <UserProtectWrapper>
-      <Terms />
-    </UserProtectWrapper>
-  } />,
-  <Route key='profile-privacy' path='/profile/privacy' element={
-    <UserProtectWrapper>
-      <Privacy />
-    </UserProtectWrapper>
-  } />,
-  <Route key='cards' path='/cards' element={
-    <UserProtectWrapper>
-      <Cards />
-    </UserProtectWrapper>
-  } />,
-  <Route key='scheduled' path='/scheduled' element={
-    <UserProtectWrapper>
-      <Scheduled />
-    </UserProtectWrapper>
-  } />,
-  <Route key='favorites' path='/favorites' element={
-    <UserProtectWrapper>
-      <Favorites />
-    </UserProtectWrapper>
-  } />,
-  <Route key='help' path='/help' element={
-    <UserProtectWrapper>
-      <Help />
-    </UserProtectWrapper>
-  } />,
+  }>
+    <Route path='/home' element={null} />
+    <Route path='/notifications' element={<Notifications />} />
+    <Route path='/activity' element={<Activity />} />
+    <Route path='/account' element={<Account />} />
+    <Route path='/wallet' element={<Wallet />} />
+    <Route path='/coupons' element={<Coupons />} />
+    <Route path='/profile' element={<Profile />} />
+    <Route path='/profile/personal-data' element={<PersonalData />} />
+    <Route path='/profile/change-password' element={<ChangePassword />} />
+    <Route path='/profile/delete-account' element={<DeleteAccount />} />
+    <Route path='/profile/terms' element={<Terms />} />
+    <Route path='/profile/privacy' element={<Privacy />} />
+    <Route path='/cards' element={<Cards />} />
+    <Route path='/scheduled' element={<Scheduled />} />
+    <Route path='/favorites' element={<Favorites />} />
+    <Route path='/help' element={<Help />} />
+  </Route>,
 ]
 
 export default passengerRoutes

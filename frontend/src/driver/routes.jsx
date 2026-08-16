@@ -27,6 +27,12 @@ const CaptainDeleteAccount = lazy(() => import('@/driver/pages/CaptainDeleteAcco
 // Mantidas exatamente como estavam em App.jsx: mesmos paths e mesmos wrappers.
 // Observacao: '/captain-wallet' e '/captain/wallet' apontam ambas para CaptainWallet,
 // duplicidade que ja existia no original e foi preservada.
+//
+// Otimização de mapa persistente (2026-08-16): mesma mudança feita em passenger/
+// routes.jsx — CaptainHome e as telas abaixo (antes rotas irmãs) viram uma rota "sem
+// path" com CaptainHome como elemento e essas telas como filhas, renderizadas via
+// <Outlet /> por cima do mapa. Corrida ativa, encomenda e presencial continuam rotas
+// separadas de propósito (mapa em modo diferente — seguindo corrida/navegação).
 const driverRoutes = [
   <Route key='captain-login' path='/captain-login' element={<CaptainLogin />} />,
   <Route key='captain-signup' path='/captain-signup' element={<CaptainSignup />} />,
@@ -41,29 +47,9 @@ const driverRoutes = [
       <CaptainParcelRiding />
     </CaptainProtectWrapper>
   } />,
-  <Route key='captain-home' path='/captain-home' element={
-    <CaptainProtectWrapper>
-      <CaptainHome />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-notifications' path='/captain/notifications' element={
-    <CaptainProtectWrapper>
-      <CaptainNotifications />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-scheduled' path='/captain/scheduled' element={
-    <CaptainProtectWrapper>
-      <CaptainScheduled />
-    </CaptainProtectWrapper>
-  } />,
   <Route key='captain-presential' path='/captain-presential' element={
     <CaptainProtectWrapper>
       <CaptainPresentialRide />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-wallet-legacy' path='/captain-wallet' element={
-    <CaptainProtectWrapper>
-      <CaptainWallet />
     </CaptainProtectWrapper>
   } />,
   <Route key='captain-logout' path='/captain/logout' element={
@@ -71,41 +57,24 @@ const driverRoutes = [
       <CaptainLogout />
     </CaptainProtectWrapper>
   } />,
-  <Route key='captain-wallet' path='/captain/wallet' element={
+
+  <Route key='captain-home-shell' element={
     <CaptainProtectWrapper>
-      <CaptainWallet />
+      <CaptainHome />
     </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-rides' path='/captain/rides' element={
-    <CaptainProtectWrapper>
-      <CaptainRidesHistory />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-parcels' path='/captain/parcels' element={
-    <CaptainProtectWrapper>
-      <CaptainParcels />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-earnings' path='/captain/earnings' element={
-    <CaptainProtectWrapper>
-      <CaptainEarnings />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-profile' path='/captain/profile' element={
-    <CaptainProtectWrapper>
-      <CaptainProfile />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-documents' path='/captain/documents' element={
-    <CaptainProtectWrapper>
-      <CaptainDocuments />
-    </CaptainProtectWrapper>
-  } />,
-  <Route key='captain-delete-account' path='/captain/delete-account' element={
-    <CaptainProtectWrapper>
-      <CaptainDeleteAccount />
-    </CaptainProtectWrapper>
-  } />,
+  }>
+    <Route path='/captain-home' element={null} />
+    <Route path='/captain/notifications' element={<CaptainNotifications />} />
+    <Route path='/captain/scheduled' element={<CaptainScheduled />} />
+    <Route path='/captain-wallet' element={<CaptainWallet />} />
+    <Route path='/captain/wallet' element={<CaptainWallet />} />
+    <Route path='/captain/rides' element={<CaptainRidesHistory />} />
+    <Route path='/captain/parcels' element={<CaptainParcels />} />
+    <Route path='/captain/earnings' element={<CaptainEarnings />} />
+    <Route path='/captain/profile' element={<CaptainProfile />} />
+    <Route path='/captain/documents' element={<CaptainDocuments />} />
+    <Route path='/captain/delete-account' element={<CaptainDeleteAccount />} />
+  </Route>,
 ]
 
 export default driverRoutes

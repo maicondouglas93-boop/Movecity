@@ -15,7 +15,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext';
 import { useContext } from 'react';
 import { UserDataContext } from '@/passenger/contexts/UserContext';
 import { RideContext } from '@/shared/contexts/RideContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import LiveTracking from '@/shared/components/LiveTracking'
 import { LocationContext } from '@/shared/contexts/LocationContext';
 import { useToast } from '@/shared/contexts/ToastContext';
@@ -1151,6 +1151,18 @@ const Home = () => {
             {/* Bottom Navigation */}
             {!(panelOpen || vehiclePanel || confirmRidePanel || optionalsPanel || paymentPanel || vehicleFound || waitingForDriver || isSelectingOnMap) && (
                 <Header />
+            )}
+
+            {/* Otimização de mapa persistente (2026-08-16): telas de conta (Carteira,
+                Perfil, Ajuda etc.) renderizam aqui via <Outlet />, por cima do mapa, em
+                vez de serem rotas irmãs que desmontariam Home (e recriariam o mapa do
+                zero) a cada ida e volta. Em '/home' a rota filha correspondente é
+                `element={null}`, então o Outlet não renderiza nada e este bloco fica
+                fora do fluxo (display:none evita ocupar espaço/interceptar clique). */}
+            {location.pathname !== '/home' && (
+                <div className='fixed inset-0 z-modal bg-surface'>
+                    <Outlet />
+                </div>
             )}
         </div>
     )

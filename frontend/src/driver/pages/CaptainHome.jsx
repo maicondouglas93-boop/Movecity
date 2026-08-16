@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useContext, useCallback } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useLocation, useSearchParams, Outlet } from 'react-router-dom'
 import CaptainDetails from '@/driver/components/CaptainDetails'
 import RidePopUp from '@/driver/components/RidePopUp'
 import ConfirmRidePopUp from '@/driver/components/ConfirmRidePopUp'
@@ -65,6 +65,7 @@ const CaptainHome = () => {
     const [ scheduledUpcoming, setScheduledUpcoming ] = useState([])
 
     const navigate = useNavigate()
+    const location = useLocation()
     const { socket } = useContext(SocketContext)
     const { captain, setCaptain } = useContext(CaptainDataContext)
     const { userLocation } = useContext(LocationContext)
@@ -917,6 +918,17 @@ const CaptainHome = () => {
                 />
             )}
             <CaptainHeader />
+
+            {/* Otimização de mapa persistente (2026-08-16): telas de conta (Carteira,
+                Ganhos, Perfil etc.) renderizam aqui via <Outlet />, por cima do mapa, em
+                vez de serem rotas irmãs que desmontariam CaptainHome (e recriariam o
+                mapa do zero) a cada ida e volta. Em '/captain-home' a rota filha
+                correspondente é `element={null}`. */}
+            {location.pathname !== '/captain-home' && (
+                <div className='fixed inset-0 z-modal bg-surface-alt'>
+                    <Outlet />
+                </div>
+            )}
         </div>
     )
 }

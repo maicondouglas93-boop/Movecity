@@ -52,6 +52,12 @@ async function calculateLiveRideFare({ ride, actualDistance, now = Date.now() })
         elapsedSeconds,
         currency: 'BRL',
         calculatedAt: new Date(now).toISOString(),
+        // Auditoria de UX (2026-08-16): relato de motorista mostrando um valor na tela
+        // e o sistema fechando com outro maior. A cobrança estava certa — o app só não
+        // tinha como mostrar o detalhamento (base/distância/minutos) antes de finalizar,
+        // só depois. Expor o mesmo breakdown que a finalização real usa permite ao
+        // frontend pedir confirmação com o valor fresco antes de travar a corrida.
+        fareBreakdown: pricing.fareBreakdown,
     };
 }
 

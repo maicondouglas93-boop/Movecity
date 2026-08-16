@@ -927,7 +927,25 @@ module.exports.getCurrentRideForCaptain = async (req, res) => {
         if (!ride) {
             return res.status(404).json({ message: 'No active ride found' });
         }
-        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
+
+        // Mesma reconciliação já usada em getCurrentRide (passageiro): o valor "ao vivo"
+        // empurrado por socket só se atualiza quando chega um ponto de GPS novo, e pode
+        // ficar minutos parado com sinal ruim ou corrida praticamente parada. Buscar
+        // /rides/captain-current pede um valor fresco (mesma distância já registrada,
+        // tempo recalculado agora) — usado pelo app pra mostrar o valor real antes de
+        // finalizar, não só depois.
+        let liveFare = null;
+        try {
+            liveFare = await calculateLiveRideFare({
+                ride,
+                actualDistance: ride.actualDistance,
+            });
+        } catch (fareError) {
+            console.error('Erro reconciliando valor ao vivo da corrida (motorista):', fareError);
+        }
+
+        const payload = toCaptainRideResponse(ride, { keepPresentialOtp: true });
+        return res.status(200).json(liveFare ? { ...payload, liveFare } : payload);
     } catch (err) {
         return res.status(500).json({ message: err.message });
     }

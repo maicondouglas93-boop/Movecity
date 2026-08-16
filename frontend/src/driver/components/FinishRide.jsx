@@ -38,8 +38,17 @@ const FinishRide = (props) => {
     const [ratingValue, setRatingValue] = useState(0)
     const [submittingRating, setSubmittingRating] = useState(false)
     const navigate = useNavigate()
-    const { setCaptainRide } = useContext(RideContext)
+    const { setCaptainRide, syncCaptainRide } = useContext(RideContext)
     const { addToast } = useToast()
+    // Auditoria de UX (2026-08-16): motorista via um valor na tela e a corrida fechava
+    // com outro maior — a cobrança sempre esteve certa, mas o valor "ao vivo" só
+    // atualiza quando chega GPS novo, e pode ficar minutos parado (sinal ruim na
+    // estrada, corrida praticamente parada perto do fim). Antes de finalizar de
+    // verdade, busca um valor fresco (mesma conta que a finalização vai usar) e pede
+    // confirmação — em vez do motorista só descobrir o valor real depois de já ter
+    // travado a corrida como finalizada.
+    const [previewFare, setPreviewFare] = useState(null)
+    const [previewLoading, setPreviewLoading] = useState(false)
     const { userLocation } = useContext(LocationContext)
     const { socket } = useContext(SocketContext)
 
@@ -131,6 +140,28 @@ const FinishRide = (props) => {
         endRideMutation.mutate();
     }
 
+    // Busca /rides/captain-current, que agora devolve liveFare com a mesma conta
+    // (distância já registrada + tempo recalculado na hora) que a finalização real vai
+    // usar. Sem liveFare utilizável (corrida presencial sem destino/distância ainda,
+    // ou a busca falhou) segue direto pra finalização — ela já valida e recalcula
+    // corretamente sozinha, então não travar o motorista numa prévia impossível.
+    async function handleFinalizeClick() {
+        setPreviewLoading(true)
+        try {
+            const fresh = await syncCaptainRide()
+            if (fresh?.liveFare?.amount > 0) {
+                setPreviewFare(fresh.liveFare)
+            } else {
+                endRide()
+            }
+        } catch (err) {
+            console.error('Erro buscando prévia do valor final:', err)
+            endRide()
+        } finally {
+            setPreviewLoading(false)
+        }
+    }
+
     const confirmPaymentMutation = useMutation({
         mutationFn: async () => {
             const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm-payment`, {
@@ -212,7 +243,64 @@ const FinishRide = (props) => {
 
     return (
         <div>
-            {!ended ? (
+            {!ended ? previewFare ? (
+                <>
+                    <h3 className='text-base font-semibold mb-2.5 text-ink-900'>Confirmar valor final</h3>
+                    <p className='text-xs text-ink-600 mb-3'>Valor calculado agora, com a distância e o tempo reais desta corrida.</p>
+
+                    <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
+                        <div className='space-y-2 text-sm'>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Distância percorrida</span>
+                                <span className='font-semibold text-ink-900'>{(Math.max(0, Number(previewFare.actualDistance) || 0) / 1000).toFixed(1)} km</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Tempo da corrida</span>
+                                <span className='font-semibold text-ink-900'>{Math.round(Math.max(0, Number(previewFare.elapsedSeconds) || 0) / 60)} min</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Tarifa base</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.baseFare || 0)}</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Distância</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.distanceFare || 0)}</span>
+                            </div>
+                            <div className='flex justify-between gap-3'>
+                                <span className='text-ink-600'>Minutos</span>
+                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.timeFare || 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
+                        <p className='text-ink-600 text-sm mb-1'>Valor total da corrida</p>
+                        <p className='text-brand-600 text-3xl font-black'>{formatBRL(previewFare.amount)}</p>
+                    </div>
+
+                    <p className='text-xs text-ink-500 text-center mb-4'>Pode variar centavos se o app captar mais deslocamento até você confirmar.</p>
+
+                    <div className='flex gap-2'>
+                        <Button
+                            variant="ghost"
+                            fullWidth={false}
+                            className="flex-1 !min-h-[44px] !text-sm"
+                            onClick={() => setPreviewFare(null)}
+                            disabled={endRideMutation.isPending}
+                        >
+                            Voltar
+                        </Button>
+                        <Button
+                            fullWidth={false}
+                            className="flex-1 !min-h-[44px] !text-sm"
+                            onClick={endRide}
+                            loading={endRideMutation.isPending}
+                        >
+                            Confirmar e finalizar
+                        </Button>
+                    </div>
+                </>
+            ) : (
                 <>
                     <h3 className='text-base font-semibold mb-2.5 text-ink-900'>Finalizar corrida</h3>
                     {props.ride?.user ? (
@@ -261,8 +349,8 @@ const FinishRide = (props) => {
                     </div>
 
                     <Button
-                        onClick={endRide}
-                        loading={endRideMutation.isPending}
+                        onClick={handleFinalizeClick}
+                        loading={previewLoading || endRideMutation.isPending}
                         className="mt-3 !min-h-[44px] !text-sm"
                     >
                         Finalizar corrida

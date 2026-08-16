@@ -1748,6 +1748,32 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     // Adicionais já embutidos no finalPrice via Unified Pricing Engine (recálculo) ou
     // somados diretamente acima (sem recálculo).
 
+    // Plano de correção (Fase 3.2, 2026-08-16, COR-3001): até aqui finalPrice é o valor
+    // CHEIO recalculado da corrida real — o desconto de cupom (aplicado só na
+    // estimativa/criação) nunca era considerado na finalização, cobrando o valor cheio
+    // de quem tinha cupom válido. Decisão de produto: o desconto é RECALCULADO sobre o
+    // valor final real (não trava no valor absoluto da estimativa) — mesma regra do
+    // cupom (percentual/fixo/teto), reaplicada ao preço já recalculado.
+    let finalDiscountAmount = 0;
+    let promotionBudgetDelta = 0;
+    let promotionForFinalization = null;
+    const promotionModel = require('../models/promotion.model');
+    const promotionUsageModel = require('../models/promotionUsage.model');
+    if (ride.promotionApplied) {
+        promotionForFinalization = await promotionModel.findById(ride.promotionApplied);
+        if (promotionForFinalization) {
+            const promotionService = require('./promotion.service');
+            finalDiscountAmount = promotionService.evaluateDiscount(promotionForFinalization, finalPrice).discount;
+        } else {
+            // Promoção não existe mais (raro — normalmente só desativa via status,
+            // nunca apaga) — preserva o valor absoluto já prometido na estimativa em
+            // vez de descartar o desconto inteiro.
+            finalDiscountAmount = Math.min(ride.discountAmount || 0, finalPrice);
+        }
+        promotionBudgetDelta = finalDiscountAmount - (ride.discountAmount || 0);
+        finalPrice = Math.max(0, finalPrice - finalDiscountAmount);
+    }
+
     // Corrida final, payment pendente e liberação do busyLock formam uma unidade
     // atômica. Se qualquer escrita falhar, o Mongo desfaz todas e a corrida continua
     // `started` com finalizationState recuperável — nunca `finished` pela metade.
@@ -1761,6 +1787,7 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
                 {
                     actualTime: actualTimeSeconds,
                     finalPrice,
+                    ...(ride.promotionApplied ? { discountAmount: finalDiscountAmount } : {}),
                     paymentStatus: 'pending',
                     actualDistance,
                     finishedAt: new Date(),
@@ -1773,6 +1800,28 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
                 { session }
             );
             if (!updated) throw new Error('Ride not started');
+
+            // Corrige o orçamento/métricas da promoção pela diferença entre o desconto
+            // estimado (já registrado na criação, ver recordPromotionUsage) e o
+            // recalculado agora sobre o valor real — nunca duplica o registro de uso,
+            // só ajusta o valor dele.
+            if (ride.promotionApplied && promotionBudgetDelta !== 0) {
+                await promotionModel.findByIdAndUpdate(
+                    ride.promotionApplied,
+                    {
+                        $inc: {
+                            currentBudgetUsed: promotionBudgetDelta,
+                            'metrics.totalDiscountGiven': promotionBudgetDelta,
+                        },
+                    },
+                    { session }
+                );
+                await promotionUsageModel.findOneAndUpdate(
+                    { rideId },
+                    { $set: { discountAmount: finalDiscountAmount } },
+                    { session }
+                );
+            }
 
             const paymentSet = {
                 amount: finalPrice,

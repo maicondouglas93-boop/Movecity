@@ -6,6 +6,15 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const app = express();
+
+// Plano de correção (Fase 1.3, 2026-08-16): sem isto, req.ip é sempre o IP do proxy
+// do Render (um único hop reverso na frente do serviço web — documentado pela própria
+// Render para apps Node/Express), nunca o do cliente. O rate limiter por IP
+// (loginLimiter, rideStartPinLimiter etc.) e qualquer log de auditoria por IP ficavam
+// olhando pro mesmo endereço pra todo mundo. '1' confia só no primeiro hop — um valor
+// maior deixaria o cliente forjar X-Forwarded-For e escolher o próprio "IP".
+app.set('trust proxy', 1);
+
 const cookieParser = require('cookie-parser');
 const connectToDb = require('./db/db');
 const userRoutes = require('./routes/user.routes');

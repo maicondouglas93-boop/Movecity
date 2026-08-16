@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getAccessToken } from '@/shared/services/session';
+import { getAccessToken, saveSession } from '@/shared/services/session';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -53,18 +53,21 @@ const ChangePassword = () => {
     const onSubmit = async (data) => {
         setLoading(true);
         try {
-            await api.put(`${import.meta.env.VITE_BASE_URL}/users/password`, {
+            const response = await api.put(`${import.meta.env.VITE_BASE_URL}/users/password`, {
                 currentPassword: data.currentPassword,
                 newPassword: data.newPassword
             }, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` }
             });
+            // A troca revoga toda sessão (inclusive a atual) e o backend emite um par
+            // novo — sem salvar aqui, este mesmo dispositivo cairia na próxima renovação.
+            saveSession('user', { token: response.data?.token, refreshToken: response.data?.refreshToken });
             addToast('Senha alterada com sucesso!', 'success');
             addToast('Logout feito nos outros dispositivos.', 'info');
             reset();
             setTimeout(() => navigate('/profile'), 2000);
         } catch (error) {
-            addToast('Erro (API não encontrada)', 'error');
+            addToast(error.response?.data?.message || 'Não foi possível alterar a senha.', 'error');
         } finally {
             setLoading(false);
         }

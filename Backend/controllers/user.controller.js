@@ -155,6 +155,49 @@ module.exports.updateUserProfile = async (req, res) => {
     }
 };
 
+// Plano de correção (Fase 1.2, 2026-08-16): a tela de troca de senha já existia no
+// frontend (ChangePassword.jsx) chamando PUT /users/password, mas o endpoint nunca
+// existiu — 404 garantido pra qualquer passageiro que tentasse trocar a senha.
+module.exports.changeUserPassword = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ message: errors.array()[0]?.msg || 'Dados inválidos', errors: errors.array() });
+        }
+
+        const { currentPassword, newPassword } = req.body;
+
+        const user = await userModel.findById(req.user._id).select('+password');
+        if (!user) {
+            return res.status(404).json({ message: 'Usuário não encontrado' });
+        }
+
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Senha atual incorreta' });
+        }
+
+        user.password = await userModel.hashPassword(newPassword);
+        await user.save();
+
+        // Revoga toda sessão existente (a garantia real de "saiu dos outros
+        // dispositivos" é a família de refresh tokens morrer) e emite um par novo pro
+        // dispositivo que fez a troca — sem isso, quem acabou de trocar a própria
+        // senha também seria derrubado na próxima renovação de token.
+        await authService.revokeAllForUser({ userId: user._id, userType: 'user', reason: 'password_change' });
+
+        return await respondWithSession(res, {
+            userDoc: user,
+            userType: 'user',
+            ip: req.ip,
+            payload: { message: 'Senha alterada com sucesso' }
+        });
+    } catch (err) {
+        console.error('Error in changeUserPassword:', err);
+        return res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+};
+
 module.exports.logoutUser = async (req, res, next) => {
     try {
         const { maxAge, ...accessClearOptions } = COOKIE_OPTIONS();

@@ -62,13 +62,20 @@ test('Socket.IO usa o ator assinado, não descoberta por coleção ou userType l
 test('token de compartilhamento tem finalidade, audience e segredo próprios', () => {
     const auth = read('services/auth.service.js');
     const ride = read('controllers/ride.controller.js');
+    const rideShareAccess = read('utils/rideShareAccess.js');
 
     assert.match(auth, /signShareToken/);
     assert.match(auth, /verifyShareToken/);
     assert.match(auth, /tokenType:\s*['"]share['"]/);
-    assert.match(ride, /signShareToken/);
-    assert.match(ride, /verifyShareToken/);
+    assert.match(auth, /shareTokenSecret/);
+    // O link de compartilhamento revogável (createRideShareAccess/verifyRideShareToken,
+    // com hash do identificador e revogação server-side) chama o mesmo segredo dedicado
+    // exportado por auth.service.js — nunca cai de volta no JWT_SECRET genérico.
+    assert.match(ride, /createRideShareAccess/);
+    assert.match(ride, /verifyRideShareToken/);
     assert.doesNotMatch(ride, /jwt\.(?:sign|verify)/);
+    assert.match(rideShareAccess, /shareTokenSecret/);
+    assert.doesNotMatch(rideShareAccess, /process\.env\.JWT_SECRET/);
 });
 
 test('models deixam de emitir JWT sem ator pelo segredo genérico', () => {

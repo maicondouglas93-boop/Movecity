@@ -130,7 +130,7 @@ const notificationSchema = new mongoose.Schema({
     // Campanha/admin que originou o envio (métricas entregue/lida)
     campaignId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'notificationCampaign',
+        ref: 'NotificationCampaign',
         default: null,
     },
 }, { timestamps: true });

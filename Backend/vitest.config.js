@@ -23,6 +23,7 @@ const jestLegacySuite = [
   'tests/unit/rideFinalization.p0.test.js',
   'tests/unit/rideFinalizationTransaction.p0.test.js',
   'tests/unit/rideTracking.p0.test.js',
+  'tests/unit/promotionFinalPrice.p0.test.js',
   'tests/integration/schedule.api.test.js',
   'tests/integration/chat.delivery.test.js',
   'tests/security/**',

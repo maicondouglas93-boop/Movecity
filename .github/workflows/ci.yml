@@ -38,6 +38,8 @@ jobs:
         run: npm run test:critical:cancellation-reconciliation
       - name: Integração transacional de cancelamento
         run: npm run test:integration:cancellation-reconciliation
+      - name: Contrato crítico de privacidade por ator
+        run: npm run test:critical:dto
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

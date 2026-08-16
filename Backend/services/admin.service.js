@@ -15,6 +15,7 @@ const uploadService = require('./upload.service');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
+const { toAdminRideDTO, toAdminParcelDTO } = require('../utils/actorDtos');
 const {
     VALID_VEHICLE_AUTHORIZATIONS,
     deriveLegacyAuthorization,
@@ -1028,7 +1029,7 @@ module.exports.getCaptainRecentRides = async (captainId) => {
         .populate('user', 'fullname email phone')
         .sort({ createdAt: -1 })
         .limit(20);
-    return rides;
+    return rides.map((ride) => toAdminRideDTO(ride));
 };
 
 module.exports.getCaptainWallet = async (captainId) => {
@@ -1138,7 +1139,7 @@ const PARCEL_STATUS_FILTER_MAP = {
 // conjunta. Campos que não existem num dos dois tipos ficam null/undefined, não
 // inventados.
 function normalizeRideForList(r) {
-    const obj = r.toObject ? r.toObject() : r;
+    const obj = toAdminRideDTO(r);
     return {
         _id: obj._id,
         serviceType: 'ride',
@@ -1171,7 +1172,7 @@ function normalizeRideForList(r) {
 }
 
 function normalizeParcelForList(p) {
-    const obj = p.toObject ? p.toObject() : p;
+    const obj = toAdminParcelDTO(p);
     return {
         _id: obj._id,
         serviceType: 'parcel',

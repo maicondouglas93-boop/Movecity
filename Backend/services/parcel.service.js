@@ -7,8 +7,13 @@ const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
-const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCache, setCache, deleteCache } = require('../cache/cache');
+const {
+    toParcelOfferDTO: buildParcelOfferDTO,
+    toParcelCaptainDTO: buildParcelCaptainDTO,
+    toParcelCaptainHistoryDTO,
+    toAdminParcelDTO,
+} = require('../utils/actorDtos');
 
 const ALLOWED_PAYMENT_METHODS = ['cash', 'pix'];
 
@@ -979,7 +984,7 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     const [total, parcels] = await Promise.all([
         parcelModel.countDocuments(historyQuery),
         parcelModel.find(historyQuery)
-            .populate('user', 'fullname phone email')
+            .populate('user', 'fullname profilePicture rating')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(safeLimit)
@@ -989,7 +994,7 @@ module.exports.getCaptainParcelHistory = async ({ captain, page = 1, limit = 20 
     return {
         activeParcel: activeParcel ? await module.exports.toParcelCaptainDTO(activeParcel) : null,
         pendingOffers,
-        parcels: await Promise.all((parcels || []).map((p) => module.exports.toParcelCaptainDTO(p))),
+        parcels: (parcels || []).map((parcel) => toParcelCaptainHistoryDTO(parcel)),
         page: safePage,
         limit: safeLimit,
         total,
@@ -1050,43 +1055,12 @@ module.exports.getPendingParcelsForCaptain = async ({ captain }) => {
 module.exports.getSettings = getSettings;
 
 module.exports.toParcelOfferDTO = (parcel) => {
-    const raw = typeof parcel.toObject === 'function' ? parcel.toObject() : { ...parcel };
-    const { computeDriverAmount } = require('../utils/financePrivacy');
-    const driverAmount = computeDriverAmount(raw);
-    return {
-        _id: raw._id,
-        vehicleType: raw.vehicleType,
-        pickup: raw.pickup,
-        destination: raw.destination,
-        pickupCoordinates: raw.pickupCoordinates,
-        destinationCoordinates: raw.destinationCoordinates,
-        itemName: raw.itemName,
-        category: raw.category,
-        weightKg: raw.weightKg,
-        size: raw.size,
-        description: raw.description,
-        notes: raw.notes,
-        // Oferta: valor que o passageiro paga + líquido (sem comissão/%).
-        fare: raw.fare,
-        driverAmount,
-        estimatedDistance: raw.estimatedDistance,
-        estimatedTime: raw.estimatedTime,
-        status: raw.status,
-        createdAt: raw.createdAt,
-        paymentMethod: raw.paymentMethod,
-        // Auditoria PWA (2026-08-07, P1): só enquanto ainda é uma oferta em aberto —
-        // espelha toCaptainRideResponse (ride.controller.js).
-        ...(raw.status === 'awaiting_provider' ? { offerExpiresAt: computeOfferExpiresAt(raw) } : {}),
-        // Sem telefones / nomes completos na oferta pré-aceite.
-    };
+    return buildParcelOfferDTO(parcel);
 };
 
 module.exports.toParcelCaptainDTO = async (parcel) => {
-    const { sanitizeCaptainFinance } = require('../utils/financePrivacy');
-    const raw = sanitizeCaptainFinance(parcel);
-    delete raw.deliveryPin;
-    raw.requireDeliveryPin = await getRequireDeliveryPin(parcel.vehicleType || 'moto');
-    return raw;
+    const requireDeliveryPin = await getRequireDeliveryPin(parcel.vehicleType || 'moto');
+    return buildParcelCaptainDTO(parcel, { requireDeliveryPin });
 };
 
 function mergeVehiclePricing(current, patch) {
@@ -1204,7 +1178,7 @@ module.exports.listParcelsAdmin = async ({ status, limit = 50, skip = 0 } = {}) 
             .sort({ createdAt: -1 }).skip(skip).limit(limit),
         parcelModel.countDocuments(filter),
     ]);
-    return { items, total };
+    return { items: items.map((parcel) => toAdminParcelDTO(parcel)), total };
 };
 
 module.exports.adminCancelParcel = async ({ parcelId, reason, admin }) => {

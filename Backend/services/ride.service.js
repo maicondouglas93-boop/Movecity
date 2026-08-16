@@ -1995,7 +1995,7 @@ module.exports.getCaptainRideHistory = async ({ captain, page = 1, limit = 20 })
     const [ total, rides ] = await Promise.all([
         rideModel.countDocuments(historyQuery),
         rideModel.find(historyQuery)
-            .populate('user', 'fullname phone email')
+            .populate('user', 'fullname profilePicture rating')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(safeLimit),

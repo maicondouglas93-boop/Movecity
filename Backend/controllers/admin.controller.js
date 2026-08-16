@@ -967,7 +967,7 @@ module.exports.createManualRide = async (req, res, next) => {
             }
         }
 
-        const { ride } = await rideService.createRide({
+        const { ride, replayed } = await rideService.createRide({
             user: user?._id,
             pickup: pickup.address.trim(),
             destination: destination.address.trim(),
@@ -987,6 +987,16 @@ module.exports.createManualRide = async (req, res, next) => {
             pickupCoordinates: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
             destinationCoordinates: { lat: Number(destination.lat), lng: Number(destination.lng) },
         });
+
+        // Duas instâncias podem ultrapassar o preflight ao mesmo tempo. O serviço
+        // resolve a corrida pela chave; a perdedora devolve o mesmo documento sem
+        // repetir despacho, log administrativo ou qualquer efeito financeiro.
+        if (replayed) {
+            if (manualRideCancellationWasDispatchFailure(ride)) {
+                return res.status(409).json({ message: 'O motorista selecionado ficou indisponível. Escolha outro motorista ou use a distribuição automática.' });
+            }
+            return res.status(200).json(manualRideResponse(ride, { reused: true }));
+        }
 
         // Marca o começo da janela exibida no painel e nos apps dos motoristas.
         // No relançamento este mesmo campo recebe um novo horário, sem criar outra corrida.
@@ -1055,6 +1065,9 @@ module.exports.createManualRide = async (req, res, next) => {
         }
         if (error?.code === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Esse passageiro já possui uma encomenda em andamento.' });
+        }
+        if (error?.code === 'USER_HAS_ACTIVE_RIDE') {
+            return res.status(409).json({ message: 'Esse passageiro já possui uma corrida em andamento.' });
         }
         if (error?.code === 'VEHICLE_CATEGORY_NOT_ALLOWED_FOR_SERVICE') {
             return res.status(400).json({ message: 'A categoria selecionada não está habilitada para corridas.' });

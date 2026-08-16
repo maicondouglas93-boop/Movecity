@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const rideModel = require('../models/ride.model');
 const userModel = require('../models/user.model');
 const paymentModel = require('../models/payment.model');
+const userWalletTransactionModel = require('../models/userWalletTransaction.model');
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
@@ -11,6 +12,10 @@ const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
 const { getCachedTariffSetting } = require('./tariffSettingCache.service');
 const { processRideTrackingPoint } = require('./rideTracking.service');
+const {
+    PASSENGER_ACTIVE_RIDE_STATUSES,
+    RIDE_CREATION_INDEXES,
+} = require('../config/rideCreationPolicy');
 
 // Máquina de estados da corrida (P2.1 da auditoria de concorrência, 2026-08-02) — toda
 // transição de status passa por `transitionRide`, que faz um único `findOneAndUpdate`
@@ -233,6 +238,44 @@ function getOtp(num) {
     return generateOtp(num);
 }
 
+function normalizeIdempotencyKey(idempotencyKey) {
+    const normalized = String(idempotencyKey || '').trim().toLowerCase();
+    return normalized || null;
+}
+
+async function findRideByIdempotencyKey({ user, source, createdBy, idempotencyKey, session }) {
+    if (!idempotencyKey) return null;
+
+    const filter = source === 'admin'
+        ? { source: 'admin', createdBy, idempotencyKey }
+        : { source: 'passenger_requested', user, idempotencyKey };
+    let query = rideModel.findOne(filter).select('+otp');
+    if (session) query = query.session(session);
+    return query;
+}
+
+function duplicateKeyMatches(err, indexName) {
+    return err?.code === 11000 && (
+        err?.index === indexName
+        || err?.constraint === indexName
+        || String(err?.message || '').includes(indexName)
+    );
+}
+
+async function activePassengerRideError(user) {
+    if (!user) return null;
+    const activeRide = await rideModel.findOne({
+        user,
+        status: { $in: PASSENGER_ACTIVE_RIDE_STATUSES },
+    }).select('_id status');
+    if (!activeRide) return null;
+
+    const err = new Error('USER_HAS_ACTIVE_RIDE');
+    err.code = 'USER_HAS_ACTIVE_RIDE';
+    err.activeRideId = activeRide._id;
+    return err;
+}
+
 module.exports.createRide = async ({
     user, pickup, destination, vehicleType, paymentMethod = 'cash', optionals = [], observation = '', useWalletBalance = false, requestFemaleDriver = false, promoCode = null, scheduledAt = null,
     source = 'passenger_requested', createdBy, createdByRole, adminPassenger, idempotencyKey,
@@ -240,6 +283,17 @@ module.exports.createRide = async ({
 }) => {
     if ((!user && source !== 'admin') || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
+    }
+
+    const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+    const priorRide = await findRideByIdempotencyKey({
+        user,
+        source,
+        createdBy,
+        idempotencyKey: normalizedIdempotencyKey,
+    });
+    if (priorRide) {
+        return { ride: priorRide, promoError: null, replayed: true };
     }
 
     let parsedSchedule = null;
@@ -372,25 +426,6 @@ module.exports.createRide = async ({
         }
     }
 
-    let walletAmountUsed = 0;
-
-    if (useWalletBalance) {
-        const userData = await userModel.findById(user);
-        if (userData && userData.walletBalance > 0) {
-            if (userData.walletBalance >= finalPrice) {
-                walletAmountUsed = finalPrice;
-                paymentMethod = 'carteira'; // Fully paid with wallet
-            } else {
-                walletAmountUsed = userData.walletBalance;
-            }
-            userData.walletBalance -= walletAmountUsed;
-            await userData.save();
-        }
-    }
-
-    // Amount to be paid via normal method
-    const paymentAmount = finalPrice - walletAmountUsed;
-
     // Agendadas: coords cedo para upcoming por raio (SCH-C3 / Fase 2.4). Imediatas: despacho grava.
     let pickupCoordinates = suppliedPickupCoordinates;
     let destinationCoordinates = suppliedDestinationCoordinates;
@@ -409,70 +444,171 @@ module.exports.createRide = async ({
         }
     }
 
-    const ride = await rideModel.create({
-        user,
-        pickup,
-        destination,
-        otp: getOtp(6),
-        fare: pricing.finalFare,
-        finalPrice: finalPrice,
-        promotionApplied,
-        discountAmount,
-        walletAmountUsed,
-        walletAmountDebited: walletAmountUsed,
-        paymentMethod,
-        optionals: processedOptionals,
-        observation,
-        requestFemaleDriver,
-        vehicleType,
-        source,
-        createdBy,
-        createdByRole,
-        adminPassenger,
-        idempotencyKey,
-        destinationPending: false,
-        status: parsedSchedule ? 'scheduled' : 'requested',
-        scheduledAt: parsedSchedule,
-        promoCodeScheduled,
-        useWalletScheduled,
-        pickupCoordinates,
-        destinationCoordinates,
-        estimatedDistance: distance,
-        estimatedTime: time,
-        estimatedPriceMin: pricing.finalFare,
-        estimatedPriceMax: pricing.finalFare,
-        commissionPercent: pricing.commissionPercent ?? 0,
-        commissionAmount: pricing.commissionAmount,
-        fareBreakdown: pricing.fareBreakdown,
-        pricingSnapshot,
-        distance,
-        duration: time
-    });
+    const basePaymentMethod = paymentMethod;
+    const session = await mongoose.startSession();
+    let ride = null;
+    let replayed = false;
 
-    // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
-    if (!parsedSchedule) {
-        if (user && (paymentAmount > 0 || walletAmountUsed > 0)) {
-            await paymentModel.create({
-                rideId: ride._id,
-                userId: user,
-                amount: finalPrice,
-                method: paymentMethod,
-                status: paymentMethod === 'carteira' ? 'approved' : 'pending'
+    try {
+        await session.withTransaction(async () => {
+            // O callback pode ser repetido pelo driver em transient transaction errors.
+            ride = null;
+            replayed = false;
+            const existingRide = await findRideByIdempotencyKey({
+                user,
+                source,
+                createdBy,
+                idempotencyKey: normalizedIdempotencyKey,
+                session,
             });
+            if (existingRide) {
+                ride = existingRide;
+                replayed = true;
+                return;
+            }
+
+            let walletAmountUsed = 0;
+            let walletBalanceBefore = 0;
+            let resolvedPaymentMethod = basePaymentMethod;
+            if (useWalletBalance && user) {
+                const userData = await userModel.findById(user)
+                    .select('walletBalance')
+                    .session(session);
+                walletBalanceBefore = Number(userData?.walletBalance) || 0;
+                if (walletBalanceBefore > 0) {
+                    walletAmountUsed = Math.min(walletBalanceBefore, finalPrice);
+                    if (walletAmountUsed >= finalPrice) {
+                        resolvedPaymentMethod = 'carteira';
+                    }
+                }
+            }
+            const paymentAmount = finalPrice - walletAmountUsed;
+
+            // A corrida vem primeiro: se a restrição de corrida ativa/idempotência
+            // rejeitar a inserção, nenhum saldo chegou a ser alterado.
+            [ride] = await rideModel.create([{
+                user,
+                pickup,
+                destination,
+                otp: getOtp(6),
+                fare: pricing.finalFare,
+                finalPrice,
+                promotionApplied,
+                discountAmount,
+                walletAmountUsed,
+                walletAmountDebited: walletAmountUsed,
+                paymentMethod: resolvedPaymentMethod,
+                optionals: processedOptionals,
+                observation,
+                requestFemaleDriver,
+                vehicleType,
+                source,
+                createdBy,
+                createdByRole,
+                adminPassenger,
+                idempotencyKey: normalizedIdempotencyKey,
+                destinationPending: false,
+                status: parsedSchedule ? 'scheduled' : 'requested',
+                scheduledAt: parsedSchedule,
+                promoCodeScheduled,
+                useWalletScheduled,
+                pickupCoordinates,
+                destinationCoordinates,
+                estimatedDistance: distance,
+                estimatedTime: time,
+                estimatedPriceMin: pricing.finalFare,
+                estimatedPriceMax: pricing.finalFare,
+                commissionPercent: pricing.commissionPercent ?? 0,
+                commissionAmount: pricing.commissionAmount,
+                fareBreakdown: pricing.fareBreakdown,
+                pricingSnapshot,
+                distance,
+                duration: time,
+            }], { session });
+
+            if (walletAmountUsed > 0) {
+                const walletUpdate = await userModel.updateOne(
+                    { _id: user, walletBalance: walletBalanceBefore },
+                    { $inc: { walletBalance: -walletAmountUsed } },
+                    { session }
+                );
+                if (walletUpdate.modifiedCount !== 1) {
+                    const err = new Error('WALLET_BALANCE_CHANGED');
+                    err.code = 'WALLET_BALANCE_CHANGED';
+                    throw err;
+                }
+                await userWalletTransactionModel.create([{
+                    userId: user,
+                    rideId: ride._id,
+                    type: 'ride_debit',
+                    amount: walletAmountUsed,
+                    balanceBefore: walletBalanceBefore,
+                    balanceAfter: walletBalanceBefore - walletAmountUsed,
+                    idempotencyKey: normalizedIdempotencyKey,
+                }], { session });
+            }
+
+            // Agendada: sem payment/captura e sem consumir cupom no booking (Fase 4).
+            if (!parsedSchedule) {
+                if (user && (paymentAmount > 0 || walletAmountUsed > 0)) {
+                    await paymentModel.create([{
+                        rideId: ride._id,
+                        userId: user,
+                        amount: finalPrice,
+                        method: resolvedPaymentMethod,
+                        status: resolvedPaymentMethod === 'carteira' ? 'approved' : 'pending',
+                    }], { session });
+                }
+
+                if (promotionApplied) {
+                    const promotionService = require('./promotion.service');
+                    await promotionService.recordPromotionUsage({
+                        promotionId: promotionApplied,
+                        userId: user,
+                        rideId: ride._id,
+                        discountAmount,
+                        session,
+                    });
+                }
+            }
+        });
+    } catch (err) {
+        // Outra requisição com a mesma chave pode ter confirmado enquanto esta
+        // transação aguardava o índice. Nesse caso o resultado correto é replay.
+        const existingRide = await findRideByIdempotencyKey({
+            user,
+            source,
+            createdBy,
+            idempotencyKey: normalizedIdempotencyKey,
+        });
+        if (existingRide && (
+            err?.code === 11000
+            || duplicateKeyMatches(err, RIDE_CREATION_INDEXES.PASSENGER_IDEMPOTENCY)
+        )) {
+            return { ride: existingRide, promoError: null, replayed: true };
         }
 
-        if (promotionApplied) {
-            const promotionService = require('./promotion.service');
-            await promotionService.recordPromotionUsage({
-                promotionId: promotionApplied,
-                userId: user,
-                rideId: ride._id,
-                discountAmount
-            });
+        const activePassengerDuplicate = duplicateKeyMatches(
+            err,
+            RIDE_CREATION_INDEXES.ACTIVE_PASSENGER
+        ) || (
+            err?.code === 11000
+            && err?.keyPattern?.user === 1
+            && !err?.keyPattern?.idempotencyKey
+        );
+        if (activePassengerDuplicate) {
+            const conflict = await activePassengerRideError(user);
+            if (conflict) throw conflict;
         }
+        throw err;
+    } finally {
+        await session.endSession();
     }
 
-    return { ride, promoError };
+    // Não deixar o documento carregar uma sessão já encerrada: controladores ADM
+    // ainda podem enriquecer e salvar a corrida após o retorno deste serviço.
+    ride?.$session?.(null);
+    return { ride, promoError, replayed };
 }
 
 /**

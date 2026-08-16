@@ -27,7 +27,10 @@
     "test:movecity:scheduled-ride": "jest tests/e2e-simulator/ride.scheduled.test.js --forceExit",
     "test:movecity:scheduled-delivery": "jest tests/e2e-simulator/parcel.scheduled.test.js --forceExit",
     "test:critical:cancellation-reconciliation": "node tests/critical/cancellation-reconciliation-contract.node.js",
-    "test:integration:cancellation-reconciliation": "jest tests/integration/cancellation.reconciliation.test.js --runInBand --forceExit"
+    "test:integration:cancellation-reconciliation": "jest tests/integration/cancellation.reconciliation.test.js --runInBand --forceExit",
+    "test:critical:atomic-ride-creation": "node --test tests/critical/atomic-ride-creation-contract.node.js",
+    "test:integration:atomic-ride-creation": "jest tests/integration/ride.creation.atomic.test.js --runInBand --forceExit",
+    "audit:ride-creation-indexes": "node scripts/audit-ride-creation-duplicates.js"
   },
   "keywords": [],
   "author": "",

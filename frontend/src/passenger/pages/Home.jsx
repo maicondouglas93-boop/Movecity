@@ -34,6 +34,7 @@ import { showBrowserNotification } from '@/shared/services/browserNotify';
 import { formatCurrencyBRL } from '@/shared/utils/formatters';
 import { isNativePlatform } from '@/shared/platform/platform';
 import { registerPush } from '@/shared/platform/notification.service';
+import { newIdempotencyKey } from '@/shared/utils/idempotency';
 
 const Home = () => {
     const [ pickup, setPickup ] = useState('')
@@ -94,6 +95,7 @@ const Home = () => {
     // Cancela a busca anterior pra resposta antiga não sobrescrever a mais recente.
     const suggestionsAbortRef = useRef(null)
     const hasFetchedInitialLocationRef = useRef(false)
+    const rideCreationKeyRef = useRef(null)
     const location = useLocation()
 
     // Fase 3 da auditoria de production readiness (M1, 2026-08-05): o debounce da
@@ -646,8 +648,7 @@ const Home = () => {
 
         devLog(`[AUDIT] Passageiro iniciando request para criar corrida. Pickup: ${pickupStr}, Dest: ${destStr}, Vehicle: ${vehicleType}`);
 
-        try {
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
+        const payload = {
                 pickup: pickupStr,
                 destination: destStr,
                 vehicleType,
@@ -657,11 +658,23 @@ const Home = () => {
                 observation,
                 requestFemaleDriver,
                 promoCode: promoCode.trim() || undefined
-            }, {
+        };
+        const requestFingerprint = JSON.stringify(payload);
+        if (rideCreationKeyRef.current?.fingerprint !== requestFingerprint) {
+            rideCreationKeyRef.current = {
+                fingerprint: requestFingerprint,
+                key: newIdempotencyKey(),
+            };
+        }
+
+        try {
+            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, payload, {
                 headers: {
-                    Authorization: `Bearer ${getAccessToken('user')}`
+                    Authorization: `Bearer ${getAccessToken('user')}`,
+                    'Idempotency-Key': rideCreationKeyRef.current.key,
                 }
             });
+            rideCreationKeyRef.current = null;
 
             const TRACE_ID = `Ride:${response.data._id}`;
             devLog(`[AUDIT][${TRACE_ID}] Request concluído com sucesso. ID retornado do Backend: ${response.data._id}`);
@@ -678,6 +691,11 @@ const Home = () => {
 
             setRide(response.data);
         } catch (err) {
+            // 4xx é uma resposta definitiva; falha de rede/5xx conserva a chave para
+            // que o botão Tentar novamente recupere a criação já confirmada no servidor.
+            if (err.response?.status && err.response.status < 500) {
+                rideCreationKeyRef.current = null;
+            }
             devError(`[AUDIT] Falha na criação da corrida pelo passageiro:`, err);
             // Antes disso, uma falha aqui deixava o passageiro preso na tela "Buscando
             // motorista" pra sempre — nenhuma corrida existia, e o botão de cancelar

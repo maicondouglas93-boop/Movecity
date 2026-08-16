@@ -40,6 +40,10 @@ jobs:
         run: npm run test:integration:cancellation-reconciliation
       - name: Contrato crítico de privacidade por ator
         run: npm run test:critical:dto
+      - name: Contrato crítico de criação atômica
+        run: npm run test:critical:atomic-ride-creation
+      - name: Concorrência e rollback da criação de corrida
+        run: npm run test:integration:atomic-ride-creation
       # Gate estável: Vitest unit (sem Jest legado / integração flaky).
       # Suíte Jest completa e e2e ficam fora do bloqueio até estabilizar.
       - name: Backend Vitest unit + coverage

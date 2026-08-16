@@ -124,13 +124,20 @@ module.exports.findApplicablePromotion = async ({ code, userId, vehicleType, pay
 
 // Registra o uso e credita o gasto de orçamento/métricas da promoção. Chamado na
 // criação da corrida (não na finalização) — ver decisão de escopo no plano do Bloco H.
-module.exports.recordPromotionUsage = async ({ promotionId, userId, rideId, discountAmount }) => {
-    await promotionUsageModel.create({ promotionId, userId, rideId, discountAmount });
+module.exports.recordPromotionUsage = async ({ promotionId, userId, rideId, discountAmount, session }) => {
+    if (session) {
+        await promotionUsageModel.create(
+            [{ promotionId, userId, rideId, discountAmount }],
+            { session }
+        );
+    } else {
+        await promotionUsageModel.create({ promotionId, userId, rideId, discountAmount });
+    }
     await promotionModel.findByIdAndUpdate(promotionId, {
         $inc: {
             currentBudgetUsed: discountAmount,
             'metrics.uses': 1,
             'metrics.totalDiscountGiven': discountAmount
         }
-    });
+    }, session ? { session } : undefined);
 };

@@ -52,6 +52,7 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
             const createRes = await sim.request(sim.app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000008')
                 .send({ pickup: 'Avenida Paulista, São Paulo', destination: 'Avenida Faria Lima, São Paulo', vehicleType: 'car', paymentMethod: 'pix' });
             const rideId = createRes.body._id;
 
@@ -127,6 +128,7 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
             const createRes = await sim.request(sim.app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000009')
                 .send({ pickup: 'Avenida Paulista, São Paulo', destination: 'Avenida Faria Lima, São Paulo', vehicleType: 'car', paymentMethod: 'pix' });
             const rideId = createRes.body._id;
 
@@ -170,6 +172,7 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
             const res = await sim.request(sim.app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000010')
                 .send({ pickup: 'Avenida Paulista, São Paulo', destination: 'Avenida Faria Lima, São Paulo', vehicleType: 'car', paymentMethod: 'card' });
 
             const rejected = res.statusCode === 400;
@@ -191,6 +194,7 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
             const createRes = await sim.request(sim.app)
                 .post('/rides/create')
                 .set('Authorization', `Bearer ${userToken}`)
+                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000011')
                 .send({ pickup: 'Avenida Paulista, São Paulo', destination: 'Avenida Faria Lima, São Paulo', vehicleType: 'car', paymentMethod: 'pix' });
             const rideId = createRes.body._id;
 

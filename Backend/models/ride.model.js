@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+    PASSENGER_ACTIVE_RIDE_STATUSES,
+    RIDE_CREATION_INDEXES,
+} = require('../config/rideCreationPolicy');
 
 const rideShareAccessSchema = new mongoose.Schema({
     // Somente o SHA-256 do identificador aleatório é persistido. Quem obtiver uma
@@ -412,6 +416,32 @@ rideSchema.index({ createdAt: -1 });
 rideSchema.index(
     { createdBy: 1, idempotencyKey: 1 },
     { unique: true, partialFilterExpression: { source: 'admin', idempotencyKey: { $type: 'string' } } }
+);
+// Uma conta pode ter vários agendamentos futuros, mas somente uma corrida em execução.
+// O índice vale também para corrida lançada pelo ADM em nome de usuário cadastrado.
+rideSchema.index(
+    { user: 1 },
+    {
+        name: RIDE_CREATION_INDEXES.ACTIVE_PASSENGER,
+        unique: true,
+        partialFilterExpression: {
+            user: { $type: 'objectId' },
+            status: { $in: PASSENGER_ACTIVE_RIDE_STATUSES },
+        },
+    }
+);
+// Retry do mesmo comando devolve a mesma corrida, inclusive depois que ela terminar.
+rideSchema.index(
+    { user: 1, idempotencyKey: 1 },
+    {
+        name: RIDE_CREATION_INDEXES.PASSENGER_IDEMPOTENCY,
+        unique: true,
+        partialFilterExpression: {
+            user: { $type: 'objectId' },
+            source: 'passenger_requested',
+            idempotencyKey: { $type: 'string' },
+        },
+    }
 );
 // SCH-M1 Fase 2: cron de ativação + listagens por janela.
 rideSchema.index({ status: 1, scheduledAt: 1 });

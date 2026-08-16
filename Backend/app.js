@@ -16,7 +16,6 @@ const app = express();
 app.set('trust proxy', 1);
 
 const cookieParser = require('cookie-parser');
-const connectToDb = require('./db/db');
 const userRoutes = require('./routes/user.routes');
 const captainRoutes = require('./routes/captain.routes');
 const mapsRoutes = require('./routes/maps.routes');
@@ -68,9 +67,12 @@ app.use(limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-if (process.env.NODE_ENV !== 'test') {
-    connectToDb();
-}
+// Plano de correção (Fase 2.3, 2026-08-16, Passo 3): conectar ao banco não é mais um
+// efeito colateral de importar este módulo (era fire-and-forget aqui, sem await, e
+// server.js já chamava server.listen() logo em seguida — o processo aceitava tráfego
+// HTTP antes do Mongo estar pronto). Quem decide QUANDO conectar agora é server.js,
+// o único consumidor real deste módulo fora de teste — ele espera a conexão terminar
+// antes de abrir a porta.
 
 app.use('/api/admin', adminRoutes);
 // Versão do APK motorista (público, somente leitura)

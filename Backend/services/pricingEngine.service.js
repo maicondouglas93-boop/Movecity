@@ -237,7 +237,14 @@ class PricingEngine {
                 if (nightConfig.type === 'fixed') {
                     nightCharge = nightConfig.value || 0;
                 } else {
-                    nightCharge = currentSubtotal * ((nightConfig.value || 0) / 100);
+                    // Plano de correção (Fase 3.3, 2026-08-16): 'multiplier' é o único
+                    // outro valor que o schema aceita (VehicleCategory.pricing.surcharges
+                    // .night.type, enum ['multiplier','fixed']) — value:1.2 significa
+                    // "multiplica o subtotal por 1,2" (+20%). Isto aqui tratava como
+                    // percentual (subtotal × 1,2/100 = +1,2%), cobrando ~19x menos que o
+                    // configurado em qualquer categoria usando o padrão do sistema.
+                    const multiplier = Number(nightConfig.value) || 1;
+                    nightCharge = currentSubtotal * Math.max(0, multiplier - 1);
                 }
             }
         }

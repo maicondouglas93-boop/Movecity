@@ -1,6 +1,7 @@
-const { getWallet, createTransaction } = require('../../services/wallet.service');
+const { getWallet, createTransaction, requestPayout } = require('../../services/wallet.service');
 const walletModel = require('../../models/wallet.model');
 const transactionModel = require('../../models/transaction.model');
+const payoutModel = require('../../models/payout.model');
 const captainModel = require('../../models/captain.model');
 const globalSettingModel = require('../../models/globalSetting.model');
 const mongoose = require('mongoose');
@@ -140,6 +141,62 @@ describe('Wallet Service', () => {
 
             const captain = await captainModel.findById(captainId);
             expect(captain.canReceiveRides).toBe(true);
+        });
+    });
+
+    // Plano de correção (Fase 3.1, 2026-08-16, COR-3005): requestPayout fazia
+    // check-then-create sem constraint no banco — duas requisições simultâneas do
+    // mesmo motorista podiam passar pelo pré-check antes de qualquer payout existir e
+    // gerar dois saques pro mesmo saldo. O índice único parcial em payout.model.js
+    // (captain_active_payout_unique) é a garantia real; este teste teria falhado antes
+    // dele existir.
+    describe('requestPayout — concorrência', () => {
+        beforeEach(async () => {
+            await captainModel.findByIdAndUpdate(captainId, {
+                pix: { key: 'motorista@pix.com' },
+            });
+            await walletModel.create({ captainId, pendingBalance: 200 });
+            await globalSettingModel.updateMany({}, { minimumPayout: 50 });
+        });
+
+        it('20 chamadas simultâneas resultam em exatamente 1 payout', async () => {
+            const attempts = await Promise.allSettled(
+                Array.from({ length: 20 }, () => requestPayout(captainId))
+            );
+
+            const succeeded = attempts.filter((a) => a.status === 'fulfilled');
+            const failed = attempts.filter((a) => a.status === 'rejected');
+
+            expect(succeeded).toHaveLength(1);
+            expect(failed).toHaveLength(19);
+            failed.forEach((f) => {
+                expect(f.reason.message).toBe('Você já tem uma solicitação de saque em andamento');
+            });
+
+            const count = await payoutModel.countDocuments({ captainId });
+            expect(count).toBe(1);
+        });
+
+        it('rejeita uma segunda solicitação depois que a primeira já existe', async () => {
+            await requestPayout(captainId);
+
+            await expect(requestPayout(captainId)).rejects.toThrow(
+                'Você já tem uma solicitação de saque em andamento'
+            );
+
+            const count = await payoutModel.countDocuments({ captainId });
+            expect(count).toBe(1);
+        });
+
+        it('permite nova solicitação depois que a anterior foi paga', async () => {
+            await requestPayout(captainId);
+            await payoutModel.updateOne({ captainId }, { status: 'paid' });
+            await walletModel.updateOne({ captainId }, { pendingBalance: 200 });
+
+            await expect(requestPayout(captainId)).resolves.toBeDefined();
+
+            const count = await payoutModel.countDocuments({ captainId });
+            expect(count).toBe(2);
         });
     });
 });

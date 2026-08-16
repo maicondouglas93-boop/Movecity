@@ -106,6 +106,22 @@ app.get('/api/health', (req, res) => {
 // /db-test removido (auditoria 2026-08-06): era público e vazava host/user da
 // connection string. Use GET /api/health (databaseState sem URI).
 
+// Plano de correção (Fase 2.1, 2026-08-16, Passo 1): /api/health é liveness (processo
+// vivo) — sempre 200, mesmo com o Mongo caído, de propósito, pra não derrubar um
+// healthcheck que só confere "o processo não travou". /api/ready é readiness de
+// verdade: só 200 quando o banco está conectado. Ainda NÃO é o que o Render usa pra
+// decidir tráfego (render.yaml continua apontando pra /api/health) — esse é só o
+// primeiro passo, adicionar o endpoint e provar em produção antes de trocar o que
+// está no ar decidindo isso.
+app.get('/api/ready', (req, res) => {
+    const ready = mongoose.connection.readyState === 1;
+    res.status(ready ? 200 : 503).json({
+        status: ready ? 'ready' : 'not_ready',
+        databaseState: ready ? 'connected' : 'disconnected',
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.use('/users', userRoutes);
 app.use('/captains', captainRoutes);
 app.use('/maps', mapsRoutes);

@@ -22,11 +22,6 @@ import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel as getPaymentStatusLabel } from '@/shared/utils/formatters'
 import { getTripProgressMessage } from '@/passenger/utils/tripProgress'
 import PassengerSafetyCenter from '@/passenger/components/PassengerSafetyCenter'
-import {
-    calculateFareDifference,
-    describeLiveFareFreshness,
-    normalizeLiveFare,
-} from '@/passenger/utils/liveFarePresentation'
 
 const shortAddress = (address) => {
     if (!address || typeof address !== 'string') return '—'
@@ -95,66 +90,17 @@ const Riding = () => {
     const [ submittingReview, setSubmittingReview ] = useState(false)
     const [ alreadyReviewed, setAlreadyReviewed ] = useState(false)
     const [ tripProgress, setTripProgress ] = useState({ progress: 0, remainingKm: null, etaMinutes: null })
-    const [ liveFare, setLiveFare ] = useState(() => normalizeLiveFare(
-        location.state?.ride?.liveFare || userRide?.liveFare
-    ))
-    const [ fareClock, setFareClock ] = useState(Date.now())
-    const [ online, setOnline ] = useState(() => navigator.onLine)
     const [ captainLocation, setCaptainLocation ] = useState(null)
 
     const isFinished = ride?.status === 'finished'
-    const rideAmount = isFinished
-        ? (ride?.finalPrice ?? ride?.fare)
-        : (liveFare?.amount ?? ride?.finalPrice ?? ride?.fare)
-    const rideAmountLabel = isFinished
-        ? 'Valor final'
-        : (liveFare?.amount != null ? 'Valor atual' : 'Estimativa original')
+    // Auditoria de UX (2026-08-16): o valor "ao vivo" durante a corrida podia divergir
+    // do que o motorista via na tela dele (o dele só atualiza por GPS, sem relógio
+    // próprio), gerando dois números diferentes pro mesmo trajeto ao mesmo tempo.
+    // Passageiro só vê a estimativa original durante a corrida e o valor final quando
+    // ela termina — o único valor que realmente importa pra cobrança.
+    const rideAmount = isFinished ? (ride?.finalPrice ?? ride?.fare) : ride?.fare
+    const rideAmountLabel = isFinished ? 'Valor final' : 'Estimativa original'
     const paymentStatusLabel = getPaymentStatusLabel(ride?.paymentStatus, ride?.paymentMethod)
-    const fareDifference = calculateFareDifference(rideAmount, ride?.fare)
-    const fareFreshness = describeLiveFareFreshness({
-        updatedAt: liveFare?.calculatedAt,
-        now: fareClock,
-        online,
-    })
-
-    useEffect(() => {
-        const interval = setInterval(() => setFareClock(Date.now()), 1000)
-        const handleOnline = () => setOnline(true)
-        const handleOffline = () => setOnline(false)
-        window.addEventListener('online', handleOnline)
-        window.addEventListener('offline', handleOffline)
-        return () => {
-            clearInterval(interval)
-            window.removeEventListener('online', handleOnline)
-            window.removeEventListener('offline', handleOffline)
-        }
-    }, [])
-
-    useEffect(() => {
-        const next = normalizeLiveFare(ride?.liveFare)
-        if (next) setLiveFare(next)
-    }, [ride?.liveFare])
-
-    useEffect(() => {
-        if (ride?.status !== 'started') return undefined
-
-        let cancelled = false
-        const reconcile = async () => {
-            const restored = await syncUserRide()
-            if (cancelled) return
-            const snapshot = normalizeLiveFare(restored?.liveFare)
-            if (snapshot) setLiveFare(snapshot)
-        }
-
-        // Atualiza também com o carro parado: o preço pode variar pelo tempo mesmo sem
-        // um novo ponto de GPS. Reconexão/retorno do app continuam cobertos pelo contexto.
-        reconcile()
-        const interval = setInterval(reconcile, 20_000)
-        return () => {
-            cancelled = true
-            clearInterval(interval)
-        }
-    }, [ride?._id, ride?.status, syncUserRide])
 
     const finishAndGoHome = useCallback(() => {
         clearUserRide?.()
@@ -205,9 +151,6 @@ const Riding = () => {
         const handleLocationUpdate = (payload) => {
             if (payload?.rideId && ride?._id && String(payload.rideId) !== String(ride._id)) return
 
-            if (typeof payload?.liveFare?.amount === 'number') {
-                setLiveFare(normalizeLiveFare(payload.liveFare))
-            }
             if (payload?.ltd != null && payload?.lng != null) {
                 setCaptainLocation({ lat: payload.ltd, lng: payload.lng })
             }
@@ -415,24 +358,13 @@ const Riding = () => {
                 />
 
                 {!isFinished && (
-                    <div
-                        className='mt-3 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'
-                        aria-live='polite'
-                    >
+                    <div className='mt-3 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'>
                         <div className='min-w-0'>
-                            <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
-                            <p className={`text-[11px] truncate ${fareFreshness.stale ? 'text-amber-700' : 'text-ink-500'}`}>
-                                {fareFreshness.label}
-                            </p>
-                            <p className='text-[11px] text-ink-400 mt-0.5'>
-                                Estimativa inicial: {ride?.fare != null ? formatCurrencyBRL(ride.fare) : '—'}
-                                {fareDifference != null && Math.abs(fareDifference) >= 0.01
-                                    ? ` · ${fareDifference > 0 ? '+' : '-'}${formatCurrencyBRL(Math.abs(fareDifference))}`
-                                    : ''}
-                            </p>
+                            <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Estimativa da corrida</p>
+                            <p className='text-[11px] text-ink-500'>Valor final é calculado ao término da corrida</p>
                         </div>
                         <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
-                            {rideAmount != null ? formatCurrencyBRL(rideAmount) : 'Calculando…'}
+                            {rideAmount != null ? formatCurrencyBRL(rideAmount) : '—'}
                         </p>
                     </div>
                 )}

@@ -44,7 +44,7 @@ const accountDeletionRequestSchema = new mongoose.Schema({
     },
     verifiedBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'adminUser',
+        ref: 'AdminUser',
         default: null,
     },
     failureReason: {

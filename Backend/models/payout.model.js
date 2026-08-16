@@ -27,7 +27,7 @@ const payoutSchema = new mongoose.Schema({
     },
     operatorId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'adminUser'
+        ref: 'AdminUser'
     },
     paidAt: {
         type: Date

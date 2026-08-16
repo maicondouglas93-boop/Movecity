@@ -24,7 +24,7 @@ const tariffScheduleSchema = new mongoose.Schema({
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'adminUser',
+        ref: 'AdminUser',
         description: "Administrador que agendou"
     },
     errorReason: {

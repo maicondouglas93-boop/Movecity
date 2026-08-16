@@ -6,6 +6,7 @@ const captainModel = require('../models/captain.model');
 const { getCachedGlobalSetting } = require('./globalSettingCache.service');
 const { sendMessageToSocketId } = require('../socket');
 const notificationService = require('./notification.service');
+const { ACTIVE_PAYOUT_STATUSES } = require('../config/payoutPolicy');
 
 const getWallet = async (captainId) => {
     let wallet = await walletModel.findOne({ captainId });
@@ -214,29 +215,43 @@ const requestPayout = async (captainId) => {
         throw new Error(`Saldo insuficiente para saque. O valor mínimo é R$ ${minimumPayout.toFixed(2)} (seu saldo pendente: R$ ${wallet.pendingBalance.toFixed(2)})`);
     }
 
+    // Auditoria pós-plano (2026-08-16, COR-3005): este findOne é só um atalho pra
+    // devolver o erro rápido no caminho comum — a garantia de verdade é o índice
+    // único parcial em payout.model.js (captain_active_payout_unique). Sem ele, duas
+    // requisições simultâneas passavam pelas duas linhas acima antes de qualquer
+    // create existir e geravam dois payouts pro mesmo saldo pendente.
     const existingPending = await payoutModel.findOne({
         captainId,
-        status: { $in: ['requested', 'in_analysis', 'approved', 'processing'] }
+        status: { $in: ACTIVE_PAYOUT_STATUSES }
     });
     if (existingPending) {
         throw new Error('Você já tem uma solicitação de saque em andamento');
     }
 
-    const payout = await payoutModel.create({
-        captainId,
-        amount: wallet.pendingBalance,
-        status: 'requested',
-        bankDetailsSnapshot: {
-            pixKey: captain.pix.key,
-            bankName: captain.bankDetails?.bankName,
-            bankAgency: captain.bankDetails?.bankAgency,
-            bankAccount: captain.bankDetails?.bankAccount,
-            accountType: captain.bankDetails?.accountType
-        },
-        gateway: 'manual'
-    });
+    try {
+        const payout = await payoutModel.create({
+            captainId,
+            amount: wallet.pendingBalance,
+            status: 'requested',
+            bankDetailsSnapshot: {
+                pixKey: captain.pix.key,
+                bankName: captain.bankDetails?.bankName,
+                bankAgency: captain.bankDetails?.bankAgency,
+                bankAccount: captain.bankDetails?.bankAccount,
+                accountType: captain.bankDetails?.accountType
+            },
+            gateway: 'manual'
+        });
 
-    return payout;
+        return payout;
+    } catch (err) {
+        // E11000 do índice único parcial: a requisição concorrente venceu a corrida
+        // entre o findOne acima e este create. Mesma mensagem amigável do pré-check.
+        if (err.code === 11000) {
+            throw new Error('Você já tem uma solicitação de saque em andamento');
+        }
+        throw err;
+    }
 };
 
 module.exports = { getWallet, createTransaction, getTransactions, requestPayout };

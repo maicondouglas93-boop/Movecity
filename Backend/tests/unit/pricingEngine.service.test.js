@@ -395,4 +395,75 @@ describe('Pricing Engine', () => {
         expect(priced.finalFare).toBe(27);
         expect(priced.fareBreakdown.surcharges.globalTariffs).toBe(2);
     });
+
+    // Plano de correção (Fase 3.3, 2026-08-16): type:'multiplier' (o único valor além de
+    // 'fixed' que o schema aceita) era tratado como percentual — value:1.2 virava +1,2%
+    // em vez de +20%. Categorias usando o padrão do sistema (value:1.2) cobravam ~19x
+    // menos que o configurado em corrida noturna.
+    describe('adicional noturno', () => {
+        const nightHour = (h) => {
+            const d = new Date();
+            d.setHours(h, 0, 0, 0);
+            return d;
+        };
+
+        it('multiplicador 1.2 soma 20% ao subtotal, não 1,2%', async () => {
+            await VehicleCategory.updateOne(
+                { name: 'car' },
+                { $set: { 'pricing.surcharges.night': { active: true, startTime: '22:00', endTime: '06:00', type: 'multiplier', value: 1.2 } } }
+            );
+            invalidateVehicleCategoryCache();
+
+            const result = await PricingEngine.calculateFare({
+                distance: 5000,
+                time: 600,
+                vehicleType: 'car',
+                paymentMethod: 'cash',
+                requestDate: nightHour(23),
+            });
+
+            // Subtotal base = 25 (mesma conta de "calcula tarifa base corretamente").
+            // +20% = +5, não +0.30 (o que o bug antigo produzia).
+            expect(result.fareBreakdown.surcharges.night).toBe(5);
+            expect(result.finalFare).toBe(30);
+        });
+
+        it('fora do horário noturno não cobra adicional', async () => {
+            await VehicleCategory.updateOne(
+                { name: 'car' },
+                { $set: { 'pricing.surcharges.night': { active: true, startTime: '22:00', endTime: '06:00', type: 'multiplier', value: 1.2 } } }
+            );
+            invalidateVehicleCategoryCache();
+
+            const result = await PricingEngine.calculateFare({
+                distance: 5000,
+                time: 600,
+                vehicleType: 'car',
+                paymentMethod: 'cash',
+                requestDate: nightHour(12),
+            });
+
+            expect(result.fareBreakdown.surcharges.night).toBe(0);
+            expect(result.finalFare).toBe(25);
+        });
+
+        it('type fixed continua somando o valor absoluto (comportamento inalterado)', async () => {
+            await VehicleCategory.updateOne(
+                { name: 'car' },
+                { $set: { 'pricing.surcharges.night': { active: true, startTime: '22:00', endTime: '06:00', type: 'fixed', value: 7 } } }
+            );
+            invalidateVehicleCategoryCache();
+
+            const result = await PricingEngine.calculateFare({
+                distance: 5000,
+                time: 600,
+                vehicleType: 'car',
+                paymentMethod: 'cash',
+                requestDate: nightHour(23),
+            });
+
+            expect(result.fareBreakdown.surcharges.night).toBe(7);
+            expect(result.finalFare).toBe(32);
+        });
+    });
 });

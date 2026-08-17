@@ -238,9 +238,12 @@ export default function RideDrawer({ ride, onClose, onAction }) {
               </div>
             )}
             <div className="flex justify-between text-sm">
-              <span className="text-text-muted">Comissão da plataforma</span>
-              <span className="font-medium text-primary">{ride.commissionAmount ? formatMoney(ride.commissionAmount) : '—'}</span>
+              <span className="text-text-muted">Comissão da MoveCity</span>
+              <span className="font-medium text-text">{ride.commissionAmount ? formatMoney(ride.commissionAmount) : '—'}</span>
             </div>
+            {ride.commissionAmount ? (
+              <p className="text-[11px] text-text-muted mt-1">Retida pela plataforma. Em dinheiro/Pix direto, sai dos créditos do motorista — não é o que ele recebeu do passageiro.</p>
+            ) : null}
           </Section>
 
           {/* ===== PAGAMENTO ===== */}

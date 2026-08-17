@@ -57,7 +57,7 @@ const RideRow = memo(function RideRow({ ride, isSelected, onToggleSelect, onOpen
         {Number.isFinite(ride.finalPrice) && ride.finalPrice !== ride.fare && (
           <p className="text-xs text-text-muted">Estimativa: {formatMoney(ride.fare)}</p>
         )}
-        <p className="text-xs text-text-muted">Comis: {ride.commissionAmount ? formatMoney(ride.commissionAmount) : '-'}</p>
+        <p className="text-xs text-text-muted">Comissão MoveCity: {ride.commissionAmount ? formatMoney(ride.commissionAmount) : '—'}</p>
       </td>
       <td className="px-4 py-4">
         <StatusBadge colorClass={itemStatusColor(ride)} label={itemStatusLabel(ride)} className="normal-case" />

@@ -163,8 +163,9 @@ describe('Ride Service — estimativa × valor final (endRide)', () => {
             paymentMethod: 'cash',
         });
 
+        // Comissão/repasse liquidam dentro do próprio endRide desde 2026-08-16 — não
+        // há mais um toque manual separado em confirmPaymentReceived pra dinheiro/pix.
         await rideService.endRide({ rideId: ride._id, captain });
-        await rideService.confirmPaymentReceived({ rideId: ride._id, captain });
 
         const paymentTx = await transactionModel.findOne({ rideId: ride._id, type: 'ride_payment' });
         const commissionTx = await transactionModel.findOne({ rideId: ride._id, type: 'commission' });
@@ -187,8 +188,8 @@ describe('Ride Service — estimativa × valor final (endRide)', () => {
             paymentMethod: 'cash',
         });
 
+        // Comissão/repasse liquidam dentro do próprio endRide desde 2026-08-16.
         await rideService.endRide({ rideId: ride._id, captain });
-        await rideService.confirmPaymentReceived({ rideId: ride._id, captain });
 
         const wallet = await walletModel.findOne({ captainId: captain._id });
 
@@ -246,8 +247,8 @@ describe('Ride Service — estimativa × valor final (endRide)', () => {
             walletAmountDebited: 10,
         });
 
+        // Comissão/repasse liquidam dentro do próprio endRide desde 2026-08-16.
         const finished = await rideService.endRide({ rideId: ride._id, captain });
-        await rideService.confirmPaymentReceived({ rideId: ride._id, captain });
 
         const wallet = await walletModel.findOne({ captainId: captain._id });
         const contribution = await transactionModel.findOne({ rideId: ride._id, type: 'wallet_contribution' });

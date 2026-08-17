@@ -1,4 +1,4 @@
-const { computeDriverAmount, toPlain } = require('./financePrivacy');
+const { computeDriverAmount, toPlain, toPassengerFareRates } = require('./financePrivacy');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
 
 function pickDefined(source, fields) {
@@ -155,6 +155,8 @@ function toRideCaptainDTO(ride, { includePresentialOtp = false } = {}) {
     const raw = plain(ride);
     const dto = rideBase(raw);
     dto.driverAmount = computeDriverAmount(raw);
+    const fareRates = toPassengerFareRates(raw.pricingSnapshot);
+    if (fareRates) dto.fareRates = fareRates;
     if (raw.user) dto.user = toUserIdentity(raw.user, { includePhone: true });
     if (!dto.user && raw.source === 'admin' && raw.adminPassenger?.name) {
         dto.user = {

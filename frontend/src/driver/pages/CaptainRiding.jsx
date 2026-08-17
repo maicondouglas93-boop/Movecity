@@ -12,7 +12,7 @@ import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { flushQueuedLocations } from '@/shared/services/offlineQueue'
+import { flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/shared/services/maps/navigationMath'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
@@ -174,7 +174,11 @@ const CaptainRiding = () => {
             // (2026-08-03): joinWithRetry renova o token e tenta de novo se o atual já
             // estiver vencido — ver docs/plans/2026-08-03-auditoria-regressao-push.md.
             joinWithRetry(socket, { userId: captain._id, userType: 'captain' }, () => {
-                flushQueuedLocations(socket).catch(e => console.error(e))
+                flushQueuedLocations(socket)
+                    .catch((e) => console.error(e))
+                    .finally(() => {
+                        replayOfflineActions({ socket }).catch((e) => console.error(e))
+                    })
             })
         }
 

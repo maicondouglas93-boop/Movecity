@@ -684,7 +684,6 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
 
     const now = new Date();
     // Mantém histórico delivered+finished; filtro atômico evita corrida com cancel.
-    // paymentStatus fica pending — liquidação da comissão é confirmParcelPayment.
     const updated = await parcelModel.findOneAndUpdate(
         { _id: parcelId, captain: captain._id, status: 'arrived_destination' },
         {
@@ -704,13 +703,26 @@ module.exports.confirmDelivery = async ({ parcelId, captain, pin }) => {
     if (!updated) throw new Error('INVALID_STATUS_FOR_DELIVERY');
 
     await dispatchService.releaseCaptainBusyLockIfIdle(captain._id);
-    return updated;
+
+    // Comissão/repasse liquidam assim que a entrega finaliza (2026-08-16, mesma
+    // decisão já aplicada às corridas) — não mais só depois de um toque separado
+    // do motorista em confirmParcelPayment. Encomenda só aceita cash/pix
+    // (ALLOWED_PAYMENT_METHODS), então não há caso de custódia de carteira nem de
+    // saldo insuficiente pra reconciliar, ao contrário das corridas. Sem estorno
+    // automático se o pagamento não se confirmar depois — correção nesse caso é
+    // manual pelo admin. Se a liquidação falhar, a entrega já finalizou mesmo assim
+    // (paymentStatus fica pending) e confirmParcelPayment segue disponível como
+    // fallback manual.
+    return module.exports.confirmParcelPayment({ parcelId, captain });
 };
 
 /**
  * Liquidação cash/pix da encomenda (espelha confirmPaymentReceived das corridas):
  * passageiro pagou o motorista fora do app; plataforma debita só a comissão na wallet.
  * Idempotente via claim atômico de paymentStatus + índice único em transaction.
+ * Chamada automaticamente por confirmDelivery desde 2026-08-16 — continua exportada
+ * e exposta via endpoint próprio como fallback manual (idempotente, então um toque
+ * extra do motorista depois da liquidação automática só é rejeitado, sem duplicar).
  */
 module.exports.confirmParcelPayment = async ({ parcelId, captain }) => {
     if (!parcelId) throw new Error('PARCEL_ID_REQUIRED');

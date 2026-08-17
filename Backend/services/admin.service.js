@@ -644,6 +644,21 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
         };
     });
 
+    // A lista do admin rotulava `captain.earnings` (faturamento bruto vitalício) como
+    // "Carteira". Isso não é crédito de comissão nem valor a receber. Anexa os dois
+    // campos reais da wallet na mesma página, sem N+1.
+    const walletDocs = captains.length
+        ? await walletModel.find({ captainId: { $in: captains.map((c) => c._id) } })
+            .select('captainId creditBalance pendingBalance')
+            .lean()
+        : [];
+    const walletByCaptain = new Map(walletDocs.map((w) => [String(w.captainId), w]));
+    captains.forEach((c) => {
+        const w = walletByCaptain.get(String(c._id));
+        c.creditBalance = w?.creditBalance || 0;
+        c.pendingBalance = w?.pendingBalance || 0;
+    });
+
     // Summary aggregation
     const totalCaptains = await captainModel.countDocuments();
     const online = await captainModel.countDocuments(availabilityBaseForFilter);
@@ -1707,7 +1722,7 @@ async function claimAndDebitPayout(payoutId, admin) {
 
             const wallet = await walletModel.findOne({ captainId: captain._id }).session(session);
             if (!wallet || wallet.pendingBalance < claimed.amount) {
-                throw new Error('Saldo insuficiente na carteira do motorista para este repasse');
+                throw new Error('A receber insuficiente para este repasse');
             }
 
             const result = await walletService.createTransaction({

@@ -119,6 +119,10 @@ describe('SIMULADOR E2E — Cenário 2: encomenda imediata', () => {
             step('POST /parcels/:id/confirm-delivery com PIN errado é rejeitado', wrongPinRejected, `status ${wrongPinRes.statusCode}`);
             if (!wrongPinRejected) problems.push({ severity: '🔴', description: `PIN errado não foi rejeitado: ${JSON.stringify(wrongPinRes.body)}` });
 
+            // Comissão/repasse liquidam na própria confirmDelivery desde 2026-08-16
+            // (mesma decisão já aplicada às corridas) — snapshot "before" vem antes.
+            const walletBefore = await readWalletSnapshot(captain._id);
+
             const deliverRes = await sim.request(sim.app)
                 .post(`/parcels/${parcelId}/confirm-delivery`)
                 .set('Authorization', `Bearer ${captainToken}`)
@@ -129,14 +133,19 @@ describe('SIMULADOR E2E — Cenário 2: encomenda imediata', () => {
             const jumpedToFinished = parcelAfterDelivery.status === 'finished';
             step("confirmDelivery transiciona atomicamente para 'finished'", jumpedToFinished, `status=${parcelAfterDelivery.status}`);
 
-            const walletBefore = await readWalletSnapshot(captain._id);
+            const walletAfter = await readWalletSnapshot(captain._id);
 
+            // Liquidação já aconteceu dentro de confirm-delivery acima — as duas
+            // chamadas manuais abaixo agora só existem como fallback e são
+            // corretamente rejeitadas (já confirmado), provando que não dá pra
+            // pagar a mesma encomenda duas vezes por esse caminho.
             const confirmPaymentRes = await sim.request(sim.app)
                 .post(`/parcels/${parcelId}/confirm-payment`)
                 .set('Authorization', `Bearer ${captainToken}`);
-            step('POST /parcels/:id/confirm-payment', confirmPaymentRes.statusCode === 200, `status ${confirmPaymentRes.statusCode}`);
+            const firstConfirmRejected = confirmPaymentRes.statusCode >= 400;
+            step('POST /parcels/:id/confirm-payment (rejeitado — liquidação já aconteceu no confirm-delivery)', firstConfirmRejected, `status ${confirmPaymentRes.statusCode}`);
+            if (!firstConfirmRejected) problems.push({ severity: '🔴', description: `confirm-payment deveria rejeitar (pagamento já liquidado), mas retornou ${confirmPaymentRes.statusCode}.` });
 
-            // Idempotência: confirmar pagamento 2x não pode duplicar transação/crédito.
             const confirmPaymentAgainRes = await sim.request(sim.app)
                 .post(`/parcels/${parcelId}/confirm-payment`)
                 .set('Authorization', `Bearer ${captainToken}`);
@@ -144,7 +153,6 @@ describe('SIMULADOR E2E — Cenário 2: encomenda imediata', () => {
             step('Confirmar pagamento 2x é rejeitado (idempotência real)', secondConfirmRejected, `status ${confirmPaymentAgainRes.statusCode}`);
             if (!secondConfirmRejected) problems.push({ severity: '🔴', description: 'confirm-payment permitiu confirmação duplicada.' });
 
-            const walletAfter = await readWalletSnapshot(captain._id);
             const finalParcel = await parcelModel.findById(parcelId);
             const captainAfter = await captainModel.findById(captain._id).select('earnings totalRides');
             const txs = await readTransactions({ captainId: captain._id, parcelId });

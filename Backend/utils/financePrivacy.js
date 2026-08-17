@@ -54,6 +54,33 @@ function sanitizeCaptainFinance(doc) {
     return raw;
 }
 
+/**
+ * Taxas que o passageiro paga, sem comissão. Serve para o app do motorista
+ * calcular um valor cobrável offline (zona rural) com o GPS guardado no celular.
+ */
+function toPassengerFareRates(snapshot) {
+    const pricing = snapshot?.category?.pricing;
+    if (!pricing || typeof pricing !== 'object') return undefined;
+
+    const wait = pricing.surcharges?.waiting || {};
+    const globals = Array.isArray(snapshot.globalTariffs) ? snapshot.globalTariffs : [];
+    const globalTariffsTotal = globals.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
+
+    return {
+        baseFare: Number(pricing.baseFare) || 0,
+        perKm: Number(pricing.perKm) || 0,
+        perMinute: Number(pricing.perMinute) || 0,
+        minimumFare: Number(pricing.minimumFare) || 0,
+        minDistanceIncludedKm: Number(pricing.minDistanceIncluded) || 0,
+        minTimeIncludedMin: Number(pricing.minTimeIncluded) || 0,
+        roundingRule: pricing.roundingRule || 'none',
+        waitingActive: wait.active !== false,
+        waitingFreeMinutes: Number(wait.freeMinutes) || 0,
+        waitingPerMinute: Number(wait.valuePerMinute) || 0,
+        globalTariffsTotal,
+    };
+}
+
 function sanitizeCaptainFinanceList(docs) {
     if (!Array.isArray(docs)) return docs;
     return docs.map((d) => sanitizeCaptainFinance(d));
@@ -158,5 +185,6 @@ module.exports = {
     sanitizeEarningsBreakdown,
     sanitizeCaptainWallet,
     sanitizeCaptainTransactions,
+    toPassengerFareRates,
     toPlain,
 };

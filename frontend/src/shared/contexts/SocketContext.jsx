@@ -51,6 +51,7 @@ const SocketProvider = ({ children }) => {
         const syncOfflineQueue = async () => {
             try {
                 await replayOfflineActions({
+                    socket,
                     onResolved: (action) => {
                         addToast(`Confirmado: ${actionLabel(action.type)}.`, 'success')
                     },

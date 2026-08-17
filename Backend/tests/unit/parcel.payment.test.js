@@ -25,9 +25,9 @@ const transactionModel = require('../../models/transaction.model');
 const { createCaptain } = require('../factories/captain.factory');
 const { createUser } = require('../factories/user.factory');
 
-async function seedParcelReadyForPayment({ paymentMethod = 'cash' } = {}) {
-    const user = await createUser({ email: `pay_user_${Date.now()}@test.com` });
-    const captain = await createCaptain({ email: `pay_cap_${Date.now()}@test.com` });
+async function createParcelUpToArrivedDestination({ paymentMethod = 'cash' } = {}) {
+    const user = await createUser({ email: `pay_user_${Date.now()}_${Math.random()}@test.com` });
+    const captain = await createCaptain({ email: `pay_cap_${Date.now()}_${Math.random()}@test.com` });
     await walletModel.create({ captainId: captain._id, creditBalance: 100 });
 
     const { parcel } = await parcelService.createParcel({
@@ -52,13 +52,36 @@ async function seedParcelReadyForPayment({ paymentMethod = 'cash' } = {}) {
         },
     });
 
+    return { user, captain, parcel };
+}
+
+// confirmDelivery liquida comissão/repasse automaticamente desde 2026-08-16 (mesma
+// decisão já aplicada às corridas) — este helper usa o fluxo real ponta a ponta.
+async function seedParcelReadyForPayment(options) {
+    const { user, captain, parcel } = await createParcelUpToArrivedDestination(options);
     const withPin = await parcelModel.findById(parcel._id).select('+deliveryPin');
     const finished = await parcelService.confirmDelivery({
         parcelId: parcel._id,
         captain,
         pin: withPin.deliveryPin,
     });
+    return { user, captain, parcel: finished };
+}
 
+// Constrói uma encomenda 'finished'/paymentStatus:'pending' SEM passar por
+// confirmDelivery (que agora liquida sozinho) — pra testar confirmParcelPayment em
+// isolamento (concorrência/idempotência), do mesmo jeito que o lado das corridas
+// testa confirmPaymentReceived isolado de endRide.
+async function seedParcelFinishedPendingPayment(options) {
+    const { user, captain, parcel } = await createParcelUpToArrivedDestination(options);
+    const finished = await parcelModel.findOneAndUpdate(
+        { _id: parcel._id, status: 'arrived_destination' },
+        {
+            $set: { status: 'finished', paymentStatus: 'pending' },
+            $push: { statusHistory: { status: 'finished', at: new Date(), by: 'system' } },
+        },
+        { new: true }
+    );
     return { user, captain, parcel: finished };
 }
 
@@ -119,14 +142,21 @@ describe('parcel payment (Decisão A)', () => {
         })).rejects.toMatchObject({ message: 'INVALID_PAYMENT_METHOD' });
     });
 
-    it('confirmDelivery deixa paymentStatus pending', async () => {
-        const { parcel } = await seedParcelReadyForPayment();
+    it('confirmDelivery liquida comissão/repasse automaticamente (paymentStatus vira paid)', async () => {
+        const { captain, parcel } = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
         expect(parcel.status).toBe('finished');
-        expect(parcel.paymentStatus).toBe('pending');
+        expect(parcel.paymentStatus).toBe('paid');
+
+        const wallet = await walletModel.findOne({ captainId: captain._id });
+        expect(wallet.totalEarned).toBe(parcel.fare);
+        expect(wallet.creditBalance).toBe(100 - parcel.commissionAmount);
+
+        const txs = await transactionModel.find({ parcelId: parcel._id }).sort({ type: 1 });
+        expect(txs.map((t) => t.type).sort()).toEqual(['commission', 'parcel_payment']);
     });
 
-    it('confirmParcelPayment debita comissão na wallet sem creditar o fare bruto', async () => {
-        const { captain, parcel } = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
+    it('confirmParcelPayment debita comissão na wallet sem creditar o fare bruto (fallback manual isolado de confirmDelivery)', async () => {
+        const { captain, parcel } = await seedParcelFinishedPendingPayment({ paymentMethod: 'cash' });
         const before = await walletModel.findOne({ captainId: captain._id });
 
         const paid = await parcelService.confirmParcelPayment({
@@ -145,8 +175,8 @@ describe('parcel payment (Decisão A)', () => {
         expect(txs.map((t) => t.type).sort()).toEqual(['commission', 'parcel_payment']);
     });
 
-    it('confirmParcelPayment é idempotente sob concorrência', async () => {
-        const { captain, parcel } = await seedParcelReadyForPayment({ paymentMethod: 'pix' });
+    it('confirmParcelPayment é idempotente sob concorrência (fallback manual isolado de confirmDelivery)', async () => {
+        const { captain, parcel } = await seedParcelFinishedPendingPayment({ paymentMethod: 'pix' });
 
         const results = await Promise.allSettled([
             parcelService.confirmParcelPayment({ parcelId: parcel._id, captain }),
@@ -165,20 +195,15 @@ describe('parcel payment (Decisão A)', () => {
     });
 
     // Regressão do E11000 { rideId:null, type:"commission" }: cada encomenda grava
-    // comissão sem rideId; o índice parcial só pode indexar ObjectId real.
+    // comissão sem rideId; o índice parcial só pode indexar ObjectId real. Desde
+    // 2026-08-16 a liquidação já acontece dentro de confirmDelivery, então basta
+    // liquidar duas encomendas em sequência (fluxo real) pra provar que não colidem.
     it('duas encomendas liquidadas não colidem no índice rideId+type', async () => {
         const first = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
         const second = await seedParcelReadyForPayment({ paymentMethod: 'cash' });
 
-        await expect(parcelService.confirmParcelPayment({
-            parcelId: first.parcel._id,
-            captain: first.captain,
-        })).resolves.toBeDefined();
-
-        await expect(parcelService.confirmParcelPayment({
-            parcelId: second.parcel._id,
-            captain: second.captain,
-        })).resolves.toBeDefined();
+        expect(first.parcel.paymentStatus).toBe('paid');
+        expect(second.parcel.paymentStatus).toBe('paid');
 
         const commissions = await transactionModel.find({ type: 'commission' });
         expect(commissions).toHaveLength(2);
@@ -188,8 +213,15 @@ describe('parcel payment (Decisão A)', () => {
         }
     });
 
-    it('getCurrentParcelForCaptain mantém unpaid finished até liquidar', async () => {
+    it('getCurrentParcelForCaptain já reflete paymentStatus paid logo após a entrega (fluxo normal)', async () => {
         const { captain, parcel } = await seedParcelReadyForPayment();
+        const current = await parcelService.getCurrentParcelForCaptain(captain._id);
+        expect(current._id.toString()).toBe(parcel._id.toString());
+        expect(current.paymentStatus).toBe('paid');
+    });
+
+    it('getCurrentParcelForCaptain mantém unpaid finished em prioridade se a liquidação automática não aconteceu', async () => {
+        const { captain, parcel } = await seedParcelFinishedPendingPayment();
         const current = await parcelService.getCurrentParcelForCaptain(captain._id);
         expect(current._id.toString()).toBe(parcel._id.toString());
         expect(current.paymentStatus).toBe('pending');

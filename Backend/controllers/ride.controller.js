@@ -573,7 +573,11 @@ module.exports.endRide = async (req, res) => {
         }
         if (ride.user?._id) {
             notificationService.sendRideFinished(ride.user._id, { rideId: ride._id.toString() }).catch(console.error);
-            if (ride.paymentStatus === 'paid') {
+            // Comissão/repasse agora liquidam pra qualquer método assim que a corrida
+            // finaliza (2026-08-16), não só carteira — mas esta notificação específica
+            // ("pagamento pela carteira foi conciliado") continua só fazendo sentido
+            // pra carteira; dinheiro/cartão o passageiro já sabe que pagou na hora.
+            if (ride.paymentStatus === 'paid' && ride.paymentMethod === 'carteira') {
                 notificationService.sendToUser(
                     ride.user._id,
                     'Pagamento confirmado',

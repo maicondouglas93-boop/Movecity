@@ -1496,15 +1496,18 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     }
 
     // Retry idempotente: se a resposta da primeira finalização se perdeu, devolve o
-    // documento já consolidado. Para carteira, também tenta completar uma liquidação
-    // que tenha ficado explicitamente marcada como recuperável.
+    // documento já consolidado. Também tenta completar uma liquidação que tenha
+    // ficado explicitamente marcada como recuperável — pra qualquer método de
+    // pagamento agora (2026-08-16: comissão/repasse liquidam na própria finalização,
+    // não mais num toque separado de "pagamento recebido"), não só carteira.
     if (ride.status === 'finished') {
-        if (
-            ride.finalizationState === 'retry_required'
-            && (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0)
-        ) {
-            const settlement = await reconcileWalletAtRideEnd(rideId);
-            if (ride.paymentMethod === 'carteira' && settlement.settled && ride.paymentStatus !== 'paid') {
+        if (ride.finalizationState === 'retry_required') {
+            let walletOk = true;
+            if (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0) {
+                const settlement = await reconcileWalletAtRideEnd(rideId);
+                walletOk = ride.paymentMethod !== 'carteira' || settlement.settled;
+            }
+            if (walletOk && ride.paymentStatus !== 'paid') {
                 await module.exports.confirmPaymentReceived({ rideId, captain, allowWalletAuto: true });
             }
         }
@@ -1663,7 +1666,23 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     const actualDistance = finishExtras.actualDistance ?? ride.actualDistance ?? 0;
     // Prefer startedAt (quando a corrida de fato começou); fallback createdAt.
     const timeBase = ride.startedAt || ride.createdAt;
-    let actualTimeSeconds = Math.round((Date.now() - new Date(timeBase).getTime()) / 1000);
+    const timeBaseMs = new Date(timeBase).getTime();
+    const now = Date.now();
+    // Prefere o instante real em que o motorista finalizou (enviado pelo cliente em
+    // finishLocation.timestamp) em vez de Date.now() no momento em que o SERVIDOR
+    // processa a requisição. Sem isso, uma finalização feita offline (sem sinal) e
+    // sincronizada só depois cobra do passageiro o tempo de sincronização como se a
+    // corrida ainda estivesse rodando. Sanidade: nunca aceita um instante futuro nem
+    // anterior ao início da corrida — relógio de cliente errado não pode alterar a
+    // duração cobrada.
+    let finishedAtMs = now;
+    if (finishLocation?.timestamp) {
+        const candidate = Number(finishLocation.timestamp);
+        if (Number.isFinite(candidate) && candidate <= now && candidate >= timeBaseMs) {
+            finishedAtMs = candidate;
+        }
+    }
+    let actualTimeSeconds = Math.round((finishedAtMs - timeBaseMs) / 1000);
     if (actualTimeSeconds < 60 && ride.estimatedTime) actualTimeSeconds = ride.estimatedTime;
 
     // Auditoria C2: presencial sem destino não pode fechar com distância 0 / preço 0.
@@ -1847,31 +1866,41 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
         await session.endSession();
     }
 
-    // Carteira é dinheiro já sob custódia da plataforma. Reconciliamos eventual
-    // diferença entre estimativa e preço final antes de liberar o repasse; o motorista
-    // nunca deve confirmar nem cobrar esse pagamento manualmente.
-    if (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0) {
-        try {
+    // Comissão e repasse liquidam assim que a corrida finaliza, pra qualquer método
+    // de pagamento (decisão de 2026-08-16: antes só carteira liquidava aqui, dinheiro/
+    // cartão/pix esperavam o motorista tocar em "pagamento recebido" separadamente).
+    // Sem estorno automático se o pagamento não se confirmar depois — correção nesse
+    // caso é manual pelo admin, igual qualquer disputa hoje.
+    //
+    // Carteira continua reconciliando, antes de liberar o repasse, a diferença entre
+    // a estimativa e o preço final no saldo do PASSAGEIRO (dinheiro já sob custódia
+    // da plataforma). Se o saldo não cobrir a diferença (settlement.settled === false),
+    // a liquidação do motorista fica pendente até isso ser resolvido por fora — o
+    // motorista nunca deve confirmar nem cobrar esse pagamento manualmente.
+    try {
+        let walletOk = true;
+        if (ride.paymentMethod === 'carteira' || (Number(ride.walletAmountUsed) || 0) > 0) {
             const settlement = await reconcileWalletAtRideEnd(rideId);
-            if (ride.paymentMethod === 'carteira' && settlement.settled) {
-                await module.exports.confirmPaymentReceived({
-                    rideId,
-                    captain,
-                    allowWalletAuto: true,
-                });
-            }
-        } catch (err) {
-            await rideModel.updateOne(
-                { _id: rideId, status: 'finished', paymentStatus: { $ne: 'paid' } },
-                {
-                    $set: {
-                        finalizationState: 'retry_required',
-                        finalizationError: err.message || 'WALLET_SETTLEMENT_FAILED',
-                    }
-                }
-            );
-            throw err;
+            walletOk = ride.paymentMethod !== 'carteira' || settlement.settled;
         }
+        if (walletOk) {
+            await module.exports.confirmPaymentReceived({
+                rideId,
+                captain,
+                allowWalletAuto: true,
+            });
+        }
+    } catch (err) {
+        await rideModel.updateOne(
+            { _id: rideId, status: 'finished', paymentStatus: { $ne: 'paid' } },
+            {
+                $set: {
+                    finalizationState: 'retry_required',
+                    finalizationError: err.message || 'PAYMENT_SETTLEMENT_FAILED',
+                }
+            }
+        );
+        throw err;
     }
 
     const updatedRide = await rideModel.findById(rideId).populate('user').populate('captain');

@@ -180,8 +180,11 @@ export default function Dashboard() {
             </div>
             <ComparativeTrend current={stats.revenue?.current?.gross} prev={stats.revenue?.prev?.gross} money />
             <div className="mt-4 pt-4 border-t border-border/50 space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-text-muted">Comissão da plataforma</span><span className="font-medium text-primary">{formatMoney(stats.revenue?.current?.commission)}</span></div>
-              <div className="flex justify-between"><span className="text-text-muted">Repassado a motoristas</span><span className="font-medium text-text">{formatMoney(stats.revenue?.current?.payout)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Comissão da plataforma</span><span className="font-medium text-text">{formatMoney(stats.revenue?.current?.commission)}</span></div>
+              <div className="flex justify-between" title="Tarifa menos comissão. Em dinheiro, o passageiro já pagou o motorista — a plataforma não fez Pix.">
+                <span className="text-text-muted">Ganho dos motoristas</span>
+                <span className="font-medium text-text">{formatMoney(stats.revenue?.current?.payout)}</span>
+              </div>
               <div className="flex justify-between"><span className="text-text-muted">Ticket médio (corrida)</span><span className="font-medium text-text">{formatMoney(stats.revenue?.current?.avgTicket)}</span></div>
             </div>
           </div>
@@ -252,8 +255,9 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-sm text-primary">{formatMoney(driver.earnings)}</p>
-                    <p className="text-xs text-text-muted mt-0.5">{driver.hoursOnline?.toFixed(1)}h online</p>
+                    <p className="font-bold text-sm text-text">{formatMoney(driver.earnings)}</p>
+                    <p className="text-xs text-text-muted mt-0.5">Ganho líquido no período</p>
+                    <p className="text-xs text-text-muted">{driver.hoursOnline?.toFixed(1)}h online</p>
                   </div>
                 </div>
               ))

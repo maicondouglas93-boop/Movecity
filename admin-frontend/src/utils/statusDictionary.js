@@ -123,6 +123,7 @@ export const TRANSACTION_TYPE_LABELS = {
   adjustment: 'Ajuste manual',
   ride_payment: 'Pagamento de corrida',
   parcel_payment: 'Pagamento de encomenda',
+  wallet_contribution: 'Carteira do passageiro',
 };
 
 // payout.model.js:15

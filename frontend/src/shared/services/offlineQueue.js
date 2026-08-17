@@ -46,7 +46,24 @@ function buildRequestConfig(action) {
         case 'update-ride-status':
             return { method: 'post', url: `${baseURL}/rides/update-status`, data: { rideId: payload.rideId, status: payload.status }, headers }
         case 'end-ride':
-            return { method: 'post', url: `${baseURL}/rides/end-ride`, data: { rideId: payload.rideId }, headers }
+            return {
+                method: 'post',
+                url: `${baseURL}/rides/end-ride`,
+                data: {
+                    rideId: payload.rideId,
+                    ...(payload.finishLat != null && payload.finishLng != null ? {
+                        finishLat: payload.finishLat,
+                        finishLng: payload.finishLng,
+                        finishAccuracy: payload.finishAccuracy ?? null,
+                        // Preserva o instante real em que o motorista tocou "Finalizar"
+                        // (capturado no enqueue, offline) — Date.now() aqui recalcularia o
+                        // horário só na hora de sincronizar, que é exatamente o atraso que
+                        // esse timestamp existe pra excluir da corrida.
+                        finishTimestamp: payload.finishTimestamp ?? Date.now(),
+                    } : {}),
+                },
+                headers,
+            }
         case 'confirm-payment':
             return { method: 'post', url: `${baseURL}/rides/confirm-payment`, data: { rideId: payload.rideId }, headers }
         case 'cancel-ride':
@@ -151,10 +168,25 @@ export async function flushQueuedLocations(socket, options = {}) {
 // corromperia a máquina de estados do lado do servidor). Para no primeiro erro
 // retentável (rede/5xx) pra não furar essa ordem; erros definitivos (409/4xx) são
 // removidos e o processamento segue pras ações seguintes.
-export async function replayOfflineActions({ onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater } = {}) {
+export async function replayOfflineActions({ socket, onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater } = {}) {
     const actions = await db.offlineActions.orderBy('timestamp').toArray()
 
     for (const action of actions) {
+        if (action.type === 'end-ride' && socket) {
+            try {
+                await flushQueuedLocations(socket, { rideId: action.rideId })
+            } catch (err) {
+                onRetryLater?.(action, err)
+                break
+            }
+            const leftover = (await db.driverLocations.orderBy('capturedAt').toArray())
+                .filter((point) => String(point.rideId || '') === String(action.rideId))
+            if (leftover.length > 0) {
+                onRetryLater?.(action, new Error('GPS da corrida ainda não sincronizou'))
+                break
+            }
+        }
+
         const config = buildRequestConfig(action)
         if (!config) {
             await moveToFailedAndRemove(action, 'Tipo de ação desconhecido (versão antiga da fila)')

@@ -140,17 +140,22 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
             const rideWithOtp = await rideModel.findById(rideId).select('+otp');
             await sim.request(sim.app).get('/rides/start-ride').set('Authorization', `Bearer ${rig.token}`).query({ rideId, otp: rideWithOtp.otp });
             await driveRoute({ socket: rig.socket, points: [{ ltd: pickupPoint.ltd + 0.01, lng: pickupPoint.lng }], delayMs: 0 });
+            // Desde 2026-08-16, comissão/repasse liquidam na própria finalização
+            // (end-ride) pra qualquer método de pagamento — não mais num toque
+            // separado de "pagamento recebido". Por isso as duas chamadas de
+            // confirm-payment abaixo são rejeitadas: a liquidação real já aconteceu
+            // no end-ride logo acima. O teste continua provando a mesma coisa
+            // (nenhuma duplicação de transação), só que pela via de idempotência do
+            // end-ride em vez da de confirm-payment.
             await sim.request(sim.app).post('/rides/end-ride').set('Authorization', `Bearer ${rig.token}`).send({ rideId });
             await sim.request(sim.app).post('/rides/pay').set('Authorization', `Bearer ${userToken}`).send({ rideId });
 
             const first = await sim.request(sim.app).post('/rides/confirm-payment').set('Authorization', `Bearer ${rig.token}`).send({ rideId });
             const second = await sim.request(sim.app).post('/rides/confirm-payment').set('Authorization', `Bearer ${rig.token}`).send({ rideId });
 
-            const firstOk = first.statusCode === 200;
-            const secondRejected = second.statusCode >= 400;
-            results.push({ label: 'confirm-payment de corrida 2x: 1ª OK, 2ª rejeitada', ok: firstOk && secondRejected, detail: `1ª=${first.statusCode} 2ª=${second.statusCode}` });
-            expect(firstOk).toBe(true);
-            expect(secondRejected).toBe(true);
+            const bothRejected = first.statusCode >= 400 && second.statusCode >= 400;
+            results.push({ label: 'confirm-payment de corrida 2x após liquidação automática: ambas rejeitadas', ok: bothRejected, detail: `1ª=${first.statusCode} 2ª=${second.statusCode}` });
+            expect(bothRejected).toBe(true);
 
             const transactionModel = require('../../models/transaction.model');
             const commissionTxs = await transactionModel.find({ rideId, type: 'commission' });

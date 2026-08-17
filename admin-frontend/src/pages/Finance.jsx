@@ -12,7 +12,8 @@ import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
 import { formatMoney, formatDateTime } from '../utils/format';
-import { PAYOUT_STATUS_LABELS, PAYOUT_STATUS_COLORS, TRANSACTION_TYPE_LABELS, statusLabel, statusColor } from '../utils/statusDictionary';
+import { PAYOUT_STATUS_LABELS, PAYOUT_STATUS_COLORS, statusLabel, statusColor } from '../utils/statusDictionary';
+import { describeCaptainLedgerTx, ledgerToneClass } from '../utils/captainLedgerDisplay';
 import StatusBadge from '../components/StatusBadge';
 
 // Auditoria de UX (2026-08-10): a tela misturava dinheiro da plataforma (comissão),
@@ -376,7 +377,7 @@ function PayoutDrawer({ payoutId, onClose }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payouts'] });
       queryClient.invalidateQueries({ queryKey: ['payout-details', payoutId] });
-      toast.success('Repasse aprovado — valor debitado da carteira do motorista, aguardando confirmação de pagamento.');
+      toast.success('Repasse aprovado — valor debitado do a receber do motorista, aguardando confirmação do Pix.');
     },
     onError: (err) => toast.error(err.response?.data?.message || err.message || 'Erro ao aprovar repasse')
   });
@@ -419,7 +420,7 @@ function PayoutDrawer({ payoutId, onClose }) {
   const captainFullName = `${captain?.fullname?.firstname || ''} ${captain?.fullname?.lastname || ''}`.trim();
 
   const handleApprove = async () => {
-    if (await confirm({ message: 'Aprovar este repasse? O valor será debitado agora da carteira do motorista — o pagamento em si (PIX) precisa ser confirmado manualmente depois, pois não há gateway integrado.', tone: 'danger', confirmLabel: 'Aprovar e debitar' })) {
+    if (await confirm({ message: 'Aprovar este repasse? O valor será debitado agora do a receber do motorista — o Pix em si precisa ser confirmado manualmente depois, pois não há gateway integrado.', tone: 'danger', confirmLabel: 'Aprovar e debitar' })) {
       approveMutation.mutate(payout._id);
     }
   };
@@ -467,7 +468,7 @@ function PayoutDrawer({ payoutId, onClose }) {
         )}
         {payout.status === 'processing' && (
           <div className="bg-surface border-b border-border p-4 space-y-3">
-            <p className="text-xs text-text-muted">Valor já debitado da carteira do motorista. Confirme aqui só depois de verificar no extrato bancário real que o PIX foi enviado.</p>
+            <p className="text-xs text-text-muted">Valor já saiu do a receber do motorista. Confirme aqui só depois de verificar no extrato bancário real que o Pix foi enviado.</p>
             <button onClick={handleConfirmPaid} disabled={confirmPaidMutation.isPending} className="w-full py-2 bg-primary text-background font-medium rounded hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 disabled:opacity-50">
               <CheckCircle className="w-5 h-5" /> {confirmPaidMutation.isPending ? 'Confirmando...' : 'Confirmar Pagamento Realizado'}
             </button>
@@ -493,16 +494,17 @@ function PayoutDrawer({ payoutId, onClose }) {
                 <Link
                   to={`/captains?search=${encodeURIComponent(captain.fullname?.firstname || captain.email || '')}`}
                   className="text-xs text-primary font-medium hover:underline"
-                  title="Abre /captains já filtrado por este motorista — o ajuste manual de saldo fica na ficha dele, aba Financeiro."
+                  title="Abre a ficha do motorista — o ajuste de créditos fica na aba Financeiro."
                 >
-                  Ajustar saldo deste motorista →
+                  Ajustar créditos deste motorista →
                 </Link>
               )}
             </div>
             <div className="p-4 grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-text-muted mb-1">Saldo Pendente na Carteira</p>
+                <p className="text-xs text-text-muted mb-1">A receber (repasse)</p>
                 <p className="text-lg font-bold">{formatMoney(wallet?.pendingBalance)}</p>
+                <p className="text-[11px] text-text-muted mt-1">O que a MoveCity deve a ele em corrida no cartão. Não são os créditos de comissão.</p>
               </div>
               <div>
                 <p className="text-xs text-text-muted mb-1">Valor Solicitado</p>
@@ -510,12 +512,12 @@ function PayoutDrawer({ payoutId, onClose }) {
               </div>
               {['requested', 'in_analysis', 'approved'].includes(payout.status) && (
                 <div className="col-span-2 pt-4 border-t border-border mt-2">
-                  <p className="text-xs text-text-muted mb-1">Saldo Restante Após o Débito</p>
+                  <p className="text-xs text-text-muted mb-1">A receber depois deste saque</p>
                   <p className={`text-lg font-bold ${((wallet?.pendingBalance || 0) - payout.amount) < 0 ? 'text-danger' : ''}`}>
                     {formatMoney((wallet?.pendingBalance || 0) - payout.amount)}
                   </p>
                   {((wallet?.pendingBalance || 0) - payout.amount) < 0 && (
-                    <p className="text-xs text-danger mt-1">Saldo insuficiente — a aprovação será recusada.</p>
+                    <p className="text-xs text-danger mt-1">A receber insuficiente — a aprovação será recusada.</p>
                   )}
                 </div>
               )}
@@ -608,27 +610,31 @@ function CaptainFinancialHistory({ captainId }) {
     <div className="pt-6 border-t border-border">
       <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-4">Histórico Financeiro (Extrato Real)</h3>
       <div className="space-y-2">
-        {transactions.map((tx) => (
+        {transactions.map((tx) => {
+          const view = describeCaptainLedgerTx(tx);
+          return (
           <div key={tx._id} className="p-3 bg-surface border border-border rounded-lg">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{TRANSACTION_TYPE_LABELS[tx.type] || tx.type}</p>
+                <p className="text-sm font-medium truncate">{view.label}</p>
                 <p className="text-xs text-text-muted truncate">{tx.description}</p>
+                {view.amountHint && <p className="text-xs text-text-muted truncate">{view.amountHint}</p>}
                 {tx.reason && <p className="text-xs text-text-muted italic truncate">Motivo: {tx.reason}</p>}
               </div>
               <div className="text-right shrink-0">
-                <p className={`text-sm font-bold ${tx.amount > 0 ? 'text-primary' : 'text-danger'}`}>
-                  {formatMoney(tx.amount, { showSign: true })}
+                <p className={`text-sm font-bold ${ledgerToneClass(view.tone)}`}>
+                  {formatMoney(view.signedAmount, { showSign: view.tone !== 'info' })}
                 </p>
                 <p className="text-[10px] text-text-muted mt-0.5">{formatDateTime(tx.createdAt)}</p>
               </div>
             </div>
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50 text-[11px] text-text-muted">
-              <span>Saldo: {formatMoney(tx.balanceBefore)} → {formatMoney(tx.balanceAfter)}</span>
+              <span>{view.balanceCaption}: {formatMoney(tx.balanceBefore)} → {formatMoney(tx.balanceAfter)}</span>
               {tx.adminId && <span>Responsável: {tx.adminId}</span>}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   )

@@ -116,19 +116,24 @@ describe('SIMULADOR E2E — Cenário 4: encomenda agendada', () => {
                 step(`PATCH /parcels/:id/status (${status})`, res.statusCode === 200, `status ${res.statusCode}`);
             }
 
+            // Comissão/repasse liquidam na própria confirmDelivery desde 2026-08-16 —
+            // snapshot "before" vem antes.
+            const walletBefore = await readWalletSnapshot(captain._id);
+
             const deliverRes = await sim.request(sim.app)
                 .post(`/parcels/${parcelId}/confirm-delivery`)
                 .set('Authorization', `Bearer ${captainToken}`)
                 .send({ pin: deliveryPin });
             step('POST /parcels/:id/confirm-delivery (PIN real)', deliverRes.statusCode === 200, `status ${deliverRes.statusCode}`);
 
-            const walletBefore = await readWalletSnapshot(captain._id);
+            const walletAfter = await readWalletSnapshot(captain._id);
+
+            // Liquidação já aconteceu no confirm-delivery acima — este toque manual
+            // agora só existe como fallback e é corretamente rejeitado (já confirmado).
             const confirmPaymentRes = await sim.request(sim.app)
                 .post(`/parcels/${parcelId}/confirm-payment`)
                 .set('Authorization', `Bearer ${captainToken}`);
-            step('POST /parcels/:id/confirm-payment', confirmPaymentRes.statusCode === 200, `status ${confirmPaymentRes.statusCode}`);
-
-            const walletAfter = await readWalletSnapshot(captain._id);
+            step('POST /parcels/:id/confirm-payment (rejeitado — liquidação já aconteceu no confirm-delivery)', confirmPaymentRes.statusCode >= 400, `status ${confirmPaymentRes.statusCode}`);
             const finalParcel = await parcelModel.findById(parcelId);
             const captainAfter = await captainModel.findById(captain._id).select('earnings');
             const txs = await readTransactions({ captainId: captain._id, parcelId });

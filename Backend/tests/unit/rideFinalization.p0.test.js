@@ -38,6 +38,7 @@ const transactionModel = require('../../models/transaction.model');
 const captainModel = require('../../models/captain.model');
 const { createCaptain } = require('../factories/captain.factory');
 const rideService = require('../../services/ride.service');
+const PricingEngine = require('../../services/pricingEngine.service');
 
 const LAJINHA = { lat: -19.5586, lng: -41.6803 };
 
@@ -73,32 +74,34 @@ describe('finalização financeira P0', () => {
     it('dupla finalização produz uma corrida e um único ledger financeiro', async () => {
         const { captain, ride } = await createFinancialRide();
 
+        // Comissão/repasse liquidam na própria finalização agora (2026-08-16), pra
+        // qualquer método de pagamento — não mais só depois de um toque separado do
+        // motorista em "pagamento recebido". A dupla finalização concorrente (duplo
+        // clique / retry de rede) continua produzindo um único ledger financeiro.
         const endResults = await Promise.allSettled([
             rideService.endRide({ rideId: ride._id, captain }),
             rideService.endRide({ rideId: ride._id, captain }),
         ]);
         expect(endResults.some(result => result.status === 'fulfilled')).toBe(true);
 
-        let storedRide = await rideModel.findById(ride._id);
+        const storedRide = await rideModel.findById(ride._id);
         expect(storedRide.status).toBe('finished');
         expect(storedRide.actualDistance).toBe(80000);
         expect(storedRide.finalPrice).toBe(250);
-        expect(storedRide.finalizationState).toBe('finished_pending_payment');
-        expect(await paymentModel.countDocuments({ rideId: ride._id })).toBe(1);
+        expect(storedRide.finalizationState).toBe('completed');
+        expect(storedRide.paymentStatus).toBe('paid');
+        expect(await paymentModel.countDocuments({ rideId: ride._id, status: 'approved' })).toBe(1);
+        expect(await transactionModel.countDocuments({ rideId: ride._id, type: 'ride_payment' })).toBe(1);
+        expect(await transactionModel.countDocuments({ rideId: ride._id, type: 'commission' })).toBe(1);
 
         const releasedCaptain = await captainModel.findById(captain._id);
         expect(releasedCaptain.busyLock).toBe(false);
 
-        const paymentResults = await Promise.allSettled([
-            rideService.confirmPaymentReceived({ rideId: ride._id, captain }),
-            rideService.confirmPaymentReceived({ rideId: ride._id, captain }),
-        ]);
-        expect(paymentResults.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-
-        storedRide = await rideModel.findById(ride._id);
-        expect(storedRide.paymentStatus).toBe('paid');
-        expect(storedRide.finalizationState).toBe('completed');
-        expect(await paymentModel.countDocuments({ rideId: ride._id, status: 'approved' })).toBe(1);
+        // O toque manual em "pagamento recebido" ainda existe como fallback, mas
+        // como a liquidação já aconteceu, ele agora é sempre rejeitado — prova que
+        // não dá pra pagar a mesma corrida duas vezes por esse caminho.
+        await expect(rideService.confirmPaymentReceived({ rideId: ride._id, captain }))
+            .rejects.toThrow('Payment already confirmed');
         expect(await transactionModel.countDocuments({ rideId: ride._id, type: 'ride_payment' })).toBe(1);
         expect(await transactionModel.countDocuments({ rideId: ride._id, type: 'commission' })).toBe(1);
     });
@@ -120,5 +123,41 @@ describe('finalização financeira P0', () => {
         expect(storedCaptain.busyLock).toBe(true);
         expect(await paymentModel.countDocuments({ rideId: ride._id })).toBe(0);
         expect(await transactionModel.countDocuments({ rideId: ride._id })).toBe(0);
+    });
+
+    it('usa o timestamp real de finishLocation pro tempo da corrida, não o Date.now() do servidor (finalização offline atrasada)', async () => {
+        const { captain, ride } = await createFinancialRide();
+        // ride.startedAt está 150min no passado (createFinancialRide). Simula uma
+        // finalização que na verdade aconteceu 10min depois do início, mas cuja
+        // requisição só chega no servidor bem mais tarde — mesmo efeito de uma ação
+        // enfileirada offline (sem sinal) que demora pra sincronizar.
+        const realFinishMs = new Date(ride.startedAt).getTime() + 10 * 60 * 1000;
+
+        await rideService.endRide({
+            rideId: ride._id,
+            captain,
+            finishLocation: { lat: LAJINHA.lat, lng: LAJINHA.lng, accuracy: 10, timestamp: realFinishMs },
+        });
+
+        expect(PricingEngine.calculateFare).toHaveBeenCalledWith(
+            expect.objectContaining({ time: 600 })
+        );
+    });
+
+    it('ignora finishLocation.timestamp implausível (no futuro) e cai de volta pro relógio do servidor', async () => {
+        const { captain, ride } = await createFinancialRide();
+        const futureMs = Date.now() + 60 * 60 * 1000;
+
+        await rideService.endRide({
+            rideId: ride._id,
+            captain,
+            finishLocation: { lat: LAJINHA.lat, lng: LAJINHA.lng, accuracy: 10, timestamp: futureMs },
+        });
+
+        const lastCall = PricingEngine.calculateFare.mock.calls.at(-1)[0];
+        // startedAt foi ~150min atrás; com o timestamp futuro descartado, o tempo
+        // calculado precisa refletir isso (relógio do servidor), não a diferença até o futuro.
+        expect(lastCall.time).toBeGreaterThan(9000 - 5);
+        expect(lastCall.time).toBeLessThan(9000 + 30);
     });
 });

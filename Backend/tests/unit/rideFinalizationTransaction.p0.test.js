@@ -114,7 +114,15 @@ function setupFinalization({ paymentError = null, rideOverrides = {} } = {}) {
         endSession: jest.fn().mockResolvedValue(undefined),
     };
     jest.spyOn(mongoose, 'startSession').mockResolvedValue(session);
-    return { initial, finished, session };
+
+    // Este arquivo testa a fiação de transação/sessão da PRÓPRIA finalização, não a
+    // liquidação financeira (isso é coberto com banco real em rideFinalization.p0.test.js).
+    // Desde 2026-08-16, endRide chama confirmPaymentReceived pra qualquer método de
+    // pagamento logo depois de finalizar — mockado aqui pra manter o foco do teste.
+    const confirmPaymentReceivedSpy = jest.spyOn(rideService, 'confirmPaymentReceived')
+        .mockResolvedValue(undefined);
+
+    return { initial, finished, session, confirmPaymentReceivedSpy };
 }
 
 describe('transação da finalização P0', () => {
@@ -124,8 +132,9 @@ describe('transação da finalização P0', () => {
     });
 
     it('grava finished, payment e liberação do motorista na mesma session', async () => {
-        const { session } = setupFinalization();
-        const result = await rideService.endRide({ rideId: 'ride1', captain: { _id: 'cap1' } });
+        const { session, confirmPaymentReceivedSpy } = setupFinalization();
+        const captain = { _id: 'cap1' };
+        const result = await rideService.endRide({ rideId: 'ride1', captain });
 
         expect(result.status).toBe('finished');
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
@@ -134,6 +143,14 @@ describe('transação da finalização P0', () => {
         expect(finishCall[2]).toEqual(expect.objectContaining({ session }));
         expect(paymentModel.findOneAndUpdate.mock.calls[0][2]).toEqual(expect.objectContaining({ session }));
         expect(captainModel.findByIdAndUpdate.mock.calls.at(-1)[2]).toEqual(expect.objectContaining({ session }));
+
+        // Liquidação (comissão + repasse) dispara logo após finalizar, pra qualquer
+        // método de pagamento — não só carteira (2026-08-16).
+        expect(confirmPaymentReceivedSpy).toHaveBeenCalledWith({
+            rideId: 'ride1',
+            captain,
+            allowWalletAuto: true,
+        });
     });
 
     it('falha financeira mantém caminho explícito de retry após rollback transacional', async () => {

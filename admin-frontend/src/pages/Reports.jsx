@@ -289,7 +289,7 @@ export default function Reports() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-bold text-primary">{formatMoney(p.amount)}</p>
-                        <p className="text-[10px] text-text-muted">{p.rides} corridas</p>
+                        <p className="text-[10px] text-text-muted">{p.rides} corridas · gasto do passageiro</p>
                       </div>
                     </div>
                   ))}
@@ -301,7 +301,7 @@ export default function Reports() {
 
             <div className="bg-surface border border-border rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Car className="w-4 h-4" /> Top 10 motoristas (por ganho)</h2>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2"><Car className="w-4 h-4" /> Top 10 motoristas (ganho líquido)</h2>
               </div>
               {isLoadingRankings ? (
                 <p className="text-sm text-text-muted">Calculando ranking...</p>
@@ -315,7 +315,7 @@ export default function Reports() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-bold text-info">{formatMoney(c.amount)}</p>
-                        <p className="text-[10px] text-text-muted">{c.rides} corridas</p>
+                        <p className="text-[10px] text-text-muted">{c.rides} corridas · tarifa − comissão</p>
                       </div>
                     </div>
                   ))}

@@ -91,6 +91,11 @@ describe('endRide — "Definir destino ao finalizar" (destino digitado)', () => 
                 populate: jest.fn().mockResolvedValue({ _id: 'ride1', status: 'finished' }),
             }),
         });
+        // Comissão/repasse liquidam dentro do próprio endRide desde 2026-08-16 (não mais
+        // só depois de um toque manual em "pagamento recebido"). Este arquivo testa a
+        // resolução de destino/distância/tempo do endRide, não a liquidação financeira
+        // (já coberta em rideFinalization.p0.test.js) — então fica só como no-op aqui.
+        jest.spyOn(rideService, 'confirmPaymentReceived').mockResolvedValue(undefined);
     });
 
     afterEach(() => {

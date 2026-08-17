@@ -4,6 +4,7 @@ const {
     sanitizeEarningsBreakdown,
     sanitizeCaptainWallet,
     sanitizeCaptainTransactions,
+    toPassengerFareRates,
 } = require('../../utils/financePrivacy');
 
 describe('financePrivacy', () => {
@@ -40,6 +41,28 @@ describe('financePrivacy', () => {
             expect(out.fareBreakdown).toBeUndefined();
             expect(out.pricingSnapshot).toBeUndefined();
             expect(out.status).toBe('finished');
+        });
+    });
+
+    describe('toPassengerFareRates', () => {
+        it('expõe só taxas do passageiro, sem comissão', () => {
+            const rates = toPassengerFareRates({
+                category: {
+                    pricing: {
+                        baseFare: 5,
+                        perKm: 2,
+                        perMinute: 0.4,
+                        minimumFare: 8,
+                        minDistanceIncluded: 1,
+                        platformCommission: 20,
+                    },
+                },
+                globalTariffs: [{ name: 'Taxa', value: 1 }],
+            });
+            expect(rates.baseFare).toBe(5);
+            expect(rates.perKm).toBe(2);
+            expect(rates.globalTariffsTotal).toBe(1);
+            expect(rates.platformCommission).toBeUndefined();
         });
     });
 

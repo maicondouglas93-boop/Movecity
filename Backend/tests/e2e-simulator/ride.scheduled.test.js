@@ -134,6 +134,10 @@ describe('SIMULADOR E2E — Cenário 3: corrida agendada', () => {
             const rideAfterDrive = await rideModel.findById(rideId).select('actualDistance');
             step('Motorista percorre rota real via GPS (~4km, socket real)', rideAfterDrive.actualDistance > 0, `actualDistance=${rideAfterDrive.actualDistance}m`);
 
+            // Comissão/repasse liquidam na própria finalização desde 2026-08-16 (pra
+            // qualquer método de pagamento) — snapshot "before" vem antes do end-ride.
+            const walletBefore = await readWalletSnapshot(captain._id);
+
             const endRes = await sim.request(sim.app)
                 .post('/rides/end-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
@@ -143,16 +147,16 @@ describe('SIMULADOR E2E — Cenário 3: corrida agendada', () => {
             const recalculated = finalPrice !== estimatedFare;
             step('finalPrice recalculado de verdade também numa corrida agendada', recalculated, `estimativa=${estimatedFare} final=${finalPrice}`);
 
-            const walletBefore = await readWalletSnapshot(captain._id);
+            const walletAfter = await readWalletSnapshot(captain._id);
 
+            // Liquidação já aconteceu no end-ride acima — este toque manual agora só
+            // existe como fallback e é corretamente rejeitado (já confirmado).
             await sim.request(sim.app).post('/rides/pay').set('Authorization', `Bearer ${userToken}`).send({ rideId });
             const confirmRes = await sim.request(sim.app)
                 .post('/rides/confirm-payment')
                 .set('Authorization', `Bearer ${captainToken}`)
                 .send({ rideId });
-            step('POST /rides/pay + /rides/confirm-payment', confirmRes.statusCode === 200, `status ${confirmRes.statusCode}`);
-
-            const walletAfter = await readWalletSnapshot(captain._id);
+            step('POST /rides/pay + /rides/confirm-payment (agora rejeitado — liquidação já aconteceu no end-ride)', confirmRes.statusCode >= 400, `status ${confirmRes.statusCode}`);
             const finalRide = await rideModel.findById(rideId);
             const captainAfter = await captainModel.findById(captain._id).select('earnings');
             const txs = await readTransactions({ captainId: captain._id, rideId });

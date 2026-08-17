@@ -21,7 +21,7 @@ import { bindPushNavigation } from '@/shared/platform/notification.service'
 import { syncNativeCaptainSession } from '@/shared/platform/nativeSession.service'
 import { isNativePlatform } from '@/shared/platform/platform'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
+import { enqueueOfflineAction, flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
 import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
@@ -287,7 +287,11 @@ const CaptainHome = () => {
             // app aberto podia cair fora do despacho silenciosamente numa reconexão
             // (ver docs/plans/2026-08-03-auditoria-regressao-push.md).
             joinWithRetry(socket, { userId: captain._id, userType: 'captain' }, () => {
-                flushQueuedLocations(socket).catch(e => console.error(e))
+                flushQueuedLocations(socket)
+                    .catch((e) => console.error(e))
+                    .finally(() => {
+                        replayOfflineActions({ socket }).catch((e) => console.error(e))
+                    })
                 // Fase B: reconexão pode ter perdido eventos 'new-ride'/'new-parcel'.
                 syncPendingRides()
                 syncPendingParcels()

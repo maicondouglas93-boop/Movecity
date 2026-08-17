@@ -85,7 +85,11 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const captain = await createCaptain();
             const ride = await createRide({
                 user: user._id, captain: captain._id, status: 'started',
-                fare: 20, waitTimeFeeCharged: 5, actualDistance: 0
+                fare: 20, waitTimeFeeCharged: 5, actualDistance: 0,
+                // Comissão/repasse liquidam dentro do próprio endRide desde 2026-08-16 —
+                // uma corrida real sempre chega aqui com isso congelado no booking
+                // (calculateRideFare), então a fixture reflete o mesmo.
+                commissionAmount: 5, commissionPercent: 20,
             });
 
             const result = await rideService.endRide({ rideId: ride._id, captain });
@@ -99,6 +103,7 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const ride = await createRide({
                 user: user._id, captain: captain._id, status: 'started',
                 fare: 20, waitTimeFeeCharged: 0, actualDistance: 0,
+                commissionAmount: 5, commissionPercent: 20,
                 optionals: [
                     { type: 'aceita_animais', price: 3 },
                     { type: 'disposicao_passageiro', price: 15 },

@@ -133,6 +133,11 @@ describe('SIMULADOR E2E — Cenário 1: corrida imediata', () => {
             const actualDistance = rideAfterDrive.actualDistance;
             step('Motorista percorre rota real via GPS (~6km, socket real)', actualDistance > 0, `actualDistance=${actualDistance}m`);
 
+            // Comissão/repasse liquidam na própria finalização desde 2026-08-16 (pra
+            // qualquer método de pagamento, não só carteira) — por isso o snapshot
+            // "before" vem antes do end-ride agora, não depois.
+            const walletBefore = await readWalletSnapshot(captain._id);
+
             const endRes = await sim.request(sim.app)
                 .post('/rides/end-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
@@ -147,7 +152,7 @@ describe('SIMULADOR E2E — Cenário 1: corrida imediata', () => {
             const cheaperAsExpected = finalPrice < estimatedFare;
             step('Corrida mais curta que a estimativa cobra menos', cheaperAsExpected, `estimativa=${estimatedFare} final=${finalPrice}`);
 
-            const walletBefore = await readWalletSnapshot(captain._id);
+            const walletAfter = await readWalletSnapshot(captain._id);
 
             const payRes = await sim.request(sim.app)
                 .post('/rides/pay')
@@ -155,13 +160,14 @@ describe('SIMULADOR E2E — Cenário 1: corrida imediata', () => {
                 .send({ rideId });
             step('POST /rides/pay (passageiro confirma pagamento)', payRes.statusCode === 200, `status ${payRes.statusCode}`);
 
+            // Liquidação já aconteceu no end-ride acima — este toque manual agora só
+            // existe como fallback e é corretamente rejeitado (já confirmado).
             const confirmRes = await sim.request(sim.app)
                 .post('/rides/confirm-payment')
                 .set('Authorization', `Bearer ${captainToken}`)
                 .send({ rideId });
-            step('POST /rides/confirm-payment (motorista confirma recebimento)', confirmRes.statusCode === 200, `status ${confirmRes.statusCode}`);
-
-            const walletAfter = await readWalletSnapshot(captain._id);
+            step('POST /rides/confirm-payment (agora rejeitado — liquidação já aconteceu no end-ride)', confirmRes.statusCode >= 400, `status ${confirmRes.statusCode}`);
+            if (confirmRes.statusCode < 400) problems.push({ severity: '🔴', description: `confirm-payment deveria rejeitar (pagamento já liquidado no end-ride), mas retornou ${confirmRes.statusCode}.` });
             const finalRide = await rideModel.findById(rideId);
             const captainAfter = await captainModel.findById(captain._id).select('earnings totalRides');
             const txs = await readTransactions({ captainId: captain._id, rideId });

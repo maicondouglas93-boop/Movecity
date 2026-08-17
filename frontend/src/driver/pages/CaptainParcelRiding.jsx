@@ -172,9 +172,18 @@ const CaptainParcelRiding = () => {
       const updated = await confirmParcelDelivery(parcel._id, pin)
       setParcel(updated)
       setCaptainParcel(updated)
-      addToast('Entrega confirmada! Confirme o pagamento recebido.', 'success')
-      setStep('payment')
-      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'payment' } })
+      // Liquidação (comissão + repasse) agora acontece na própria confirmação de
+      // entrega (2026-08-16), não mais num toque separado de "pagamento recebido"
+      // — resolveStep já detecta paymentStatus:'paid' e manda direto pra avaliação.
+      const nextStep = resolveStep(updated)
+      addToast(
+        nextStep === 'payment'
+          ? 'Entrega confirmada! Confirme o pagamento recebido.'
+          : 'Entrega confirmada! Pagamento já liquidado.',
+        'success'
+      )
+      setStep(nextStep)
+      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: nextStep } })
     } catch (err) {
       addToast(err.response?.data?.message || 'PIN inválido', 'error')
     } finally {

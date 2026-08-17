@@ -8,6 +8,7 @@ import { useConfirm } from '../contexts/ConfirmContext';
 import { usePrompt } from '../contexts/PromptContext';
 import { buildCsv, downloadCsv } from '../utils/csv';
 import { formatMoney, formatDate } from '../utils/format';
+import { describeCaptainLedgerTx, ledgerToneClass } from '../utils/captainLedgerDisplay';
 import {
   CAPTAIN_APPROVAL_LABELS, CAPTAIN_APPROVAL_COLORS,
   RIDE_STATUS_LABELS, RIDE_STATUS_COLORS,
@@ -287,7 +288,7 @@ export default function Captains() {
                 <th className="px-4 py-3 font-medium">Motorista</th>
                 <th className="px-4 py-3 font-medium">Veículo / Placa</th>
                 <th className="px-4 py-3 font-medium">Avaliação / Corridas</th>
-                <th className="px-4 py-3 font-medium">Carteira</th>
+                <th className="px-4 py-3 font-medium">Créditos / a receber</th>
                 <th className="px-4 py-3 font-medium">Conexão</th>
                 <th className="px-4 py-3 font-medium">Status da conta</th>
                 <th className="px-4 py-3 text-right">Ações</th>
@@ -351,7 +352,9 @@ export default function Captains() {
 // inteiro), então a maioria dos pings — que não mudam se um motorista está online ou
 // não, só a posição, que esta linha nem exibe — não recalcula nada aqui.
 const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onToggleSelect, onOpenDrawer }) {
-  const walletColor = captain.earnings < 0 ? 'text-danger' : captain.earnings > 0 ? 'text-primary' : 'text-text-muted';
+  const credits = captain.creditBalance ?? 0;
+  const pending = captain.pendingBalance ?? 0;
+  const creditColor = credits < 0 ? 'text-danger' : 'text-text';
   // operationalStatus vem calculado do backend (getCaptains) — online+fresco+livre =
   // disponível; online+fresco+ocupado = em corrida; senão offline. Não confundir com
   // approvalStatus (status DA CONTA), mostrado na outra coluna.
@@ -393,7 +396,8 @@ const CaptainRow = memo(function CaptainRow({ captain, isSelected, isLive, onTog
         <p className="text-xs text-text-muted">{captain.totalRides || 0} corridas</p>
       </td>
       <td className="px-4 py-4">
-        <p className={`font-medium ${walletColor}`}>{formatMoney(captain.earnings)}</p>
+        <p className={`font-medium ${creditColor}`}>{formatMoney(credits)}</p>
+        <p className="text-xs text-text-muted">A receber {formatMoney(pending)}</p>
       </td>
       <td className="px-4 py-4" title={OPERATIONAL_STATUS_LABELS[opStatus]}>
         <StatusBadge colorClass={OPERATIONAL_STATUS_COLORS[opStatus]} label={OPERATIONAL_STATUS_LABELS[opStatus]} />
@@ -590,10 +594,13 @@ function TabProfile({ captain, liveDrivers, onCaptainUpdated }) {
     <div className="space-y-6">
       {/* Alertas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-         {captain.earnings < 0 && (
+         {(captain.creditBalance ?? 0) < 0 && (
            <div className="p-3 bg-danger/10 border border-danger/20 rounded-xl flex items-start gap-3">
              <AlertTriangle className="w-5 h-5 text-danger mt-0.5" />
-             <div><p className="text-sm font-bold text-danger">Carteira Negativa</p><p className="text-xs text-danger/80">O motorista deve comissões à plataforma.</p></div>
+             <div>
+               <p className="text-sm font-bold text-danger">Créditos negativos</p>
+               <p className="text-xs text-danger/80">Ele deve comissão à plataforma. Recarregue os créditos na aba Financeiro para voltar a receber corridas.</p>
+             </div>
            </div>
          )}
          {captain.rating < 4.5 && (
@@ -1229,7 +1236,7 @@ function TabFinance({ captainId, captainName }) {
           transactions: [res.data.transaction, ...(old.transactions || [])]
         };
       });
-      toast.success('Saldo atualizado com sucesso!');
+      toast.success('Créditos atualizados com sucesso!');
       setShowAdjustModal(false);
       setAdjustAmount('');
       setAdjustReason('');
@@ -1247,8 +1254,8 @@ function TabFinance({ captainId, captainName }) {
     const amount = Number(adjustAmount);
     if (amount > 10000) return toast.error('O valor excede o limite (R$ 10.000)');
 
-    const confirmMsg = `Você está adicionando um ${adjustType === 'credit' ? 'Crédito' : 'Débito'} de R$ ${amount.toFixed(2)} ao motorista ${captainName || ''}.\n\nMotivo: ${adjustReason}`;
-    const ok = await confirm({ title: 'Confirmar ajuste de saldo', message: confirmMsg, tone: 'danger', confirmLabel: 'Confirmar ajuste' });
+    const confirmMsg = `Você está ${adjustType === 'credit' ? 'creditando' : 'debitando'} R$ ${amount.toFixed(2)} nos créditos de comissão de ${captainName || 'este motorista'}.\n\nIsso não é o ganho da corrida — só o saldo usado para a plataforma cobrar a comissão.\n\nMotivo: ${adjustReason}`;
+    const ok = await confirm({ title: 'Confirmar ajuste de créditos', message: confirmMsg, tone: 'danger', confirmLabel: 'Confirmar ajuste' });
     if (!ok) return;
 
     adjustMutation.mutate({ amount, type: adjustType, reason: adjustReason });
@@ -1258,31 +1265,45 @@ function TabFinance({ captainId, captainName }) {
 
   return (
     <div className="space-y-6">
+       <div className="bg-background/60 border border-border rounded-xl p-4 text-sm text-text-muted">
+          O passageiro paga o motorista na hora. Estes números não são o faturamento da corrida:
+          créditos pagam a comissão da MoveCity; “a receber” é o que a plataforma deve a ele (cartão).
+       </div>
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-surface p-6 rounded-xl border border-border flex flex-col items-center justify-center text-center relative">
-             <p className="text-sm font-bold uppercase tracking-wider text-text-muted mb-2">Saldo Atual</p>
-             <p className={`text-4xl font-bold ${wallet?.balance < 0 ? 'text-danger' : 'text-primary'}`}>R$ {wallet?.balance?.toFixed(2) || '0.00'}</p>
-             {wallet?.balance < 0 && <p className="text-xs text-danger mt-2 bg-danger/10 px-3 py-1 rounded">Devendo à Plataforma</p>}
+             <p className="text-sm font-bold uppercase tracking-wider text-text-muted mb-2">Créditos para comissão</p>
+             <p className={`text-4xl font-bold ${wallet?.balance < 0 ? 'text-danger' : 'text-primary'}`}>{formatMoney(wallet?.balance)}</p>
+             <p className="text-xs text-text-muted mt-2 max-w-xs">Não é o ganho dele. Serve só para a plataforma descontar a comissão depois que o passageiro paga.</p>
+             {wallet?.balance < 0 && <p className="text-xs text-danger mt-2 bg-danger/10 px-3 py-1 rounded">Devendo à plataforma — pode bloquear corridas</p>}
              
              <button 
                 onClick={() => setShowAdjustModal(true)}
                 className="mt-4 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 transition-colors border border-primary/20 rounded-lg text-sm font-semibold flex items-center gap-2"
              >
-                <Activity className="w-4 h-4"/> Ajuste Manual
+                <Activity className="w-4 h-4"/> Ajustar créditos
              </button>
           </div>
           <div className="bg-surface p-5 rounded-xl border border-border space-y-4">
-             <div className="flex justify-between items-center">
-                <span className="text-sm text-text-muted">Valores Pendentes</span>
-                <span className="font-medium text-warning">R$ {wallet?.pending?.toFixed(2) || '0.00'}</span>
+             <div>
+                <div className="flex justify-between items-center">
+                   <span className="text-sm text-text-muted">A receber (repasse)</span>
+                   <span className="font-medium text-warning">{formatMoney(wallet?.pending)}</span>
+                </div>
+                <p className="text-[11px] text-text-muted mt-1">O que a MoveCity deve a ele em corrida no cartão. Zero em dinheiro/Pix direto.</p>
              </div>
-             <div className="flex justify-between items-center">
-                <span className="text-sm text-text-muted">Comissões da Plataforma</span>
-                <span className="font-medium text-text">R$ {wallet?.commissions?.toFixed(2) || '0.00'}</span>
+             <div>
+                <div className="flex justify-between items-center">
+                   <span className="text-sm text-text-muted">Comissão já cobrada</span>
+                   <span className="font-medium text-text">{formatMoney(wallet?.commissions)}</span>
+                </div>
+                <p className="text-[11px] text-text-muted mt-1">Total vitalício — não é saldo e não pode sacar.</p>
              </div>
-             <div className="pt-4 border-t border-border flex justify-between items-center">
-                <span className="text-sm text-text-muted">Última Recarga</span>
-                <span className="font-medium text-sm">{wallet?.lastRecharge ? new Date(wallet.lastRecharge).toLocaleDateString() : 'N/A'}</span>
+             <div className="pt-4 border-t border-border">
+                <div className="flex justify-between items-center">
+                   <span className="text-sm text-text-muted">Última recarga Pix</span>
+                   <span className="font-medium text-sm">{wallet?.lastRecharge ? formatDate(wallet.lastRecharge) : 'Nenhuma'}</span>
+                </div>
+                <p className="text-[11px] text-text-muted mt-1">Ajuste manual do admin não conta como recarga.</p>
              </div>
           </div>
        </div>
@@ -1290,32 +1311,42 @@ function TabFinance({ captainId, captainName }) {
        {/* Transaction History */}
        <div className="bg-surface rounded-xl border border-border overflow-hidden">
          <div className="p-4 border-b border-border bg-background/50">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted flex items-center gap-2"><History className="w-4 h-4"/> Histórico de Transações</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-text-muted flex items-center gap-2"><History className="w-4 h-4"/> Extrato</h3>
+            <p className="text-[11px] text-text-muted mt-1">Comissão sai dos créditos. Corrida em dinheiro aparece aqui só como registro — o valor já está com o motorista.</p>
          </div>
          <div className="divide-y divide-border">
             {!wallet?.transactions || wallet.transactions.length === 0 ? (
                <div className="p-6 text-center text-text-muted">Nenhuma transação recente.</div>
             ) : (
-               wallet.transactions.map((tx) => (
+               wallet.transactions.map((tx) => {
+                  const view = describeCaptainLedgerTx(tx);
+                  const badgeClass = view.tone === 'debit'
+                    ? 'bg-danger/10 text-danger border-danger/20'
+                    : view.tone === 'credit'
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'bg-background border-border text-text-muted';
+                  return (
                   <div key={tx._id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-background/30 transition-colors">
                      <div>
                         <div className="flex items-center gap-2 mb-1">
-                           <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${tx.type === 'adjustment' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-background border-border text-text-muted'}`}>
-                              {tx.type === 'adjustment' ? 'Ajuste Manual' : tx.type}
+                           <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${badgeClass}`}>
+                              {view.label}
                            </span>
-                           <span className="text-xs text-text-muted">{new Date(tx.createdAt).toLocaleString()}</span>
+                           <span className="text-xs text-text-muted">{new Date(tx.createdAt).toLocaleString('pt-BR')}</span>
                         </div>
                         <p className="text-sm text-text font-medium">{tx.description || tx.reason}</p>
+                        {view.amountHint && <p className="text-xs text-text-muted mt-1">{view.amountHint}</p>}
                         {tx.adminId && <p className="text-xs text-text-muted mt-1">Admin: {tx.adminId}</p>}
                      </div>
                      <div className="text-left md:text-right">
-                        <p className={`font-bold ${tx.amount > 0 ? 'text-primary' : 'text-danger'}`}>
-                           {tx.amount > 0 ? '+' : ''}{tx.amount?.toFixed(2)}
+                        <p className={`font-bold ${ledgerToneClass(view.tone)}`}>
+                           {formatMoney(view.signedAmount, { showSign: view.tone !== 'info' })}
                         </p>
-                        <p className="text-xs text-text-muted mt-1">Saldo após: R$ {tx.balanceAfter?.toFixed(2)}</p>
+                        <p className="text-xs text-text-muted mt-1">{view.balanceCaption}: {formatMoney(tx.balanceAfter)}</p>
                      </div>
                   </div>
-               ))
+                  );
+               })
             )}
          </div>
        </div>
@@ -1325,10 +1356,11 @@ function TabFinance({ captainId, captainName }) {
          <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/60 px-4 animate-fade-in">
             <div className="bg-surface w-full max-w-md rounded-2xl border border-border shadow-2xl flex flex-col">
                <div className="p-4 border-b border-border flex justify-between items-center bg-background/50 rounded-t-2xl">
-                  <h3 className="font-bold">Ajuste Manual de Saldo</h3>
+                  <h3 className="font-bold">Ajuste de créditos</h3>
                   <button onClick={() => setShowAdjustModal(false)} className="text-text-muted hover:text-text"><X className="w-5 h-5"/></button>
                </div>
                <form onSubmit={handleAdjust} className="p-6 space-y-4">
+                  <p className="text-xs text-text-muted">Altera só os créditos de comissão. Não muda o ganho da corrida nem o valor a receber.</p>
                   <div className="grid grid-cols-2 gap-2">
                      <button type="button" onClick={() => setAdjustType('credit')} className={`py-2 px-4 rounded border text-sm font-bold flex justify-center items-center gap-2 transition-colors ${adjustType === 'credit' ? 'bg-primary/10 border-primary text-primary' : 'bg-background border-border text-text-muted'}`}>
                         + Crédito

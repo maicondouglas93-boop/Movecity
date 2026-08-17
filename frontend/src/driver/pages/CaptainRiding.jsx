@@ -507,16 +507,14 @@ const CaptainRiding = () => {
                     ) : null}
 
                     <div
-                        className='mb-2 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'
+                        className='mb-2 rounded-panel border border-brand-200 bg-brand-50 px-3 py-3 flex flex-col items-center text-center gap-0.5'
                         aria-live='polite'
                     >
-                        <div className='min-w-0'>
-                            <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
-                            <p className='text-[11px] text-ink-500 truncate'>Atualizado por tempo e distância</p>
-                        </div>
-                        <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
+                        <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Valor atual da corrida</p>
+                        <p className='text-4xl font-black tabular-nums text-ink-900'>
                             {currentRideAmount != null ? formatBRL(currentRideAmount) : 'Calculando…'}
                         </p>
+                        <p className='text-[11px] text-ink-500'>Atualizado por tempo e distância</p>
                     </div>
 
                     <div className='flex items-center gap-2.5 min-w-0'>

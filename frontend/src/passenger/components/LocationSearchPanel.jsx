@@ -1,8 +1,10 @@
 import React, { useState } from 'react'
-import { getPlaceDetails } from '@/shared/services/mapsApi'
+import { getPlaceDetails, getAddressSuggestions } from '@/shared/services/mapsApi'
+import { QUICK_PLACES } from '@/shared/assets/quickPlaces/quickPlaces'
 
 const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPickup, setDestination, activeField, setIsSelectingOnMap, isSearching, sessionToken }) => {
     const [ resolvingKey, setResolvingKey ] = useState(null)
+    const [ resolvingQuickPlaceId, setResolvingQuickPlaceId ] = useState(null)
 
     const handleSuggestionClick = async (suggestion) => {
         if (typeof suggestion === 'string') {
@@ -53,8 +55,60 @@ const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPi
         }
     }
 
+    // Atalho fixo (igreja, pronto-socorro, mercados locais...): busca pelo NOME na
+    // mesma API de autocomplete que o campo de texto já usa, em vez de fixar
+    // lat/lng aqui. A coordenada exata sempre vem do provider de mapas configurado
+    // (Google Places ou OSM) — reaproveita o mesmo pipeline de resolução da busca
+    // manual (handleSuggestionClick), só pulando a etapa de digitar.
+    const handleQuickPlaceClick = async (place) => {
+        setResolvingQuickPlaceId(place.id)
+        try {
+            const { suggestions: found } = await getAddressSuggestions({ input: place.query, sessionToken })
+            const best = found[0]
+            if (!best) {
+                console.error(`Nenhum resultado de mapa para o local fixo "${place.label}"`)
+                return
+            }
+            await handleSuggestionClick(best)
+        } catch (err) {
+            console.error(`Falha ao buscar local fixo "${place.label}":`, err)
+        } finally {
+            setResolvingQuickPlaceId(null)
+        }
+    }
+
     return (
         <div>
+            <div className="mb-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 pt-1 pb-2">Locais frequentes</p>
+                {QUICK_PLACES.map((place) => {
+                    const isResolving = resolvingQuickPlaceId === place.id
+                    return (
+                        <div
+                            key={place.id}
+                            onClick={() => !resolvingQuickPlaceId && handleQuickPlaceClick(place)}
+                            className={`flex gap-4 p-3 border-b border-gray-100 active:bg-green-50 items-center justify-start cursor-pointer transition-colors ${resolvingQuickPlaceId && !isResolving ? 'opacity-50 pointer-events-none' : ''}`}
+                        >
+                            <div className='relative h-9 w-9 flex-shrink-0'>
+                                <img
+                                    src={place.icon}
+                                    alt=""
+                                    className='h-9 w-9 rounded-full object-cover border border-gray-200'
+                                />
+                                {isResolving && (
+                                    <div className='absolute inset-0 flex items-center justify-center bg-white/70 rounded-full'>
+                                        <i className="ri-loader-4-line text-lg text-green-500 animate-spin"></i>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col overflow-hidden">
+                                <h4 className='font-bold text-gray-800 text-[15px] truncate'>{place.label}</h4>
+                                <p className='text-sm text-gray-500 truncate'>{place.subtitle}</p>
+                            </div>
+                        </div>
+                    )
+                })}
+            </div>
             {isSearching ? (
                 <div className="flex flex-col items-center justify-center py-10 text-green-500">
                     <i className="ri-loader-4-line text-3xl animate-spin mb-2"></i>

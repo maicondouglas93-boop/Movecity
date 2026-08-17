@@ -78,7 +78,12 @@ function findAabs(directory) {
 }
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const gradle = process.platform === 'win32' ? 'gradlew.bat' : 'bash'
+// Caminho absoluto no Windows: com shell:true, spawnSync não honra `cwd` na
+// resolução do próprio comando (só nos args/execução) — um nome relativo
+// como 'gradlew.bat' falha com "não é reconhecido" mesmo estando em cwd.
+const gradle = process.platform === 'win32'
+    ? path.join(config.androidDir, 'gradlew.bat')
+    : 'bash'
 const releaseEnv = {
     ...process.env,
     CI_REQUIRE_RELEASE_SIGNING: 'true',

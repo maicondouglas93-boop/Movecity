@@ -556,6 +556,16 @@ module.exports.sendRechargeApproved = async (captainId, data) => {
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'RECHARGE', { ...data, deepLink: DEEP_LINK.captainWallet }));
 };
 
+// Créditos zerados desligam o motorista do despacho na mesma transação da comissão.
+// Sem este aviso ele só descobre abrindo a tela Carteira por conta própria: fica
+// online, não recebe corrida nenhuma e conclui que o app quebrou. No modelo de
+// dinheiro em mãos isso não é exceção — é o ciclo normal de todo motorista.
+module.exports.sendCreditsBlocked = async (captainId, data) => {
+    const title = 'Seus créditos acabaram';
+    const message = 'Você parou de receber corridas. Recarregue seus créditos para voltar a rodar.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'RECHARGE', { ...data, deepLink: DEEP_LINK.captainWallet }));
+};
+
 // `sendPromotion` foi removida na auditoria final (Fase 8) — era código morto desde
 // sempre (M11 da auditoria original: nunca foi chamada em lugar nenhum). Push
 // promocional já é coberto, de forma melhor, pelo fluxo de campanhas: admin.controller

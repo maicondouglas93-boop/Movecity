@@ -1251,6 +1251,14 @@ module.exports.acceptRideAtomic = async ({
         throw new Error('VEHICLE_MISMATCH');
     }
 
+    // Lock órfão (busyLock true sem ride/parcel ativos) some do despacho e nunca se
+    // resolve sozinho: o motorista fica online sem receber corrida nenhuma e sem saber
+    // por quê. Iniciar presencial e aceitar encomenda já limpavam o resíduo antes de
+    // tentar adquirir — só o aceite de corrida não limpava, então quem caísse nesse
+    // estado continuava aceitando encomenda normalmente (o que curava por acidente) mas
+    // ficava permanentemente invisível pra corridas.
+    await dispatchService.releaseCaptainBusyLockIfIdle(captain._id);
+
     // Exclusão mútua ride↔parcel: busyLock atômico + recheck dentro da seção crítica.
     const locked = await dispatchService.acquireCaptainBusyLock(captain._id);
     if (!locked) {

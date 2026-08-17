@@ -66,6 +66,12 @@ function toPassengerFareRates(snapshot) {
     const globals = Array.isArray(snapshot.globalTariffs) ? snapshot.globalTariffs : [];
     const globalTariffsTotal = globals.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
 
+    // Adicionais noturno e de chuva também precisam viajar: sem eles o app calculava
+    // um valor menor do que a finalização registraria, o motorista cobrava esse valor
+    // em dinheiro e ainda pagava comissão sobre a diferença que nunca recebeu.
+    const night = pricing.surcharges?.night || {};
+    const rain = pricing.surcharges?.rain || {};
+
     return {
         baseFare: Number(pricing.baseFare) || 0,
         perKm: Number(pricing.perKm) || 0,
@@ -78,6 +84,17 @@ function toPassengerFareRates(snapshot) {
         waitingFreeMinutes: Number(wait.freeMinutes) || 0,
         waitingPerMinute: Number(wait.valuePerMinute) || 0,
         globalTariffsTotal,
+        // 'multiplier' multiplica o subtotal (1.2 = +20%); 'fixed' soma direto. Mesma
+        // semântica de pricingEngine.service.js — o cálculo offline reimplementa essa
+        // regra, então precisa do tipo, não só do valor.
+        nightActive: night.active === true,
+        nightType: night.type === 'fixed' ? 'fixed' : 'multiplier',
+        nightValue: Number(night.value) || 0,
+        nightStartTime: night.startTime || '22:00',
+        nightEndTime: night.endTime || '06:00',
+        rainActive: rain.active === true,
+        rainType: rain.type === 'fixed' ? 'fixed' : 'percent',
+        rainValue: Number(rain.value) || 0,
     };
 }
 

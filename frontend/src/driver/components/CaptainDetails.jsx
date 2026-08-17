@@ -154,19 +154,28 @@ const CaptainDetails = ({ children = null }) => {
         addToast('Abra o perfil ou fale com o suporte pelo WhatsApp configurado.', 'info')
     }
 
-    const statusTitle = isOnline && locationError
-        ? 'Online, sem GPS'
-        : isOnline
-            ? 'Você está online'
-            : 'Você está offline'
+    // Créditos zerados desligam o motorista do despacho. Ele continua "online" e nada na
+    // tela dizia isso — só a tela Carteira, que ele teria que abrir por conta própria.
+    // Ficava esperando corrida que nunca vinha, achando que o app quebrou.
+    const creditsBlocked = captain?.canReceiveRides === false
 
-    const statusSubtitle = isOnline && locationError
-        ? 'Ative a localização para receber solicitações'
-        : isOnline
-            ? 'Disponível para receber solicitações'
-            : 'Fique online para receber solicitações'
+    const statusTitle = creditsBlocked
+        ? 'Sem créditos'
+        : isOnline && locationError
+            ? 'Online, sem GPS'
+            : isOnline
+                ? 'Você está online'
+                : 'Você está offline'
 
-    const bannerClass = isOnline && locationError
+    const statusSubtitle = creditsBlocked
+        ? 'Recarregue para voltar a receber corridas'
+        : isOnline && locationError
+            ? 'Ative a localização para receber solicitações'
+            : isOnline
+                ? 'Disponível para receber solicitações'
+                : 'Fique online para receber solicitações'
+
+    const bannerClass = creditsBlocked || (isOnline && locationError)
         ? 'bg-danger-600'
         : isOnline
             ? PANEL_BG
@@ -181,6 +190,21 @@ const CaptainDetails = ({ children = null }) => {
 
     return (
         <div className="flex flex-col gap-4">
+            {creditsBlocked && (
+                <div className="flex flex-col gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
+                    <div className="flex items-center gap-2">
+                        <i className="ri-wallet-3-line text-base" aria-hidden="true" />
+                        Seus créditos acabaram — você não está recebendo corridas.
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => navigate('/captain-wallet')}
+                        className="self-start underline font-bold"
+                    >
+                        Recarregar créditos
+                    </button>
+                </div>
+            )}
             {isOnline && locationError && (
                 <div className="flex flex-col gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
                     <div className="flex items-center gap-2">

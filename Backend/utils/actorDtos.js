@@ -157,6 +157,10 @@ function toRideCaptainDTO(ride, { includePresentialOtp = false } = {}) {
     dto.driverAmount = computeDriverAmount(raw);
     const fareRates = toPassengerFareRates(raw.pricingSnapshot);
     if (fareRates) dto.fareRates = fareRates;
+    // Desconto congelado na estimativa: sem ele o cálculo offline manda cobrar o valor
+    // cheio de um passageiro que tem cupom. É o mesmo fallback que a própria
+    // finalização usa quando a promoção não existe mais (ride.service.js).
+    if (raw.discountAmount > 0) dto.discountAmount = raw.discountAmount;
     if (raw.user) dto.user = toUserIdentity(raw.user, { includePhone: true });
     if (!dto.user && raw.source === 'admin' && raw.adminPassenger?.name) {
         dto.user = {

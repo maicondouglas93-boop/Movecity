@@ -24,6 +24,42 @@ function optionalsTotal(ride) {
     return ride.optionals.reduce((sum, opt) => sum + (Number(opt?.price) || 0), 0)
 }
 
+function parseClockToHours(text, fallback) {
+    const [h, m] = String(text || fallback).split(':').map(Number)
+    if (!Number.isFinite(h)) return null
+    return h + ((Number.isFinite(m) ? m : 0) / 60)
+}
+
+/** Mesma regra de janela do servidor, inclusive quando o período cruza a meia-noite. */
+export function isNightTime(rates, at) {
+    const start = parseClockToHours(rates?.nightStartTime, '22:00')
+    const end = parseClockToHours(rates?.nightEndTime, '06:00')
+    if (start == null || end == null) return false
+
+    const current = at.getHours() + (at.getMinutes() / 60)
+    return start > end
+        ? (current >= start || current <= end)
+        : (current >= start && current <= end)
+}
+
+function nightSurcharge(rates, subtotal, at) {
+    if (rates?.nightActive !== true) return 0
+    if (!isNightTime(rates, at)) return 0
+
+    const value = Number(rates.nightValue) || 0
+    if (rates.nightType === 'fixed') return value
+    // 'multiplier': 1.2 significa +20% sobre o subtotal, não 1,2%.
+    return subtotal * Math.max(0, value - 1)
+}
+
+function rainSurcharge(rates, subtotal) {
+    if (rates?.rainActive !== true) return 0
+
+    const value = Number(rates.rainValue) || 0
+    if (rates.rainType === 'fixed') return value
+    return subtotal * (value / 100)
+}
+
 function applyRounding(value, rule) {
     if (rule === 'up') return Math.ceil(value)
     if (rule === 'down') return Math.floor(value)
@@ -64,9 +100,17 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
         waiting = (Math.max(0, waitSeconds - freeSeconds) / 60) * (Number(rates.waitingPerMinute) || 0)
     }
 
-    let subtotal = baseFare + distanceFare + timeFare + waiting
-        + optionalsTotal(ride)
-        + (Number(rates.globalTariffsTotal) || 0)
+    let subtotal = baseFare + distanceFare + timeFare + waiting + optionalsTotal(ride)
+
+    // Adicionais noturno e de chuva incidem sobre o subtotal ANTES das tarifas globais,
+    // na mesma ordem do motor de preço do servidor (pricingEngine.service.js). Sem eles
+    // o app mandava cobrar menos do que a finalização registraria, e o motorista pagava
+    // comissão sobre a diferença que nunca recebeu.
+    const night = nightSurcharge(rates, subtotal, new Date(now))
+    const rain = rainSurcharge(rates, subtotal)
+    subtotal += night + rain
+
+    subtotal += (Number(rates.globalTariffsTotal) || 0)
 
     let minimumFareAdjustment = 0
     const minimumFare = Number(rates.minimumFare) || 0
@@ -74,6 +118,10 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
         minimumFareAdjustment = minimumFare - subtotal
         subtotal = minimumFare
     }
+
+    // Cupom entra depois do piso, igual ao servidor — desconto não é acréscimo.
+    const discount = Math.min(Math.max(0, Number(ride?.discountAmount) || 0), subtotal)
+    subtotal -= discount
 
     const amount = applyRounding(subtotal, rates.roundingRule)
 
@@ -86,6 +134,9 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
             baseFare,
             distanceFare,
             timeFare,
+            nightSurcharge: night,
+            rainSurcharge: rain,
+            discount,
             minimumFareAdjustment,
         },
     }

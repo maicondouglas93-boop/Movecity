@@ -113,7 +113,15 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
     const settings = await getCachedGlobalSetting()
         || { blockDriverOnNegativeBalance: true, maximumNegativeBalance: 0 };
     const shouldBlock = settings.blockDriverOnNegativeBalance && wallet.creditBalance < settings.maximumNegativeBalance;
-    await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: !shouldBlock }, { session });
+    // Sem `new: true` o retorno é o documento ANTES da escrita — é como sabemos se este
+    // lançamento foi o que virou a chave. Avisar só na transição evita repetir a mesma
+    // notificação a cada nova comissão de um motorista que já está bloqueado.
+    const captainBeforeUpdate = await captainModel.findByIdAndUpdate(
+        captainId,
+        { canReceiveRides: !shouldBlock },
+        { session }
+    );
+    const justBlocked = shouldBlock && captainBeforeUpdate?.canReceiveRides !== false;
 
     const applySideEffects = async () => {
         // Auditoria de cache (2026-08-08): wallet:/transactions: não existem mais —
@@ -178,6 +186,14 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
         // movimentação de carteira) pra não notificar demais por débito de comissão etc.
         if (type === 'recharge') {
             notificationService.sendRechargeApproved(captainId, { transactionId: transaction._id.toString(), amount }).catch(console.error);
+        }
+
+        // Só na transição pra bloqueado, e sempre depois do commit — avisar antes
+        // anunciaria um bloqueio que a transação ainda pode desfazer.
+        if (justBlocked) {
+            notificationService.sendCreditsBlocked(captainId, {
+                creditBalance: wallet.creditBalance,
+            }).catch(console.error);
         }
     };
 

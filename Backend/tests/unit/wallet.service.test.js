@@ -142,6 +142,58 @@ describe('Wallet Service', () => {
             const captain = await captainModel.findById(captainId);
             expect(captain.canReceiveRides).toBe(true);
         });
+
+        // Achado P2 da auditoria de fluxos (2026-08-17): o motorista era desligado do
+        // despacho em silêncio. No modelo de dinheiro em mãos, zerar créditos é o ciclo
+        // normal de todo motorista — ele ficava online, não recebia nada e concluía que
+        // o app tinha quebrado.
+        describe('aviso ao bloquear por falta de créditos', () => {
+            const notificationService = require('../../notification/notificationDispatcher.service');
+
+            beforeEach(() => {
+                jest.spyOn(notificationService, 'sendCreditsBlocked').mockResolvedValue(undefined);
+            });
+
+            afterEach(() => {
+                jest.restoreAllMocks();
+            });
+
+            it('notifica o motorista na transição para bloqueado', async () => {
+                await createTransaction({
+                    captainId, type: 'commission', paymentMethod: 'wallet',
+                    amount: 60, description: 'Comissão',
+                });
+
+                expect(notificationService.sendCreditsBlocked).toHaveBeenCalledTimes(1);
+                expect(notificationService.sendCreditsBlocked).toHaveBeenCalledWith(
+                    captainId,
+                    expect.objectContaining({ creditBalance: -60 }),
+                );
+            });
+
+            it('não repete o aviso em quem já estava bloqueado', async () => {
+                await captainModel.findByIdAndUpdate(captainId, { canReceiveRides: false });
+                await walletModel.create({ captainId, creditBalance: -60 });
+
+                await createTransaction({
+                    captainId, type: 'commission', paymentMethod: 'wallet',
+                    amount: 10, description: 'Comissão da corrida seguinte',
+                });
+
+                expect(notificationService.sendCreditsBlocked).not.toHaveBeenCalled();
+            });
+
+            it('não avisa quem continua com créditos suficientes', async () => {
+                await walletModel.create({ captainId, creditBalance: 100 });
+
+                await createTransaction({
+                    captainId, type: 'commission', paymentMethod: 'wallet',
+                    amount: 10, description: 'Comissão',
+                });
+
+                expect(notificationService.sendCreditsBlocked).not.toHaveBeenCalled();
+            });
+        });
     });
 
     // Plano de correção (Fase 3.1, 2026-08-16, COR-3005): requestPayout fazia

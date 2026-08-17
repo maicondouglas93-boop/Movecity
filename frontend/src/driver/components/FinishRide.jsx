@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { buildOfflineFinishPreview } from '@/shared/services/offlineRideFare'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -22,6 +23,10 @@ const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
 const isNetworkError = (error) => (
     (typeof navigator !== 'undefined' && !navigator.onLine)
     || error?.message === 'Network Error'
+    // Teto de tempo estourado ou GPS que não sincronizou: os dois são falta de
+    // conectividade, não erro de regra do servidor. Precisam cair no mesmo caminho
+    // (guardar a finalização na fila) em vez de virar um toast que perde a corrida.
+    || error?.isConnectivityIssue === true
 )
 
 const FinishRide = (props) => {
@@ -32,6 +37,9 @@ const FinishRide = (props) => {
     const [pendingFinalizationSync, setPendingFinalizationSync] = useState(false)
     const [pendingPaymentSync, setPendingPaymentSync] = useState(false)
     const [endedRide, setEndedRide] = useState(null)
+    // Finalização offline não passa pela mutation, então precisa do próprio estado de
+    // carregamento — sem ele o botão não trava e um toque duplo enfileira duas vezes.
+    const [queueingOffline, setQueueingOffline] = useState(false)
     // Auditoria de UX do motorista (2026-08-02, Etapa 7): "o motorista nunca avalia o
     // passageiro, embora reviewApi.js exista no projeto" — o backend já suportava o tipo
     // 'driver_to_passenger' no schema de review, só nunca tinha endpoint pra usá-lo.
@@ -104,20 +112,31 @@ const FinishRide = (props) => {
             // A finalização só pode congelar a distância depois que todos os pontos já
             // coletados desta corrida receberam ack do backend. Se a rede oscilar aqui,
             // o botão falha com segurança e os pontos permanecem para retry.
-            await flushQueuedLocations(socket, { rideId: props.ride._id })
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
-                rideId: props.ride._id,
-                ...(userLocation?.lat != null && userLocation?.lng != null ? {
-                    finishLat: userLocation.lat,
-                    finishLng: userLocation.lng,
-                    finishAccuracy: userLocation.accuracy ?? null,
-                    finishTimestamp: userLocation.timestamp ?? Date.now(),
-                } : {}),
-            }, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
-                }
-            })
+            try {
+                await flushQueuedLocations(socket, { rideId: props.ride._id })
+            } catch (flushError) {
+                // GPS não sincronizou: é falta de conectividade, não erro de regra.
+                // Guardar na fila é seguro e correto — o replay drena o GPS antes de
+                // reenviar, então a distância nunca fecha incompleta.
+                flushError.isConnectivityIssue = true
+                throw flushError
+            }
+
+            const response = await withHardTimeout(
+                api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
+                    rideId: props.ride._id,
+                    ...(userLocation?.lat != null && userLocation?.lng != null ? {
+                        finishLat: userLocation.lat,
+                        finishLng: userLocation.lng,
+                        finishAccuracy: userLocation.accuracy ?? null,
+                        finishTimestamp: userLocation.timestamp ?? Date.now(),
+                    } : {}),
+                }, {
+                    headers: {
+                        Authorization: `Bearer ${getAccessToken('captain')}`
+                    }
+                }),
+            )
             return response.data;
         },
         onSuccess: (data) => {
@@ -136,57 +155,82 @@ const FinishRide = (props) => {
         },
         onError: async (err) => {
             console.error('End ride error:', err)
-            const presentialPending = props.ride?.source === 'driver_initiated'
-                && (props.ride?.destinationPending || !props.ride?.destination)
             if (isNetworkError(err)) {
-                const localPreview = previewFare?.offline ? previewFare : await buildOfflineFinishPreview(props.ride)
-                if (presentialPending && !(localPreview?.amount > 0)) {
-                    addToast('Sem internet neste destino. Mantenha o app aberto e toque em Finalizar de novo — o valor sai do GPS guardado no celular.', 'error')
-                    return
-                }
-                try {
-                    await enqueueOfflineAction({
-                        type: 'end-ride',
-                        rideId: props.ride._id,
-                        payload: {
-                            rideId: props.ride._id,
-                            finishLat: userLocation?.lat,
-                            finishLng: userLocation?.lng,
-                            finishAccuracy: userLocation?.accuracy ?? null,
-                            finishTimestamp: userLocation?.timestamp ?? Date.now(),
-                        }
-                    })
-                    setEnded(true)
-                    setEndedRide(localPreview?.amount > 0
-                        ? {
-                            ...props.ride,
-                            finalPrice: localPreview.amount,
-                            actualDistance: localPreview.actualDistance,
-                            actualTime: localPreview.elapsedSeconds,
-                            fareBreakdown: localPreview.fareBreakdown,
-                        }
-                        : null)
-                    setPendingFinalizationSync(true)
-                    addToast(
-                        localPreview?.amount > 0
-                            ? 'Sem sinal — cobre o valor mostrado. A corrida confirma no sistema quando a internet voltar.'
-                            : 'Finalização pendente. Aguarde o valor final antes de cobrar o passageiro.',
-                        'warning',
-                    )
-                } catch (queueError) {
-                    console.error('Could not queue end ride action:', queueError)
-                    addToast('Não foi possível guardar a finalização para sincronizar. Tente novamente com internet.', 'error')
-                }
-            } else {
-                addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
-                if (typeof navigator === 'undefined' || navigator.onLine) {
-                    Sentry.captureException(err, { tags: { issue: 'api_error' } });
-                }
+                await queueFinalizationOffline()
+                return
+            }
+            addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
+            if (typeof navigator === 'undefined' || navigator.onLine) {
+                Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
         }
     })
 
+    // Guarda a finalização pra sincronizar depois e libera o motorista pra cobrar.
+    // Vive fora do onError porque agora também é chamada ANTES de tentar a rede,
+    // quando o app já sabe que está sem sinal.
+    async function queueFinalizationOffline() {
+        const presentialPending = props.ride?.source === 'driver_initiated'
+            && (props.ride?.destinationPending || !props.ride?.destination)
+        const localPreview = previewFare?.offline ? previewFare : await buildOfflineFinishPreview(props.ride)
+
+        if (presentialPending && !(localPreview?.amount > 0)) {
+            addToast('Sem internet neste destino. Mantenha o app aberto e toque em Finalizar de novo — o valor sai do GPS guardado no celular.', 'error')
+            return
+        }
+
+        try {
+            await enqueueOfflineAction({
+                type: 'end-ride',
+                rideId: props.ride._id,
+                payload: {
+                    rideId: props.ride._id,
+                    finishLat: userLocation?.lat,
+                    finishLng: userLocation?.lng,
+                    finishAccuracy: userLocation?.accuracy ?? null,
+                    finishTimestamp: userLocation?.timestamp ?? Date.now(),
+                }
+            })
+            setEnded(true)
+            setEndedRide(localPreview?.amount > 0
+                ? {
+                    ...props.ride,
+                    finalPrice: localPreview.amount,
+                    actualDistance: localPreview.actualDistance,
+                    actualTime: localPreview.elapsedSeconds,
+                    fareBreakdown: localPreview.fareBreakdown,
+                }
+                : null)
+            setPendingFinalizationSync(true)
+            addToast(
+                localPreview?.amount > 0
+                    ? 'Sem sinal — cobre o valor mostrado. A corrida confirma no sistema quando a internet voltar.'
+                    : 'Finalização pendente. Aguarde o valor final antes de cobrar o passageiro.',
+                'warning',
+            )
+        } catch (queueError) {
+            console.error('Could not queue end ride action:', queueError)
+            addToast('Não foi possível guardar a finalização para sincronizar. Tente novamente com internet.', 'error')
+        }
+    }
+
     async function endRide() {
+        // Sem sinal conhecido: guarda direto, sem tentar a rede. Antes a fila só era
+        // alimentada pelo onError, então o app precisava que a requisição FALHASSE pra
+        // guardar a finalização — e sem conectividade ela não falha, fica pendurada.
+        // O motorista via o botão girando pra sempre e, se fechasse o app, perdia a
+        // corrida. O replay drena o GPS antes de reenviar, então pular o flush aqui é
+        // seguro (ver replayOfflineActions em offlineQueue.js).
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            if (queueingOffline) return
+            setQueueingOffline(true)
+            try {
+                await queueFinalizationOffline()
+            } finally {
+                setQueueingOffline(false)
+            }
+            return
+        }
         endRideMutation.mutate();
     }
 
@@ -347,7 +391,7 @@ const FinishRide = (props) => {
                             fullWidth={false}
                             className="flex-1 !min-h-[44px] !text-sm"
                             onClick={() => setPreviewFare(null)}
-                            disabled={endRideMutation.isPending}
+                            disabled={endRideMutation.isPending || queueingOffline}
                         >
                             Voltar
                         </Button>
@@ -355,7 +399,7 @@ const FinishRide = (props) => {
                             fullWidth={false}
                             className="flex-1 !min-h-[44px] !text-sm"
                             onClick={endRide}
-                            loading={endRideMutation.isPending}
+                            loading={endRideMutation.isPending || queueingOffline}
                         >
                             Confirmar e finalizar
                         </Button>

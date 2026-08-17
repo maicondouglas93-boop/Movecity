@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import * as Sentry from '@sentry/react'
 import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
@@ -94,10 +95,10 @@ const ConfirmRidePopUp = (props) => {
     const updateStatus = async (status) => {
         setLoading(true)
         try {
-            const response = await api.post('/rides/update-status', {
+            const response = await withHardTimeout(api.post('/rides/update-status', {
                 rideId: props.ride._id,
                 status: status
-            })
+            }))
             const updatedRide = response.data || await syncCaptainRide?.()
             if (updatedRide) {
                 props.setRide?.(updatedRide)
@@ -139,12 +140,12 @@ const ConfirmRidePopUp = (props) => {
         setError('')
         setLoading(true)
         try {
-            const response = await api.get('/rides/start-ride', {
+            const response = await withHardTimeout(api.get('/rides/start-ride', {
                 params: {
                     rideId: props.ride._id,
                     otp: otp
                 }
-            })
+            }))
 
             if (response.status === 200) {
                 const startedRide = { ...(response.data || props.ride), status: 'started' }

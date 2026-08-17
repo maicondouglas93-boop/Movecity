@@ -22,6 +22,7 @@ import { syncNativeCaptainSession } from '@/shared/platform/nativeSession.servic
 import { isNativePlatform } from '@/shared/platform/platform'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { enqueueOfflineAction, flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
@@ -635,7 +636,7 @@ const CaptainHome = () => {
             // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
             // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
             // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
-            const response = await api.post(`/rides/${targetRide._id}/accept`, {})
+            const response = await withHardTimeout(api.post(`/rides/${targetRide._id}/accept`, {}))
 
             if (response.data) {
                 setRide(response.data)

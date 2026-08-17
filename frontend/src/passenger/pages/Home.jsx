@@ -30,6 +30,7 @@ import RideChat from '@/shared/components/RideChat';
 import { getAccessToken } from '@/shared/services/session';
 import { joinWithRetry } from '@/shared/services/socketAuth';
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue';
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { showBrowserNotification } from '@/shared/services/browserNotify';
 import { formatCurrencyBRL } from '@/shared/utils/formatters';
 import { isNativePlatform } from '@/shared/platform/platform';
@@ -711,13 +712,13 @@ const Home = () => {
         
         addToast('Cancelando corrida...', 'info');
         try {
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
+            const response = await withHardTimeout(api.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, {
                 rideId: ride._id
             }, {
                 headers: {
                     Authorization: `Bearer ${getAccessToken('user')}`
                 }
-            });
+            }));
             const walletRefundedAmount = Number(response.data?.walletRefundedAmount || 0);
             const walletRefundText = walletRefundedAmount > 0
                 ? ` ${formatCurrencyBRL(walletRefundedAmount)} foram devolvidos à sua carteira.`

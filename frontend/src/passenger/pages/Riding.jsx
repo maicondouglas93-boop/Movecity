@@ -19,6 +19,7 @@ import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
 import { enqueueOfflineAction } from '@/shared/services/offlineQueue'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { formatCurrencyBRL, formatDistanceLabel, formatDurationLabel, paymentMethodLabel, paymentStatusLabel as getPaymentStatusLabel } from '@/shared/utils/formatters'
 import { getTripProgressMessage } from '@/passenger/utils/tripProgress'
 import PassengerSafetyCenter from '@/passenger/components/PassengerSafetyCenter'
@@ -236,11 +237,11 @@ const Riding = () => {
         setError('')
         setLoading(true)
         try {
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
+            const response = await withHardTimeout(api.post(`${import.meta.env.VITE_BASE_URL}/rides/pay`, {
                 rideId: ride._id
             }, {
                 headers: { Authorization: `Bearer ${getAccessToken('user')}` }
-            })
+            }))
             addToast(
                 response.data?.reportStatus === 'already_confirmed'
                     ? 'O motorista já confirmou o recebimento.'

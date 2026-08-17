@@ -278,41 +278,62 @@ const FinishRide = (props) => {
 
     const confirmPaymentMutation = useMutation({
         mutationFn: async () => {
-            const response = await api.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm-payment`, {
-                rideId: props.ride._id
-            }, {
-                headers: {
-                    Authorization: `Bearer ${getAccessToken('captain')}`
-                }
-            })
+            const response = await withHardTimeout(
+                api.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm-payment`, {
+                    rideId: props.ride._id
+                }, {
+                    headers: {
+                        Authorization: `Bearer ${getAccessToken('captain')}`
+                    }
+                }),
+            )
             return response.data;
         },
         onSuccess: handlePaymentSettled,
         onError: async (err) => {
             console.error('Confirm payment error:', err)
             if (isNetworkError(err)) {
-                try {
-                    await enqueueOfflineAction({
-                        type: 'confirm-payment',
-                        rideId: props.ride._id,
-                        payload: { rideId: props.ride._id }
-                    })
-                    setPaymentConfirmed(true)
-                    setPendingPaymentSync(true)
-                    setCaptainRide(null)
-                    scheduleTimer(() => navigate('/captain-home'), 2500)
-                } catch (queueError) {
-                    console.error('Could not queue payment confirmation:', queueError)
-                    addToast('Não foi possível guardar a confirmação de pagamento. Tente novamente com internet.', 'error')
-                }
-            } else {
-                Sentry.captureException(err, { tags: { issue: 'api_error' } });
-                addToast(err.response?.data?.message || 'Não foi possível confirmar o pagamento.', 'error')
+                await queuePaymentOffline()
+                return
             }
+            Sentry.captureException(err, { tags: { issue: 'api_error' } });
+            addToast(err.response?.data?.message || 'Não foi possível confirmar o pagamento.', 'error')
         }
     })
 
+    // Mesmo motivo do queueFinalizationOffline: sem conectividade a requisição não
+    // falha, fica pendurada, e o onError — onde mora o enfileiramento — nunca roda.
+    async function queuePaymentOffline() {
+        try {
+            await enqueueOfflineAction({
+                type: 'confirm-payment',
+                rideId: props.ride._id,
+                payload: { rideId: props.ride._id }
+            })
+            setPaymentConfirmed(true)
+            setPendingPaymentSync(true)
+            setCaptainRide(null)
+            scheduleTimer(() => navigate('/captain-home'), 2500)
+        } catch (queueError) {
+            console.error('Could not queue payment confirmation:', queueError)
+            addToast('Não foi possível guardar a confirmação de pagamento. Tente novamente com internet.', 'error')
+        }
+    }
+
     async function confirmPayment() {
+        // Sem sinal conhecido: guarda direto. A finalização enfileirada já liquida o
+        // pagamento sozinha quando sincroniza (desde 2026-08-16), então esta ação vira
+        // um 409 "já confirmado" no replay — que a fila trata como sucesso.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            if (queueingOffline) return
+            setQueueingOffline(true)
+            try {
+                await queuePaymentOffline()
+            } finally {
+                setQueueingOffline(false)
+            }
+            return
+        }
         confirmPaymentMutation.mutate();
     }
 
@@ -474,7 +495,7 @@ const FinishRide = (props) => {
                             <p className='text-ink-600 text-center'>Sem sinal no destino. Este valor foi calculado com o GPS do celular. Receba em dinheiro ou Pix e confirme abaixo.</p>
                             <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
                             <p className='text-xs text-ink-500 text-center'>A confirmação no sistema vai sozinha quando a internet voltar. Pode variar alguns centavos.</p>
-                            <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending}>
+                            <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending || queueingOffline}>
                                 Pagamento recebido
                             </Button>
                         </>
@@ -597,7 +618,7 @@ const FinishRide = (props) => {
                         <p className='text-sm text-ink-600'>Cliente paga direto a você. Confirme quando o pagamento for recebido.</p>
                     </div>
 
-                    <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending}>
+                    <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending || queueingOffline}>
                         <i className="ri-hand-coin-fill text-xl"></i>
                         Pagamento Recebido
                     </Button>

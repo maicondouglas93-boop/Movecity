@@ -160,7 +160,9 @@ const ConfirmRidePopUp = (props) => {
                 enqueueOfflineAction({
                     type: 'start-ride',
                     rideId: props.ride._id,
-                    payload: { rideId: props.ride._id, otp: otp }
+                    // Instante real do embarque. É a partir daqui que a corrida é
+                    // cronometrada e que a espera do motorista para de contar.
+                    payload: { rideId: props.ride._id, otp: otp, occurredAt: Date.now() }
                 }).catch(e => console.error(e));
                 const optimisticRide = { ...props.ride, status: 'started' }
                 props.setRide?.(optimisticRide)

@@ -1303,7 +1303,27 @@ module.exports.acceptRideAtomic = async ({
     return ride;
 }
 
-module.exports.startRide = async ({ rideId, otp, captain }) => {
+/**
+ * Instante em que o motorista REALMENTE executou a ação, quando o app informa.
+ *
+ * Ações feitas sem sinal ficam numa fila e só chegam aqui quando a internet volta —
+ * às vezes muito depois. Usar o relógio do servidor nesse momento cobra do passageiro
+ * o tempo de sincronização (como espera ou como duração de corrida).
+ *
+ * Só aceita dentro de [notBefore, agora]: instante futuro ou anterior ao marco da
+ * corrida cai de volta pro relógio do servidor. Como o teto é o próprio `agora`, que já
+ * é o comportamento atual, este campo só consegue REDUZIR uma cobrança inflada pelo
+ * atraso — nunca criar uma cobrança maior do que a de hoje.
+ */
+function resolveClientMoment(occurredAt, { notBefore = null, now = Date.now() } = {}) {
+    const candidate = Number(occurredAt);
+    if (!Number.isFinite(candidate)) return now;
+    if (candidate > now) return now;
+    if (notBefore != null && candidate < notBefore) return now;
+    return candidate;
+}
+
+module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) => {
     if (!rideId || !otp) {
         throw new Error('Ride id and OTP are required');
     }
@@ -1330,9 +1350,16 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
         throw new Error('Invalid OTP');
     }
 
+    // Embarque real (o toque do motorista), não o instante em que esta requisição foi
+    // processada: um "iniciar corrida" feito sem sinal chega minutos ou horas depois, e
+    // todo esse atraso seria cobrado do passageiro como espera parada no ponto.
+    const startedAtMs = resolveClientMoment(occurredAt, {
+        notBefore: ride.arrivedAt ? ride.arrivedAt.getTime() : new Date(ride.createdAt).getTime(),
+    });
+
     let waitTimeSeconds = 0;
     if (ride.arrivedAt) {
-        waitTimeSeconds = Math.max(0, (Date.now() - ride.arrivedAt.getTime()) / 1000);
+        waitTimeSeconds = Math.max(0, (startedAtMs - ride.arrivedAt.getTime()) / 1000);
     }
 
     // Auditoria financeira (2026-08-08, ALTO #9): waitTimeSeconds era calculado mas
@@ -1350,7 +1377,7 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
     const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
         waitTimeSeconds,
         waitTimeFeeCharged,
-        startedAt: new Date(),
+        startedAt: new Date(startedAtMs),
         // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
         ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
             ? {
@@ -1570,6 +1597,26 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
 
     try {
     const finishExtras = {};
+
+    // Instante em que a corrida REALMENTE terminou. Preferimos o horário enviado pelo
+    // cliente (o toque em "Finalizar") em vez de Date.now(), porque uma finalização
+    // feita offline só chega aqui quando o sinal volta — às vezes muito depois. Sem
+    // isso, o tempo de sincronização seria cobrado do passageiro como tempo de corrida.
+    // Sanidade: nunca aceita instante futuro nem anterior ao início — relógio errado no
+    // aparelho não pode alterar a duração cobrada.
+    // Fica no topo porque a validação de GPS da presencial (abaixo) também precisa medir
+    // a idade da localização contra o fim real, não contra o relógio de agora.
+    const timeBase = ride.startedAt || ride.createdAt;
+    const timeBaseMs = new Date(timeBase).getTime();
+    const nowMs = Date.now();
+    let finishedAtMs = nowMs;
+    if (finishLocation?.timestamp) {
+        const candidate = Number(finishLocation.timestamp);
+        if (Number.isFinite(candidate) && candidate <= nowMs && candidate >= timeBaseMs) {
+            finishedAtMs = candidate;
+        }
+    }
+
     const isPresentialPendingDest = !!(ride.destinationPending || (ride.source === 'driver_initiated' && !ride.destination));
     // O texto informado ao finalizar descreve somente ONDE a corrida terminou. Em uma
     // presencial iniciada sem destino ele jamais pode substituir a soma do percurso
@@ -1612,7 +1659,15 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
         const lastSeenMs = ride.lastLocationAt
             ? new Date(ride.lastLocationAt).getTime()
             : (freshCaptain?.lastSeenAt ? new Date(freshCaptain.lastSeenAt).getTime() : 0);
-        if (!lastSeenMs || (Date.now() - lastSeenMs) > 120000) {
+        // Mede a idade da localização contra o FIM DA CORRIDA, não contra o relógio de
+        // agora. O que esta trava protege é inventar destino/preço a partir de uma
+        // posição que já não valia quando a corrida acabou — e isso independe de quanto
+        // tempo a requisição demorou pra chegar. Comparar com Date.now() reprovava toda
+        // finalização offline sincronizada mais de 2 min depois (zona rural sem sinal):
+        // virava 400, a fila offline descarta 4xx como definitivo e a corrida ficava
+        // presa em `started` pra sempre, sem pagar o motorista.
+        const locationAgeAtFinishMs = finishedAtMs - lastSeenMs;
+        if (!lastSeenMs || locationAgeAtFinishMs > 120000) {
             const err = new Error('STALE_FINISH_LOCATION');
             err.code = 'STALE_FINISH_LOCATION';
             throw err;
@@ -1664,24 +1719,8 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     }
 
     const actualDistance = finishExtras.actualDistance ?? ride.actualDistance ?? 0;
-    // Prefer startedAt (quando a corrida de fato começou); fallback createdAt.
-    const timeBase = ride.startedAt || ride.createdAt;
-    const timeBaseMs = new Date(timeBase).getTime();
-    const now = Date.now();
-    // Prefere o instante real em que o motorista finalizou (enviado pelo cliente em
-    // finishLocation.timestamp) em vez de Date.now() no momento em que o SERVIDOR
-    // processa a requisição. Sem isso, uma finalização feita offline (sem sinal) e
-    // sincronizada só depois cobra do passageiro o tempo de sincronização como se a
-    // corrida ainda estivesse rodando. Sanidade: nunca aceita um instante futuro nem
-    // anterior ao início da corrida — relógio de cliente errado não pode alterar a
-    // duração cobrada.
-    let finishedAtMs = now;
-    if (finishLocation?.timestamp) {
-        const candidate = Number(finishLocation.timestamp);
-        if (Number.isFinite(candidate) && candidate <= now && candidate >= timeBaseMs) {
-            finishedAtMs = candidate;
-        }
-    }
+    // timeBase/finishedAtMs vêm do topo da finalização (a validação de GPS da presencial
+    // também depende deles). Prefere startedAt; fallback createdAt.
     let actualTimeSeconds = Math.round((finishedAtMs - timeBaseMs) / 1000);
     if (actualTimeSeconds < 60 && ride.estimatedTime) actualTimeSeconds = ride.estimatedTime;
 
@@ -1694,13 +1733,14 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
 
     let finalPrice = ride.fare;
     let pricingUpdate = {};
-    const mustRecalculatePrice = actualDistance > 0 || isPresentialPendingDest;
-    if (mustRecalculatePrice) {
-        if (!(actualDistance > 0)) {
-            const err = new Error('INSUFFICIENT_TRIP_DISTANCE');
-            err.code = 'INSUFFICIENT_TRIP_DISTANCE';
-            throw err;
-        }
+    // Recalcula SEMPRE com distância e tempo reais — a mesma conta que o app já mostra
+    // na prévia de finalização (liveRideFare.service.js chama este mesmo motor sem
+    // condição nenhuma). Antes o recálculo dependia de `actualDistance > 0`, então uma
+    // corrida que terminava com 0 km caía num ramo que cobrava a estimativa congelada do
+    // booking: o motorista via R$ 9,25 na tela de confirmação e o passageiro era cobrado
+    // R$ 16,00 (a estimativa de 1,2 km que nunca foi percorrida). Duas regras diferentes
+    // pro mesmo cálculo é o que produzia essa divergência.
+    {
         try {
             const optionalsMap = {};
             if (Array.isArray(ride.optionals)) {
@@ -1744,18 +1784,15 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
                 err.code = 'PRICING_FAILED';
                 throw err;
             }
+            // Último recurso, só pra corrida despachada pelo app: o motor de preço não
+            // respondeu, então cai na estimativa congelada. Mesmo aqui não pode perder a
+            // taxa de espera nem os opcionais (auditoria financeira 2026-08-08, CRÍTICO
+            // #4) — no caminho normal quem soma isso é o próprio PricingEngine.
+            const optionalsTotal = Array.isArray(ride.optionals)
+                ? ride.optionals.reduce((sum, opt) => sum + (Number(opt?.price) || 0), 0)
+                : 0;
+            finalPrice = (Number(ride.fare) || 0) + (Number(ride.waitTimeFeeCharged) || 0) + optionalsTotal;
         }
-    } else {
-        // Auditoria financeira (2026-08-08, CRÍTICO #4): sem recálculo por distância
-        // (actualDistance===0 e não é presencial pendente), finalPrice ficava só em
-        // ride.fare — a taxa de espera cobrada em startRide e os opcionais escolhidos
-        // na criação (já com price congelado, ver processedOptionals em createRide)
-        // nunca entravam na conta final. Confirmado por rideFees.service.test.js
-        // (testes pré-existentes, estavam falhando antes desta correção).
-        const optionalsTotal = Array.isArray(ride.optionals)
-            ? ride.optionals.reduce((sum, opt) => sum + (Number(opt?.price) || 0), 0)
-            : 0;
-        finalPrice = (Number(ride.fare) || 0) + (Number(ride.waitTimeFeeCharged) || 0) + optionalsTotal;
     }
 
     if (isPresentialPendingDest && !(finalPrice > 0)) {

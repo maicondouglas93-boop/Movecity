@@ -41,8 +41,24 @@ function buildRequestConfig(action) {
     switch (action.type) {
         case 'accept-ride':
             return { method: 'post', url: `${baseURL}/rides/${payload.rideId}/accept`, data: {}, headers }
+        // `occurredAt` viaja como foi capturado no enqueue (o toque real do motorista) e
+        // nunca é regerado aqui: recalcular na sincronização é exatamente o atraso que
+        // este campo existe pra excluir da cobrança.
         case 'start-ride':
-            return { method: 'get', url: `${baseURL}/rides/start-ride`, params: { rideId: payload.rideId, otp: payload.otp }, headers }
+            return {
+                method: 'get',
+                url: `${baseURL}/rides/start-ride`,
+                params: {
+                    rideId: payload.rideId,
+                    otp: payload.otp,
+                    ...(payload.occurredAt != null ? { occurredAt: payload.occurredAt } : {}),
+                },
+                headers,
+            }
+        // 'update-ride-status' (inclui 'arrived') NÃO manda occurredAt de propósito:
+        // um arrivedAt mais antigo AUMENTA a espera cobrada, então seria uma alavanca
+        // de inflação vinda do cliente. O caso que importava — chegada online + embarque
+        // offline — já é corrigido pelo occurredAt do start-ride.
         case 'update-ride-status':
             return { method: 'post', url: `${baseURL}/rides/update-status`, data: { rideId: payload.rideId, status: payload.status }, headers }
         case 'end-ride':
@@ -217,7 +233,17 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
                 continue
             }
 
-            if (status && status >= 400 && status < 500) {
+            // 'end-ride' é a única ação que representa trabalho JÁ EXECUTADO: a viagem
+            // aconteceu. Descartá-la num 4xx significa nunca pagar o motorista por ela, e
+            // vários 400 desta rota são ambientais — GPS que ainda não terminou de
+            // sincronizar, tarifa indisponível no instante, localização considerada
+            // velha. Esses passam numa tentativa seguinte, então ela entra no contador de
+            // retentativas em vez de morrer no primeiro erro. 404 continua definitivo: a
+            // corrida não existe mais e nenhuma tentativa muda isso.
+            const isPerformedWork = action.type === 'end-ride'
+            const worthRetrying = isPerformedWork && status !== 404
+
+            if (status && status >= 400 && status < 500 && !worthRetrying) {
                 // Erro do próprio pedido (corrida não existe mais, OTP inválido, etc.) —
                 // tentar de novo não muda o resultado.
                 await moveToFailedAndRemove(action, err.response?.data?.message || err.message);

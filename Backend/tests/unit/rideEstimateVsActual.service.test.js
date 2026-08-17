@@ -67,6 +67,35 @@ describe('Ride Service — estimativa × valor final (endRide)', () => {
         expect(result.fare).toBe(42.5); // estimativa original preservada, não sobrescrita
     });
 
+    // Regressão do caso reportado em campo (2026-08-16): presencial COM destino
+    // informado na criação, finalizada com 0 km percorrido. O app mostrava o valor
+    // recalculado na tela "Confirmar valor final" (R$ 9,25 no relato) e o sistema cobrava
+    // a estimativa congelada do booking (R$ 16,00), porque o recálculo era condicionado a
+    // `actualDistance > 0`. Prévia e finalização precisam usar a mesma conta.
+    it('recalcula mesmo com distância zero, em vez de cair na estimativa do booking', async () => {
+        const ride = await createRide({
+            user: user._id,
+            captain: captain._id,
+            source: 'driver_initiated',
+            destination: 'Av. Antônio Florêncio Alvim, Lajinha',
+            destinationPending: false,
+            status: 'started',
+            fare: 42.5,            // estimativa congelada na criação
+            estimatedDistance: 10000,
+            estimatedTime: 1800,   // 30 min — usado como tempo quando o real é < 60s
+            actualDistance: 0,     // motorista não saiu do lugar
+            startedAt: new Date(),
+        });
+
+        const result = await rideService.endRide({ rideId: ride._id, captain });
+
+        // 10 (base) + 0 (distância) + 30min × 0,50 = 25 — acima do mínimo (15) e
+        // claramente diferente da estimativa de 42,50.
+        expect(result.finalPrice).toBe(25);
+        expect(result.finalPrice).not.toBe(42.5);
+        expect(result.fare).toBe(42.5); // a estimativa original segue preservada
+    });
+
     // TESTE 2 — corrida termina ANTES do destino pesquisado (X -> Z, Z a 4km de X)
     it('cobra pelo trajeto real quando a corrida termina antes do destino pesquisado', async () => {
         const ride = await createRide({

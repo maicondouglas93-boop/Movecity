@@ -70,6 +70,36 @@ async function createFinancialRide() {
     return { captain, ride };
 }
 
+// Presencial sem destino: o destino sai da última GPS válida, então a finalização
+// valida a idade dessa posição. `lastLocationAt` controla quão "velha" ela é.
+async function createPresentialRideWithLastLocationAt(lastLocationAt) {
+    const captain = await createCaptain({
+        busyLock: true,
+        isOnline: true,
+        location: { ltd: LAJINHA.lat, lng: LAJINHA.lng },
+        lastSeenAt: lastLocationAt,
+    });
+    const ride = await rideModel.create({
+        source: 'driver_initiated',
+        captain: captain._id,
+        pickup: 'Lajinha, MG',
+        destinationPending: true,
+        pickupCoordinates: LAJINHA,
+        origin: { coordinates: [LAJINHA.lng, LAJINHA.lat], timestamp: new Date() },
+        fare: 0,
+        vehicleType: 'car',
+        paymentMethod: 'cash',
+        otp: '123456',
+        status: 'started',
+        startedAt: new Date(Date.now() - 150 * 60 * 1000),
+        actualDistance: 80000,
+        lastLocation: LAJINHA,
+        lastLocationAt,
+        optionals: [],
+    });
+    return { captain, ride };
+}
+
 describe('finalização financeira P0', () => {
     it('dupla finalização produz uma corrida e um único ledger financeiro', async () => {
         const { captain, ride } = await createFinancialRide();
@@ -142,6 +172,55 @@ describe('finalização financeira P0', () => {
         expect(PricingEngine.calculateFare).toHaveBeenCalledWith(
             expect.objectContaining({ time: 600 })
         );
+    });
+
+    // Regressão do achado 01 da auditoria de corrida ativa (2026-08-16): zona rural sem
+    // sinal. O motorista finaliza offline, a ação fica na fila e só sincroniza quando o
+    // sinal volta — às vezes uma hora depois. A validação de GPS da presencial comparava
+    // a idade da posição com Date.now() (o instante em que a requisição CHEGA), então
+    // reprovava com STALE_FINISH_LOCATION → 400 → a fila offline descarta 4xx como
+    // definitivo → corrida presa em `started` pra sempre, motorista sem receber.
+    it('finaliza presencial sincronizada muito depois, desde que a GPS fosse fresca no fim real', async () => {
+        const finishedAt = Date.now() - 60 * 60 * 1000; // motorista finalizou 1h atrás
+        const { captain, ride } = await createPresentialRideWithLastLocationAt(
+            new Date(finishedAt - 10 * 60 * 1000)
+        );
+
+        const finished = await rideService.endRide({
+            rideId: ride._id,
+            captain,
+            finishLocation: {
+                lat: LAJINHA.lat,
+                lng: LAJINHA.lng,
+                accuracy: 10,
+                timestamp: finishedAt,
+            },
+        });
+
+        expect(finished.status).toBe('finished');
+        // Cobra só até o fim real (150min de início → 60min atrás = 90min), não as 150min
+        // que teriam saído do relógio do servidor no momento da sincronização.
+        expect(PricingEngine.calculateFare).toHaveBeenCalledWith(
+            expect.objectContaining({ time: 5400 })
+        );
+    });
+
+    it('mantém a recusa quando a GPS já estava velha no momento do fim', async () => {
+        const finishedAt = Date.now() - 60 * 60 * 1000;
+        // Última posição conhecida é 30min ANTERIOR ao fim declarado: não dá pra saber
+        // onde a corrida terminou, então inventar destino/preço continua proibido.
+        const { captain, ride } = await createPresentialRideWithLastLocationAt(
+            new Date(finishedAt - 30 * 60 * 1000)
+        );
+
+        await expect(rideService.endRide({
+            rideId: ride._id,
+            captain,
+            // Sem finishLocation: nada atualiza a posição, a última válida segue velha.
+        })).rejects.toMatchObject({ code: 'STALE_FINISH_LOCATION' });
+
+        const stored = await rideModel.findById(ride._id);
+        expect(stored.status).toBe('started');
     });
 
     it('ignora finishLocation.timestamp implausível (no futuro) e cai de volta pro relógio do servidor', async () => {

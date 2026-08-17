@@ -450,10 +450,15 @@ module.exports.startRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId, otp } = req.query;
+    const { rideId, otp, occurredAt } = req.query;
 
     try {
-        const ride = await rideService.startRide({ rideId, otp, captain: req.captain });
+        const ride = await rideService.startRide({
+            rideId,
+            otp,
+            captain: req.captain,
+            occurredAt: occurredAt == null ? null : Number(occurredAt),
+        });
 
         // Não logar o documento da ride — OTP e PII (auditoria presencial).
         console.log(`[AUDIT] startRide ok ride=${ride._id} captain=${req.captain._id} source=${ride.source || 'passenger_requested'}`);

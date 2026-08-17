@@ -53,6 +53,47 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             expect(result.waitTimeFeeCharged).toBeCloseTo(5.0, 1);
         });
 
+        // Regressão do achado 02 da auditoria de corrida ativa (2026-08-16): o motorista
+        // marca "cheguei" com sinal, embarca o passageiro logo depois mas já sem sinal, e
+        // a fila offline só sincroniza uma hora adiante. Sem o instante real do embarque,
+        // waitTimeSeconds virava (sincronização − chegada) e cobrava do passageiro uma
+        // hora de espera parada no ponto que nunca existiu.
+        it('cobra só a espera real quando o embarque foi offline e sincronizou muito depois', async () => {
+            const user = await createUser();
+            const captain = await createCaptain();
+            const arrivedAt = new Date(Date.now() - 65 * 60 * 1000);
+            const boardedAt = arrivedAt.getTime() + 8 * 60 * 1000; // embarcou 8 min depois
+            const ride = await createRide({
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt, otp: '1234'
+            });
+
+            const result = await rideService.startRide({
+                rideId: ride._id, otp: '1234', captain, occurredAt: boardedAt,
+            });
+
+            // 8 min de espera − 5 grátis = 3 min × R$1,00 = R$3,00 (e não os ~60 min
+            // que sairiam do relógio do servidor no momento da sincronização).
+            expect(result.waitTimeFeeCharged).toBeCloseTo(3.0, 1);
+            expect(result.waitTimeSeconds).toBeCloseTo(480, 0);
+            expect(new Date(result.startedAt).getTime()).toBe(boardedAt);
+        });
+
+        it('descarta instante de embarque no futuro e usa o relógio do servidor', async () => {
+            const user = await createUser();
+            const captain = await createCaptain();
+            const arrivedAt = new Date(Date.now() - 10 * 60 * 1000);
+            const ride = await createRide({
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt, otp: '1234'
+            });
+
+            const result = await rideService.startRide({
+                rideId: ride._id, otp: '1234', captain, occurredAt: Date.now() + 60 * 60 * 1000,
+            });
+
+            // Relógio adulterado no aparelho não encurta a espera devida.
+            expect(result.waitTimeFeeCharged).toBeCloseTo(5.0, 1);
+        });
+
         it('should NOT charge a wait-time fee within the free window', async () => {
             const user = await createUser();
             const captain = await createCaptain();

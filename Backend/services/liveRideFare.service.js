@@ -15,12 +15,22 @@ function getRideOptionals(ride) {
     return optionals;
 }
 
+/**
+ * Segundos cobráveis da corrida — a MESMA regra que a finalização aplica.
+ *
+ * O piso de 60s (que troca o tempo real pelo estimado numa corrida muito curta) existia
+ * só em endRide. A prévia mostrava o tempo real e a cobrança usava o estimado, então o
+ * motorista via um valor na tela e o sistema fechava com outro. Fonte única aqui,
+ * consumida pelos dois lados.
+ */
 function getElapsedSeconds(ride, now) {
     const base = ride?.startedAt || ride?.createdAt;
     const baseMs = base ? new Date(base).getTime() : now;
 
     if (!Number.isFinite(baseMs)) return 0;
-    return Math.max(0, Math.round((now - baseMs) / 1000));
+    const elapsed = Math.max(0, Math.round((now - baseMs) / 1000));
+    if (elapsed < 60 && ride?.estimatedTime) return ride.estimatedTime;
+    return elapsed;
 }
 
 /**
@@ -46,8 +56,29 @@ async function calculateLiveRideFare({ ride, actualDistance, now = Date.now() })
         optionals: getRideOptionals(ride),
     });
 
+    // Cupom: a finalização recalcula o desconto sobre o valor real. A prévia ignorava
+    // isso e mostrava o valor cheio, então quem tinha cupom via um número maior durante
+    // o trajeto do que o cobrado no fim. Mesma função de avaliação, mesmo fallback pro
+    // valor congelado quando a promoção não existe mais (ver endRide).
+    let amount = pricing.finalFare;
+    let discountAmount = 0;
+    if (ride.promotionApplied) {
+        try {
+            const promotionModel = require('../models/promotion.model');
+            const promotion = await promotionModel.findById(ride.promotionApplied);
+            discountAmount = promotion
+                ? require('./promotion.service').evaluateDiscount(promotion, amount).discount
+                : Math.min(ride.discountAmount || 0, amount);
+            amount = Math.max(0, amount - discountAmount);
+        } catch (err) {
+            // Uma falha ao ler a promoção não pode esconder o valor corrente da corrida.
+            console.error('[LiveFare] desconto não aplicado na prévia:', err.message);
+        }
+    }
+
     return {
-        amount: pricing.finalFare,
+        amount,
+        discountAmount,
         actualDistance: distance,
         elapsedSeconds,
         currency: 'BRL',

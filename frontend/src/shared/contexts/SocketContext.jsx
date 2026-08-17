@@ -64,6 +64,13 @@ const SocketProvider = ({ children }) => {
                             'error',
                             8000
                         )
+                        // A ação morreu: o estado otimista do app não corresponde mais a
+                        // nada no servidor. Sem isto, a tela seguia mostrando a corrida
+                        // no estado antigo até o app ser reaberto — e o motorista não
+                        // tinha como saber que era isso.
+                        window.dispatchEvent(new CustomEvent('offline-action-failed', {
+                            detail: { type: action.type, rideId: action.rideId },
+                        }))
                     },
                     // onRetryLater: rede ainda instável, tenta de novo na próxima reconexão
                     // sem incomodar o motorista a cada tentativa silenciosa.

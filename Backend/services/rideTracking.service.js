@@ -10,6 +10,19 @@ const {
 const MIN_COUNTABLE_DISTANCE_METERS = 5;
 const MAX_TRACKING_RETRIES = 5;
 
+// Quantos pointIds recentes ficam guardados na corrida para detectar reenvio.
+//
+// A lista era ilimitada: um ponto a cada 5s, e CADA ponto recarregava o array inteiro
+// do Mongo para conferir duplicata — custo quadrático ao longo da corrida. Uma corrida
+// de 1h chegava a 720 entradas relidas 720 vezes; numa corrida travada por horas,
+// degradava rápido e caminhava para o limite de 16 MB do documento.
+//
+// 300 entradas cobrem ~25 minutos de reenvio no intervalo normal de 5s. Um ponto mais
+// antigo que isso cair fora da lista não recria o risco de contar distância duas vezes:
+// a checagem de ordem (`point.timestamp <= previousAtMs`) rejeita qualquer ponto
+// anterior ao último aceito, que é exatamente o caso de um replay atrasado.
+const MAX_PROCESSED_POINT_IDS = 300;
+
 function buildPointId({ rideId, captainId, location, pointId }) {
     const supplied = typeof pointId === 'string' ? pointId.trim() : '';
     if (supplied && supplied.length <= 160) return supplied;
@@ -51,7 +64,7 @@ async function confirmRejectedPoint({ ride, captainId, trackingPointId, reason }
             finalizationState: { $ne: 'finishing' },
             processedTrackingPointIds: { $ne: trackingPointId },
         },
-        { $addToSet: { processedTrackingPointIds: trackingPointId } },
+        { $push: { processedTrackingPointIds: { $each: [trackingPointId], $slice: -MAX_PROCESSED_POINT_IDS } } },
         { new: true, projection: { actualDistance: 1 } }
     );
 
@@ -148,7 +161,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                         lastLocation: { lat: point.lat, lng: point.lng },
                         lastLocationAt: new Date(point.timestamp),
                     },
-                    $addToSet: { processedTrackingPointIds: trackingPointId },
+                    $push: { processedTrackingPointIds: { $each: [trackingPointId], $slice: -MAX_PROCESSED_POINT_IDS } },
                 },
                 { new: true, projection: { actualDistance: 1 } }
             );
@@ -204,7 +217,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                 lastLocation: { lat: point.lat, lng: point.lng },
                 lastLocationAt: new Date(point.timestamp),
             },
-            $addToSet: { processedTrackingPointIds: trackingPointId },
+            $push: { processedTrackingPointIds: { $each: [trackingPointId], $slice: -MAX_PROCESSED_POINT_IDS } },
         };
         if (countDistance) update.$inc = { actualDistance: distMeters };
 

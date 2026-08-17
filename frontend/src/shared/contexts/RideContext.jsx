@@ -103,12 +103,18 @@ const RideProvider = ({ children }) => {
 
     const syncSeqRef = useRef({ user: 0, captain: 0, userParcel: 0, captainParcel: 0 })
 
-    const syncRide = useCallback(async (kind) => {
+    // `force` ignora a proteção anti-retrocesso. Ela existe pra um snapshot antigo não
+    // sobrescrever um estado mais avançado, mas quando uma ação offline falha em
+    // definitivo o estado otimista do app é que está errado — e o guarda passa a
+    // IMPEDIR o estado correto do servidor de entrar, deixando a tela mostrando uma
+    // corrida em andamento que o backend não tem.
+    const syncRide = useCallback(async (kind, { force = false } = {}) => {
         const seq = ++syncSeqRef.current[kind]
         const result = await fetchActive(kind, RIDE_ENDPOINT_BY_KIND)
         if (seq !== syncSeqRef.current[kind]) return result
         if (result !== UNKNOWN) {
             if (kind === 'user') setUserRide(result)
+            else if (force) setCaptainRideState(result)
             else setCaptainRideState(previous => mergeRideByStatus(previous, result))
         }
         return result
@@ -134,6 +140,20 @@ const RideProvider = ({ children }) => {
     const setCaptainRide = useCallback((nextRide) => {
         setCaptainRideState(previous => mergeRideByStatus(previous, nextRide))
     }, [])
+
+    // Uma ação offline (aceitar/iniciar/finalizar) que falhou em definitivo deixa o app
+    // exibindo um estado que o servidor nunca chegou a ter. Só um aviso não bastava: o
+    // guarda anti-retrocesso segurava o estado otimista até o app ser reaberto, e nada
+    // dizia isso ao motorista. Evento de janela porque SocketProvider envolve este
+    // contexto e não consegue chamá-lo direto — mesmo padrão do listener de 'online'.
+    useEffect(() => {
+        const resyncFromServer = () => {
+            syncRide('captain', { force: true }).catch(() => {})
+            syncParcel('captain').catch(() => {})
+        }
+        window.addEventListener('offline-action-failed', resyncFromServer)
+        return () => window.removeEventListener('offline-action-failed', resyncFromServer)
+    }, [syncRide, syncParcel])
 
     const clearUserRide = useCallback(() => {
         setUserRide(null)

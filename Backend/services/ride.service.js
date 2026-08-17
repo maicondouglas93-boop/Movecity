@@ -36,6 +36,12 @@ const VALID_ORIGINS_BY_TARGET = {
     started: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     finished: ['started'],
     // SCH-M3 Fase 2: scheduled cancelável via /rides/cancel (mesmo motor de transição).
+    //
+    // `started` está fora de propósito: corrida em andamento não se cancela, se finaliza.
+    // O painel administrativo é a ÚNICA exceção e não passa por aqui — ele usa
+    // RIDE_FORCE_ORIGINS (cancellationReconciliation.service.js), que inclui 'started'
+    // justamente para destravar uma corrida presa. Se você veio consertar uma corrida
+    // que "não cancela", o caminho é aquele, não acrescentar 'started' nesta lista.
     cancelled: ['scheduled', 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
     // Única reversão da máquina (todo o resto é progressão linear ou término): motorista
     // desiste de uma corrida já aceita, mas antes de iniciar (auditoria de UX, 2026-08-02).
@@ -1854,7 +1860,10 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
                     ...(ride.promotionApplied ? { discountAmount: finalDiscountAmount } : {}),
                     paymentStatus: 'pending',
                     actualDistance,
-                    finishedAt: new Date(),
+                    // Instante real do fim, não o do processamento: numa finalização
+                    // offline sincronizada depois, gravar `agora` fazia o histórico
+                    // mostrar a corrida terminando quando o sinal voltou.
+                    finishedAt: new Date(finishedAtMs),
                     finalizationState: 'finished_pending_payment',
                     ...finishExtras,
                     ...pricingUpdate,

@@ -41,6 +41,21 @@ jest.mock('../../models/ride.model', () => ({
             const pointId = update.$addToSet.processedTrackingPointIds;
             if (!mockState.processedTrackingPointIds.includes(pointId)) mockState.processedTrackingPointIds.push(pointId);
         }
+        // A lista de pontos processados passou a ser podada ($push + $slice negativo)
+        // para não crescer sem limite durante a corrida. O `$ne` no filtro continua
+        // sendo o que garante idempotência; o $slice só descarta os mais antigos.
+        const pushed = update.$push?.processedTrackingPointIds;
+        if (pushed) {
+            const ids = pushed.$each || [pushed];
+            ids.forEach((pointId) => {
+                if (!mockState.processedTrackingPointIds.includes(pointId)) {
+                    mockState.processedTrackingPointIds.push(pointId);
+                }
+            });
+            if (typeof pushed.$slice === 'number' && pushed.$slice < 0) {
+                mockState.processedTrackingPointIds = mockState.processedTrackingPointIds.slice(pushed.$slice);
+            }
+        }
         return { ...mockState };
     }),
 }));

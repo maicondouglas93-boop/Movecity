@@ -170,12 +170,25 @@ async function runLocationFlush(socket, { rideId } = {}) {
 }
 
 export async function flushQueuedLocations(socket, options = {}) {
-    if (locationFlushPromise) await locationFlushPromise
-    locationFlushPromise = runLocationFlush(socket, options)
+    // Encadeia em vez de "esperar e então começar": vários chamadores em espera
+    // retomavam juntos, cada um seguia para iniciar a própria sincronização, e todos
+    // liam a mesma fila e emitiam os mesmos pontos. A idempotência do servidor absorvia
+    // financeiramente, mas gastava rede e bateria à toa. Aqui cada chamada se enfileira
+    // depois da anterior, e o `catch` impede que uma falha derrube as seguintes.
+    const previous = locationFlushPromise
+    const current = (async () => {
+        if (previous) {
+            await previous.catch(() => {})
+        }
+        return runLocationFlush(socket, options)
+    })()
+
+    locationFlushPromise = current
     try {
-        return await locationFlushPromise
+        return await current
     } finally {
-        locationFlushPromise = null
+        // Só limpa se ninguém encadeou depois — senão apagaria a corrente em andamento.
+        if (locationFlushPromise === current) locationFlushPromise = null
     }
 }
 

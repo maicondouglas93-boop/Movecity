@@ -32,6 +32,7 @@ const accountDeletionRoutes = require('./routes/accountDeletion.routes');
 require('./services/tariffScheduler.service'); // registra o cron que aplica tarifas agendadas
 require('./services/captainDeadline.service'); // registra o cron do prazo de documentação do motorista
 require('./services/schedule.service'); // registra o cron que ativa corridas/encomendas agendadas
+require('./services/rideHealth.service'); // registra o cron que detecta corridas travadas
 require('./services/accountDeletion.service'); // anonimiza contas 30 dias após a solicitação
 
 const adminRoutes = require('./routes/admin.routes');

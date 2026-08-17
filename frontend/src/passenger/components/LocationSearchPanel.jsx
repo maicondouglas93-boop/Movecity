@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
 import { getPlaceDetails, getAddressSuggestions } from '@/shared/services/mapsApi'
 import { QUICK_PLACES } from '@/shared/assets/quickPlaces/quickPlaces'
+import { useToast } from '@/shared/contexts/ToastContext'
 
 const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPickup, setDestination, activeField, setIsSelectingOnMap, isSearching, sessionToken }) => {
     const [ resolvingKey, setResolvingKey ] = useState(null)
     const [ resolvingQuickPlaceId, setResolvingQuickPlaceId ] = useState(null)
+    const { addToast } = useToast()
 
     const handleSuggestionClick = async (suggestion) => {
         if (typeof suggestion === 'string') {
@@ -66,12 +68,18 @@ const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPi
             const { suggestions: found } = await getAddressSuggestions({ input: place.query, sessionToken })
             const best = found[0]
             if (!best) {
+                // Falhar em silêncio aqui é o pior caso: o passageiro toca, nada
+                // acontece, e não há nenhuma pista de que a busca não encontrou o
+                // local (foi exatamente o que aconteceu com "Paróquia N. Sra. de
+                // Nazaré" — o app só logava no console, que ninguém vê em produção).
                 console.error(`Nenhum resultado de mapa para o local fixo "${place.label}"`)
+                addToast(`Não encontrei "${place.label}" no mapa agora. Digite o endereço manualmente.`, 'error')
                 return
             }
             await handleSuggestionClick(best)
         } catch (err) {
             console.error(`Falha ao buscar local fixo "${place.label}":`, err)
+            addToast(`Não consegui buscar "${place.label}" agora. Tente digitar o endereço.`, 'error')
         } finally {
             setResolvingQuickPlaceId(null)
         }

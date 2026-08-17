@@ -17,8 +17,11 @@ export const QUICK_PLACES = [
     {
         id: 'igreja-nazare',
         label: 'Paróquia N. Sra. de Nazaré',
-        subtitle: 'R. Dom Cavati, 47 - Lajinha, MG',
-        query: 'Paróquia Nossa Senhora de Nazaré, R. Dom Cavati, 47, Lajinha, MG',
+        subtitle: 'R. Dom Cavate, 47-173 - Lajinha, MG',
+        // Grafia e numeração exatas conforme o Google Maps (confirmado em campo,
+        // 2026-08-17) — "Dom Cavati" + só "47" não batia com nenhum resultado real e
+        // a busca falhava sem preencher nada.
+        query: 'Paróquia Nossa Senhora de Nazaré, R. Dom Cavate, 47-173, Lajinha, MG, 36980-000',
         icon: igrejaIcon,
     },
     {

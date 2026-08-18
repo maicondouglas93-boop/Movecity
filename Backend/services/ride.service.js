@@ -741,6 +741,18 @@ function isValidGpsCoord(lat, lng) {
 // pode ter rodado a cidade inteira com o app fechado.
 const STORED_LOCATION_MAX_AGE_MS = 5 * 60 * 1000;
 
+/**
+ * A posição guardada no servidor ainda descreve onde o motorista está?
+ *
+ * Fonte única da resposta — antes cada uso da posição do motorista decidia isso por
+ * conta própria (ou não decidia), e foi daí que saíram as rotas absurdas e a distância
+ * fantasma cobrada do passageiro.
+ */
+function isStoredLocationFresh(captainDoc, now = Date.now()) {
+    const lastSeenMs = captainDoc?.lastSeenAt ? new Date(captainDoc.lastSeenAt).getTime() : null;
+    return Number.isFinite(lastSeenMs) && (now - lastSeenMs) <= STORED_LOCATION_MAX_AGE_MS;
+}
+
 function resolveCaptainOrigin(captainDoc, clientLat, clientLng, now = Date.now()) {
     const storedLat = captainDoc?.location?.ltd;
     const storedLng = captainDoc?.location?.lng;
@@ -748,9 +760,7 @@ function resolveCaptainOrigin(captainDoc, clientLat, clientLng, now = Date.now()
     const storedOk = isValidGpsCoord(storedLat, storedLng);
 
     if (clientOk && storedOk) {
-        const lastSeenMs = captainDoc?.lastSeenAt ? new Date(captainDoc.lastSeenAt).getTime() : null;
-        const storedIsFresh = Number.isFinite(lastSeenMs)
-            && (now - lastSeenMs) <= STORED_LOCATION_MAX_AGE_MS;
+        const storedIsFresh = isStoredLocationFresh(captainDoc, now);
 
         // A checagem de "salto" existe contra GPS falsificado, e só faz sentido quando
         // o servidor sabe MESMO onde o motorista está. Sem olhar a idade, ela descartava
@@ -1446,15 +1456,31 @@ module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) =
         waitTimeFeeCharged = (chargeableSeconds / 60) * (Number(tariffSetting.perMinuteWaitFee) || 0);
     }
 
+    // Âncora do contador de distância.
+    //
+    // Antes isto gravava a posição GUARDADA do motorista carimbada com o horário de
+    // AGORA — o carimbo era a parte perigosa. A validação de velocidade passava a
+    // comparar cada GPS real contra um ponto que podia ser de horas atrás, como se
+    // tivesse acabado de ser capturado: os primeiros pontos eram descartados por
+    // "velocidade impossível" (distância perdida) e, quando o tempo decorrido já
+    // "permitia" aquele salto, o trecho fantasma inteiro era somado e cobrado do
+    // passageiro. Reproduzido em teste: 3.336 m somados sem o carro sair do lugar.
+    //
+    // Agora só ancora quando a posição é recente, e com o horário REAL em que ela foi
+    // registrada. Sem isso, não ancora nada: o primeiro GPS da corrida vira a âncora
+    // sozinho (processRideTrackingPoint já trata esse caso sem contar distância).
+    const storedLat = ride.captain?.location?.ltd;
+    const storedLng = ride.captain?.location?.lng;
+    const canAnchor = isValidGpsCoord(storedLat, storedLng) && isStoredLocationFresh(ride.captain);
+
     const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
         waitTimeSeconds,
         waitTimeFeeCharged,
         startedAt: new Date(startedAtMs),
-        // Inicia o tracking de distância a partir do GPS atual do motorista, se houver.
-        ...(ride.captain?.location?.ltd != null && ride.captain?.location?.lng != null
+        ...(canAnchor
             ? {
-                lastLocation: { lat: ride.captain.location.ltd, lng: ride.captain.location.lng },
-                lastLocationAt: new Date(),
+                lastLocation: { lat: storedLat, lng: storedLng },
+                lastLocationAt: new Date(ride.captain.lastSeenAt),
             }
             : {}),
     });
@@ -2716,6 +2742,7 @@ module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }
 // module.exports ao longo do arquivo, para deixar claro que não são API do serviço.
 module.exports.__testing__ = {
     resolveCaptainOrigin,
+    isStoredLocationFresh,
     STORED_LOCATION_MAX_AGE_MS,
     MAX_ROUTE_DISTANCE_METERS,
 };

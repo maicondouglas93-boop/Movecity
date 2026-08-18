@@ -107,6 +107,47 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             expect(result.waitTimeFeeCharged).toBe(0);
         });
 
+        // Achado L1 da auditoria de localização/preço (2026-08-18): startRide gravava a
+        // posição guardada do motorista como âncora da distância, carimbada com o horário
+        // de agora. Uma posição velha assim fazia o rastreamento rejeitar os primeiros
+        // pontos reais e, depois, somar o vão inteiro como se tivesse sido percorrido.
+        describe('âncora do contador de distância', () => {
+            const LAJINHA = { ltd: -20.1500, lng: -41.6300 };
+
+            it('não ancora numa posição antiga do motorista', async () => {
+                const user = await createUser();
+                const captain = await createCaptain({
+                    location: LAJINHA,
+                    lastSeenAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+                });
+                const ride = await createRide({
+                    user: user._id, captain: captain._id, status: 'arrived', otp: '1234',
+                });
+
+                await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+
+                const stored = await rideModel.findById(ride._id);
+                expect(stored.lastLocation?.lat ?? null).toBeNull();
+            });
+
+            it('ancora numa posição recente, com a hora real em que ela foi registrada', async () => {
+                const user = await createUser();
+                const lastSeenAt = new Date(Date.now() - 30 * 1000);
+                const captain = await createCaptain({ location: LAJINHA, lastSeenAt });
+                const ride = await createRide({
+                    user: user._id, captain: captain._id, status: 'arrived', otp: '1234',
+                });
+
+                await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+
+                const stored = await rideModel.findById(ride._id);
+                expect(stored.lastLocation.lat).toBeCloseTo(LAJINHA.ltd, 5);
+                // O carimbo precisa ser o da captura, não o do início da corrida — era
+                // essa mentira que enganava a validação de velocidade.
+                expect(new Date(stored.lastLocationAt).getTime()).toBe(lastSeenAt.getTime());
+            });
+        });
+
         it('should NOT charge a wait-time fee when the driver never marked arrived', async () => {
             const user = await createUser();
             const captain = await createCaptain();

@@ -12,7 +12,7 @@ const { deleteByPrefix } = require('../../cache/cache');
 // definido no ambiente de teste) com o HTTP mockado: o que importa validar aqui é a
 // NORMALIZAÇÃO da resposta do roteador, não a rede.
 
-// O axios vem de node_modules e é externalizado pelo Vitest — `vi.mock` não o
+// O axios vem de node_modules e é externalizado pelo Vitest — `jest.mock` não o
 // intercepta. Como o teste e os providers compartilham a MESMA instância (cache do
 // require do Node), espionar o método aqui substitui a chamada lá dentro.
 let getSpy;
@@ -53,7 +53,7 @@ describe('GET /maps/get-route (Fase D)', () => {
     let userToken;
 
     beforeEach(async () => {
-        getSpy = vi.spyOn(axios, 'get');
+        getSpy = jest.spyOn(axios, 'get');
         // O serviço cacheia a rota por 5 min; sem limpar, o segundo teste leria o
         // resultado do primeiro em vez de exercitar a normalização de novo.
         deleteByPrefix('route-steps:');

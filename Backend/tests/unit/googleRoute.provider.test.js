@@ -46,7 +46,7 @@ describe('google.provider.getRouteWithSteps (Fase D)', () => {
     beforeEach(() => {
         deleteByPrefix('google-route');
         deleteByPrefix('google-geocode');
-        postSpy = vi.spyOn(axios, 'post').mockResolvedValue(ROUTES_RESPONSE);
+        postSpy = jest.spyOn(axios, 'post').mockResolvedValue(ROUTES_RESPONSE);
     });
 
     afterEach(() => {

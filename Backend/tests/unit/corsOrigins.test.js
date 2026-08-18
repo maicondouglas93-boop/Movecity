@@ -34,11 +34,11 @@ describe('corsOrigins — lista compartilhada REST + Socket.IO', () => {
     });
 
     it('callback do cors resolve permitido e rejeita desconhecido', () => {
-        const okCb = vi.fn();
+        const okCb = jest.fn();
         corsOriginCallback('https://localhost', okCb);
         expect(okCb).toHaveBeenCalledWith(null, true);
 
-        const denyCb = vi.fn();
+        const denyCb = jest.fn();
         corsOriginCallback('https://evil.example.com', denyCb);
         expect(denyCb).toHaveBeenCalledTimes(1);
         expect(denyCb.mock.calls[0][0]).toBeInstanceOf(Error);

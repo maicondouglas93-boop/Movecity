@@ -1,6 +1,6 @@
 const state = { doc: null };
 
-vi.mock('../../models/driverAppVersion.model', () => {
+jest.mock('../../models/driverAppVersion.model', () => {
   class FakeDoc {
     constructor(data) {
       Object.assign(this, data);
@@ -11,10 +11,10 @@ vi.mock('../../models/driverAppVersion.model', () => {
     }
   }
   return {
-    findOne: vi.fn(() => ({
-      sort: vi.fn(async () => state.doc),
+    findOne: jest.fn(() => ({
+      sort: jest.fn(async () => state.doc),
     })),
-    create: vi.fn(async (data) => {
+    create: jest.fn(async (data) => {
       state.doc = new FakeDoc({ ...data, updatedAt: new Date() });
       return state.doc;
     }),
@@ -26,7 +26,7 @@ const service = require('../../services/driverAppVersion.service');
 describe('driverAppVersion.service', () => {
   beforeEach(() => {
     state.doc = null;
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('cria defaults na primeira leitura', async () => {

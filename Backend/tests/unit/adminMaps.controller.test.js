@@ -24,11 +24,11 @@ function mockRes() {
 
 describe('adminMaps.controller', () => {
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
     });
 
     it('estimateRoute devolve km/min e polyline a partir do maps.service', async () => {
-        vi.spyOn(mapService, 'getDistanceTime').mockResolvedValue({
+        jest.spyOn(mapService, 'getDistanceTime').mockResolvedValue({
             distance: { text: '5.0 km', value: 5000 },
             duration: { text: '12 mins', value: 720 },
             polyline: [[-23.55, -46.63], [-23.54, -46.62]],
@@ -52,7 +52,7 @@ describe('adminMaps.controller', () => {
     });
 
     it('getSuggestions exige input válido e devolve array', async () => {
-        vi.spyOn(mapService, 'getAutoCompleteSuggestionsWithSession').mockResolvedValue({
+        jest.spyOn(mapService, 'getAutoCompleteSuggestionsWithSession').mockResolvedValue({
             suggestions: [{ title: 'Av. Paulista', lat: -23.56, lng: -46.65 }],
             sessionToken: 'tok-1',
         });

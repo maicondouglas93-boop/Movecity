@@ -6,7 +6,7 @@ const { deleteByPrefix } = require('../../cache/cache');
 
 describe('maps — não inventar coordenadas nem rota fixa', () => {
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
         deleteByPrefix('google-geocode');
         deleteByPrefix('google-route');
         deleteByPrefix('route:');
@@ -26,7 +26,7 @@ describe('maps — não inventar coordenadas nem rota fixa', () => {
     it('google.getAddressCoordinate propaga falha em vez de inventar SP', async () => {
         const prev = process.env.GOOGLE_MAPS_API;
         process.env.GOOGLE_MAPS_API = 'test-key';
-        vi.spyOn(axios, 'get').mockRejectedValue(new Error('network down'));
+        jest.spyOn(axios, 'get').mockRejectedValue(new Error('network down'));
 
         await expect(
             googleProvider.getAddressCoordinate('Rua que não existe, Cidade X')
@@ -36,7 +36,7 @@ describe('maps — não inventar coordenadas nem rota fixa', () => {
     });
 
     it('osm.getDistanceTime usa haversine quando roteadores falham (coords embutidas)', async () => {
-        vi.spyOn(axios, 'get').mockRejectedValue(new Error('routers down'));
+        jest.spyOn(axios, 'get').mockRejectedValue(new Error('routers down'));
 
         const route = await osmProvider.getDistanceTime(
             '-23.550500,-46.633300',

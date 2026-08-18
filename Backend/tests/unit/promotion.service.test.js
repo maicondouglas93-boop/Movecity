@@ -3,13 +3,13 @@ const promotionUsageModel = require('../../models/promotionUsage.model');
 const userModel = require('../../models/user.model');
 const promotionService = require('../../services/promotion.service');
 
-const findPromotion = vi.spyOn(promotionModel, 'findOne');
-const countPromotionUses = vi.spyOn(promotionUsageModel, 'countDocuments');
-const findUser = vi.spyOn(userModel, 'findById');
+const findPromotion = jest.spyOn(promotionModel, 'findOne');
+const countPromotionUses = jest.spyOn(promotionUsageModel, 'countDocuments');
+const findUser = jest.spyOn(userModel, 'findById');
 
 describe('promotion.service — cupons de desconto', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
     });
 
     test('calcula desconto percentual e respeita o teto', () => {

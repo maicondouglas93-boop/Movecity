@@ -47,7 +47,7 @@ describe('rota implausível não vira preço', () => {
         mapService.getDistanceTime.mockResolvedValue(route(10554500, 1266540));
 
         await expect(rideService.calculateRideFare(params))
-            .rejects.toMatchObject({ code: 'ROUTE_CALCULATION_FAILED' });
+            .rejects.toMatchObject({ code: 'IMPLAUSIBLE_ROUTE_DISTANCE' });
 
         // O preço nem chega a ser calculado: o erro sai antes do motor de tarifa.
         expect(PricingEngine.calculateFare).not.toHaveBeenCalled();
@@ -82,7 +82,7 @@ describe('rota implausível não vira preço', () => {
         mapService.getDistanceTime.mockResolvedValue(route(1500 * 1000 + 1, 20 * 3600));
 
         await expect(rideService.calculateRideFare(params))
-            .rejects.toMatchObject({ code: 'ROUTE_CALCULATION_FAILED' });
+            .rejects.toMatchObject({ code: 'IMPLAUSIBLE_ROUTE_DISTANCE' });
     });
 
     // Distância zero tem código próprio: quase sempre é o ponto de partida detectado

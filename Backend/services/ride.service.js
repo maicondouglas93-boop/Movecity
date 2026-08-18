@@ -736,15 +736,33 @@ function isValidGpsCoord(lat, lng) {
         && !(Math.abs(lat) < 1e-6 && Math.abs(lng) < 1e-6);
 }
 
-function resolveCaptainOrigin(captainDoc, clientLat, clientLng) {
+// Por quanto tempo a posição guardada no servidor ainda serve como referência do
+// "onde o motorista estava". Passado isso ela é só um registro antigo — o motorista
+// pode ter rodado a cidade inteira com o app fechado.
+const STORED_LOCATION_MAX_AGE_MS = 5 * 60 * 1000;
+
+function resolveCaptainOrigin(captainDoc, clientLat, clientLng, now = Date.now()) {
     const storedLat = captainDoc?.location?.ltd;
     const storedLng = captainDoc?.location?.lng;
     const clientOk = isValidGpsCoord(clientLat, clientLng);
     const storedOk = isValidGpsCoord(storedLat, storedLng);
 
     if (clientOk && storedOk) {
+        const lastSeenMs = captainDoc?.lastSeenAt ? new Date(captainDoc.lastSeenAt).getTime() : null;
+        const storedIsFresh = Number.isFinite(lastSeenMs)
+            && (now - lastSeenMs) <= STORED_LOCATION_MAX_AGE_MS;
+
+        // A checagem de "salto" existe contra GPS falsificado, e só faz sentido quando
+        // o servidor sabe MESMO onde o motorista está. Sem olhar a idade, ela descartava
+        // o GPS real de quem simplesmente andou mais de 2 km desde o último contato e
+        // usava a posição antiga como origem — daí saíam rotas absurdas (relato de campo
+        // 2026-08-18: corrida dentro de Lajinha estimada em 10.554 km) e, depois do teto
+        // de sanidade, a recusa de qualquer corrida presencial.
+        if (!storedIsFresh) {
+            return { lat: clientLat, lng: clientLng, from: 'client_stale_server' };
+        }
+
         const jumpKm = mapService.haversineKm(storedLat, storedLng, clientLat, clientLng);
-        // Aceita o GPS fresco do app só se estiver coerente com a última posição do backend.
         if (jumpKm <= 2) {
             return { lat: clientLat, lng: clientLng, from: 'client_validated' };
         }
@@ -844,8 +862,8 @@ async function calculateRideFare({
     // passageiro — em campo saiu uma corrida dentro de Lajinha estimada em 10.554 km
     // e R$ 36.946. Recusar é sempre melhor do que cobrar um valor inventado.
     if (distanceMeters > MAX_ROUTE_DISTANCE_METERS) {
-        const err = new Error('ROUTE_CALCULATION_FAILED');
-        err.code = 'ROUTE_CALCULATION_FAILED';
+        const err = new Error('IMPLAUSIBLE_ROUTE_DISTANCE');
+        err.code = 'IMPLAUSIBLE_ROUTE_DISTANCE';
         err.implausibleDistanceMeters = distanceMeters;
         console.error('[RIDE] rota implausível descartada', {
             distanceMeters,
@@ -2693,3 +2711,11 @@ module.exports.submitCaptainReview = async ({ rideId, captain, rating, comment }
 
     return review;
 }
+
+// Funções internas expostas só para teste. Ficam agrupadas aqui, e não espalhadas como
+// module.exports ao longo do arquivo, para deixar claro que não são API do serviço.
+module.exports.__testing__ = {
+    resolveCaptainOrigin,
+    STORED_LOCATION_MAX_AGE_MS,
+    MAX_ROUTE_DISTANCE_METERS,
+};

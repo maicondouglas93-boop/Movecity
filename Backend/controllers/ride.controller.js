@@ -385,6 +385,12 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.message === 'Destination is required when not pending') {
             return res.status(400).json({ message: 'Informe o destino ou escolha definir ao finalizar.' });
         }
+        if (err.code === 'IMPLAUSIBLE_ROUTE_DISTANCE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'O ponto de partida detectado está muito longe do destino. Verifique se o GPS está ativo e com sinal.',
+            });
+        }
         if (err.code === 'ZERO_DISTANCE_ROUTE') {
             return res.status(400).json({
                 code: err.code,
@@ -433,6 +439,12 @@ module.exports.estimatePresentialFare = async (req, res) => {
         }
         if (err.code === 'VEHICLE_NOT_AUTHORIZED') {
             return res.status(403).json({ message: 'Você não está autorizado a rodar nesta categoria de veículo.' });
+        }
+        if (err.code === 'IMPLAUSIBLE_ROUTE_DISTANCE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'O ponto de partida detectado está muito longe do destino. Verifique se o GPS está ativo e com sinal.',
+            });
         }
         if (err.code === 'ZERO_DISTANCE_ROUTE') {
             return res.status(400).json({

@@ -178,6 +178,23 @@ module.exports.createRide = async (req, res) => {
 
     } catch (err) {
         console.error(`[AUDIT] Erro crítico no createRide:`, err);
+        // Mesmos códigos do fluxo presencial: o passageiro precisa saber que o
+        // endereço não fecha, em vez de ver um preço inventado ou um erro genérico.
+        if (err.code === 'IMPLAUSIBLE_ROUTE_DISTANCE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'Não foi possível calcular esta rota. Confira o endereço de partida e o de destino.',
+            });
+        }
+        if (err.code === 'ZERO_DISTANCE_ROUTE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'A partida e o destino são praticamente o mesmo lugar. Confira os endereços.',
+            });
+        }
+        if (err.code === 'ROUTE_CALCULATION_FAILED') {
+            return res.status(502).json({ message: 'Não foi possível calcular a rota agora. Tente novamente.' });
+        }
         if (err.code === 'USER_HAS_ACTIVE_PARCEL' || err.message === 'USER_HAS_ACTIVE_PARCEL') {
             return res.status(409).json({ message: 'Você já possui uma encomenda em andamento.' });
         }
@@ -213,6 +230,23 @@ module.exports.getFare = async (req, res) => {
         const fare = await rideService.getFare(pickup, destination);
         return res.status(200).json(fare);
     } catch (err) {
+        // Mesmos códigos do fluxo presencial: o passageiro precisa saber que o
+        // endereço não fecha, em vez de ver um preço inventado ou um erro genérico.
+        if (err.code === 'IMPLAUSIBLE_ROUTE_DISTANCE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'Não foi possível calcular esta rota. Confira o endereço de partida e o de destino.',
+            });
+        }
+        if (err.code === 'ZERO_DISTANCE_ROUTE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'A partida e o destino são praticamente o mesmo lugar. Confira os endereços.',
+            });
+        }
+        if (err.code === 'ROUTE_CALCULATION_FAILED') {
+            return res.status(502).json({ message: 'Não foi possível calcular a rota agora. Tente novamente.' });
+        }
         return res.status(500).json({ message: err.message });
     }
 }

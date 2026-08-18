@@ -153,9 +153,9 @@ async function getFare(pickup, destination) {
         throw new Error('Pickup and destination are required');
     }
 
-    const distanceTime = await mapService.getDistanceTime(pickup, destination);
-    const distance = distanceTime.distance.value;
-    const time = distanceTime.duration.value;
+    // Mesmas verificações de sanidade do fluxo presencial — antes esta cotação usava a
+    // rota sem conferir nada, e um endereço geocodificado errado virava preço na tela.
+    const { distanceMeters: distance, durationSeconds: time } = await resolveRouteForPricing(pickup, destination);
 
     // Auditoria de cache (2026-08-08, A3): getFare fazia essa leitura em bulk e
     // depois buildConfigSnapshot relia CADA categoria de novo (1+N leituras do
@@ -351,12 +351,10 @@ module.exports.createRide = async ({
             ? `${lat.toFixed(6)}, ${lng.toFixed(6)}`
             : address;
     };
-    const distanceTime = await mapService.getDistanceTime(
+    const { distanceMeters: distance, durationSeconds: time } = await resolveRouteForPricing(
         routePoint(pickup, suppliedPickupCoordinates),
         routePoint(destination, suppliedDestinationCoordinates)
     );
-    const distance = distanceTime.distance.value;
-    const time = distanceTime.duration.value;
 
     // Congela a configuração de tarifa/comissão vigente agora (P2.2 da auditoria de
     // concorrência, 2026-08-02) — guardada na corrida e reutilizada em endRide, pra uma
@@ -783,6 +781,62 @@ function resolveCaptainOrigin(captainDoc, clientLat, clientLng, now = Date.now()
     return null;
 }
 
+/**
+ * Resolve a rota entre dois pontos e recusa o que não pode virar preço.
+ *
+ * Ponto único das verificações de sanidade de distância. Elas viviam só dentro de
+ * calculateRideFare, e a corrida comum do passageiro (getFare/createRide) chamava a API
+ * de rotas direto — ou seja, o fluxo MAIS usado era o único sem proteção nenhuma
+ * (achados L2/L5 da auditoria de 2026-08-18). Toda proteção nova entra aqui e passa a
+ * valer para os dois fluxos de uma vez.
+ *
+ * `origin` e `destination` são o que o provider aceita: "lat,lng", "Endereço (lat, lng)"
+ * ou endereço em texto.
+ */
+async function resolveRouteForPricing(origin, destination) {
+    let route;
+    try {
+        route = await mapService.getDistanceTime(origin, destination);
+    } catch (e) {
+        // Sem isto, o motivo real (coordenada ilegível, provider fora do ar, endereço
+        // não encontrado) sumia atrás de uma mensagem genérica — e a única forma de
+        // investigar um relato de campo era adivinhar.
+        console.error('[RIDE] falha ao calcular rota', { origin, destination, motivo: e?.message });
+        const err = new Error('ROUTE_CALCULATION_FAILED');
+        err.code = 'ROUTE_CALCULATION_FAILED';
+        err.cause = e;
+        throw err;
+    }
+
+    const distanceMeters = route?.distance?.value;
+    const durationSeconds = route?.duration?.value;
+
+    // Distância zero quase sempre significa uma coisa só: o ponto de partida caiu
+    // praticamente em cima do destino (a API de rotas omite a distância quando os dois
+    // pontos coincidem). É GPS impreciso ou endereço errado, não falha técnica — e
+    // mandar "tente novamente" faz repetir uma ação que nunca vai dar certo.
+    if (!(distanceMeters > 0)) {
+        console.error('[RIDE] rota sem distância utilizável', { origin, destination, distanceMeters });
+        const err = new Error('ZERO_DISTANCE_ROUTE');
+        err.code = 'ZERO_DISTANCE_ROUTE';
+        throw err;
+    }
+
+    // Teto de sanidade: uma rota deste tamanho não é corrida, é endereço resolvido no
+    // lugar errado. Em campo saiu uma corrida dentro de Lajinha estimada em 10.554 km e
+    // R$ 36.946. Recusar é sempre melhor do que cobrar um valor inventado.
+    if (distanceMeters > MAX_ROUTE_DISTANCE_METERS) {
+        console.error('[RIDE] rota implausível descartada', { origin, destination, distanceMeters });
+        const err = new Error('IMPLAUSIBLE_ROUTE_DISTANCE');
+        err.code = 'IMPLAUSIBLE_ROUTE_DISTANCE';
+        err.implausibleDistanceMeters = distanceMeters;
+        throw err;
+    }
+
+    return { distanceMeters, durationSeconds, route };
+}
+
+
 // Função central de cálculo de tarifa (auditoria "definir destino ao finalizar",
 // 2026-08-10): resolve a rota real (distância/duração) entre origem e destino e
 // calcula o preço via PricingEngine — num único lugar. Antes disso, a resolução de
@@ -829,59 +883,7 @@ async function calculateRideFare({
     const originStr = `${originLat},${originLng}`;
     const destinationStr = hasDestCoords ? `${destinationLat},${destinationLng}` : String(destination).trim();
 
-    let route;
-    try {
-        route = await mapService.getDistanceTime(originStr, destinationStr);
-    } catch (e) {
-        // Sem isto, o motivo real (coordenada ilegível, provider fora do ar, endereço
-        // não encontrado) sumia atrás de uma mensagem genérica — e a única forma de
-        // investigar um relato de campo era adivinhar.
-        console.error('[RIDE] falha ao calcular rota', {
-            origin: originStr,
-            destination: destinationStr,
-            motivo: e?.message,
-        });
-        const err = new Error('ROUTE_CALCULATION_FAILED');
-        err.code = 'ROUTE_CALCULATION_FAILED';
-        err.cause = e;
-        throw err;
-    }
-
-    const distanceMeters = route?.distance?.value;
-    const durationSeconds = route?.duration?.value;
-    // Rota calculada mas com distância 0/ausente não é uma corrida válida — nunca
-    // silenciosamente vira tarifa mínima daqui pra frente (era exatamente esse o bug).
-    //
-    // Distância zero quase sempre significa uma coisa só: o ponto de partida detectado
-    // caiu praticamente em cima do destino (a API de rotas omite distanceMeters quando
-    // os dois pontos coincidem). Isso é GPS impreciso ou endereço errado, não falha
-    // técnica — e mandar "tente novamente" faz o motorista repetir uma ação que nunca
-    // vai dar certo. Código próprio para a tela poder explicar o que fazer.
-    if (!(distanceMeters > 0)) {
-        console.error('[RIDE] rota sem distância utilizável', {
-            origin: originStr,
-            destination: destinationStr,
-            distanceMeters,
-        });
-        const err = new Error('ZERO_DISTANCE_ROUTE');
-        err.code = 'ZERO_DISTANCE_ROUTE';
-        throw err;
-    }
-    // Teto de sanidade. Uma rota deste tamanho não é corrida: é endereço resolvido no
-    // lugar errado. Sem isto, um erro de geocodificação virava preço cobrado do
-    // passageiro — em campo saiu uma corrida dentro de Lajinha estimada em 10.554 km
-    // e R$ 36.946. Recusar é sempre melhor do que cobrar um valor inventado.
-    if (distanceMeters > MAX_ROUTE_DISTANCE_METERS) {
-        const err = new Error('IMPLAUSIBLE_ROUTE_DISTANCE');
-        err.code = 'IMPLAUSIBLE_ROUTE_DISTANCE';
-        err.implausibleDistanceMeters = distanceMeters;
-        console.error('[RIDE] rota implausível descartada', {
-            distanceMeters,
-            origin: originStr,
-            destination: destinationStr,
-        });
-        throw err;
-    }
+    const { distanceMeters, durationSeconds } = await resolveRouteForPricing(originStr, destinationStr);
 
     let destCoords = hasDestCoords ? { lat: destinationLat, lng: destinationLng } : null;
     if (!destCoords) {

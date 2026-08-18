@@ -94,4 +94,23 @@ describe('rota implausível não vira preço', () => {
         await expect(rideService.calculateRideFare(params))
             .rejects.toMatchObject({ code: 'ZERO_DISTANCE_ROUTE' });
     });
+
+    // Achados L2/L5 da auditoria (2026-08-18): estas verificações viviam só dentro de
+    // calculateRideFare, e a corrida comum do passageiro chamava a API de rotas direto.
+    // O fluxo MAIS usado era o único sem proteção nenhuma.
+    describe('cotação do passageiro (getFare) tem a mesma proteção', () => {
+        it('recusa rota absurda em vez de mostrar preço', async () => {
+            mapService.getDistanceTime.mockResolvedValue(route(10554500, 1266540));
+
+            await expect(rideService.getFare('Rua A, Lajinha', 'Rua B, Lajinha'))
+                .rejects.toMatchObject({ code: 'IMPLAUSIBLE_ROUTE_DISTANCE' });
+        });
+
+        it('recusa partida e destino no mesmo ponto', async () => {
+            mapService.getDistanceTime.mockResolvedValue(route(0, 0));
+
+            await expect(rideService.getFare('Rua A, Lajinha', 'Rua A, Lajinha'))
+                .rejects.toMatchObject({ code: 'ZERO_DISTANCE_ROUTE' });
+        });
+    });
 });

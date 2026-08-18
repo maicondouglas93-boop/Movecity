@@ -17,17 +17,17 @@ const { invalidateVehicleCategoryCache } = require('../../services/vehicleCatego
 
 describe('getFare — frescor da tarifa', () => {
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
     });
 
     beforeEach(async () => {
-        vi.spyOn(mapService, 'getDistanceTime').mockResolvedValue({
+        jest.spyOn(mapService, 'getDistanceTime').mockResolvedValue({
             distance: { value: 5000 },
             duration: { value: 600 },
             polyline: 'fake',
         });
-        vi.spyOn(mapService, 'getAddressCoordinate').mockResolvedValue({ ltd: -23.55, lng: -46.63 });
-        vi.spyOn(mapService, 'getCaptainsInTheRadius').mockResolvedValue([]);
+        jest.spyOn(mapService, 'getAddressCoordinate').mockResolvedValue({ ltd: -23.55, lng: -46.63 });
+        jest.spyOn(mapService, 'getCaptainsInTheRadius').mockResolvedValue([]);
 
         await TariffSetting.create({
             minDistanceIncluded: 0,
@@ -107,5 +107,21 @@ describe('getFare — frescor da tarifa', () => {
         expect(result.optionalPricesByCategory.car.aceita_animais).toBe(4);
         expect(result.fareMax).toBeUndefined();
         expect(result.fareCardMax).toBeUndefined();
+    });
+
+    // Regressão do 500 em produção (2026-08-18): ao unificar o cálculo de rota em
+    // resolveRouteForPricing, a variável `distanceTime` sumiu mas a montagem da resposta
+    // continuou lendo `distanceTime.polyline` — ReferenceError em TODA cotação do
+    // passageiro, que o controller traduzia no 500 genérico. Este arquivo cobria o
+    // caminho inteiro, mas estava escrito em sintaxe do vitest (`vi.spyOn`) rodando sob
+    // jest: as 4 asserções morriam em "vi is not defined" antes de exercitar qualquer
+    // coisa. O teste existia e mesmo assim o bug chegou na loja — por isso a cotação
+    // agora afirma o corpo da resposta, e não só o preço.
+    it('devolve a resposta completa da cotação, com polyline da rota', async () => {
+        const result = await rideService.getFare('Origem A', 'Destino B');
+
+        expect(result.polyline).toBe('fake');
+        expect(result.distance).toBe(5000);
+        expect(result.time).toBe(600);
     });
 });

@@ -155,7 +155,7 @@ async function getFare(pickup, destination) {
 
     // Mesmas verificações de sanidade do fluxo presencial — antes esta cotação usava a
     // rota sem conferir nada, e um endereço geocodificado errado virava preço na tela.
-    const { distanceMeters: distance, durationSeconds: time } = await resolveRouteForPricing(pickup, destination);
+    const { distanceMeters: distance, durationSeconds: time, route } = await resolveRouteForPricing(pickup, destination);
 
     // Auditoria de cache (2026-08-08, A3): getFare fazia essa leitura em bulk e
     // depois buildConfigSnapshot relia CADA categoria de novo (1+N leituras do
@@ -222,7 +222,7 @@ async function getFare(pickup, destination) {
         fareCard,
         distance,
         time,
-        polyline: distanceTime.polyline,
+        polyline: route.polyline,
         breakdown: fareBreakdownData,
         showAsEstimate: tariffSetting?.showAsEstimate ?? true,
         // Por categoria (fonte: VehicleCategory.pricing.optionals).

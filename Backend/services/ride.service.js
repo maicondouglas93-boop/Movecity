@@ -2367,6 +2367,12 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
 // já estava a caminho ou no local.
 const CAPTAIN_CANCEL_REQUIRES_REASON = ['arrived', 'waiting_passenger'];
 
+// Janela para desfazer o início de uma corrida presencial. Curta de propósito: cobre
+// o engano (iniciou sem querer, passageiro desistiu na hora) sem virar uma porta para
+// rodar a viagem toda e cancelar no fim, fugindo da comissão. Depois disso o caminho
+// é finalizar e cobrar normalmente.
+const PRESENTIAL_CANCEL_WINDOW_MS = 60 * 1000;
+
 module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     if (!rideId || !captain) {
         throw new Error('Ride id and captain are required');
@@ -2378,11 +2384,26 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
     }
 
     // Presencial: não há pool de despacho — cancelamento total (não requeue).
-    // Também permite cancelar em 'started' antes da conclusão (engano do motorista).
+    // Também permite cancelar em 'started', mas só numa janela curta logo após o
+    // início (engano do motorista, passageiro desistiu na hora).
     if (ride.source === 'driver_initiated') {
         const presentialOrigins = [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ];
         if (!presentialOrigins.includes(ride.status)) {
             throw new Error('Ride cannot be cancelled at this stage');
+        }
+
+        // Sem esta janela, o motorista podia rodar a viagem inteira e cancelar no fim
+        // para não pagar a comissão — a corrida sumia sem registro financeiro nenhum.
+        // A regra vive AQUI, e não só na tela: esconder o botão no app não impede uma
+        // chamada direta ao endpoint nem uma versão antiga instalada.
+        if (ride.status === 'started') {
+            const startedAtMs = ride.startedAt ? new Date(ride.startedAt).getTime() : null;
+            const elapsedMs = startedAtMs ? Date.now() - startedAtMs : Infinity;
+            if (!startedAtMs || elapsedMs > PRESENTIAL_CANCEL_WINDOW_MS) {
+                const err = new Error('PRESENTIAL_CANCEL_WINDOW_EXPIRED');
+                err.code = 'PRESENTIAL_CANCEL_WINDOW_EXPIRED';
+                throw err;
+            }
         }
         const { reconcileRideCancellation } = require('./cancellationReconciliation.service');
         let cancelled;

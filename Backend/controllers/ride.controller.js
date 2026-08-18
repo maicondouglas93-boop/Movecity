@@ -1048,6 +1048,12 @@ module.exports.captainCancelRide = async (req, res) => {
         if (err.message === 'Ride cannot be cancelled at this stage') {
             return res.status(409).json({ message: 'Não é mais possível cancelar esta corrida.' });
         }
+        if (err.code === 'PRESENTIAL_CANCEL_WINDOW_EXPIRED') {
+            return res.status(409).json({
+                code: err.code,
+                message: 'O prazo para cancelar já passou. Use "Finalizar corrida" para encerrar e cobrar.',
+            });
+        }
         if (err.message === 'Cancellation reason is required at this stage') {
             return res.status(400).json({ message: 'Informe o motivo do cancelamento.' });
         }

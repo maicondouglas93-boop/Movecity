@@ -183,6 +183,13 @@ const LiveTracking = (props) => {
     const onNavigationUpdateRef = useRef(props.onNavigationUpdate);
     const onTripProgressRef = useRef(props.onTripProgress);
     const onCaptainLocationRef = useRef(props.onCaptainLocation);
+    // Lido dentro do loop de animação (roda a 60 fps). Via ref pra uma mudança de
+    // altura do painel não reiniciar o loop e cortar a interpolação da câmera.
+    const bottomInsetRef = useRef(props.bottomInsetPx || 0);
+
+    useEffect(() => {
+        bottomInsetRef.current = props.bottomInsetPx || 0;
+    }, [props.bottomInsetPx]);
 
     // Keep routeCoordsRef in sync
     useEffect(() => {
@@ -741,6 +748,9 @@ const LiveTracking = (props) => {
                     heading: state.heading,
                     zoom: state.zoom,
                     viewportHeightPx: mapRef.current?.clientHeight || 0,
+                    // Faixa de mapa coberta pelo painel da corrida — quem tem o painel
+                    // é a tela, então ela informa quanto do mapa não está visível.
+                    bottomInsetPx: bottomInsetRef.current,
                 }),
                 heading: state.heading,
                 tilt: NAV_TILT,

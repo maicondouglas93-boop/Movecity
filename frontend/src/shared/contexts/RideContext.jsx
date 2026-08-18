@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { getAccessToken, onSessionChanged } from '@/shared/services/session'
+import { hasPendingFinalization } from '@/shared/services/offlineQueue'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
 
 // Fase A da experiência de corrida ativa (2026-08-03) + restore de encomenda.
@@ -112,11 +113,26 @@ const RideProvider = ({ children }) => {
         const seq = ++syncSeqRef.current[kind]
         const result = await fetchActive(kind, RIDE_ENDPOINT_BY_KIND)
         if (seq !== syncSeqRef.current[kind]) return result
-        if (result !== UNKNOWN) {
-            if (kind === 'user') setUserRide(result)
-            else if (force) setCaptainRideState(result)
-            else setCaptainRideState(previous => mergeRideByStatus(previous, result))
+        if (result === UNKNOWN) return result
+
+        if (kind === 'user') {
+            setUserRide(result)
+            return result
         }
+
+        // Corrida finalizada offline: quando a internet volta, esta reconciliação e o
+        // replay da fila disparam no mesmo evento 'online' — e o GET chega antes do
+        // replay conseguir enviar a finalização. O servidor responde com a corrida
+        // ainda `started` e a tela reabria uma corrida que o motorista já tinha
+        // fechado (com o valor já cobrado do passageiro). Enquanto houver finalização
+        // pendente na fila, o estado do servidor está sabidamente atrasado.
+        if (result?._id && await hasPendingFinalization(result._id)) {
+            return result
+        }
+        if (seq !== syncSeqRef.current[kind]) return result
+
+        if (force) setCaptainRideState(result)
+        else setCaptainRideState(previous => mergeRideByStatus(previous, result))
         return result
     }, [])
 

@@ -107,6 +107,35 @@ export async function enqueueOfflineAction({ type, rideId, payload }) {
     await db.offlineActions.add({ type, rideId, payload, timestamp: Date.now(), attempts: 0 })
 }
 
+/**
+ * Esta corrida já foi finalizada pelo motorista, faltando só sincronizar?
+ *
+ * Quando a internet volta, a reconciliação com o servidor (GET /rides/captain-current)
+ * e o replay da fila disparam no MESMO evento 'online'. O GET é muito mais rápido que
+ * o replay (que ainda drena o GPS antes de reenviar), então o servidor responde com a
+ * corrida ainda `started` e a tela ressuscita uma corrida que o motorista já fechou.
+ *
+ * A fila é a verdade local nesse intervalo: enquanto houver um 'end-ride' pendente
+ * para a corrida, o estado do servidor está sabidamente atrasado e não deve reabrir
+ * nada na tela.
+ */
+export async function hasPendingFinalization(rideId) {
+    if (!rideId) return false
+    try {
+        // Compara com String() dos dois lados: um _id que chegue como ObjectId/número
+        // não bateria numa busca por índice e a checagem falharia em silêncio — que é
+        // exatamente o modo de falha que este guarda existe para evitar. A fila tem
+        // poucas ações pendentes, então varrer é barato.
+        const pending = await db.offlineActions.toArray()
+        return pending.some((action) => (
+            action.type === 'end-ride' && String(action.rideId) === String(rideId)
+        ))
+    } catch (err) {
+        console.error('[OfflineQueue] falha ao consultar finalização pendente:', err)
+        return false
+    }
+}
+
 // Auditoria PWA (2026-08-03): antes vivia em SocketContext.jsx, disparado direto no
 // 'connect' do socket — mas 'join' agora exige token e faz verificações assíncronas no
 // backend antes de aceitar `update-location-captain` (C1/C2). Emitir a localização

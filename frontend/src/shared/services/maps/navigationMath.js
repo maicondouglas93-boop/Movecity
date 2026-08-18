@@ -75,12 +75,34 @@ export function lerp(from, to, t) {
 // desloca o alvo para a FRENTE (na direção do movimento) por uma fração da altura do
 // viewport. Sem isso, o veículo fica no meio da tela e o motorista enxerga tanta rua
 // atrás quanto à frente — metade da tela desperdiçada.
-export function cameraCenterForFollow({ position, heading, zoom, viewportHeightPx, offsetRatio = 0.18 }) {
+export function cameraCenterForFollow({
+    position,
+    heading,
+    zoom,
+    viewportHeightPx,
+    bottomInsetPx = 0,
+    offsetRatio = 0.18,
+}) {
     if (!position) return position;
     if (!Number.isFinite(heading) || !Number.isFinite(viewportHeightPx) || viewportHeightPx <= 0) {
         return position;
     }
-    const forwardMeters = metersPerPixel(position.lat, zoom) * viewportHeightPx * offsetRatio;
+
+    // O painel da corrida cobre a parte de baixo do mapa. Sem descontar essa faixa, o
+    // veículo era posicionado a 18% abaixo do centro da tela INTEIRA e acabava atrás
+    // do painel — o motorista perdia de vista a própria seta.
+    //
+    // Aqui a conta mira o centro da área realmente visível (a faixa acima do painel) e
+    // só então aplica o deslocamento para a frente, que existe pra mostrar mais da rua
+    // que vem do que da que ficou pra trás. Com inset 0 o resultado é idêntico ao de
+    // antes, então nada muda onde não há painel.
+    const inset = Number.isFinite(bottomInsetPx) && bottomInsetPx > 0
+        ? Math.min(bottomInsetPx, viewportHeightPx * 0.6)
+        : 0;
+    const visibleHeightPx = viewportHeightPx - inset;
+    const forwardPixels = (offsetRatio * visibleHeightPx) - (inset / 2);
+
+    const forwardMeters = metersPerPixel(position.lat, zoom) * forwardPixels;
     return offsetPosition(position, heading, forwardMeters);
 }
 

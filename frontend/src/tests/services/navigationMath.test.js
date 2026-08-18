@@ -124,6 +124,50 @@ describe('cameraCenterForFollow (veículo no terço inferior)', () => {
         expect(cameraCenterForFollow({ position: SP, heading: null, zoom, viewportHeightPx })).toBe(SP)
         expect(cameraCenterForFollow({ position: SP, heading: 0, zoom, viewportHeightPx: 0 })).toBe(SP)
     })
+
+    // Relato de campo (2026-08-17): a seta do motorista sumia atrás do painel da
+    // corrida. A câmera posicionava o veículo a 18% abaixo do centro da tela INTEIRA,
+    // sem saber que o painel cobre a parte de baixo do mapa.
+    describe('painel da corrida cobrindo o mapa', () => {
+        it('sobe o veículo na tela quando há painel, em vez de deixá-lo atrás dele', () => {
+            const semPainel = cameraCenterForFollow({ position: SP, heading: 0, zoom, viewportHeightPx })
+            const comPainel = cameraCenterForFollow({
+                position: SP, heading: 0, zoom, viewportHeightPx, bottomInsetPx: 400,
+            })
+            // Rumo norte: quanto MENOR o deslocamento da câmera para o norte, mais alto
+            // o veículo aparece na tela — que é o que tira a seta de trás do painel.
+            expect(distanceMeters(SP, comPainel)).toBeLessThan(distanceMeters(SP, semPainel))
+        })
+
+        it('centraliza na faixa visível: painel muito alto empurra a câmera para trás do veículo', () => {
+            const center = cameraCenterForFollow({
+                position: SP, heading: 0, zoom, viewportHeightPx, bottomInsetPx: 480,
+            })
+            // 18% de 320px visíveis (57,6) é menor que a metade do painel (240), então o
+            // deslocamento fica negativo: a câmera mira ATRÁS do veículo, subindo a seta.
+            expect(center.lat).toBeLessThan(SP.lat)
+        })
+
+        it('inset zero mantém exatamente o comportamento anterior', () => {
+            const semInset = cameraCenterForFollow({ position: SP, heading: 45, zoom, viewportHeightPx })
+            const insetZero = cameraCenterForFollow({
+                position: SP, heading: 45, zoom, viewportHeightPx, bottomInsetPx: 0,
+            })
+            expect(insetZero).toEqual(semInset)
+        })
+
+        // Um painel expandido a quase toda a tela zeraria a área visível e mandaria a
+        // câmera para longe do veículo.
+        it('limita o inset a 60% da tela, mesmo se o painel for maior', () => {
+            const absurdo = cameraCenterForFollow({
+                position: SP, heading: 0, zoom, viewportHeightPx, bottomInsetPx: 5000,
+            })
+            const teto = cameraCenterForFollow({
+                position: SP, heading: 0, zoom, viewportHeightPx, bottomInsetPx: viewportHeightPx * 0.6,
+            })
+            expect(absurdo).toEqual(teto)
+        })
+    })
 })
 
 describe('dynamicZoom', () => {

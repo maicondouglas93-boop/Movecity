@@ -67,6 +67,21 @@ jest.mock('../../models/payment.model', () => ({
     findOne: jest.fn().mockResolvedValue(null),
 }));
 
+// O cancelamento presencial delega a reconciliação financeira (transação Mongo,
+// estorno, liberação de lock) a este serviço. Sem mocká-lo, ele consultava o banco de
+// verdade, não achava a corrida forjada nos mocks e devolvia RIDE_NOT_FOUND — por isso
+// o teste de cancelamento já falhava antes desta mudança. Aqui só interessa QUEM pode
+// cancelar e QUANDO; a reconciliação em si tem cobertura própria.
+jest.mock('../../services/cancellationReconciliation.service', () => ({
+    reconcileRideCancellation: jest.fn(async ({ rideId }) => ({
+        _id: rideId,
+        source: 'driver_initiated',
+        status: 'cancelled',
+        cancelledBy: 'captain',
+    })),
+    reconcileParcelCancellation: jest.fn(),
+}));
+
 const mockCreatedRide = {
     _id: 'ride1',
     source: 'driver_initiated',
@@ -278,14 +293,84 @@ describe('cancelRideByCaptain presential', () => {
             reason: 'engano',
         });
 
-        expect(rideModel.findOneAndUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ source: 'driver_initiated' }),
+        // A escrita em si é do serviço de reconciliação (transação + estorno). O que
+        // cabe verificar aqui é o contrato: cancelamento de presencial parte do
+        // motorista e nunca volta pro pool de despacho.
+        const { reconcileRideCancellation } = require('../../services/cancellationReconciliation.service');
+        expect(reconcileRideCancellation).toHaveBeenCalledWith(
             expect.objectContaining({
-                $set: expect.objectContaining({ status: 'cancelled', cancelledBy: 'captain' }),
-            }),
-            expect.any(Object)
+                rideId: 'ride1',
+                actor: 'captain',
+                allowedOrigins: expect.arrayContaining(['accepted', 'started']),
+            })
         );
         expect(result.status).toBe('cancelled');
         expect(dispatchService.releaseCaptainBusyLock).toHaveBeenCalled();
+    });
+
+    // Sem janela de tempo, o motorista rodava a viagem inteira e cancelava no fim: a
+    // corrida sumia, o passageiro pagava em mãos e a plataforma não recebia comissão
+    // nenhuma. A trava vive no backend porque esconder o botão no app não impede uma
+    // chamada direta ao endpoint nem uma versão antiga instalada.
+    const startedRide = (startedAt) => ({
+        _id: 'ride1',
+        source: 'driver_initiated',
+        status: 'started',
+        captain: 'cap1',
+        startedAt,
+    });
+
+    test('permite desfazer engano logo depois de iniciar', async () => {
+        rideModel.findOne.mockResolvedValue(startedRide(new Date(Date.now() - 20 * 1000)));
+        rideModel.findOneAndUpdate.mockResolvedValue({ _id: 'ride1', status: 'cancelled' });
+        rideModel.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue({ _id: 'ride1', status: 'cancelled' }),
+        });
+
+        const result = await rideService.cancelRideByCaptain({
+            rideId: 'ride1', captain: 'cap1', reason: 'engano',
+        });
+
+        expect(result.status).toBe('cancelled');
+    });
+
+    test('recusa cancelamento depois da janela de 1 minuto', async () => {
+        rideModel.findOne.mockResolvedValue(startedRide(new Date(Date.now() - 15 * 60 * 1000)));
+
+        await expect(rideService.cancelRideByCaptain({
+            rideId: 'ride1', captain: 'cap1', reason: 'mudei de ideia',
+        })).rejects.toMatchObject({ code: 'PRESENTIAL_CANCEL_WINDOW_EXPIRED' });
+
+        expect(rideModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test('corrida sem startedAt não abre exceção para cancelar', async () => {
+        rideModel.findOne.mockResolvedValue(startedRide(null));
+
+        await expect(rideService.cancelRideByCaptain({
+            rideId: 'ride1', captain: 'cap1',
+        })).rejects.toMatchObject({ code: 'PRESENTIAL_CANCEL_WINDOW_EXPIRED' });
+    });
+
+    // A janela vale só depois do embarque. Antes de iniciar não há serviço prestado —
+    // limitar aí prenderia o motorista numa corrida que o passageiro nem apareceu.
+    test('antes de iniciar continua cancelável sem limite de tempo', async () => {
+        rideModel.findOne.mockResolvedValue({
+            _id: 'ride1',
+            source: 'driver_initiated',
+            status: 'waiting_passenger',
+            captain: 'cap1',
+            createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        });
+        rideModel.findOneAndUpdate.mockResolvedValue({ _id: 'ride1', status: 'cancelled' });
+        rideModel.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue({ _id: 'ride1', status: 'cancelled' }),
+        });
+
+        const result = await rideService.cancelRideByCaptain({
+            rideId: 'ride1', captain: 'cap1', reason: 'passageiro não apareceu',
+        });
+
+        expect(result.status).toBe('cancelled');
     });
 });

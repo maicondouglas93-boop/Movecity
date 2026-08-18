@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import FinishRide from '@/driver/components/FinishRide'
 import Button from '@/shared/components/ui/Button'
@@ -24,11 +24,20 @@ import { formatBRL } from '@/shared/utils/currency'
 
 const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
+// Espelha PRESENTIAL_CANCEL_WINDOW_MS do backend (ride.service.js). Se mudar lá,
+// mudar aqui: o servidor é quem decide, isto só evita mostrar um botão que vai falhar.
+const PRESENTIAL_CANCEL_WINDOW_SEC = 60
+
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
     const [ cancelPanel, setCancelPanel ] = useState(false)
     const [ detailsExpanded, setDetailsExpanded ] = useState(false)
+    // Altura real do painel da corrida. A câmera do mapa precisa dela pra manter a seta
+    // do motorista na faixa visível — sem isso ela era centralizada considerando a tela
+    // inteira e ficava escondida atrás deste painel.
+    const bottomPanelRef = useRef(null)
+    const [ bottomInsetPx, setBottomInsetPx ] = useState(0)
     const [ cancelling, setCancelling ] = useState(false)
     const [ elapsedSec, setElapsedSec ] = useState(0)
     const [ liveDistance, setLiveDistance ] = useState(0)
@@ -67,6 +76,28 @@ const CaptainRiding = () => {
     const handleNavigationUpdate = useCallback((info) => setNavInfo(info), [])
 
     const isPresential = rideData?.source === 'driver_initiated'
+
+    // Cancelar uma presencial já iniciada só faz sentido logo no começo (engano,
+    // passageiro desistiu na hora). Depois disso o botão sai da tela: sem o limite, dava
+    // pra rodar a viagem inteira e cancelar no fim, fugindo da comissão. O servidor
+    // aplica a MESMA regra (PRESENTIAL_CANCEL_WINDOW_MS em ride.service.js) — aqui é só
+    // a camada visual, que sozinha não protegeria nada.
+    const canCancelPresential = isPresential && elapsedSec < PRESENTIAL_CANCEL_WINDOW_SEC
+
+    // Mede o painel de verdade em vez de estimar: a altura muda quando o motorista
+    // expande os detalhes, quando aparece o card do passageiro e conforme a safe area
+    // do aparelho. ResizeObserver cobre todos esses casos sem precisar listar cada um.
+    useEffect(() => {
+        const node = bottomPanelRef.current
+        if (!node || typeof ResizeObserver === 'undefined') return undefined
+
+        const update = () => setBottomInsetPx(node.getBoundingClientRect().height)
+        update()
+
+        const observer = new ResizeObserver(update)
+        observer.observe(node)
+        return () => observer.disconnect()
+    }, [])
 
     useEffect(() => {
         if (!rideData || rideData.status !== 'started') return undefined
@@ -340,6 +371,7 @@ const CaptainRiding = () => {
                     ride={rideData}
                     navigationMode={navigationMode}
                     onNavigationUpdate={handleNavigationUpdate}
+                    bottomInsetPx={bottomInsetPx}
                 />
             </div>
 
@@ -437,7 +469,7 @@ const CaptainRiding = () => {
             {/* Bottom HUD — altura pelo conteúdo por padrão; a alça expande até
                 70vh (com scroll interno) pra mostrar os detalhes completos,
                 sem nunca cobrir o mapa inteiro. */}
-            <div className='absolute bottom-0 left-0 right-0 z-overlay'>
+            <div ref={bottomPanelRef} className='absolute bottom-0 left-0 right-0 z-overlay'>
                 <div className={`bg-surface border-t border-line rounded-t-3xl shadow-floating select-none px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-[max-height] duration-300 ease-in-out ${detailsExpanded ? 'max-h-[70vh] overflow-y-auto' : 'max-h-[60vh]'}`}>
                     <button
                         type="button"
@@ -584,13 +616,13 @@ const CaptainRiding = () => {
                         </div>
                     )}
 
-                    {isPresential && (
+                    {canCancelPresential && (
                         <button
                             type="button"
                             onClick={() => setCancelPanel(true)}
                             className='mt-2.5 w-full text-center text-xs font-semibold text-danger-600 py-1'
                         >
-                            Cancelar corrida
+                            Cancelar corrida ({Math.max(0, PRESENTIAL_CANCEL_WINDOW_SEC - elapsedSec)}s)
                         </button>
                     )}
                 </div>
@@ -600,8 +632,9 @@ const CaptainRiding = () => {
                 <div className="pb-1">
                     <h3 className="text-base font-semibold mb-2 text-ink-900">Cancelar corrida presencial?</h3>
                     <p className="text-sm text-ink-600 mb-4">
-                        A corrida será encerrada sem cobrança. Use isso só em caso de engano —
-                        se o serviço já foi feito, use "Finalizar corrida" em vez de cancelar.
+                        A corrida será encerrada sem cobrança. Isso só pode ser feito no
+                        primeiro minuto, em caso de engano — depois disso, o caminho é
+                        "Finalizar corrida" para encerrar e cobrar.
                     </p>
                     <div className="flex gap-2">
                         <Button

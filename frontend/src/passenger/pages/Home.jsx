@@ -1047,6 +1047,7 @@ const Home = () => {
                         setIsSelectingOnMap={setIsSelectingOnMap}
                         isSearching={isSearching}
                         sessionToken={suggestionsSessionToken}
+                        query={activeField === 'pickup' ? pickup : destination}
                     />
                 </div>
             </div>

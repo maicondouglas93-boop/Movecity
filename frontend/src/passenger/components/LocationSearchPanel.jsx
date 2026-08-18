@@ -3,7 +3,7 @@ import { getPlaceDetails, getAddressSuggestions } from '@/shared/services/mapsAp
 import { QUICK_PLACES } from '@/shared/assets/quickPlaces/quickPlaces'
 import { useToast } from '@/shared/contexts/ToastContext'
 
-const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPickup, setDestination, activeField, setIsSelectingOnMap, isSearching, sessionToken }) => {
+const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPickup, setDestination, activeField, setIsSelectingOnMap, isSearching, sessionToken, query }) => {
     const [ resolvingKey, setResolvingKey ] = useState(null)
     const [ resolvingQuickPlaceId, setResolvingQuickPlaceId ] = useState(null)
     const { addToast } = useToast()
@@ -85,9 +85,64 @@ const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPi
         }
     }
 
+    // O campo ativo só dispara autocomplete a partir de 3 caracteres (Home.jsx). Sem
+    // essa checagem, "Nenhuma sugestão encontrada" apareceria com o campo ainda vazio,
+    // encravado entre "Escolher no mapa" e os locais frequentes — ruído no lugar mais
+    // nobre do painel. Só vale mostrar o vazio quando uma busca de verdade não achou nada.
+    const queryText = typeof query === 'string' ? query : (query?.address || '')
+    const hasSearched = queryText.trim().length >= 3
+
     return (
         <div>
-            <div className="mb-1">
+            {/* Primeiro da lista, colado no input: escolher no mapa é a saída de quem não
+                sabe escrever o endereço — no rodapé, depois de toda a lista, ficava fora
+                de alcance justo pra quem mais precisa dele. */}
+            <div onClick={() => {
+                setPanelOpen(false);
+                if (typeof setIsSelectingOnMap === 'function') {
+                    setIsSelectingOnMap(true);
+                }
+            }} className='flex gap-4 p-3 border-b border-gray-100 active:bg-green-50 items-center justify-start cursor-pointer transition-colors'>
+                <h2 className='text-green-500 h-8 w-8 flex items-center justify-center rounded-full'>
+                    <i className="ri-pushpin-2-fill text-xl"></i>
+                </h2>
+                <h4 className='font-semibold text-gray-800 text-[15px]'>Escolher no mapa</h4>
+            </div>
+
+            {/* Resultados do que foi digitado vêm antes dos atalhos fixos: quem digitou já
+                disse o que quer, e antes esses resultados nasciam abaixo de 5 locais
+                frequentes — fora da tela, exigindo rolagem pra ver a própria busca. */}
+            {isSearching ? (
+                <div className="flex flex-col items-center justify-center py-10 text-green-500">
+                    <i className="ri-loader-4-line text-3xl animate-spin mb-2"></i>
+                    <p className="text-gray-500">Buscando sugestões...</p>
+                </div>
+            ) : suggestions.length > 0 ? (
+                suggestions.map((elem, idx) => {
+                    const isString = typeof elem === 'string';
+                    const title = isString ? elem : elem.title;
+                    const subtitle = isString ? '' : elem.subtitle;
+                    const isResolving = !isString && elem.placeId && resolvingKey === elem.placeId;
+
+                    return (
+                        <div key={idx} onClick={() => handleSuggestionClick(elem)} className='flex gap-4 p-3 border-b border-gray-100 active:bg-green-50 items-center justify-start cursor-pointer transition-colors'>
+                            <h2 className='text-green-500 h-8 w-8 flex items-center justify-center rounded-full'>
+                                <i className={isResolving ? "ri-loader-4-line text-xl animate-spin" : "ri-map-pin-fill text-xl"}></i>
+                            </h2>
+                            <div className="flex flex-col overflow-hidden">
+                                <h4 className='font-bold text-gray-800 text-[15px] truncate'>{title}</h4>
+                                {subtitle && <p className='text-sm text-gray-500 truncate'>{subtitle}</p>}
+                            </div>
+                        </div>
+                    );
+                })
+            ) : hasSearched ? (
+                <div className="text-center text-gray-400 py-5">
+                    Nenhuma sugestão encontrada
+                </div>
+            ) : null}
+
+            <div className="mt-2">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 pt-1 pb-2">Locais frequentes</p>
                 {QUICK_PLACES.map((place) => {
                     const isResolving = resolvingQuickPlaceId === place.id
@@ -116,47 +171,6 @@ const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPi
                         </div>
                     )
                 })}
-            </div>
-            {isSearching ? (
-                <div className="flex flex-col items-center justify-center py-10 text-green-500">
-                    <i className="ri-loader-4-line text-3xl animate-spin mb-2"></i>
-                    <p className="text-gray-500">Buscando sugestões...</p>
-                </div>
-            ) : suggestions.length > 0 ? (
-                suggestions.map((elem, idx) => {
-                    const isString = typeof elem === 'string';
-                    const title = isString ? elem : elem.title;
-                    const subtitle = isString ? '' : elem.subtitle;
-                    const isResolving = !isString && elem.placeId && resolvingKey === elem.placeId;
-
-                    return (
-                        <div key={idx} onClick={() => handleSuggestionClick(elem)} className='flex gap-4 p-3 border-b border-gray-100 active:bg-green-50 items-center justify-start cursor-pointer transition-colors'>
-                            <h2 className='text-green-500 h-8 w-8 flex items-center justify-center rounded-full'>
-                                <i className={isResolving ? "ri-loader-4-line text-xl animate-spin" : "ri-map-pin-fill text-xl"}></i>
-                            </h2>
-                            <div className="flex flex-col overflow-hidden">
-                                <h4 className='font-bold text-gray-800 text-[15px] truncate'>{title}</h4>
-                                {subtitle && <p className='text-sm text-gray-500 truncate'>{subtitle}</p>}
-                            </div>
-                        </div>
-                    );
-                })
-            ) : (
-                <div className="text-center text-gray-400 py-5">
-                    Nenhuma sugestão encontrada
-                </div>
-            )}
-
-            <div onClick={() => {
-                setPanelOpen(false);
-                if (typeof setIsSelectingOnMap === 'function') {
-                    setIsSelectingOnMap(true);
-                }
-            }} className='flex gap-4 p-3 border-t border-gray-100 active:bg-green-50 items-center mt-2 justify-start cursor-pointer transition-colors'>
-                <h2 className='text-green-500 h-8 w-8 flex items-center justify-center rounded-full'>
-                    <i className="ri-pushpin-2-fill text-xl"></i>
-                </h2>
-                <h4 className='font-semibold text-gray-800 text-[15px]'>Escolher no mapa</h4>
             </div>
         </div>
     )

@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { getCache, setCache } = require('../../cache/cache');
-const { haversineKm, approximateRouteFromCoords } = require('./geo.util');
+const { haversineKm, approximateRouteFromCoords, extractEmbeddedCoords } = require('./geo.util');
 const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 // Geocoding reverso via Nominatim — não existia no código original (Home.jsx chama
@@ -30,14 +30,11 @@ module.exports.getReverseGeocode = async (lat, lng) => {
 };
 
 module.exports.getAddressCoordinate = async (address) => {
-    // Extract exact coordinates if the string contains them like "Address (-20.12, -41.22)" or just "-20.12, -41.22"
-    const coordMatch = address.match(/\((-?\d+\.\d+),\s*(-?\d+\.\d+)\)$/) || address.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
-    if (coordMatch) {
-        return {
-            ltd: parseFloat(coordMatch[1]),
-            lng: parseFloat(coordMatch[2])
-        };
-    }
+    // "Endereço (lat, lng)" ou par cru "lat,lng" — parser único em geo.util.js, que
+    // LANÇA quando o texto parece coordenada mas não dá pra ler, em vez de mandar
+    // isso pro geocodificador como se fosse um endereço.
+    const embedded = extractEmbeddedCoords(address);
+    if (embedded) return embedded;
 
     const apiKey = process.env.GOOGLE_MAPS_API;
     const isGoogle = apiKey && apiKey !== 'dummy-google-maps-api-key';

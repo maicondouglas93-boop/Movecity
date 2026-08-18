@@ -722,6 +722,12 @@ module.exports.settleScheduledRideFinance = async (rideId) => {
     );
 };
 
+// Teto de distância de uma rota aceitável. Não é regra de negócio (não limita até
+// onde se pode viajar) — é detector de erro: acima disto, o endereço foi resolvido no
+// lugar errado e o "preço" seria ficção. Folgado de propósito, para nunca recusar uma
+// viagem real; o objetivo é barrar a ordem de grandeza absurda.
+const MAX_ROUTE_DISTANCE_METERS = 1500 * 1000;
+
 function isValidGpsCoord(lat, lng) {
     return Number.isFinite(lat)
         && Number.isFinite(lng)
@@ -812,6 +818,21 @@ async function calculateRideFare({
     if (!(distanceMeters > 0)) {
         const err = new Error('ROUTE_CALCULATION_FAILED');
         err.code = 'ROUTE_CALCULATION_FAILED';
+        throw err;
+    }
+    // Teto de sanidade. Uma rota deste tamanho não é corrida: é endereço resolvido no
+    // lugar errado. Sem isto, um erro de geocodificação virava preço cobrado do
+    // passageiro — em campo saiu uma corrida dentro de Lajinha estimada em 10.554 km
+    // e R$ 36.946. Recusar é sempre melhor do que cobrar um valor inventado.
+    if (distanceMeters > MAX_ROUTE_DISTANCE_METERS) {
+        const err = new Error('ROUTE_CALCULATION_FAILED');
+        err.code = 'ROUTE_CALCULATION_FAILED';
+        err.implausibleDistanceMeters = distanceMeters;
+        console.error('[RIDE] rota implausível descartada', {
+            distanceMeters,
+            origin: originStr,
+            destination: destinationStr,
+        });
         throw err;
     }
 

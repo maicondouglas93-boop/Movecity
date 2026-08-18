@@ -1,7 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { getCache, setCache } = require('../../cache/cache');
-const { haversineKm, approximateRouteFromCoords } = require('./geo.util');
+const { haversineKm, approximateRouteFromCoords, extractEmbeddedCoords } = require('./geo.util');
 const { trackUsageSafe } = require('../monitoring/usageTracker');
 
 const apiKey = () => process.env.GOOGLE_MAPS_API;
@@ -18,13 +18,9 @@ function trackMaps(sku, started, err = null) {
     });
 }
 
-// Mesma extração de coordenadas embutidas usada pelo osm.provider.js — o formato
-// "Endereço (lat, lng)" é uma convenção do MoveCity, independente de provider.
-function extractEmbeddedCoords(address) {
-    const m = address.match(/\((-?\d+\.\d+),\s*(-?\d+\.\d+)\)$/) || address.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
-    if (!m) return null;
-    return { ltd: parseFloat(m[1]), lng: parseFloat(m[2]) };
-}
+// A extração de "Endereço (lat, lng)" / "lat,lng" agora vive em geo.util.js, uma vez
+// só para os dois providers — antes eram duas cópias da mesma regex, e endurecer uma
+// deixaria a outra com o mesmo buraco.
 
 module.exports.getAddressCoordinate = async (address) => {
     const embedded = extractEmbeddedCoords(address);

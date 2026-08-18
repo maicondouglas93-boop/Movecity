@@ -385,6 +385,12 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.message === 'Destination is required when not pending') {
             return res.status(400).json({ message: 'Informe o destino ou escolha definir ao finalizar.' });
         }
+        if (err.code === 'ZERO_DISTANCE_ROUTE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'O ponto de partida detectado está praticamente no destino. Confira o GPS e o endereço informado.',
+            });
+        }
         if (err.code === 'ROUTE_CALCULATION_FAILED') {
             return res.status(502).json({ message: 'Não foi possível calcular a rota até o destino. Tente novamente.' });
         }
@@ -427,6 +433,12 @@ module.exports.estimatePresentialFare = async (req, res) => {
         }
         if (err.code === 'VEHICLE_NOT_AUTHORIZED') {
             return res.status(403).json({ message: 'Você não está autorizado a rodar nesta categoria de veículo.' });
+        }
+        if (err.code === 'ZERO_DISTANCE_ROUTE') {
+            return res.status(400).json({
+                code: err.code,
+                message: 'O ponto de partida detectado está praticamente no destino. Confira o GPS e o endereço informado.',
+            });
         }
         if (err.code === 'ROUTE_CALCULATION_FAILED') {
             return res.status(502).json({ message: 'Não foi possível calcular a rota até o destino. Tente novamente.' });

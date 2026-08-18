@@ -805,6 +805,14 @@ async function calculateRideFare({
     try {
         route = await mapService.getDistanceTime(originStr, destinationStr);
     } catch (e) {
+        // Sem isto, o motivo real (coordenada ilegível, provider fora do ar, endereço
+        // não encontrado) sumia atrás de uma mensagem genérica — e a única forma de
+        // investigar um relato de campo era adivinhar.
+        console.error('[RIDE] falha ao calcular rota', {
+            origin: originStr,
+            destination: destinationStr,
+            motivo: e?.message,
+        });
         const err = new Error('ROUTE_CALCULATION_FAILED');
         err.code = 'ROUTE_CALCULATION_FAILED';
         err.cause = e;
@@ -815,9 +823,20 @@ async function calculateRideFare({
     const durationSeconds = route?.duration?.value;
     // Rota calculada mas com distância 0/ausente não é uma corrida válida — nunca
     // silenciosamente vira tarifa mínima daqui pra frente (era exatamente esse o bug).
+    //
+    // Distância zero quase sempre significa uma coisa só: o ponto de partida detectado
+    // caiu praticamente em cima do destino (a API de rotas omite distanceMeters quando
+    // os dois pontos coincidem). Isso é GPS impreciso ou endereço errado, não falha
+    // técnica — e mandar "tente novamente" faz o motorista repetir uma ação que nunca
+    // vai dar certo. Código próprio para a tela poder explicar o que fazer.
     if (!(distanceMeters > 0)) {
-        const err = new Error('ROUTE_CALCULATION_FAILED');
-        err.code = 'ROUTE_CALCULATION_FAILED';
+        console.error('[RIDE] rota sem distância utilizável', {
+            origin: originStr,
+            destination: destinationStr,
+            distanceMeters,
+        });
+        const err = new Error('ZERO_DISTANCE_ROUTE');
+        err.code = 'ZERO_DISTANCE_ROUTE';
         throw err;
     }
     // Teto de sanidade. Uma rota deste tamanho não é corrida: é endereço resolvido no

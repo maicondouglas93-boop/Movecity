@@ -85,12 +85,13 @@ describe('rota implausível não vira preço', () => {
             .rejects.toMatchObject({ code: 'ROUTE_CALCULATION_FAILED' });
     });
 
-    // Regressão da proteção que já existia: distância zerada também não pode virar
-    // tarifa mínima silenciosa.
-    it('continua recusando rota sem distância', async () => {
+    // Distância zero tem código próprio: quase sempre é o ponto de partida detectado
+    // em cima do destino (GPS impreciso), não falha do provider. Mandar "tente
+    // novamente" nesse caso faz o motorista repetir algo que nunca vai funcionar.
+    it('recusa rota sem distância com código próprio', async () => {
         mapService.getDistanceTime.mockResolvedValue(route(0, 0));
 
         await expect(rideService.calculateRideFare(params))
-            .rejects.toMatchObject({ code: 'ROUTE_CALCULATION_FAILED' });
+            .rejects.toMatchObject({ code: 'ZERO_DISTANCE_ROUTE' });
     });
 });

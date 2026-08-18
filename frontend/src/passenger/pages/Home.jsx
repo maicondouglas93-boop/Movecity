@@ -60,6 +60,10 @@ const Home = () => {
     const [ activeField, setActiveField ] = useState(null)
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
+    // Desistir da cotação (voltar da escolha de veículo) precisa devolver o mapa limpo.
+    // Sem isto o trajeto continuava traçado na Home depois de recuar, como se a corrida
+    // ainda estivesse em jogo — e nada além de pedir outra corrida o apagava.
+    const [ tripCleared, setTripCleared ] = useState(false)
     // Fase A da experiência de corrida ativa (2026-08-03): a corrida saiu do useState
     // local e passou a viver no RideContext — que reconsulta o backend a cada
     // abertura/reconexão/retorno do background. Refresh na Home não perde mais a
@@ -617,6 +621,9 @@ const Home = () => {
         // sozinho junto do toast de erro. Antes ele fechava na hora, e o usuário ficava
         // olhando pra tela inicial sem nenhum indício de que algo estava carregando.
         setFareLoading(true)
+        // Pedir a cotação de novo com o MESMO trajeto que acabou de ser recuado precisa
+        // religar o desenho — senão a tela de categorias voltaria com o mapa em branco.
+        setTripCleared(false)
         try {
             const response = await api.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
                 params: { pickup: pickupStr, destination: destStr },
@@ -765,6 +772,13 @@ const Home = () => {
         }
     }
 
+    // Mexeu em partida ou destino, quer ver o trajeto de novo: a limpeza vale só para o
+    // recuo em si. Sem isto o mapa ficaria mudo até a próxima cotação, e escolher um novo
+    // destino não desenharia mais nada.
+    useEffect(() => {
+        setTripCleared(false)
+    }, [pickup, destination])
+
     // Voltar (gesto do sistema ou seta no topo) recua um passo do fluxo, sem colapsar
     // o painel para "ver o mapa" — o chevron de dismiss foi removido dessas telas.
     // Em "aguardando motorista" não há seta de voltar: cancelar exige confirmação
@@ -786,6 +800,7 @@ const Home = () => {
         }
         if (vehiclePanel) {
             setVehiclePanel(false)
+            setTripCleared(true)
             return
         }
         if (panelOpen) {
@@ -846,7 +861,7 @@ const Home = () => {
                     // motorista da corrida.
                     showNearbyDrivers={!ride || ride.status === 'requested' || ride.status === 'finished' || ride.status === 'cancelled'}
                     // Pós-corrida: força remoção de polyline/markers da viagem anterior.
-                    clearTrip={Boolean(location.state?.clearTrip) || ride?.status === 'finished' || ride?.status === 'cancelled'}
+                    clearTrip={Boolean(location.state?.clearTrip) || tripCleared || ride?.status === 'finished' || ride?.status === 'cancelled'}
                     onTripProgress={setApproachProgress}
                     onCaptainLocation={setCaptainLocation}
                 />

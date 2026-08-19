@@ -359,12 +359,15 @@ const Riding = () => {
                 />
 
                 {!isFinished && (
-                    <div className='mt-3 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2 flex items-center justify-between gap-3'>
-                        <div className='min-w-0'>
+                    <div className='mt-3 rounded-panel border border-brand-200 bg-brand-50 px-3 py-2.5 flex items-center gap-3'>
+                        <span className='flex-shrink-0 h-9 w-9 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center' aria-hidden="true">
+                            <i className="ri-money-dollar-circle-fill text-lg" />
+                        </span>
+                        <div className='min-w-0 flex-1'>
                             <p className='text-[11px] font-semibold uppercase tracking-wide text-brand-700'>Estimativa da corrida</p>
                             <p className='text-[11px] text-ink-500'>Valor final é calculado ao término da corrida</p>
                         </div>
-                        <p className='text-xl font-bold tabular-nums text-brand-700 flex-shrink-0'>
+                        <p className='text-2xl font-black tabular-nums text-brand-700 flex-shrink-0'>
                             {rideAmount != null ? formatCurrencyBRL(rideAmount) : '—'}
                         </p>
                     </div>
@@ -384,24 +387,35 @@ const Riding = () => {
 
                 {!isFinished && (tripProgress.remainingKm != null || tripProgress.etaMinutes != null) && (
                     <div className='mt-2.5 grid grid-cols-2 gap-2' aria-label='Progresso da viagem'>
-                        <div className='rounded-panel bg-surface-alt px-3 py-2'>
-                            <p className='text-[11px] text-ink-400'>Distância restante</p>
-                            <p className='text-sm font-bold tabular-nums text-ink-900'>{tripProgress.remainingKm?.toFixed(1) ?? '—'} km</p>
+                        <div className='rounded-panel bg-surface-alt px-3 py-2.5 flex items-center gap-2.5'>
+                            <span className='flex-shrink-0 h-8 w-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center' aria-hidden="true">
+                                <i className="ri-route-line text-base" />
+                            </span>
+                            <div className='min-w-0'>
+                                <p className='text-[11px] text-ink-400'>Distância restante</p>
+                                <p className='text-base font-bold tabular-nums text-ink-900 leading-tight'>{tripProgress.remainingKm?.toFixed(1) ?? '—'} km</p>
+                            </div>
                         </div>
-                        <div className='rounded-panel bg-surface-alt px-3 py-2'>
-                            <p className='text-[11px] text-ink-400'>Tempo estimado</p>
-                            <p className='text-sm font-bold tabular-nums text-ink-900'>{tripProgress.etaMinutes ? `${tripProgress.etaMinutes} min` : 'Calculando…'}</p>
+                        <div className='rounded-panel bg-surface-alt px-3 py-2.5 flex items-center gap-2.5'>
+                            <span className='flex-shrink-0 h-8 w-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center' aria-hidden="true">
+                                <i className="ri-time-line text-base" />
+                            </span>
+                            <div className='min-w-0'>
+                                <p className='text-[11px] text-ink-400'>Tempo estimado</p>
+                                <p className='text-base font-bold tabular-nums text-ink-900 leading-tight'>{tripProgress.etaMinutes ? `${tripProgress.etaMinutes} min` : 'Calculando…'}</p>
+                            </div>
                         </div>
                     </div>
                 )}
 
-                <div className='mt-2.5 flex items-center gap-3 text-xs text-ink-600'>
-                    <span className='inline-flex items-center gap-1 min-w-0 flex-1 truncate'>
-                        <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
-                        <span className='truncate font-medium text-ink-900'>{shortAddress(ride?.destination)}</span>
-                    </span>
+                <div className='mt-2.5 flex items-center gap-3 rounded-panel border border-line bg-surface px-3 py-2.5'>
+                    <i className="ri-map-pin-2-fill text-danger-500 text-lg flex-shrink-0" aria-hidden="true" />
+                    <div className='min-w-0 flex-1'>
+                        <p className='text-[11px] text-ink-400'>Destino</p>
+                        <p className='text-sm font-semibold text-ink-900 truncate'>{shortAddress(ride?.destination)}</p>
+                    </div>
                     {(distanceLabel || durationLabel) && (
-                        <span className='flex-shrink-0 tabular-nums text-ink-500'>
+                        <span className='flex-shrink-0 text-xs tabular-nums text-ink-500'>
                             {[distanceLabel, durationLabel].filter(Boolean).join(' · ')}
                         </span>
                     )}

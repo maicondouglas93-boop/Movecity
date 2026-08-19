@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { vehicleImages } from '@/shared/assets/vehicleAssets'
-import Card from '@/shared/components/ui/Card'
-import DetailRow from '@/shared/components/ui/DetailRow'
+import RouteCard from '@/shared/components/ui/RouteCard'
 import Button from '@/shared/components/ui/Button'
 import { formatCurrencyBRL, paymentMethodLabel } from '@/shared/utils/formatters'
 
@@ -95,21 +94,7 @@ const LookingForDriver = (props) => {
                 </div>
             )}
 
-            <Card padding='p-0.5' className='divide-y divide-line'>
-                <DetailRow
-                    compact
-                    icon="ri-map-pin-user-fill"
-                    title={extractTitle(props.pickup)}
-                    className='px-2'
-                />
-                <DetailRow
-                    compact
-                    icon="ri-map-pin-2-fill"
-                    iconColor="text-danger-500"
-                    title={extractTitle(props.destination)}
-                    className='px-2'
-                />
-            </Card>
+            <RouteCard pickup={extractTitle(props.pickup)} destination={extractTitle(props.destination)} />
 
             <Button variant='danger' onClick={handleCancel} loading={cancelling} className='mt-3 !min-h-[44px] !text-sm'>
                 {cancelling ? 'Cancelando...' : confirmingCancel ? 'Toque de novo para confirmar' : 'Cancelar corrida'}

@@ -11,7 +11,10 @@ module.exports.getActiveCategories = async (req, res) => {
         if (fieldByService[service]) query[fieldByService[service]] = { $ne: false };
         const categories = await vehicleCategoryModel
             .find(query)
-            .select('name displayName description capacity iconKey sortOrder allowedServices')
+            // luggageCapacity é campo antigo do cadastro (texto livre, preenchido pelo
+            // admin) que nunca chegou a ser exposto — o card de veículo passou a mostrá-lo
+            // quando existe. Não é dado novo: só deixou de ficar escondido.
+            .select('name displayName description capacity luggageCapacity iconKey sortOrder allowedServices')
             .sort({ sortOrder: 1, displayName: 1 });
 
         res.status(200).json(categories);

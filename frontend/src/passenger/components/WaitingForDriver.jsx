@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import RouteCard from '@/shared/components/ui/RouteCard'
 import Button from '@/shared/components/ui/Button'
 import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
 import { formatCurrencyBRL, paymentMethodLabel } from '@/shared/utils/formatters'
@@ -127,16 +128,12 @@ const WaitingForDriver = (props) => {
             </button>
             {copiedPin && <p className="mt-1 text-center text-[11px] font-medium text-brand-700">PIN copiado</p>}
 
-            <div className="mt-2 px-0.5 flex gap-3 text-xs text-ink-600">
-                <p className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <i className="ri-map-pin-user-fill text-brand-500 flex-shrink-0" aria-hidden="true" />
-                    <span className="truncate">{extractTitle(props.ride?.pickup)}</span>
-                </p>
-                <p className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <i className="ri-map-pin-2-fill text-danger-500 flex-shrink-0" aria-hidden="true" />
-                    <span className="truncate">{extractTitle(props.ride?.destination)}</span>
-                </p>
-            </div>
+            <RouteCard
+                layout="split"
+                className="mt-2.5"
+                pickup={extractTitle(props.ride?.pickup)}
+                destination={extractTitle(props.ride?.destination)}
+            />
 
             <div className="mt-2.5 grid grid-cols-3 gap-2">
                 <button

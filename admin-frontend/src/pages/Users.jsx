@@ -118,27 +118,29 @@ export default function Users() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
+      {/* 5 colunas só a partir de lg: em 768px cada cartão ficava com ~42px úteis para o
+          texto e rótulos como "Novos na Semana" vazavam para fora da tela. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4 min-w-0">
           <div className="p-3 bg-primary/20 text-primary rounded-lg"><UsersIcon className="w-5 h-5" /></div>
           <div><p className="text-sm text-text-muted">Totais</p><p className="text-xl font-bold">{data?.summary?.total || 0}</p></div>
         </div>
-        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
+        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4 min-w-0">
           <div className="p-3 bg-success/20 text-success rounded-lg"><UserCheck className="w-5 h-5" /></div>
           {/* Auditoria de UX/produção (2026-08-10): rotulado "Ativos", mas mede
               isBlocked:false (admin.service.js) — não engajamento/atividade recente.
               Renomeado pra não sugerir algo que o dado não mede. */}
           <div><p className="text-sm text-text-muted">Não bloqueados</p><p className="text-xl font-bold">{data?.summary?.active || 0}</p></div>
         </div>
-        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
+        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4 min-w-0">
           <div className="p-3 bg-danger/20 text-danger rounded-lg"><Ban className="w-5 h-5" /></div>
           <div><p className="text-sm text-text-muted">Bloqueados</p><p className="text-xl font-bold">{data?.summary?.blocked || 0}</p></div>
         </div>
-        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
+        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4 min-w-0">
           <div className="p-3 bg-info/20 text-info rounded-lg"><TrendingUp className="w-5 h-5" /></div>
           <div><p className="text-sm text-text-muted">Novos Hoje</p><p className="text-xl font-bold">{data?.summary?.newToday || 0}</p></div>
         </div>
-        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4">
+        <div className="bg-surface p-4 rounded-xl border border-border shadow-sm flex items-center gap-4 min-w-0">
           <div className="p-3 bg-warning/20 text-warning rounded-lg"><UsersIcon className="w-5 h-5" /></div>
           <div><p className="text-sm text-text-muted">Novos na Semana</p><p className="text-xl font-bold">{data?.summary?.newWeek || 0}</p></div>
         </div>
@@ -146,8 +148,10 @@ export default function Users() {
 
       {/* Toolbar */}
       <div className="bg-surface p-4 rounded-xl border border-border flex flex-col md:flex-row gap-4 justify-between items-center">
-        <div className="flex w-full md:w-auto gap-4 flex-1">
-          <div className="relative flex-1 max-w-sm">
+        {/* flex-wrap + min-w-0: busca e filtros disputavam a mesma linha e os selects
+            saíam pela direita da tela no celular. */}
+        <div className="flex flex-wrap w-full md:w-auto gap-4 flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0 max-w-sm">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-text-muted" />
             <input 
               type="text" 
@@ -157,7 +161,7 @@ export default function Users() {
               className="w-full bg-background border border-border rounded-lg pl-9 pr-4 py-2 text-sm text-text focus:border-primary outline-none"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <select className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-text outline-none"
               value={filters.status} onChange={(e) => setFilters({...filters, status: e.target.value})}
             >
@@ -303,7 +307,9 @@ export default function Users() {
         </div>
         
         {/* Pagination */}
-        <div className="bg-background/50 border-t border-border p-4 flex justify-between items-center text-sm">
+        {/* Em 360px "Itens por página" e os botões de navegação não cabem lado a lado, e
+            o "Próxima" saía da tela — sem paginação alcançável. */}
+        <div className="bg-background/50 border-t border-border p-4 flex flex-wrap gap-3 justify-between items-center text-sm">
           <div className="flex items-center gap-3 text-text-muted">
             <span>Itens por página:</span>
             <select value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }} className="bg-background border border-border rounded p-1 outline-none">

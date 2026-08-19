@@ -406,7 +406,12 @@ export default function Rides() {
     <div className="flex h-[calc(100vh-6rem)] overflow-hidden bg-background">
       
       {/* MAIN CONTENT (LEFT) */}
-      <div className={`flex flex-col flex-1 border-r border-border ${showMap ? 'lg:w-2/3' : 'w-full'} transition-all duration-300`}>
+      {/* min-w-0: sem isto o filho flex não encolhe abaixo do próprio conteúdo (a regra
+          min-width:auto do flexbox). A tabela usa whitespace-nowrap, então a coluna
+          inteira esticava para ~740px num celular de 390px e o overflow-hidden do pai
+          simplesmente cortava — o cabeçalho, os filtros e metade da tabela ficavam
+          inalcançáveis, sem barra de rolagem nenhuma. */}
+      <div className={`flex flex-col flex-1 min-w-0 border-r border-border ${showMap ? 'lg:w-2/3' : 'w-full'} transition-all duration-300`}>
         
         {/* Header & Stats */}
         <div className="p-6 border-b border-border space-y-6 flex-shrink-0 bg-surface">
@@ -581,7 +586,13 @@ export default function Rides() {
           mobile o mapa vira overlay de tela cheia; no desktop fica sempre visível
           como painel lateral, independente de showMap (que hoje só existe pro
           mobile, já que não há botão de esconder no desktop). */}
-      <div className={`${showMap ? 'fixed inset-0 z-40 flex' : 'hidden'} lg:flex! lg:static lg:z-0 lg:w-1/3 flex-col bg-surface relative border-l border-border`}>
+      {/* O `relative` solto (sem variante) vencia o `fixed` na folha de estilo e o painel
+          deixava de ser overlay: virava item flex sem largura e COLAPSAVA para 1px — no
+          celular, tocar em "Mapa" não mostrava mapa nenhum. Ele existia só para ancorar os
+          filhos absolutos (botão fechar e resumo da frota), e `fixed` já faz esse papel;
+          quem precisava era o desktop, onde `lg:static` tirava a âncora. Daí `lg:relative`
+          no lugar dos dois. */}
+      <div className={`${showMap ? 'fixed inset-0 z-40 flex' : 'hidden'} lg:flex! lg:relative lg:z-0 lg:w-1/3 flex-col bg-surface border-l border-border`}>
           <button
             type="button"
             onClick={() => setShowMap(false)}

@@ -60,7 +60,9 @@ export default function Dashboard() {
           <p className="text-sm text-text-muted">O que está acontecendo agora, como foi o desempenho, e o que precisa da sua atenção.</p>
         </div>
 
-        <div className="flex items-center gap-4">
+        {/* flex-wrap: o seletor de período mais o painel de saúde do sistema não cabem
+            lado a lado num celular, e sem quebra o segundo era cortado pela metade. */}
+        <div className="flex flex-wrap items-center gap-4">
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}

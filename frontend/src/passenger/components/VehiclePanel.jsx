@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { vehicleImages } from '@/shared/assets/vehicleAssets'
+import { vehicleImageFor } from '@/shared/assets/vehicleAssets'
 import { getVehicleCategories } from '@/shared/services/vehicleCategoriesApi'
 import SelectableOptionCard from '@/shared/components/ui/SelectableOptionCard'
 import Button from '@/shared/components/ui/Button'
@@ -55,7 +55,7 @@ const VehiclePanel = (props) => {
                             key={category._id || category.name}
                             selected={selectedName === category.name}
                             onClick={() => setSelectedName(category.name)}
-                            icon={<img className='h-9 w-12 object-contain' src={vehicleImages[category.iconKey] || vehicleImages[category.name] || vehicleImages.car} alt="" width="1024" height="1024" loading="lazy" />}
+                            icon={<img className='h-9 w-12 object-contain' src={vehicleImageFor(category)} alt="" width="1024" height="1024" loading="lazy" />}
                             title={
                                 <span className='inline-flex items-center gap-1.5'>
                                     {category.displayName}

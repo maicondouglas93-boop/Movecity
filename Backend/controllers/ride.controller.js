@@ -404,6 +404,16 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
         }
+        // A corrida em aberto é a DELE, esperando o PIN — não um impedimento. Devolve o
+        // id para o app levá-lo direto ao passo certo em vez de deixá-lo tentando criar
+        // outra corrida que o índice único nunca vai permitir.
+        if (err.code === 'PRESENTIAL_ALREADY_OPEN') {
+            return res.status(409).json({
+                code: err.code,
+                rideId: err.rideId,
+                message: 'Você já tem uma corrida presencial aberta, esperando o PIN. Abra ela para continuar ou cancele antes de criar outra.',
+            });
+        }
         if (err.code === 'CAPTAIN_BUSY') {
             return res.status(409).json({ message: 'Você já possui uma corrida ou encomenda em andamento.' });
         }

@@ -1088,6 +1088,26 @@ module.exports.createPresentialRide = async ({
         throw err;
     }
 
+    // Antes de disputar o lock: se o motorista JÁ tem uma presencial aberta, a resposta
+    // certa é apontar essa corrida, não dizer que ele está ocupado.
+    //
+    // Esta checagem precisa vir antes do acquire porque o lock é justamente o que a
+    // segunda tentativa esbarra — e ali dentro já não dá pra distinguir "ocupado com
+    // outra coisa" de "esta é a sua corrida esperando o PIN". Na rua, esse é o caso
+    // comum: a primeira tentativa ficou sem resposta por falta de sinal e o motorista
+    // tocou de novo.
+    const presentialEmAberto = await rideModel.findOne({
+        captain: freshCaptain._id,
+        source: 'driver_initiated',
+        status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ] },
+    }).select('_id');
+    if (presentialEmAberto) {
+        const err = new Error('PRESENTIAL_ALREADY_OPEN');
+        err.code = 'PRESENTIAL_ALREADY_OPEN';
+        err.rideId = String(presentialEmAberto._id);
+        throw err;
+    }
+
     // Cancela via admin (e outros caminhos que esqueciam o unlock) deixavam busyLock
     // true sem ride/parcel ativos — limpa o lock órfão antes de tentar adquirir.
     await dispatchService.releaseCaptainBusyLockIfIdle(freshCaptain._id);
@@ -1101,11 +1121,23 @@ module.exports.createPresentialRide = async ({
 
     let presentialCreatedId = null;
     try {
-        const existingActive = await rideModel.exists({
+        const existingActive = await rideModel.findOne({
             captain: freshCaptain._id,
             status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] },
-        });
+        }).select('_id source status');
         if (existingActive) {
+            // Distingue "você está ocupado com OUTRA coisa" de "esta corrida é a SUA, e
+            // ela já existe". O segundo caso é o mais comum na rua: a primeira tentativa
+            // ficou sem resposta (sinal ruim), o motorista tocou de novo, e devolver
+            // "você já possui uma corrida em andamento" fazia parecer recusa — quando na
+            // verdade é só a corrida dele esperando o PIN. Devolver o id permite ao app
+            // levá-lo direto pra lá em vez de deixá-lo tentando criar outra.
+            if (existingActive.source === 'driver_initiated' && existingActive.status !== 'started') {
+                const err = new Error('PRESENTIAL_ALREADY_OPEN');
+                err.code = 'PRESENTIAL_ALREADY_OPEN';
+                err.rideId = String(existingActive._id);
+                throw err;
+            }
             const err = new Error('CAPTAIN_BUSY');
             err.code = 'CAPTAIN_BUSY';
             throw err;

@@ -126,6 +126,9 @@ describe('createPresentialRide', () => {
         dispatchService.acquireCaptainBusyLock.mockResolvedValue(true);
         dispatchService.captainHasActiveParcel.mockResolvedValue(false);
         rideModel.exists.mockResolvedValue(false);
+        // Checagem de presencial já aberta (P2/P4 da auditoria do presencial): roda antes
+        // de disputar o busyLock e usa findOne().select(). Por padrão, nenhuma em aberto.
+        rideModel.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
         require('../../models/captain.model').findById.mockResolvedValue({ ...mockCaptainDoc });
     });
 
@@ -168,6 +171,28 @@ describe('createPresentialRide', () => {
             source: 'driver_initiated',
             status: 'accepted',
         }));
+    });
+
+    // Achado P4 da auditoria do presencial (2026-08-19): a segunda tentativa (a primeira
+    // ficou sem resposta por falta de sinal) devolvia "você já possui uma corrida em
+    // andamento" — uma mensagem que soa como recusa, quando na verdade a corrida dele já
+    // existe esperando o PIN. Precisa se identificar como tal E devolver o id, senão o app
+    // não tem como levá-lo de volta.
+    test('presencial já aberta se identifica e devolve o id, em vez de "ocupado"', async () => {
+        rideModel.findOne.mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: 'ride-em-aberto' }),
+        });
+
+        await expect(rideService.createPresentialRide({
+            captain: mockCaptainDoc,
+            destinationPending: true,
+            clientLat: -20.15,
+            clientLng: -41.62,
+        })).rejects.toMatchObject({ code: 'PRESENTIAL_ALREADY_OPEN', rideId: 'ride-em-aberto' });
+
+        // Não pode nem chegar a disputar o lock: a corrida dele já ocupa o motorista.
+        expect(dispatchService.acquireCaptainBusyLock).not.toHaveBeenCalled();
+        expect(rideModel.create).not.toHaveBeenCalled();
     });
 
     test('bloqueia motorista ocupado', async () => {

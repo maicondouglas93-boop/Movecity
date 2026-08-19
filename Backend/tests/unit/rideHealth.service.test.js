@@ -196,3 +196,103 @@ describe('lembrete de corrida aberta há muito tempo', () => {
         expect(resultado.remindedLongRides).toContain(String(ride._id));
     });
 });
+
+/**
+ * Presencial parada antes do PIN (achado P2 da auditoria do presencial, 2026-08-19).
+ *
+ * Ela nasce em 'accepted' e só vira 'started' quando o motorista digita o PIN. Se o
+ * passageiro desiste e ele fecha o app, a corrida fica aberta com o busyLock: ele para de
+ * receber oferta e nada diz por quê. Era o único estado travado sobre o qual ninguém
+ * era avisado — a varredura olhava started, finished pendente e requested, nunca accepted.
+ */
+describe('lembrete de presencial esperando o PIN', () => {
+    beforeEach(() => {
+        jest.spyOn(notificationService, 'sendPresentialAwaitingPinReminder').mockResolvedValue(undefined);
+        jest.spyOn(notificationService, 'sendLongRideReminder').mockResolvedValue(undefined);
+        jest.spyOn(notificationService, 'sendAdminAlert').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    const presencialParada = async (overrides = {}) => {
+        const user = await createUser();
+        const captain = await createCaptain();
+        const ride = await createRide({
+            user: user._id,
+            captain: captain._id,
+            status: 'accepted',
+            source: 'driver_initiated',
+            ...overrides,
+        });
+        // createdAt é imutável no Mongoose: precisa ir pelo driver nativo.
+        await rideModel.collection.updateOne(
+            { _id: ride._id },
+            { $set: { createdAt: minutesAgo(rideHealth.PRESENTIAL_AWAITING_PIN_MINUTES + 5) } }
+        );
+        return ride;
+    };
+
+    it('avisa o motorista, dizendo há quanto tempo a corrida está aberta', async () => {
+        const ride = await presencialParada();
+
+        const avisadas = await rideHealth.remindPresentialAwaitingPin();
+
+        expect(avisadas).toContain(String(ride._id));
+        const [captainId, data] = notificationService.sendPresentialAwaitingPinReminder.mock.calls[0];
+        expect(String(captainId)).toBe(String(ride.captain));
+        expect(data.rideId).toBe(String(ride._id));
+        expect(data.minutesWaiting).toBeGreaterThanOrEqual(rideHealth.PRESENTIAL_AWAITING_PIN_MINUTES);
+    });
+
+    it('avisa uma vez só', async () => {
+        await presencialParada();
+
+        await rideHealth.remindPresentialAwaitingPin();
+        const segunda = await rideHealth.remindPresentialAwaitingPin();
+
+        expect(segunda).toHaveLength(0);
+        expect(notificationService.sendPresentialAwaitingPinReminder).toHaveBeenCalledTimes(1);
+    });
+
+    it('não incomoda corrida recém-criada, que ainda está na conversa do PIN', async () => {
+        const user = await createUser();
+        const captain = await createCaptain();
+        await createRide({
+            user: user._id, captain: captain._id, status: 'accepted', source: 'driver_initiated',
+        });
+
+        const avisadas = await rideHealth.remindPresentialAwaitingPin();
+
+        expect(avisadas).toHaveLength(0);
+    });
+
+    // Corrida despachada pelo app fica em 'accepted' enquanto o motorista se desloca até
+    // o embarque — é o funcionamento normal dela, não um travamento.
+    it('não confunde com corrida despachada a caminho do embarque', async () => {
+        const user = await createUser();
+        const captain = await createCaptain();
+        const ride = await createRide({
+            user: user._id, captain: captain._id, status: 'accepted', source: 'passenger_requested',
+        });
+        await rideModel.collection.updateOne(
+            { _id: ride._id },
+            { $set: { createdAt: minutesAgo(120) } }
+        );
+
+        const avisadas = await rideHealth.remindPresentialAwaitingPin();
+
+        expect(avisadas).toHaveLength(0);
+        expect(notificationService.sendPresentialAwaitingPinReminder).not.toHaveBeenCalled();
+    });
+
+    it('a varredura completa dispara o lembrete e reporta o grupo ao operador', async () => {
+        const ride = await presencialParada();
+
+        const resultado = await rideHealth.reportStuckRides();
+
+        expect(resultado.remindedAwaitingPin).toContain(String(ride._id));
+        expect(resultado.presentialAwaitingPin.map((r) => String(r._id))).toContain(String(ride._id));
+    });
+});

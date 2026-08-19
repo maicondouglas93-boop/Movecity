@@ -410,6 +410,7 @@ const DEEP_LINK = {
     captainHome: '/captain-home',
     captainRiding: '/captain-riding',
     captainWallet: '/captain/wallet',
+    captainPresential: '/captain-presential',
     captainProfile: '/captain/profile',
     riding: '/riding',
     home: '/home',
@@ -563,6 +564,22 @@ module.exports.sendLongRideReminder = async (captainId, data = {}) => {
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'RIDE_REMINDER', {
         ...data,
         deepLink: DEEP_LINK.captainRiding,
+    }));
+};
+
+// Presencial criada e parada antes do PIN. O motorista continua "ocupado" para o
+// despacho sem estar rodando nada — e o mais provável é que ele nem saiba disso. O texto
+// diz o que fazer com as duas saídas possíveis, porque as duas são legítimas: o
+// passageiro embarcou (inicia) ou desistiu (cancela).
+module.exports.sendPresentialAwaitingPinReminder = async (captainId, data = {}) => {
+    const minutos = Number(data.minutesWaiting) || null;
+    const title = 'Corrida presencial esperando o PIN';
+    const message = minutos
+        ? `Você abriu uma corrida há ${minutos} min e ela ainda não começou. Enquanto isso você não recebe novas corridas — informe o PIN para iniciar, ou cancele se o passageiro desistiu.`
+        : 'Você tem uma corrida aberta que ainda não começou. Enquanto isso você não recebe novas corridas — informe o PIN para iniciar, ou cancele se o passageiro desistiu.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'RIDE_REMINDER', {
+        ...data,
+        deepLink: DEEP_LINK.captainPresential,
     }));
 };
 

@@ -37,6 +37,17 @@ const LONG_RIDE_REMINDER_MINUTES = Number(process.env.LONG_RIDE_REMINDER_MINUTES
 // esse lembrete nela seria cutucar quem está fazendo exatamente o combinado.
 const TIME_HIRE_OPTIONAL = 'disposicao_passageiro';
 
+// Presencial parada antes do PIN.
+//
+// Ela nasce em `accepted` e só vira `started` quando o motorista digita o PIN. Entre um e
+// outro existe uma conversa real com o passageiro — que pode desistir. Se o motorista
+// fecha o app nesse ponto, a corrida fica em `accepted` com o busyLock ativo: ele para de
+// receber oferta e nada na tela diz por quê. Era o único estado travado do sistema sobre
+// o qual ninguém era avisado (achado P2 da auditoria do presencial, 2026-08-19).
+//
+// 15 min: o PIN é coisa de segundos. Acima disso já não é conversa, é corrida esquecida.
+const PRESENTIAL_AWAITING_PIN_MINUTES = Number(process.env.PRESENTIAL_AWAITING_PIN_MINUTES) || 15;
+
 function minutesAgo(minutes) {
     return new Date(Date.now() - minutes * 60 * 1000);
 }
@@ -46,7 +57,7 @@ function minutesAgo(minutes) {
  * Retorna os grupos encontrados, sem alterar nenhum documento.
  */
 async function findStuckRides() {
-    const [stuckStarted, stuckFinalization, staleRequested] = await Promise.all([
+    const [stuckStarted, stuckFinalization, staleRequested, presentialAwaitingPin] = await Promise.all([
         rideModel.find({
             status: 'started',
             startedAt: { $lt: minutesAgo(STUCK_STARTED_HOURS * 60) },
@@ -62,9 +73,18 @@ async function findStuckRides() {
             status: 'requested',
             createdAt: { $lt: minutesAgo(STALE_REQUESTED_MINUTES) },
         }).select('_id user createdAt').lean(),
+
+        // Presencial parada antes do PIN: o motorista segue ocupado (busyLock) sem estar
+        // rodando nada. Entra no relatório para o operador enxergar, além do lembrete que
+        // vai direto pra ele.
+        rideModel.find({
+            status: 'accepted',
+            source: 'driver_initiated',
+            createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_PIN_MINUTES) },
+        }).select('_id captain createdAt').lean(),
     ]);
 
-    return { stuckStarted, stuckFinalization, staleRequested };
+    return { stuckStarted, stuckFinalization, staleRequested, presentialAwaitingPin };
 }
 
 /**
@@ -116,6 +136,50 @@ async function remindLongRunningRides() {
     return avisadas;
 }
 
+/**
+ * Avisa o motorista de presencial parada esperando o PIN.
+ *
+ * Mesma trava de repetição do lembrete de corrida longa, e pelo mesmo motivo: a varredura
+ * roda a cada 15 min e repetir o aviso ensina a ignorá-lo. Reaproveita
+ * `longRideReminderAt` de propósito — uma corrida presa antes do PIN nunca chega a ser
+ * uma corrida longa em andamento, então os dois avisos jamais disputam o mesmo registro.
+ */
+async function remindPresentialAwaitingPin() {
+    const candidatas = await rideModel.find({
+        status: 'accepted',
+        source: 'driver_initiated',
+        createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_PIN_MINUTES) },
+        longRideReminderAt: null,
+        captain: { $ne: null },
+    }).select('_id captain createdAt').lean();
+
+    const avisadas = [];
+    for (const ride of candidatas) {
+        // eslint-disable-next-line no-await-in-loop
+        const claimed = await rideModel.findOneAndUpdate(
+            { _id: ride._id, status: 'accepted', longRideReminderAt: null },
+            { $set: { longRideReminderAt: new Date() } },
+            { new: true, projection: { _id: 1 } }
+        );
+        if (!claimed) continue;
+
+        const minutesWaiting = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 60000);
+        try {
+            // eslint-disable-next-line no-await-in-loop
+            await notificationService.sendPresentialAwaitingPinReminder(String(ride.captain), {
+                rideId: String(ride._id),
+                referenceId: String(ride._id),
+                minutesWaiting,
+            });
+            avisadas.push(String(ride._id));
+        } catch (err) {
+            console.error('[RideHealth] lembrete de presencial sem PIN não enviado:', String(ride._id), err.message);
+        }
+    }
+
+    return avisadas;
+}
+
 async function reportStuckRides() {
     // Roda antes da varredura de travadas: o lembrete é a chance de o motorista resolver
     // sozinho, e o alerta de 4h é o que sobra quando ele não resolveu.
@@ -125,12 +189,19 @@ async function reportStuckRides() {
             return [];
         });
 
+    const remindedAwaitingPin = await remindPresentialAwaitingPin()
+        .catch((err) => {
+            console.error('[RideHealth] varredura de presencial sem PIN falhou:', err.message);
+            return [];
+        });
+
     const groups = await findStuckRides();
     const total = groups.stuckStarted.length
         + groups.stuckFinalization.length
-        + groups.staleRequested.length;
+        + groups.staleRequested.length
+        + groups.presentialAwaitingPin.length;
 
-    if (total === 0) return { total, remindedLongRides, ...groups };
+    if (total === 0) return { total, remindedLongRides, remindedAwaitingPin, ...groups };
 
     // Log estruturado com os ids: é o que permite investigar sem precisar de query
     // manual no banco quando alguém relatar o problema.
@@ -138,6 +209,7 @@ async function reportStuckRides() {
         emAndamentoHaMuitoTempo: groups.stuckStarted.map((r) => String(r._id)),
         liquidacaoPendente: groups.stuckFinalization.map((r) => String(r._id)),
         pedidoSemMotorista: groups.staleRequested.map((r) => String(r._id)),
+        presencialSemPin: groups.presentialAwaitingPin.map((r) => String(r._id)),
     });
 
     // Só a liquidação pendente vira alerta ativo: é a única que significa dinheiro não
@@ -152,7 +224,7 @@ async function reportStuckRides() {
         ).catch((err) => console.error('[RideHealth] alerta não enviado:', err.message));
     }
 
-    return { total, remindedLongRides, ...groups };
+    return { total, remindedLongRides, remindedAwaitingPin, ...groups };
 }
 
 // A cada 15 minutos: frequente o bastante para você descobrir no mesmo turno de
@@ -166,7 +238,9 @@ if (process.env.NODE_ENV !== 'test') {
 module.exports = {
     STUCK_STARTED_HOURS,
     LONG_RIDE_REMINDER_MINUTES,
+    PRESENTIAL_AWAITING_PIN_MINUTES,
     remindLongRunningRides,
+    remindPresentialAwaitingPin,
     STUCK_FINALIZATION_MINUTES,
     STALE_REQUESTED_MINUTES,
     findStuckRides,

@@ -680,16 +680,31 @@ module.exports.getCaptains = async (page = 1, limit = 10, search = '', filters =
 // de cada motorista. Usa a mesma base de disponibilidade do dashboard (TTL de
 // lastSeenAt), incluindo quem está em corrida (canReceiveRides:false), e só devolve
 // quem já tem coordenada gravada.
-module.exports.formatLiveMapDriver = (captain) => {
+module.exports.formatLiveMapDriver = (captain, { hasActiveService = false } = {}) => {
+    const captainService = require('./captain.service');
     const first = captain.fullname?.firstname || '';
     const last = captain.fullname?.lastname || '';
-    const inRide = captain.canReceiveRides === false || captain.busyLock === true;
+    // `hasActiveService` vem da corrida/encomenda real. canReceiveRides/busyLock são
+    // reflexos disso e podem ficar órfãos, então a existência do serviço manda.
+    const inRide = hasActiveService || captain.canReceiveRides === false || captain.busyLock === true;
+
+    // Há quanto tempo o servidor não tem contato. Um ponto no mapa sem isto sugere
+    // "está aqui agora", quando pode ser a última posição de 40 minutos atrás.
+    const lastSeenMs = captain.lastSeenAt ? new Date(captain.lastSeenAt).getTime() : null;
+    const minutesSinceLastSeen = lastSeenMs === null
+        ? null
+        : Math.max(0, Math.round((Date.now() - lastSeenMs) / 60000));
+    const isStale = minutesSinceLastSeen === null
+        || minutesSinceLastSeen > captainService.AVAILABILITY_TTL_MINUTES;
+
     return {
         captainId: captain._id.toString(),
         name: `${first} ${last}`.trim() || 'Motorista',
         ltd: captain.location?.ltd,
         lng: captain.location?.lng,
         status: inRide ? 'in_ride' : 'available',
+        minutesSinceLastSeen,
+        isStale,
         vehicle: {
             plate: captain.vehicle?.plate || '',
             vehicleType: captain.vehicle?.vehicleType || '',
@@ -701,19 +716,59 @@ module.exports.formatLiveMapDriver = (captain) => {
     };
 };
 
+// Serviço em andamento: mesmos status que impedem o motorista de pegar outra corrida
+// (ride.service.getCurrentRideForCaptain) e outra encomenda (parcel.service).
+const LIVE_MAP_ACTIVE_RIDE_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started'];
+const LIVE_MAP_ACTIVE_PARCEL_STATUSES = [
+    'provider_accepted', 'going_to_pickup', 'arrived_pickup',
+    'collected', 'in_transit', 'arrived_destination',
+];
+
 module.exports.getLiveMapCaptains = async () => {
     const captainService = require('./captain.service');
     const { canReceiveRides: _ignored, ...availabilityBase } = captainService.availabilityFilter();
 
+    // Quem está no meio de um serviço entra no mapa mesmo sem batimento recente.
+    //
+    // O availabilityFilter responde "dá pra DESPACHAR pra este motorista?" — e por isso
+    // exige lastSeenAt dentro de 15 min e isOnline. Para um motorista em viagem essa é a
+    // pergunta errada: quem perde sinal (zona rural) ou tem o app morto pelo Android para
+    // de bater e sumia do mapa, justamente com passageiro embarcado e ninguém sabendo
+    // onde ele está. A última posição conhecida, marcada como antiga, informa mais do que
+    // a ausência dele.
+    const [ rideCaptainIds, parcelCaptainIds ] = await Promise.all([
+        rideModel.distinct('captain', {
+            captain: { $ne: null },
+            status: { $in: LIVE_MAP_ACTIVE_RIDE_STATUSES },
+        }),
+        parcelModel.distinct('captain', {
+            captain: { $ne: null },
+            status: { $in: LIVE_MAP_ACTIVE_PARCEL_STATUSES },
+        }),
+    ]);
+    const busyIds = [...new Set([...rideCaptainIds, ...parcelCaptainIds].map(String))]
+        .map((id) => new mongoose.Types.ObjectId(id));
+
     const captains = await captainModel.find({
-        ...availabilityBase,
+        $or: [
+            availabilityBase,
+            { _id: { $in: busyIds } },
+        ],
+        // Continua sendo obrigatório ter posição: sem coordenada não há o que desenhar.
         'location.ltd': { $type: 'number' },
         'location.lng': { $type: 'number' },
     }).select('fullname vehicle vehicleAuthorization location isOnline canReceiveRides busyLock lastSeenAt');
 
+    const busySet = new Set(busyIds.map(String));
     const drivers = captains
-        .map((c) => module.exports.formatLiveMapDriver(c))
+        .map((c) => module.exports.formatLiveMapDriver(c, { hasActiveService: busySet.has(String(c._id)) }))
         .filter((d) => Number.isFinite(d.ltd) && Number.isFinite(d.lng));
+
+    // Motorista em serviço que nunca mandou posição não tem como ser desenhado. Contar
+    // é melhor que omitir em silêncio: o painel consegue avisar que existe alguém em
+    // viagem fora do mapa, em vez de dar a impressão de que não existe.
+    const plotted = new Set(drivers.map((d) => String(d.captainId)));
+    const inServiceWithoutPosition = busyIds.filter((id) => !plotted.has(String(id))).length;
 
     return {
         drivers,
@@ -721,6 +776,8 @@ module.exports.getLiveMapCaptains = async () => {
             total: drivers.length,
             available: drivers.filter((d) => d.status === 'available').length,
             inRide: drivers.filter((d) => d.status === 'in_ride').length,
+            stale: drivers.filter((d) => d.isStale).length,
+            inServiceWithoutPosition,
         },
         updatedAt: new Date().toISOString(),
     };

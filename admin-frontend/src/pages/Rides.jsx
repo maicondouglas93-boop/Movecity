@@ -28,11 +28,15 @@ L.Icon.Default.mergeOptions({
 const DRIVER_STALE_MS = 15 * 60 * 1000; // alinhado ao TTL de disponibilidade do backend
 const DEFAULT_MAP_CENTER = [-23.55052, -46.633308];
 
-function driverMarkerIcon(status) {
+function driverMarkerIcon(status, isStale = false) {
   const color = status === 'in_ride' ? '#f59e0b' : '#22c55e';
+  // Sem contato recente: bolinha vazada, não preenchida. Um ponto sólido afirma "está
+  // aqui agora"; quando o último GPS é de 40 minutos atrás isso é mentira, e é
+  // exatamente na viagem sem sinal que o operador precisa saber a diferença.
+  const fill = isStale ? 'transparent' : color;
   return L.divIcon({
     className: 'admin-live-driver-marker',
-    html: `<div style="width:18px;height:18px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 0 0 2px ${color}55;"></div>`,
+    html: `<div style="width:18px;height:18px;border-radius:9999px;background:${fill};border:2px ${isStale ? 'dashed' : 'solid'} ${isStale ? color : '#fff'};box-shadow:0 0 0 2px ${color}55;"></div>`,
     iconSize: [18, 18],
     iconAnchor: [9, 9],
     popupAnchor: [0, -10],
@@ -71,7 +75,7 @@ const DriversLayer = React.memo(function DriversLayer({ drivers }) {
         <Marker
           key={driver.captainId}
           position={[driver.ltd, driver.lng]}
-          icon={driverMarkerIcon(driver.status)}
+          icon={driverMarkerIcon(driver.status, driver.isStale)}
         >
           <Popup>
             <div className="text-sm space-y-1 min-w-[140px]">
@@ -79,6 +83,11 @@ const DriversLayer = React.memo(function DriversLayer({ drivers }) {
               <p className="text-xs">
                 {driver.status === 'in_ride' ? 'Em corrida / ocupado' : 'Disponível'}
               </p>
+              {driver.isStale && (
+                <p className="text-[11px] font-semibold text-amber-600">
+                  Sem contato{driver.minutesSinceLastSeen != null ? ` há ${driver.minutesSinceLastSeen} min` : ''} — última posição conhecida
+                </p>
+              )}
               {(driver.vehicle?.plate || driver.vehicle?.vehicleType) && (
                 <p className="text-xs opacity-80">
                   {[driver.vehicle?.vehicleType, driver.vehicle?.plate, driver.vehicle?.color]
@@ -230,7 +239,14 @@ export default function Rides() {
     };
   }, [socket]);
 
-  // Remove motoristas sem heartbeat recente (TTL alinhado ao backend)
+  // Remove motoristas sem heartbeat recente (TTL alinhado ao backend) — EXCETO quem
+  // está em corrida/encomenda.
+  //
+  // Motorista em serviço que perde sinal (zona rural) ou tem o app morto pelo Android
+  // para de bater e era descartado aqui, sumindo do mapa justamente com passageiro
+  // embarcado. A última posição conhecida, marcada como antiga, informa muito mais que
+  // a ausência dele — o backend passou a devolvê-lo pelo mesmo motivo, e limpar aqui
+  // desfaria isso do lado do painel.
   useEffect(() => {
     const id = setInterval(() => {
       const cutoff = Date.now() - DRIVER_STALE_MS;
@@ -239,7 +255,7 @@ export default function Rides() {
         const next = {};
         for (const [key, driver] of Object.entries(prev)) {
           const seen = driver.lastSeenAt ? new Date(driver.lastSeenAt).getTime() : 0;
-          if (seen && seen < cutoff) {
+          if (seen && seen < cutoff && driver.status !== 'in_ride') {
             changed = true;
             continue;
           }

@@ -43,7 +43,7 @@ const notificationSchema = new mongoose.Schema({
         // COUPON / SYSTEM / ALERT: tipos da central de notificações in-app.
         enum: [
             'NEW_RIDE', 'NEW_PARCEL', 'RIDE_ACCEPTED', 'RIDE_STARTED', 'RIDE_FINISHED',
-            'RIDE_ARRIVED', 'RIDE_CANCELLED', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN',
+            'RIDE_ARRIVED', 'RIDE_CANCELLED', 'RIDE_REMINDER', 'CHAT', 'PAYMENT', 'PROMOTION', 'ADMIN',
             'RECHARGE', 'DOCUMENT',
             'SCHEDULE_CREATED', 'SCHEDULE_ACTIVATED', 'SCHEDULE_NO_DRIVER', 'SCHEDULE_REMINDER',
             'COUPON', 'SYSTEM', 'ALERT',

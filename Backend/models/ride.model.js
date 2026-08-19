@@ -232,6 +232,13 @@ const rideSchema = new mongoose.Schema({
     },
     finalizationStartedAt: Date,
     finalizationError: String,
+    // Quando o lembrete de "corrida aberta há muito tempo" foi enviado ao motorista.
+    // Serve de trava: a varredura roda a cada 15 min e sem isto o motorista receberia
+    // o mesmo aviso repetidamente até finalizar — vira ruído e ele para de ler.
+    longRideReminderAt: {
+        type: Date,
+        default: null,
+    },
     actualTime: {
         type: Number,
     },

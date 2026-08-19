@@ -107,3 +107,92 @@ describe('varredura de corridas travadas', () => {
         expect(notificationService.sendAdminAlert).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * Lembrete ao motorista de corrida aberta há tempo demais.
+ *
+ * O caso comum não é defeito de sistema: o motorista sai do app (ou o Android mata) e a
+ * corrida fica aberta. O alerta de 4h existia só para o operador — o motorista, que é
+ * quem pode resolver com um toque, nunca era avisado.
+ */
+describe('lembrete de corrida aberta há muito tempo', () => {
+    beforeEach(() => {
+        jest.spyOn(notificationService, 'sendLongRideReminder').mockResolvedValue(undefined);
+        jest.spyOn(notificationService, 'sendAdminAlert').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    const corridaAberta = async (overrides = {}) => {
+        const user = await createUser();
+        const captain = await createCaptain();
+        return createRide({
+            user: user._id,
+            captain: captain._id,
+            status: 'started',
+            startedAt: minutesAgo(rideHealth.LONG_RIDE_REMINDER_MINUTES + 10),
+            ...overrides,
+        });
+    };
+
+    it('avisa o motorista, com o tempo real da corrida', async () => {
+        const ride = await corridaAberta();
+
+        const avisadas = await rideHealth.remindLongRunningRides();
+
+        expect(avisadas).toContain(String(ride._id));
+        expect(notificationService.sendLongRideReminder).toHaveBeenCalledTimes(1);
+        const [captainId, data] = notificationService.sendLongRideReminder.mock.calls[0];
+        expect(String(captainId)).toBe(String(ride.captain));
+        expect(data.rideId).toBe(String(ride._id));
+        expect(data.minutesRunning).toBeGreaterThanOrEqual(rideHealth.LONG_RIDE_REMINDER_MINUTES);
+    });
+
+    it('avisa UMA vez só, mesmo com a varredura rodando de novo', async () => {
+        await corridaAberta();
+
+        await rideHealth.remindLongRunningRides();
+        const segunda = await rideHealth.remindLongRunningRides();
+
+        expect(segunda).toHaveLength(0);
+        expect(notificationService.sendLongRideReminder).toHaveBeenCalledTimes(1);
+    });
+
+    it('não incomoda corrida recente', async () => {
+        await corridaAberta({ startedAt: minutesAgo(5) });
+
+        const avisadas = await rideHealth.remindLongRunningRides();
+
+        expect(avisadas).toHaveLength(0);
+        expect(notificationService.sendLongRideReminder).not.toHaveBeenCalled();
+    });
+
+    // Corrida contratada por tempo é longa por definição — o lembrete cutucaria quem
+    // está fazendo exatamente o que foi combinado.
+    it('não incomoda corrida de motorista à disposição', async () => {
+        await corridaAberta({ optionals: [{ type: 'disposicao_passageiro', price: 15 }] });
+
+        const avisadas = await rideHealth.remindLongRunningRides();
+
+        expect(avisadas).toHaveLength(0);
+        expect(notificationService.sendLongRideReminder).not.toHaveBeenCalled();
+    });
+
+    it('não avisa corrida que já foi finalizada', async () => {
+        await corridaAberta({ status: 'finished' });
+
+        const avisadas = await rideHealth.remindLongRunningRides();
+
+        expect(avisadas).toHaveLength(0);
+    });
+
+    it('a varredura completa dispara o lembrete junto', async () => {
+        const ride = await corridaAberta();
+
+        const resultado = await rideHealth.reportStuckRides();
+
+        expect(resultado.remindedLongRides).toContain(String(ride._id));
+    });
+});

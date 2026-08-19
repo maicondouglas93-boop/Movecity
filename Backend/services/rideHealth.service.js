@@ -27,6 +27,16 @@ const STUCK_FINALIZATION_MINUTES = 30;
 // consulta a corrida atual). Sem ninguém consultando, o pedido fica no banco.
 const STALE_REQUESTED_MINUTES = 30;
 
+// Lembrete ao motorista, muito antes do alerta de 4h. Uma corrida em Lajinha raramente
+// passa de ~50 min; acima disso a explicação mais provável não é uma viagem longa, e sim
+// o motorista ter saído do app (ou o Android ter matado) sem finalizar. Avisar cedo
+// resolve sozinho o caso comum — e evita que a corrida só apareça quando já está travada.
+const LONG_RIDE_REMINDER_MINUTES = Number(process.env.LONG_RIDE_REMINDER_MINUTES) || 60;
+
+// Corrida contratada por tempo ("motorista à disposição") é longa POR DEFINIÇÃO. Mandar
+// esse lembrete nela seria cutucar quem está fazendo exatamente o combinado.
+const TIME_HIRE_OPTIONAL = 'disposicao_passageiro';
+
 function minutesAgo(minutes) {
     return new Date(Date.now() - minutes * 60 * 1000);
 }
@@ -57,13 +67,70 @@ async function findStuckRides() {
     return { stuckStarted, stuckFinalization, staleRequested };
 }
 
+/**
+ * Avisa o motorista de corrida aberta há tempo demais.
+ *
+ * A marcação de `longRideReminderAt` é feita por findOneAndUpdate condicional, ANTES de
+ * enviar: é o que garante um aviso só. A varredura roda a cada 15 min e pode haver mais
+ * de uma instância do servidor — sem o claim atômico, o motorista receberia o mesmo
+ * empurrão várias vezes e pararia de ler qualquer notificação nossa.
+ */
+async function remindLongRunningRides() {
+    const candidatas = await rideModel.find({
+        status: 'started',
+        startedAt: { $lt: minutesAgo(LONG_RIDE_REMINDER_MINUTES) },
+        longRideReminderAt: null,
+        captain: { $ne: null },
+        // Nenhum item "à disposição" na corrida (optionals é array de subdocumentos, e
+        // este $ne casa com "nenhum elemento tem esse type").
+        'optionals.type': { $ne: TIME_HIRE_OPTIONAL },
+    }).select('_id captain startedAt').lean();
+
+    const avisadas = [];
+    for (const ride of candidatas) {
+        // eslint-disable-next-line no-await-in-loop
+        const claimed = await rideModel.findOneAndUpdate(
+            { _id: ride._id, status: 'started', longRideReminderAt: null },
+            { $set: { longRideReminderAt: new Date() } },
+            { new: true, projection: { _id: 1 } }
+        );
+        if (!claimed) continue;
+
+        const minutesRunning = Math.round((Date.now() - new Date(ride.startedAt).getTime()) / 60000);
+        try {
+            // eslint-disable-next-line no-await-in-loop
+            await notificationService.sendLongRideReminder(String(ride.captain), {
+                rideId: String(ride._id),
+                referenceId: String(ride._id),
+                minutesRunning,
+            });
+            avisadas.push(String(ride._id));
+        } catch (err) {
+            // O envio falhou, mas a corrida já está marcada. Melhor perder UM lembrete do
+            // que arriscar repetir: quem não finalizar continua sendo pego pelo alerta de
+            // 4h, que é a rede de segurança de verdade.
+            console.error('[RideHealth] lembrete de corrida longa não enviado:', String(ride._id), err.message);
+        }
+    }
+
+    return avisadas;
+}
+
 async function reportStuckRides() {
+    // Roda antes da varredura de travadas: o lembrete é a chance de o motorista resolver
+    // sozinho, e o alerta de 4h é o que sobra quando ele não resolveu.
+    const remindedLongRides = await remindLongRunningRides()
+        .catch((err) => {
+            console.error('[RideHealth] varredura de lembretes falhou:', err.message);
+            return [];
+        });
+
     const groups = await findStuckRides();
     const total = groups.stuckStarted.length
         + groups.stuckFinalization.length
         + groups.staleRequested.length;
 
-    if (total === 0) return { total, ...groups };
+    if (total === 0) return { total, remindedLongRides, ...groups };
 
     // Log estruturado com os ids: é o que permite investigar sem precisar de query
     // manual no banco quando alguém relatar o problema.
@@ -85,7 +152,7 @@ async function reportStuckRides() {
         ).catch((err) => console.error('[RideHealth] alerta não enviado:', err.message));
     }
 
-    return { total, ...groups };
+    return { total, remindedLongRides, ...groups };
 }
 
 // A cada 15 minutos: frequente o bastante para você descobrir no mesmo turno de
@@ -98,6 +165,8 @@ if (process.env.NODE_ENV !== 'test') {
 
 module.exports = {
     STUCK_STARTED_HOURS,
+    LONG_RIDE_REMINDER_MINUTES,
+    remindLongRunningRides,
     STUCK_FINALIZATION_MINUTES,
     STALE_REQUESTED_MINUTES,
     findStuckRides,

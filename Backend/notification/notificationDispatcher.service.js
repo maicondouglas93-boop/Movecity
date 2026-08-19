@@ -550,6 +550,22 @@ module.exports.sendPaymentReported = async (captainId, data) => {
     queue.enqueue(() => sendToCaptain(captainId, title, message, 'PAYMENT', { ...data, deepLink: DEEP_LINK.captainRiding }));
 };
 
+// Corrida aberta há muito mais tempo que uma viagem normal. O caso comum não é
+// problema de sistema: o motorista saiu do app (ou o Android matou) e a corrida ficou
+// aberta. O aviso é um empurrão, não uma acusação — pode ser que a viagem esteja mesmo
+// em curso, então o texto não afirma que ele errou nem ameaça nada.
+module.exports.sendLongRideReminder = async (captainId, data = {}) => {
+    const minutos = Number(data.minutesRunning) || null;
+    const title = 'Corrida ainda aberta';
+    const message = minutos
+        ? `Sua corrida está em andamento há ${minutos} min. Se a viagem já terminou, finalize no app para receber e ficar livre para a próxima.`
+        : 'Sua corrida continua em andamento. Se a viagem já terminou, finalize no app para receber e ficar livre para a próxima.';
+    queue.enqueue(() => sendToCaptain(captainId, title, message, 'RIDE_REMINDER', {
+        ...data,
+        deepLink: DEEP_LINK.captainRiding,
+    }));
+};
+
 module.exports.sendRechargeApproved = async (captainId, data) => {
     const title = 'Recarga Aprovada!';
     const message = 'Seus créditos foram adicionados com sucesso à sua carteira.';

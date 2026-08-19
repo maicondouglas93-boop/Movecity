@@ -877,14 +877,19 @@ const Home = () => {
                             {/* Saudação e localização atual — texto de contexto, deliberadamente
                                 mais leve que o campo de busca abaixo (que é a ação primária da
                                 tela, não a saudação). Ver §6/item 19 do relatório de UX. */}
-                            <div className="mb-4">
-                                <p className="text-sm font-medium text-ink-600">
-                                    {new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, {user?.fullname?.firstname || ''}
-                                </p>
-                                <p className="text-xs text-ink-400 truncate flex items-center gap-1 mt-0.5">
-                                    <i className="ri-map-pin-2-fill text-brand-500" aria-hidden="true"></i>
-                                    {typeof pickup === 'object' && pickup?.address ? pickup.address : 'Obtendo sua localização...'}
-                                </p>
+                            <div className="mb-4 flex items-start gap-3">
+                                <span className="flex-shrink-0 h-10 w-10 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                    <i className="ri-user-3-fill text-xl"></i>
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-lg font-bold text-ink-900 leading-tight">
+                                        {new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, {user?.fullname?.firstname || ''}
+                                    </p>
+                                    <p className="text-xs text-ink-400 truncate flex items-center gap-1 mt-0.5">
+                                        <i className="ri-map-pin-2-fill text-brand-500 flex-shrink-0" aria-hidden="true"></i>
+                                        {typeof pickup === 'object' && pickup?.address ? pickup.address : 'Obtendo sua localização...'}
+                                    </p>
+                                </div>
                             </div>
 
                             <button
@@ -896,8 +901,11 @@ const Home = () => {
                                 }}
                                 className="w-full bg-surface border border-line px-5 py-4 rounded-panel shadow-raised flex items-center gap-3 active:scale-[0.98] transition-transform"
                             >
-                                <i className="ri-search-line text-xl text-brand-500" aria-hidden="true"></i>
-                                <span className="text-ink-900 font-semibold text-base">Para onde vamos?</span>
+                                <i className="ri-search-line text-2xl text-brand-500 flex-shrink-0" aria-hidden="true"></i>
+                                <span className="flex-1 text-left text-ink-900 font-bold text-lg">Para onde vamos?</span>
+                                <span className="flex-shrink-0 h-9 w-9 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                    <i className="ri-arrow-right-line text-lg"></i>
+                                </span>
                             </button>
 
                             <div className="mt-3 flex gap-2">
@@ -914,23 +922,35 @@ const Home = () => {
                                         }
                                         navigate('/encomenda')
                                     }}
-                                    className="flex-1 min-w-0 bg-surface-alt border border-line px-3 py-3.5 rounded-panel flex items-center gap-2 active:scale-[0.98] transition-transform"
+                                    className="flex-1 min-w-0 bg-surface-alt border border-line p-3 rounded-panel flex items-center gap-2.5 active:scale-[0.98] transition-transform"
                                     aria-label={userParcel ? 'Encomenda em andamento' : 'Fazer uma encomenda'}
                                 >
-                                    <i className="ri-box-3-line text-xl text-brand-500 shrink-0" aria-hidden="true"></i>
-                                    <span className="flex-1 min-w-0 text-left text-ink-900 font-semibold text-sm leading-tight truncate">
-                                        {userParcel ? 'Em andamento' : 'Encomenda'}
+                                    <span className="flex-shrink-0 h-10 w-10 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                        <i className="ri-box-3-line text-xl"></i>
+                                    </span>
+                                    <span className="flex-1 min-w-0 text-left">
+                                        <span className="block text-ink-900 font-bold text-sm leading-tight truncate">
+                                            {userParcel ? 'Em andamento' : 'Encomenda'}
+                                        </span>
+                                        <span className="block text-[11px] text-ink-400 leading-tight mt-0.5 truncate">
+                                            {userParcel ? 'Acompanhe sua entrega' : 'Envie ou receba encomendas'}
+                                        </span>
                                     </span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => navigate('/agendar')}
-                                    className="flex-1 min-w-0 bg-surface-alt border border-line px-3 py-3.5 rounded-panel flex items-center gap-2 active:scale-[0.98] transition-transform"
+                                    className="flex-1 min-w-0 bg-surface-alt border border-line p-3 rounded-panel flex items-center gap-2.5 active:scale-[0.98] transition-transform"
                                     aria-label="Agendar corrida ou encomenda"
                                 >
-                                    <i className="ri-calendar-event-line text-xl text-brand-500 shrink-0" aria-hidden="true" />
-                                    <span className="flex-1 min-w-0 text-left text-ink-900 font-semibold text-sm leading-tight truncate">
-                                        Agendar
+                                    <span className="flex-shrink-0 h-10 w-10 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                        <i className="ri-calendar-event-line text-xl"></i>
+                                    </span>
+                                    <span className="flex-1 min-w-0 text-left">
+                                        <span className="block text-ink-900 font-bold text-sm leading-tight truncate">Agendar</span>
+                                        <span className="block text-[11px] text-ink-400 leading-tight mt-0.5 truncate">
+                                            Agende com antecedência
+                                        </span>
                                     </span>
                                 </button>
                             </div>
@@ -990,7 +1010,11 @@ const Home = () => {
                                 <i className="ri-arrow-down-wide-line text-2xl" aria-hidden="true"></i>
                             </button>
                             <h4 className='text-xl font-semibold text-ink-900'>Escolha um destino</h4>
-                            <form className='relative mt-4' onSubmit={submitHandler}>
+                            {/* Partida, destino e a ação primária no MESMO cartão: os três são
+                                um bloco só de decisão. Soltos na tela, o botão parecia pertencer
+                                ao que vinha depois (sugestões), não ao que estava sendo preenchido. */}
+                            <div className='mt-4 rounded-panel border border-line bg-surface p-3 shadow-raised'>
+                            <form className='relative' onSubmit={submitHandler}>
                                 {/* Timeline / Dots */}
                                 <div className="absolute left-2 top-[22px] bottom-[26px] flex flex-col items-center">
                                     <div className="w-2.5 h-2.5 rounded-full border-2 border-brand-500 bg-white z-10"></div>
@@ -1040,14 +1064,30 @@ const Home = () => {
                                             onChange={handleDestinationChange}
                                             className='w-full px-1 py-1 text-[16px] text-gray-800 font-medium outline-none bg-transparent placeholder-gray-400'
                                             type="text"
-                                            placeholder='Para onde você vai?' 
+                                            placeholder='Para onde você vai?'
                                         />
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.preventDefault()
+                                                e.stopPropagation()
+                                                // Troca os dois campos. Só reordena o que já está
+                                                // preenchido — não busca nada nem inventa endereço.
+                                                setPickup(destination)
+                                                setDestination(pickup)
+                                            }}
+                                            aria-label="Inverter partida e destino"
+                                            className='absolute right-0 top-1/2 -translate-y-1/2 p-3 -m-1 text-ink-400 active:text-brand-500 flex items-center justify-center z-20'
+                                        >
+                                            <i className="ri-arrow-up-down-line text-xl" aria-hidden="true"></i>
+                                        </button>
                                     </div>
                                 </div>
                             </form>
                             <Button onClick={findTrip} loading={fareLoading} className='mt-3'>
                                 Buscar Corrida
                             </Button>
+                            </div>
                         </>
                     )}
                 </div>

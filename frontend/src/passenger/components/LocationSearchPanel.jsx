@@ -102,11 +102,15 @@ const LocationSearchPanel = ({ suggestions, setVehiclePanel, setPanelOpen, setPi
                 if (typeof setIsSelectingOnMap === 'function') {
                     setIsSelectingOnMap(true);
                 }
-            }} className='flex gap-4 p-3 border-b border-gray-100 active:bg-green-50 items-center justify-start cursor-pointer transition-colors'>
-                <h2 className='text-green-500 h-8 w-8 flex items-center justify-center rounded-full'>
-                    <i className="ri-pushpin-2-fill text-xl"></i>
-                </h2>
-                <h4 className='font-semibold text-gray-800 text-[15px]'>Escolher no mapa</h4>
+            }} className='flex gap-3 p-3 mb-1 rounded-panel border border-line bg-surface active:bg-brand-50 items-center cursor-pointer transition-colors'>
+                <span className='flex-shrink-0 h-10 w-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center'>
+                    <i className="ri-map-2-fill text-xl"></i>
+                </span>
+                <div className='flex-1 min-w-0'>
+                    <p className='font-bold text-ink-900 text-[15px] leading-tight'>Escolher no mapa</p>
+                    <p className='text-[12px] text-ink-400 leading-tight mt-0.5'>Selecione o destino diretamente no mapa</p>
+                </div>
+                <i className="ri-arrow-right-s-line text-ink-400 flex-shrink-0" aria-hidden="true"></i>
             </div>
 
             {/* Resultados do que foi digitado vêm antes dos atalhos fixos: quem digitou já

@@ -46,6 +46,39 @@ function routeDistanceMeters(points, start) {
     return total;
 }
 
+// Velocidade urbana simulada. O backend recusa deslocamento acima de 60 m/s como
+// impossível — o simulador precisa ficar bem abaixo disso para ser realista.
+const DEFAULT_SPEED_MPS = 12; // ~43 km/h
+
+/**
+ * Dá a cada ponto da rota um horário coerente com a distância até o ponto anterior.
+ *
+ * Sem isto o simulador emite 500 m a cada ~50 ms — perto de 36.000 km/h. A validação de
+ * velocidade do backend rejeita TODOS os pontos, a corrida fecha com distância zero e o
+ * caminho que transforma GPS em dinheiro fica sem cobertura nenhuma.
+ *
+ * A linha do tempo TERMINA em `endTimeMs` e caminha para trás: horário futuro é recusado
+ * (tolerância de 30 s), então a viagem simulada tem que já ter acontecido. Quem chama
+ * precisa alinhar a corrida a ela — recuar `startedAt` e a âncora (`lastLocation` /
+ * `lastLocationAt`) para antes do primeiro ponto. Sem isso os pontos chegam "antes do
+ * início" ou "fora de ordem" e são recusados por outro motivo.
+ */
+function routeTimeline(points, { speedMps = DEFAULT_SPEED_MPS, endTimeMs = Date.now() } = {}) {
+    const legs = [0];
+    for (let i = 1; i < points.length; i += 1) {
+        const meters = mapService.haversineKm(
+            points[i - 1].ltd, points[i - 1].lng, points[i].ltd, points[i].lng
+        ) * 1000;
+        legs.push(legs[i - 1] + meters);
+    }
+
+    const totalSeconds = legs[legs.length - 1] / speedMps;
+    const startMs = endTimeMs - Math.round(totalSeconds * 1000);
+    const timestamps = legs.map((meters) => startMs + Math.round((meters / speedMps) * 1000));
+
+    return { timestamps, startMs, endMs: endTimeMs, totalSeconds };
+}
+
 // Anda um ponto por vez. Quando existe corrida/encomenda ativa pro motorista, o
 // handler real (socket.js) sempre ecoa 'captain-location-updated' de volta pro
 // próprio socket que emitiu — esperamos esse eco pra garantir que o acúmulo de
@@ -53,8 +86,14 @@ function routeDistanceMeters(points, start) {
 // avançar. Sem corrida/encomenda ativa (ex.: fix inicial pra fixar a posição do
 // motorista antes de aceitar uma oferta), o handler só grava captain.location e NÃO
 // emite eco nenhum — `expectEcho:false` evita esperar por um evento que nunca chega.
-async function driveRoute({ socket, points, delayMs = 20, timeoutMs = 5000, expectEcho = true }) {
-    for (const point of points) {
+async function driveRoute({ socket, points, delayMs = 20, timeoutMs = 5000, expectEcho = true, timeline = null }) {
+    const timestamps = timeline?.timestamps || null;
+    let index = -1;
+    for (const rawPoint of points) {
+        index += 1;
+        // Com linha do tempo, cada ponto viaja com o horário simulado da captura — é o que
+        // faz a validação de velocidade enxergar deslocamento possível, não teletransporte.
+        const point = timestamps ? { ...rawPoint, timestamp: timestamps[index] } : rawPoint;
         if (expectEcho) {
             // eslint-disable-next-line no-await-in-loop
             await new Promise((resolve, reject) => {
@@ -80,4 +119,4 @@ async function driveRoute({ socket, points, delayMs = 20, timeoutMs = 5000, expe
     }
 }
 
-module.exports = { interpolatePoints, buildLinearRoute, routeDistanceMeters, driveRoute };
+module.exports = { interpolatePoints, buildLinearRoute, routeDistanceMeters, routeTimeline, driveRoute, DEFAULT_SPEED_MPS };

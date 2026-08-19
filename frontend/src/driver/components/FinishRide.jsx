@@ -201,6 +201,24 @@ const FinishRide = (props) => {
                     fareBreakdown: localPreview.fareBreakdown,
                 }
                 : null)
+            // Espelha a finalização no RideContext, igual ao que o caminho online faz no
+            // onSuccess. Sem isto o contexto seguia com a corrida em 'started': o guarda de
+            // finalização pendente impede o SERVIDOR de reabrir a corrida quando a internet
+            // volta, mas não conserta um estado LOCAL que nunca avançou — e era esse estado
+            // parado que fazia a corrida "voltar a ficar ativa" na Home do motorista.
+            //
+            // Vale mesmo sem valor calculado: a corrida foi fechada e enfileirada de
+            // qualquer jeito, só o preço é que fica para o servidor confirmar.
+            setCaptainRide({
+                ...props.ride,
+                status: 'finished',
+                ...(localPreview?.amount > 0 ? {
+                    finalPrice: localPreview.amount,
+                    actualDistance: localPreview.actualDistance,
+                    actualTime: localPreview.elapsedSeconds,
+                    fareBreakdown: localPreview.fareBreakdown,
+                } : {}),
+            })
             setPendingFinalizationSync(true)
             addToast(
                 localPreview?.amount > 0

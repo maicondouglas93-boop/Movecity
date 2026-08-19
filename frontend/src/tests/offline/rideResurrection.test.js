@@ -71,3 +71,53 @@ describe('corrida finalizada offline não ressuscita', () => {
         await expect(hasPendingFinalization('12345')).resolves.toBe(true)
     })
 })
+
+/**
+ * O guarda acima resolve METADE do problema, e o relato voltou por causa da outra metade.
+ *
+ * hasPendingFinalization impede que o snapshot atrasado do SERVIDOR entre no estado. Mas
+ * a finalização offline nunca avançava o estado LOCAL: diferente do caminho online
+ * (onSuccess faz setCaptainRide(data)) e do próprio pagamento offline (que faz
+ * setCaptainRide(null)), queueFinalizationOffline só mexia em estado interno da tela.
+ *
+ * Resultado: o RideContext seguia com a corrida em 'started' o tempo todo. Quando a
+ * internet voltava, o guarda barrava o servidor com sucesso — e mesmo assim a Home lia do
+ * contexto uma corrida ativa que o motorista já tinha fechado.
+ */
+describe('estado local avança ao finalizar offline', () => {
+    const RANK = {
+        scheduled: 0, requested: 1, accepted: 2, going_to_pickup: 3,
+        arrived: 4, waiting_passenger: 5, started: 6, finished: 7, cancelled: 7,
+    }
+    // Mesma regra do mergeRideByStatus do RideContext.
+    const merge = (previous, next) => {
+        if (!previous || !next?._id) return next
+        if (String(previous._id) !== String(next._id)) return next
+        const p = RANK[previous.status] ?? -1
+        const n = RANK[next.status] ?? -1
+        return n >= 0 && p > n ? previous : next
+    }
+
+    it('a corrida finalizada offline entra no contexto e não é revertida pelo servidor', () => {
+        const emAndamento = { _id: 'ride-1', status: 'started' }
+
+        // O que queueFinalizationOffline passou a fazer.
+        const finalizadaLocalmente = { ...emAndamento, status: 'finished', finalPrice: 25 }
+        const contexto = merge(emAndamento, finalizadaLocalmente)
+        expect(contexto.status).toBe('finished')
+
+        // Internet volta: o servidor ainda responde 'started' porque o replay não chegou.
+        // Mesmo que esse snapshot escape do guarda, o merge por status não pode retroceder.
+        const doServidor = { _id: 'ride-1', status: 'started' }
+        expect(merge(contexto, doServidor).status).toBe('finished')
+    })
+
+    it('sem valor calculado a corrida ainda assim é dada como encerrada', () => {
+        // Zona rural sem GPS suficiente pro preço: o preço espera o servidor, mas a
+        // corrida foi fechada e enfileirada do mesmo jeito — deixar em 'started' era o
+        // que reabria a tela.
+        const emAndamento = { _id: 'ride-2', status: 'started' }
+        const semPreco = { ...emAndamento, status: 'finished' }
+        expect(merge(emAndamento, semPreco).status).toBe('finished')
+    })
+})

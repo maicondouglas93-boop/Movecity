@@ -18,6 +18,11 @@ import {
 } from '@/shared/services/presentialRideApi'
 import { formatBRL } from '@/shared/utils/currency'
 
+// Falha de sinal não tem `response`, então a mensagem padrão do catch ("não foi
+// possível...") mandava o motorista desistir de algo que talvez tenha dado certo do
+// outro lado. Sem rede a orientação é outra: esperar sinal e conferir, não refazer.
+const semRede = (err) => err?.isConnectivityIssue === true
+
 const STEPS = {
   CHOICE: 'choice',
   DESTINATION: 'destination',
@@ -43,7 +48,7 @@ function formatMin(seconds) {
 const CaptainPresentialRide = () => {
   const navigate = useNavigate()
   const { userLocation, locationError } = useContext(LocationContext)
-  const { setCaptainRide, captainRide, captainParcel } = useContext(RideContext)
+  const { setCaptainRide, captainRide, captainParcel, syncCaptainRide } = useContext(RideContext)
   const { socket } = useContext(SocketContext)
   const { addToast } = useToast()
 
@@ -168,7 +173,12 @@ const CaptainPresentialRide = () => {
       setEstimate(data)
       setStep(STEPS.CONFIRM)
     } catch (err) {
-      addToast(err.response?.data?.message || 'Não foi possível estimar a tarifa.', 'error')
+      addToast(
+        semRede(err)
+          ? 'Sem sinal para calcular o valor. Procure um ponto com rede e tente de novo.'
+          : (err.response?.data?.message || 'Não foi possível estimar a tarifa.'),
+        'error',
+      )
     } finally {
       setEstimating(false)
     }
@@ -207,7 +217,27 @@ const CaptainPresentialRide = () => {
       setStep(STEPS.PIN)
       addToast('Corrida criada. Informe o PIN ao passageiro.', 'success')
     } catch (err) {
-      addToast(err.response?.data?.message || 'Não foi possível criar a corrida.', 'error')
+      // A corrida já existe e é dele (tentativa anterior que ficou sem resposta): em vez
+      // de mostrar um erro e deixá-lo tentando de novo contra um índice único, sincroniza
+      // e cai direto no passo do PIN — que é onde ele precisava chegar.
+      if (err.response?.data?.code === 'PRESENTIAL_ALREADY_OPEN') {
+        addToast('Esta corrida já estava aberta. Informe o PIN ao passageiro.', 'info')
+        try {
+          const atual = await syncCaptainRide()
+          if (atual?._id) setRide(atual)
+        } catch { /* sem rede: o efeito de restauração assume quando o contexto sincronizar */ }
+        setStep(STEPS.PIN)
+        return
+      }
+      addToast(
+        semRede(err)
+          // Aqui a corrida PODE ter sido criada e a resposta se perdido no caminho — por
+          // isso o texto não manda tentar de novo às cegas. Ao recuperar sinal, o próprio
+          // app restaura a corrida em aberto no passo do PIN.
+          ? 'Sem sinal ao criar a corrida. Ao voltar a rede, confira se ela já foi aberta antes de criar outra.'
+          : (err.response?.data?.message || 'Não foi possível criar a corrida.'),
+        'error',
+      )
     } finally {
       setLoading(false)
     }
@@ -230,7 +260,12 @@ const CaptainPresentialRide = () => {
       setCaptainRide(started)
       navigate('/captain-riding', { state: { ride: started } })
     } catch (err) {
-      addToast(err.response?.data?.message || 'PIN inválido.', 'error')
+      addToast(
+        semRede(err)
+          ? 'Sem sinal para iniciar a corrida. Tente de novo assim que a rede voltar.'
+          : (err.response?.data?.message || 'PIN inválido.'),
+        'error',
+      )
     } finally {
       setLoading(false)
     }

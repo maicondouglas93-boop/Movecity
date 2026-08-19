@@ -1,5 +1,6 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { vehicleImages } from '../../assets/vehicleAssets'
 
 // Fix default marker icon issue in Leaflet with Webpack/Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -24,12 +25,15 @@ const directionPointer = `
   </div>
 `;
 
-const vehicleIcon = (iconClass, colorClasses) => L.divIcon({
+// Ícone solto: sem círculo/fundo por trás, só a imagem do veículo — o círculo colorido
+// escondia o desenho e, num "car_motorcycle" (motorista autorizado pros dois), não dava
+// pra saber qual veículo estava vindo de verdade.
+const vehicleIcon = (imgSrc) => L.divIcon({
     html: `
       <div class="relative h-12 w-12">
         ${directionPointer}
-        <div class="absolute inset-2 flex items-center justify-center ${colorClasses} rounded-full border-2 border-white shadow-xl">
-          <i class="${iconClass} text-lg"></i>
+        <div class="absolute inset-0 flex items-center justify-center drop-shadow-lg">
+          <img src="${imgSrc}" class="h-9 w-9 object-contain" alt="" />
         </div>
       </div>
     `,
@@ -39,11 +43,11 @@ const vehicleIcon = (iconClass, colorClasses) => L.divIcon({
 });
 
 const vehicleIcons = {
-    car: vehicleIcon('ri-car-fill', 'bg-black text-white'),
-    moto: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
-    motorcycle: vehicleIcon('ri-motorbike-fill', 'bg-black text-white'),
-    car_motorcycle: vehicleIcon('ri-user-location-fill', 'bg-violet-700 text-white'),
-    auto: vehicleIcon('ri-taxi-fill', 'bg-black text-yellow-400'),
+    car: vehicleIcon(vehicleImages.car),
+    moto: vehicleIcon(vehicleImages.moto),
+    motorcycle: vehicleIcon(vehicleImages.motorcycle),
+    car_motorcycle: vehicleIcon(vehicleImages.car),
+    auto: vehicleIcon(vehicleImages.auto),
 };
 
 const userPositionIcon = L.divIcon({

@@ -1,4 +1,5 @@
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
+import { vehicleImages } from '../../assets/vehicleAssets'
 
 let optionsSet = false
 let mapsLibraryPromise = null
@@ -33,12 +34,12 @@ const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || null
 // ícones de imagem, não HTML, então a aproximação visual é por SVG/emoji, não
 // idêntica ao divIcon do Leaflet. pickup/destination reaproveitam o path SVG original (já eram
 // SVG puro, não dependiam de fonte de ícone — por isso ficam bem próximos do original).
-const VEHICLE_EMOJI = {
-    car: '🚗',
-    moto: '🏍',
-    motorcycle: '🏍',
-    car_motorcycle: '◎',
-    auto: '🚕',
+const VEHICLE_IMAGE_BY_TYPE = {
+    car: vehicleImages.car,
+    moto: vehicleImages.moto,
+    motorcycle: vehicleImages.motorcycle,
+    car_motorcycle: vehicleImages.car,
+    auto: vehicleImages.auto,
 }
 
 // Fase C (2026-08-03): o ícone ganhou um ponteiro externo que indica a direção do
@@ -46,15 +47,15 @@ const VEHICLE_EMOJI = {
 // deixaria o emoji tombado, sem comunicar direção (um 🚗 de lado não é uma seta). Sem
 // heading conhecido (motorista parado ou recém-visto) o ponteiro não é desenhado, em vez
 // de apontar para o norte e mentir.
+// Sem círculo/fundo por trás — só a imagem do veículo, embutida como <image> dentro do
+// mesmo SVG do ponteiro de direção (google.maps.Marker só aceita UM ícone de imagem, daí
+// os dois precisarem estar na mesma URI, diferente do divIcon do Leaflet).
 function vehicleIconUrl(type, rotation = null) {
-    const emoji = VEHICLE_EMOJI[type] || VEHICLE_EMOJI.car
-    const ringColor = type === 'auto' ? '#facc15' : '#ffffff' // aproxima o acento amarelo do "auto" original
-    const fillColor = type === 'car_motorcycle' ? '#6d28d9' : '#000000'
-    const textFill = type === 'car_motorcycle' ? ' fill="#fff"' : ''
+    const imgSrc = VEHICLE_IMAGE_BY_TYPE[type] || VEHICLE_IMAGE_BY_TYPE.car
     const pointer = Number.isFinite(rotation)
         ? `<g transform="rotate(${rotation.toFixed(0)} 24 24)"><path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></g>`
         : ''
-    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<circle cx="24" cy="24" r="16" fill="${fillColor}" stroke="${ringColor}" stroke-width="2"/><text x="24" y="30" font-size="16"${textFill} text-anchor="middle">${emoji}</text></svg>`)
+    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<image href="${imgSrc}" x="9" y="9" width="30" height="30"/></svg>`)
 }
 
 const USER_ICON_URL = svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" fill-opacity="0.35"/><circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/></svg>`)

@@ -42,11 +42,28 @@ const vehicleIcon = (imgSrc) => L.divIcon({
     iconAnchor: [24, 24],
 });
 
+// Motorista autorizado a carro E moto: continua com marcador neutro e distinto, de
+// propósito. Não dá pra prometer ao passageiro qual veículo vai chegar, então desenhar
+// um carro aqui seria mentir — mantém o símbolo neutro em vez de escolher por ele.
+const neutralIcon = (iconClass, colorClasses) => L.divIcon({
+    html: `
+      <div class="relative h-12 w-12">
+        ${directionPointer}
+        <div class="absolute inset-2 flex items-center justify-center ${colorClasses} rounded-full border-2 border-white shadow-xl">
+          <i class="${iconClass} text-lg"></i>
+        </div>
+      </div>
+    `,
+    className: 'custom-vehicle-icon',
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+});
+
 const vehicleIcons = {
     car: vehicleIcon(vehicleMarkerImages.car),
     moto: vehicleIcon(vehicleMarkerImages.moto),
     motorcycle: vehicleIcon(vehicleMarkerImages.motorcycle),
-    car_motorcycle: vehicleIcon(vehicleMarkerImages.car),
+    car_motorcycle: neutralIcon('ri-user-location-fill', 'bg-violet-700 text-white'),
     auto: vehicleIcon(vehicleMarkerImages.auto),
 };
 

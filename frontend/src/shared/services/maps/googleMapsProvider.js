@@ -55,6 +55,11 @@ function vehicleIconUrl(type, rotation = null) {
     const pointer = Number.isFinite(rotation)
         ? `<g transform="rotate(${rotation.toFixed(0)} 24 24)"><path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></g>`
         : ''
+    // Autorizado a carro E moto: marcador neutro e distinto, de propósito — não dá pra
+    // prometer qual veículo chega, então desenhar um dos dois seria mentir.
+    if (type === 'car_motorcycle') {
+        return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<circle cx="24" cy="24" r="16" fill="#6d28d9" stroke="#ffffff" stroke-width="2"/><text x="24" y="30" font-size="16" fill="#fff" text-anchor="middle">◎</text></svg>`)
+    }
     // xlink:href além de href: renderizadores de SVG-como-imagem mais antigos (incluindo
     // WebViews Android antigas, que é justamente onde o app do motorista roda) ignoram o
     // href simples do SVG 2 e só entendem o xlink do SVG 1.1.

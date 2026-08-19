@@ -192,10 +192,14 @@ describe('googleMapsProvider — câmera de navegação (Fase D)', () => {
         provider.placeMarker('driver_moto', { lat: -23.4, lng: -46.5 }, { type: 'motorcycle' })
         const motorcycleSvg = decodeURIComponent(currentStub.markerInstances.at(-1).icon.url)
 
-        expect(carSvg).toContain('🚗')
+        // Carro e moto passaram a usar a arte real do veículo (PNG embutido em base64
+        // dentro do SVG), no lugar do emoji sobre círculo preto. O que importa continua
+        // sendo o mesmo: cada um traz uma imagem, e nenhum deles é o marcador neutro.
+        expect(carSvg).toContain('data:image/png;base64,')
         expect(carSvg).not.toContain('#6d28d9')
-        expect(motorcycleSvg).toContain('🏍')
+        expect(motorcycleSvg).toContain('data:image/png;base64,')
         expect(motorcycleSvg).not.toContain('#6d28d9')
+        expect(carSvg).not.toBe(motorcycleSvg)
     })
 
     it('ignora rotação em marcadores que não representam direção', async () => {

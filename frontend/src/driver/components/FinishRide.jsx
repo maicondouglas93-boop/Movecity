@@ -149,6 +149,14 @@ const FinishRide = (props) => {
             // já acabou (até a próxima sincronização com o backend).
             setCaptainRide(data)
             queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
+            // Finalizar já resolve tudo: o backend liquida comissão e repasse dentro do
+            // próprio end-ride (2026-08-16). Dinheiro e Pix vão direto pra mão do
+            // motorista, então não há nada a confirmar num segundo toque.
+            //
+            // A tela de "Confirmar Pagamento" sobrevive só como socorro real: quando a
+            // liquidação do servidor não fechou (finalizationState 'retry_required', sem
+            // paymentStatus 'paid'). Aí o botão ainda decide alguma coisa — nos outros
+            // casos ele só pedia um toque cerimonial.
             if (data?.paymentStatus === 'paid') {
                 handlePaymentSettled()
             }
@@ -220,6 +228,11 @@ const FinishRide = (props) => {
                 } : {}),
             })
             setPendingFinalizationSync(true)
+            // Dinheiro e Pix são pagos em mãos, e a comissão já é debitada na própria
+            // finalização — não existe nada que o motorista precise confirmar depois.
+            // Sem isto o caminho offline caía na tela "Confirmar Pagamento" e exigia um
+            // toque em "Pagamento Recebido" que não decide mais nada.
+            if (!isWalletPayment) setPaymentConfirmed(true)
             addToast(
                 localPreview?.amount > 0
                     ? 'Sem sinal — cobre o valor mostrado. A corrida confirma no sistema quando a internet voltar.'
@@ -510,11 +523,15 @@ const FinishRide = (props) => {
                     </h3>
                     {passengerAmount != null ? (
                         <>
-                            <p className='text-ink-600 text-center'>Sem sinal no destino. Este valor foi calculado com o GPS do celular. Receba em dinheiro ou Pix e confirme abaixo.</p>
+                            <p className='text-ink-600 text-center'>Sem sinal no destino. Este valor foi calculado com o GPS do celular. Receba em dinheiro ou Pix.</p>
                             <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
-                            <p className='text-xs text-ink-500 text-center'>A confirmação no sistema vai sozinha quando a internet voltar. Pode variar alguns centavos.</p>
-                            <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending || queueingOffline}>
-                                Pagamento recebido
+                            <p className='text-xs text-ink-500 text-center'>A corrida já está encerrada e confirma sozinha quando a internet voltar. Pode variar alguns centavos.</p>
+                            {/* Sem botão de "pagamento recebido": a comissão já foi debitada na
+                                finalização e o dinheiro vai direto pra mão do motorista, então o
+                                toque não decidia mais nada — só prendia o motorista numa tela a
+                                mais depois de a corrida já ter acabado. */}
+                            <Button onClick={() => navigate('/captain-home')}>
+                                Voltar para o início
                             </Button>
                         </>
                     ) : (

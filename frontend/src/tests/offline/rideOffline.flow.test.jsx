@@ -144,10 +144,11 @@ describe('app do motorista sem internet', () => {
         expect(state.hangingCalls).toBe(0)
     })
 
-    // Regressão do relato de campo (17/ago): a finalização já funcionava offline, mas
-    // "Pagamento recebido" ficava girando pra sempre — o gêmeo que não tinha sido
-    // corrigido junto.
-    it('confirmar pagamento sem rede não trava o botão', async () => {
+    // Finalizar tem que resolver tudo: comissão e repasse liquidam dentro do próprio
+    // end-ride, e dinheiro/Pix vão direto pra mão do motorista. Offline, a tela ainda
+    // exigia um toque em "Pagamento Recebido" que não decidia mais nada — cerimônia com
+    // a corrida já encerrada e o dinheiro já no bolso.
+    it('finalizar sem rede encerra o serviço sem pedir confirmação de pagamento', async () => {
         const user = userEvent.setup()
         renderFinishRide()
 
@@ -155,15 +156,17 @@ describe('app do motorista sem internet', () => {
         await screen.findByText(/R\$\s*11,06/)
         await user.click(screen.getByRole('button', { name: /confirmar e finalizar/i }))
 
-        const cobrar = await screen.findByRole('button', { name: /pagamento recebido/i })
-        await user.click(cobrar)
-
-        await waitFor(() => {
-            expect(state.enqueued.map((a) => a.type)).toContain('confirm-payment')
-        })
-        expect(state.hangingCalls).toBe(0)
+        // A corrida já está encerrada: a tela diz o valor a cobrar e libera o motorista,
+        // sem um botão de "pagamento recebido" que não decide mais nada.
+        expect(await screen.findByText(/cobre o cliente agora/i)).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /pagamento recebido/i })).toBeNull()
+        expect(screen.getByRole('button', { name: /voltar para o in.cio/i })).toBeInTheDocument()
     })
 
+    // O "Pagamento recebido" offline deixou de existir (a comissão liquida na própria
+    // finalização e o dinheiro vai direto pra mão do motorista). O que estes testes
+    // protegiam continua valendo, só que agora com UMA ação: nada pode pendurar a rede
+    // sabendo que está offline, e a finalização tem que ficar guardada.
     it('nenhuma ação offline chega a tocar a rede', async () => {
         const user = userEvent.setup()
         renderFinishRide()
@@ -173,33 +176,22 @@ describe('app do motorista sem internet', () => {
         await user.click(screen.getByRole('button', { name: /confirmar e finalizar/i }))
         await waitFor(() => expect(state.enqueued.length).toBeGreaterThan(0))
 
-        const cobrar = await screen.findByRole('button', { name: /pagamento recebido/i })
-        await user.click(cobrar)
-        await waitFor(() => expect(state.enqueued.length).toBe(2))
-
         // Sabendo que está offline, o app não deve nem tentar — tentar é o que produzia
         // a promise pendurada que nunca voltava.
         expect(state.hangingCalls).toBe(0)
     })
 
-    it('o ciclo inteiro guarda finalização e pagamento, nessa ordem', async () => {
+    it('guarda só a finalização, sem ação de pagamento redundante', async () => {
         const user = userEvent.setup()
         renderFinishRide()
 
         await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
         await screen.findByText(/R\$\s*11,06/)
         await user.click(screen.getByRole('button', { name: /confirmar e finalizar/i }))
-        await waitFor(() => expect(state.enqueued.length).toBeGreaterThan(0))
-
-        const cobrar = await screen.findByRole('button', { name: /pagamento recebido/i })
-        await user.click(cobrar)
 
         await waitFor(() => {
-            expect(state.enqueued.map((a) => a.type)).toEqual(['end-ride', 'confirm-payment'])
+            expect(state.enqueued.map((a) => a.type)).toEqual(['end-ride'])
         })
-        // A ordem importa: o replay é sequencial e a finalização precisa chegar antes
-        // do pagamento, senão o servidor recusa a confirmação de uma corrida não
-        // finalizada.
         expect(state.enqueued.every((a) => a.rideId === ride._id)).toBe(true)
     })
 })

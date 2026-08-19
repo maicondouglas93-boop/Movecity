@@ -20,6 +20,10 @@ const Button = ({
     disabled = false,
     fullWidth = true,
     className = '',
+    // Ícone à direita, encostado na borda: usado pelas ações que AVANÇAM o fluxo
+    // (continuar, buscar, solicitar). Some durante o loading, senão o botão mostraria
+    // dois sinais concorrentes — "estou processando" e "vá em frente".
+    trailingIcon = null,
     children,
     ...rest
 }) => {
@@ -32,7 +36,7 @@ const Button = ({
             className={`
                 ${fullWidth ? 'w-full' : ''}
                 min-h-[48px] rounded-panel font-semibold text-base
-                flex items-center justify-center gap-2
+                flex items-center justify-center gap-2 px-4
                 transition-all active:scale-[0.97]
                 disabled:cursor-not-allowed disabled:active:scale-100
                 ${VARIANTS[variant] || VARIANTS.primary}
@@ -41,7 +45,14 @@ const Button = ({
             {...rest}
         >
             {loading && <i className="ri-loader-4-line animate-spin text-lg" aria-hidden="true" />}
-            {children}
+            {trailingIcon && !loading ? (
+                <>
+                    <span className="flex-1 text-center">{children}</span>
+                    <i className={`${trailingIcon} text-lg flex-shrink-0`} aria-hidden="true" />
+                </>
+            ) : (
+                children
+            )}
         </button>
     )
 }

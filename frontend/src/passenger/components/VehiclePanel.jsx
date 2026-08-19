@@ -63,8 +63,8 @@ const VehiclePanel = (props) => {
 
     return (
         <div className='pb-2'>
-            <h3 className='text-lg font-bold text-ink-900'>Escolha um veículo</h3>
-            <p className='text-sm text-ink-400 mb-3'>Selecione a opção ideal para sua viagem</p>
+            <h3 className='text-base font-bold text-ink-900'>Escolha um veículo</h3>
+            <p className='text-[12px] text-ink-400 mb-2'>Selecione a opção ideal para sua viagem</p>
 
             {loading ? (
                 <div className='flex justify-center py-5'>
@@ -85,50 +85,50 @@ const VehiclePanel = (props) => {
                                 type="button"
                                 onClick={() => setSelectedName(category.name)}
                                 aria-pressed={selected}
-                                className={`w-full flex items-center gap-3 p-2.5 rounded-panel border-2 text-left transition-colors active:scale-[0.99] ${
+                                className={`w-full flex items-center gap-2.5 p-2 rounded-panel border-2 text-left transition-colors active:scale-[0.99] ${
                                     selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
                                 }`}
                             >
-                                <div className={`flex-shrink-0 h-16 w-20 rounded-xl flex items-center justify-center ${paleta.tile}`}>
+                                <div className={`flex-shrink-0 h-12 w-14 rounded-lg flex items-center justify-center ${paleta.tile}`}>
                                     <img
-                                        className='h-11 w-16 object-contain'
+                                        className='h-8 w-12 object-contain'
                                         src={vehicleImageFor(category)}
                                         alt=""
                                         loading="lazy"
                                     />
                                 </div>
 
+                                {/* O nome da categoria é o que decide a escolha, então ele fica com a
+                                    largura. O ícone que resumia o serviço saiu daqui: era redundante
+                                    com a própria imagem do veículo e roubava justamente o espaço que
+                                    fazia "Carro Econômico" e "Motoboy-Moto Taxi" aparecerem cortados. */}
                                 <div className='flex-1 min-w-0'>
-                                    <div className='flex items-center gap-1.5'>
-                                        <span className={`flex-shrink-0 h-5 w-5 rounded-full flex items-center justify-center ${paleta.chip}`}>
+                                    <p className='font-bold text-ink-900 text-[13px] leading-tight'>
+                                        {category.displayName}
+                                    </p>
+                                    <p className='text-[11px] text-ink-400 leading-tight mt-0.5 truncate'>
+                                        <span className='inline-flex items-center gap-0.5 mr-1.5'>
                                             <i className={`${serviceIcon(category)} text-[11px]`} aria-hidden="true"></i>
+                                            {category.capacity}
                                         </span>
-                                        <span className='font-bold text-ink-900 text-[15px] truncate'>{category.displayName}</span>
-                                        <span className='flex-shrink-0 inline-flex items-center gap-0.5 text-xs text-ink-400'>
-                                            <i className="ri-user-3-fill" aria-hidden="true"></i>{category.capacity}
-                                        </span>
-                                    </div>
-
-                                    {category.description && (
-                                        <p className='text-[13px] text-ink-400 truncate mt-0.5'>{category.description}</p>
-                                    )}
-
+                                        {category.description}
+                                    </p>
                                     {/* Só aparece quando o admin preencheu a capacidade de bagagem no
                                         cadastro. Campo antigo que nunca tinha sido exibido — sem ele o
                                         card simplesmente não mostra a linha, em vez de inventar texto. */}
                                     {category.luggageCapacity && (
-                                        <p className='text-[12px] text-ink-400 truncate mt-1 inline-flex items-center gap-1'>
-                                            <i className="ri-suitcase-2-line" aria-hidden="true"></i>
+                                        <p className='text-[10px] text-ink-400 leading-tight mt-0.5 truncate'>
+                                            <i className="ri-suitcase-2-line mr-1" aria-hidden="true"></i>
                                             {category.luggageCapacity}
                                         </p>
                                     )}
                                 </div>
 
-                                <div className='flex-shrink-0 text-right pl-1'>
+                                <div className='flex-shrink-0 text-right'>
                                     {mostraEstimativa && preco != null && (
-                                        <p className='text-[11px] text-brand-600 leading-none mb-1'>A partir de</p>
+                                        <p className='text-[9px] text-brand-600 leading-none mb-0.5'>A partir de</p>
                                     )}
-                                    <p className='text-base font-bold text-ink-900 leading-tight'>
+                                    <p className='text-[15px] font-bold text-ink-900 leading-tight tabular-nums'>
                                         {preco != null ? formatCurrencyBRL(preco) : ''}
                                     </p>
                                 </div>
@@ -142,16 +142,16 @@ const VehiclePanel = (props) => {
                 como Estimativa" do painel admin (showAsEstimate) nunca tinha efeito
                 nenhum, ligado ou desligado. */}
             {mostraEstimativa && (
-                <div className='flex items-start gap-2 mt-3 p-2.5 rounded-panel bg-brand-50 border border-brand-100'>
-                    <i className="ri-shield-check-fill text-brand-500 text-base mt-px" aria-hidden="true"></i>
+                <div className='flex items-start gap-2 mt-2 p-2 rounded-panel bg-brand-50 border border-brand-100'>
+                    <i className="ri-shield-check-fill text-brand-500 text-sm mt-px flex-shrink-0" aria-hidden="true"></i>
                     <div className='min-w-0'>
-                        <p className='text-[13px] font-semibold text-ink-900'>Preço estimado</p>
-                        <p className='text-[12px] text-ink-400'>O valor final pode variar de acordo com o trânsito e a distância.</p>
+                        <p className='text-[11px] font-semibold text-ink-900 leading-tight'>Preço estimado</p>
+                        <p className='text-[10px] text-ink-400 leading-tight mt-0.5'>O valor final pode variar de acordo com o trânsito e a distância.</p>
                     </div>
                 </div>
             )}
 
-            <Button onClick={handleContinue} disabled={!selectedName} className='mt-3 !min-h-[44px] !text-sm'>
+            <Button onClick={handleContinue} disabled={!selectedName} trailingIcon="ri-arrow-right-line" className='mt-2.5 !min-h-[44px] !text-sm'>
                 Continuar
             </Button>
         </div>

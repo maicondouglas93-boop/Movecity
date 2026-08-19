@@ -877,15 +877,26 @@ const Home = () => {
                             {/* Saudação e localização atual — texto de contexto, deliberadamente
                                 mais leve que o campo de busca abaixo (que é a ação primária da
                                 tela, não a saudação). Ver §6/item 19 do relatório de UX. */}
-                            <div className="mb-4 flex items-start gap-3">
-                                <span className="flex-shrink-0 h-10 w-10 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
-                                    <i className="ri-user-3-fill text-xl"></i>
-                                </span>
+                            <div className="mb-3 flex items-center gap-2.5">
+                                {/* Foto do perfil quando existe; o selo genérico é o fallback,
+                                    não o padrão — o campo já era usado na tela de conta. */}
+                                {user?.profilePicture ? (
+                                    <img
+                                        src={user.profilePicture}
+                                        alt=""
+                                        className="flex-shrink-0 h-9 w-9 rounded-full object-cover border border-line"
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    <span className="flex-shrink-0 h-9 w-9 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                        <i className="ri-user-3-fill text-lg"></i>
+                                    </span>
+                                )}
                                 <div className="min-w-0 flex-1">
-                                    <p className="text-lg font-bold text-ink-900 leading-tight">
+                                    <p className="text-[15px] font-bold text-ink-900 leading-tight truncate">
                                         {new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'}, {user?.fullname?.firstname || ''}
                                     </p>
-                                    <p className="text-xs text-ink-400 truncate flex items-center gap-1 mt-0.5">
+                                    <p className="text-[11px] text-ink-400 truncate flex items-center gap-1 mt-0.5">
                                         <i className="ri-map-pin-2-fill text-brand-500 flex-shrink-0" aria-hidden="true"></i>
                                         {typeof pickup === 'object' && pickup?.address ? pickup.address : 'Obtendo sua localização...'}
                                     </p>
@@ -899,12 +910,12 @@ const Home = () => {
                                     setActiveField('destination')
                                     requestLocationPermissions()
                                 }}
-                                className="w-full bg-surface border border-line px-5 py-4 rounded-panel shadow-raised flex items-center gap-3 active:scale-[0.98] transition-transform"
+                                className="w-full bg-surface border border-line px-4 py-3 rounded-panel shadow-raised flex items-center gap-2.5 active:scale-[0.98] transition-transform"
                             >
-                                <i className="ri-search-line text-2xl text-brand-500 flex-shrink-0" aria-hidden="true"></i>
-                                <span className="flex-1 text-left text-ink-900 font-bold text-lg">Para onde vamos?</span>
-                                <span className="flex-shrink-0 h-9 w-9 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
-                                    <i className="ri-arrow-right-line text-lg"></i>
+                                <i className="ri-search-line text-xl text-brand-500 flex-shrink-0" aria-hidden="true"></i>
+                                <span className="flex-1 text-left text-ink-900 font-bold text-[15px]">Para onde vamos?</span>
+                                <span className="flex-shrink-0 h-8 w-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center" aria-hidden="true">
+                                    <i className="ri-arrow-right-line text-base"></i>
                                 </span>
                             </button>
 
@@ -1084,7 +1095,7 @@ const Home = () => {
                                     </div>
                                 </div>
                             </form>
-                            <Button onClick={findTrip} loading={fareLoading} className='mt-3'>
+                            <Button onClick={findTrip} loading={fareLoading} trailingIcon="ri-arrow-right-line" className='mt-2.5 !min-h-[46px] !text-sm'>
                                 Buscar Corrida
                             </Button>
                             </div>
@@ -1129,13 +1140,13 @@ const Home = () => {
             )}
             {/* Painéis do fluxo de corrida: altura inicial ~35–40% (mapa dominante).
                 Conteúdo longo continua rolável; max 80% mantém o mapa visível. */}
-            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={vehiclePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <VehiclePanel
                     service="ride"
                     selectVehicle={setVehicleType}
                     fare={fare} setConfirmRidePanel={setConfirmRidePanel} setVehiclePanel={setVehiclePanel} />
             </div>
-            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={confirmRidePanelRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <ConfirmRide
                     createRide={createRide}
                     pickup={pickup}
@@ -1151,7 +1162,7 @@ const Home = () => {
                     setPromoCode={setPromoCode}
                 />
             </div>
-            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={optionalsPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <OptionalsPanel
                     setOptionalsPanel={setOptionalsPanel}
                     setOptionals={setOptionals}
@@ -1163,7 +1174,7 @@ const Home = () => {
                     }
                 />
             </div>
-            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={paymentPanelRef} className='fixed w-full z-40 bottom-0 translate-y-full invisible bg-white px-3 pt-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl max-h-[80dvh] overflow-y-auto overscroll-y-contain'>
                 <PaymentOptionsPanel
                     setPaymentPanel={setPaymentPanel}
                     paymentMethod={paymentMethod}
@@ -1173,7 +1184,7 @@ const Home = () => {
                     walletBalance={user?.walletBalance}
                 />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl'>
+            <div ref={vehicleFoundRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl'>
                 <LookingForDriver
                     createRide={createRide}
                     pickup={pickup}
@@ -1184,7 +1195,7 @@ const Home = () => {
                     cancelRide={cancelRide} />
             </div>
             {/* Painel sempre aberto: altura pelo conteúdo — sem scroll nem expansão. */}
-            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom,12px)] rounded-t-3xl shadow-2xl max-h-[88dvh] overflow-y-auto overscroll-y-contain'>
+            <div ref={waitingForDriverRef} className='fixed w-full z-30 bottom-0 translate-y-full invisible bg-white px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-2xl max-h-[88dvh] overflow-y-auto overscroll-y-contain'>
                 <WaitingForDriver
                     ride={ride}
                     cancelRide={cancelRide}

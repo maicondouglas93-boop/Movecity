@@ -30,7 +30,7 @@ const BottomSheet = ({ open, onClose, children, className = '', zIndexClass = 'z
             className={`
                 fixed w-full bottom-0 left-0 ${zIndexClass}
                 bg-surface rounded-t-3xl shadow-floating
-                px-4 pt-2 pb-[env(safe-area-inset-bottom,12px)]
+                px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]
                 transition-transform duration-300 ease-out
                 ${open ? 'translate-y-0' : 'translate-y-full invisible'}
                 ${className}

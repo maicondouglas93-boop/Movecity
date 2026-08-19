@@ -128,6 +128,9 @@ const LiveTracking = (props) => {
 
     // Use ref for current position to avoid destroying the map
     const currentPositionRef = useRef(null);
+    // Espelho do ponto de embarque para o loop de motoristas próximos ler sem virar
+    // dependência do efeito (que remontaria a assinatura a cada mudança).
+    const pickupCoordsRef = useRef(null);
     // Piscar do mapa ao voltar pra Home (2026-08-08): sair da tela e voltar remonta
     // este componente do zero (rotas sem layout persistente — ver LocationContext,
     // que já tem o GPS rodando contínuo a nível de app). Antes hasPosition sempre
@@ -231,6 +234,11 @@ const LiveTracking = (props) => {
             setHasPosition(true);
         }
     }, [userLocation]); // Syncs automatically when global location updates
+
+    // Mantém o espelho do embarque em dia para o loop de motoristas próximos.
+    useEffect(() => {
+        pickupCoordsRef.current = pickupCoords;
+    }, [pickupCoords]);
 
     const subjectStatus = props.status || props.parcelStatus || props.ride?.status;
     const rideIsTerminal = ['finished', 'cancelled', 'delivered'].includes(subjectStatus);
@@ -609,7 +617,14 @@ const LiveTracking = (props) => {
         };
 
         const syncDrivers = async () => {
-            const pos = currentPositionRef.current;
+            // Centro da busca: GPS do aparelho quando existe, senão o ponto de embarque.
+            //
+            // Antes dependia SÓ do GPS. Sem permissão de localização (ou com o GPS ainda
+            // respondendo), `pos` era nulo e a requisição nem chegava a sair: o passageiro
+            // via o mapa da cidade dele, com motoristas online de verdade, e nenhum ponto
+            // na tela — sem erro, sem explicação. E quem já escolheu a partida está
+            // perguntando "quem pode me buscar ALI", que é justamente o pickup.
+            const pos = currentPositionRef.current || pickupCoordsRef.current;
             const accessToken = getAccessToken('user');
             if (!pos || !accessToken) return;
             try {
@@ -680,7 +695,11 @@ const LiveTracking = (props) => {
             document.removeEventListener('visibilitychange', handleVisibility);
             clearAllDrivers();
         };
-    }, [props.showNearbyDrivers, mapReady, socket]);
+        // `hasPosition` e `pickupCoords` entram nas dependências para RE-DISPARAR a busca
+        // assim que existir um centro. Sem isso, quem abre a tela antes do GPS responder
+        // (ou antes de escolher a partida) só veria motoristas na próxima varredura — até
+        // 4 minutos de mapa vazio com a frota inteira online.
+    }, [props.showNearbyDrivers, mapReady, socket, hasPosition, pickupCoords]);
 
     // ====== Fase D (2026-08-03): câmera de navegação estilo Waze/Google Maps ======
     // Duas responsabilidades separadas de propósito:

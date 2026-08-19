@@ -1,5 +1,5 @@
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
-import { vehicleImages } from '../../assets/vehicleAssets'
+import { vehicleMarkerImages } from '../../assets/vehicleAssets'
 
 let optionsSet = false
 let mapsLibraryPromise = null
@@ -35,11 +35,11 @@ const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || null
 // idêntica ao divIcon do Leaflet. pickup/destination reaproveitam o path SVG original (já eram
 // SVG puro, não dependiam de fonte de ícone — por isso ficam bem próximos do original).
 const VEHICLE_IMAGE_BY_TYPE = {
-    car: vehicleImages.car,
-    moto: vehicleImages.moto,
-    motorcycle: vehicleImages.motorcycle,
-    car_motorcycle: vehicleImages.car,
-    auto: vehicleImages.auto,
+    car: vehicleMarkerImages.car,
+    moto: vehicleMarkerImages.moto,
+    motorcycle: vehicleMarkerImages.motorcycle,
+    car_motorcycle: vehicleMarkerImages.car,
+    auto: vehicleMarkerImages.auto,
 }
 
 // Fase C (2026-08-03): o ícone ganhou um ponteiro externo que indica a direção do
@@ -55,7 +55,10 @@ function vehicleIconUrl(type, rotation = null) {
     const pointer = Number.isFinite(rotation)
         ? `<g transform="rotate(${rotation.toFixed(0)} 24 24)"><path d="M 24,2 L 29.5,12.5 L 18.5,12.5 Z" fill="#111827" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></g>`
         : ''
-    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">${pointer}<image href="${imgSrc}" x="9" y="9" width="30" height="30"/></svg>`)
+    // xlink:href além de href: renderizadores de SVG-como-imagem mais antigos (incluindo
+    // WebViews Android antigas, que é justamente onde o app do motorista roda) ignoram o
+    // href simples do SVG 2 e só entendem o xlink do SVG 1.1.
+    return svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="48" height="48" viewBox="0 0 48 48">${pointer}<image href="${imgSrc}" xlink:href="${imgSrc}" x="9" y="9" width="30" height="30"/></svg>`)
 }
 
 const USER_ICON_URL = svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" fill-opacity="0.35"/><circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#fff" stroke-width="2"/></svg>`)

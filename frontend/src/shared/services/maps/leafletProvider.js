@@ -1,6 +1,6 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { vehicleImages } from '../../assets/vehicleAssets'
+import { vehicleMarkerImages } from '../../assets/vehicleAssets'
 
 // Fix default marker icon issue in Leaflet with Webpack/Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -43,11 +43,11 @@ const vehicleIcon = (imgSrc) => L.divIcon({
 });
 
 const vehicleIcons = {
-    car: vehicleIcon(vehicleImages.car),
-    moto: vehicleIcon(vehicleImages.moto),
-    motorcycle: vehicleIcon(vehicleImages.motorcycle),
-    car_motorcycle: vehicleIcon(vehicleImages.car),
-    auto: vehicleIcon(vehicleImages.auto),
+    car: vehicleIcon(vehicleMarkerImages.car),
+    moto: vehicleIcon(vehicleMarkerImages.moto),
+    motorcycle: vehicleIcon(vehicleMarkerImages.motorcycle),
+    car_motorcycle: vehicleIcon(vehicleMarkerImages.car),
+    auto: vehicleIcon(vehicleMarkerImages.auto),
 };
 
 const userPositionIcon = L.divIcon({

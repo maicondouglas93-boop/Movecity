@@ -6,6 +6,8 @@ import carroEconomicoImg from './vehicles/carro-economico.png'
 import carroZonaRuralImg from './vehicles/carro-zona-rural.png'
 import motoboyMotoTaxiImg from './vehicles/motoboy-moto-taxi.png'
 import picapeFreteImg from './vehicles/picape-frete.png'
+// Mesmas artes embutidas em base64, só para o marcador de mapa — ver vehicleMarkerImages.
+import { CARRO_ECONOMICO_DATA_URI, MOTOBOY_MOTO_TAXI_DATA_URI } from './vehicles/markerArt'
 
 export const vehicleImages = {
     car: carImg,
@@ -22,6 +24,26 @@ export const vehicleImages = {
     carro_zona_rural: carroZonaRuralImg,
     motoboy_moto_taxi: motoboyMotoTaxiImg,
     picape_frete: picapeFreteImg,
+}
+
+// Arte do MARCADOR DE MAPA, indexada por tipo/autorização do motorista.
+//
+// Precisa obrigatoriamente ter fundo transparente: o marcador não tem mais círculo por
+// trás, então a imagem aparece solta sobre o mapa. As antigas (vehicle-*.png) são JPEG
+// 1024x1024 de fundo BRANCO opaco — funcionavam dentro do círculo preto, mas soltas
+// sobre o mapa claro viravam um quadrado branco invisível.
+//
+// São data URIs, não caminhos: o provider do Google embute a arte dentro de um <image>
+// no mesmo SVG do ponteiro de direção, e um SVG consumido COMO IMAGEM não carrega
+// recurso externo nenhum — com um caminho /assets/... ali dentro, o marcador sairia vazio.
+export const vehicleMarkerImages = {
+    car: CARRO_ECONOMICO_DATA_URI,
+    moto: MOTOBOY_MOTO_TAXI_DATA_URI,
+    motorcycle: MOTOBOY_MOTO_TAXI_DATA_URI,
+    // Motorista autorizado para carro e moto: mostra o carro, que é o veículo de maior
+    // porte e o que o passageiro precisa reconhecer chegando.
+    car_motorcycle: CARRO_ECONOMICO_DATA_URI,
+    auto: CARRO_ECONOMICO_DATA_URI,
 }
 
 // Normaliza qualquer rótulo ("Carro Econômico", "Motoboy-Moto Taxi") para a chave do mapa:

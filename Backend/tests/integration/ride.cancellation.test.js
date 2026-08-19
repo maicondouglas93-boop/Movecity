@@ -257,11 +257,14 @@ describe('Cancelamento — auto-expiração usa transição atômica (corrige ra
         const user = await createUser();
         const userToken = generateAuthToken(user, 'user');
         const ride = await createRide({ user: user._id, captain: undefined, status: 'requested' });
-        // findByIdAndUpdate não é confiável pra retroceder createdAt (o hook de
-        // timestamps do Mongoose intercepta updates) — direto no documento + save()
-        // garante que o valor realmente persiste como o teste espera.
-        ride.createdAt = new Date(Date.now() - 11 * 60 * 1000);
-        await ride.save();
+        // createdAt é imutável no Mongoose (timestamps): atribuir no documento e dar
+        // save() é descartado em silêncio — a corrida seguia "nova", nunca expirava e o
+        // teste cobrava um 404 que não tinha como acontecer. Escrever pelo driver nativo
+        // é o único caminho que realmente retrocede o relógio do booking.
+        await rideModel.collection.updateOne(
+            { _id: ride._id },
+            { $set: { createdAt: new Date(Date.now() - 11 * 60 * 1000) } }
+        );
 
         const res = await request(app)
             .get('/rides/current')

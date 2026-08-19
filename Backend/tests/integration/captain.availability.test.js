@@ -139,8 +139,10 @@ describe('Disponibilidade do motorista x conexão de socket', () => {
 
         const notification = await waitFor();
         expect(notification).toBeTruthy();
-        // Diagnóstico de push de corrida (2026-08-03): título/formato atualizados.
-        expect(notification.title).toMatch(/Nova corrida/);
+        // O título passou a identificar o veículo desde 17a36bc (2026-08-11, autorização
+        // por tipo de veículo): "🚗 CORRIDA DE CARRO · R$ x,xx". A asserção antiga
+        // (/Nova corrida/) ficou para trás e derrubava esta suíte desde então.
+        expect(notification.title).toMatch(/CORRIDA DE CARRO/);
     });
 });
 

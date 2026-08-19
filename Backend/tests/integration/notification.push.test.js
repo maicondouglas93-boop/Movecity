@@ -106,8 +106,9 @@ describe('Fluxo de push de nova corrida (Fase 1: C1, C2, C3, C5)', () => {
             { requireFinal: true }
         );
         expect(notification).toBeTruthy();
-        // Diagnóstico de push de corrida (2026-08-03): título/formato atualizados.
-        expect(notification.title).toMatch(/Nova corrida/);
+        // Título por tipo de veículo desde 17a36bc (2026-08-11) — o mesmo formato que a
+        // asserção de payload no fim deste arquivo já cobrava, mas esta linha não seguiu.
+        expect(notification.title).toMatch(/CORRIDA DE CARRO/);
         // O envio real ao Firebase falha neste ambiente (sem credenciais) mesmo depois
         // dos retries do pushTransport — o status final gravado tem que refletir isso
         // (M4 da auditoria: antes gravava 'sent' incondicionalmente, mesmo sem entregar).

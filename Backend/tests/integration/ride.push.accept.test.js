@@ -66,7 +66,8 @@ describe('Push de corrida — cenário 1: motorista com o app fechado recebe a o
 
         const notification = await waitFor(() => Notification.findOne({ captainId: captain._id, type: 'NEW_RIDE' }));
         expect(notification).toBeTruthy();
-        expect(notification.title).toMatch(/Nova corrida/);
+        // Título por tipo de veículo desde 17a36bc (2026-08-11).
+        expect(notification.title).toMatch(/CORRIDA DE CARRO/);
         // Valor fica no título; body traz rota / distância / detalhes.
         expect(notification.title + ' ' + notification.message).toMatch(/R\$ \d+,\d{2}/);
     });
@@ -88,7 +89,9 @@ describe('Push de corrida — cenário 2: motorista toca em "Aceitar" na notific
 
         expect(res.statusCode).toBe(200);
         expect(res.body.status).toBe('accepted');
-        expect(res.body.captain).toBeTruthy();
+        // O DTO do motorista não devolve o próprio motorista (b74bcd0, 2026-08-15).
+        // O que este cenário precisa garantir é que o aceite REALMENTE vinculou a corrida.
+        expect(res.body.captain).toBeUndefined();
         expect(res.body.otp).toBeUndefined(); // nunca vaza o PIN pro motorista
 
         const persisted = await rideModel.findById(ride._id);

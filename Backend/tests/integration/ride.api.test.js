@@ -50,8 +50,12 @@ describe('Ride API Integration Tests', () => {
                 });
 
             expect(res.statusCode).toBe(201); // or 200 depending on controller
-            expect(res.body).toHaveProperty('user');
-            expect(res.body.user.toString()).toBe(user._id.toString());
+            // A resposta do passageiro não repete o próprio passageiro desde b74bcd0
+            // (2026-08-15, DTOs por ator): o campo `user` saiu de propósito. O vínculo
+            // continua sendo o que importa aqui — conferido na fonte, não no DTO.
+            expect(res.body._id).toBeTruthy();
+            const persisted = await rideModel.findById(res.body._id);
+            expect(persisted.user.toString()).toBe(user._id.toString());
         });
 
         it('should fail if unauthenticated', async () => {
@@ -130,8 +134,11 @@ describe('Ride API Integration Tests', () => {
             expect(res.body.rides.map((r) => r._id.toString()).sort()).toEqual(
                 [finished._id.toString(), cancelled._id.toString()].sort()
             );
-            expect(res.body.rides.every((r) => r.captain?.toString?.() === captain._id.toString()
-                || r.captain?._id?.toString() === captain._id.toString())).toBe(true);
+            // O histórico do motorista não repete o próprio motorista (b74bcd0). Que a
+            // lista traga só corridas dele já está cravado no _id exato acima; aqui a
+            // titularidade é reconferida na fonte.
+            const donas = await rideModel.find({ _id: { $in: res.body.rides.map((r) => r._id) } }).select('captain');
+            expect(donas.every((r) => r.captain.toString() === captain._id.toString())).toBe(true);
             expect(res.body.rides.some((r) => Number(r.fare) === 99)).toBe(false);
             expect(res.body.total).toBe(2);
         });
@@ -281,7 +288,11 @@ describe('Ride API Integration Tests', () => {
     // cobrem as transições inválidas que antes eram aceitas silenciosamente.
     describe('Máquina de estados (P2.1)', () => {
         it('rejeita iniciar uma corrida que ainda não foi aceita (requested)', async () => {
-            const ride = await createRide({ user: user._id, status: 'requested', otp: '654321' });
+            // Sem passar captain, a factory inventa um motorista NOVO — a corrida não
+            // pertence a quem está autenticado, e o serviço barra na titularidade (404)
+            // antes de chegar na máquina de estados. Para exercitar a transição inválida
+            // de verdade, a corrida precisa ser deste motorista.
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'requested', otp: '654321' });
 
             const res = await request(app)
                 .get('/rides/start-ride')

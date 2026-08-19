@@ -50,10 +50,18 @@ describe('GET /maps/nearby-drivers (Fase C)', () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.length).toBe(1);
         const driver = res.body[0];
-        expect(driver.id).toBe(captain._id.toString());
+        // O id do mapa público é um pseudônimo HMAC por assinatura (utils/publicDriverMap.js),
+        // não o _id real — devolver o ObjectId deixaria o passageiro correlacionar cada
+        // ponto do mapa com um motorista de verdade. Cravar o id real aqui cobrava
+        // exatamente o vazamento que o produto decidiu fechar.
+        expect(driver.id).toMatch(/^drv_[0-9a-f]{24}$/);
+        expect(driver.id).not.toBe(captain._id.toString());
         expect(driver.vehicleType).toBe('car');
         expect(driver.vehicleAuthorization).toBe('car_motorcycle');
-        expect(driver.location.ltd).toBe(VIEWER_POS.lat);
+        // A posição do mapa público é arredondada de propósito (PUBLIC_LOCATION_DECIMALS)
+        // — precisão de rua, não de porta. Cravar igualdade exata cobrava a precisão total
+        // que o produto decidiu não expor.
+        expect(driver.location.ltd).toBeCloseTo(VIEWER_POS.lat, 3);
         // Posição de frota é sensível — nome/telefone/placa não podem vazar pra quem
         // só está olhando o mapa.
         expect(Object.keys(driver).sort()).toEqual(['id', 'location', 'vehicleAuthorization', 'vehicleType']);

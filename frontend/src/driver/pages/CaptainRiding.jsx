@@ -21,6 +21,7 @@ import api from '@/shared/services/axios'
 import { getAccessToken } from '@/shared/services/session'
 import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
 import { formatBRL } from '@/shared/utils/currency'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
@@ -300,9 +301,11 @@ const CaptainRiding = () => {
     useEffect(() => {
         const fetchUnread = async () => {
             try {
-                const response = await api.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
-                    headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-                });
+                const response = await withHardTimeout(
+                    api.get(`${import.meta.env.VITE_BASE_URL}/chat/${rideData?._id}`, {
+                        headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
+                    })
+                );
                 if (response.data.chat) {
                     setUnreadCount(response.data.chat.unreadCaptain || 0);
                 }
@@ -337,10 +340,12 @@ const CaptainRiding = () => {
         if (!rideData?._id || cancelling) return
         setCancelling(true)
         try {
-            await api.post(
-                `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
-                { rideId: rideData._id, reason: 'Cancelamento de corrida presencial' },
-                { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+            await withHardTimeout(
+                api.post(
+                    `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
+                    { rideId: rideData._id, reason: 'Cancelamento de corrida presencial' },
+                    { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+                )
             )
             setCaptainRide(null)
             addToast('Corrida presencial cancelada.', 'info')

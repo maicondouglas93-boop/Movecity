@@ -63,7 +63,11 @@ function buildRide(overrides = {}) {
 }
 
 function mockFindOneChain(doc) {
-    const chain = { populate: jest.fn(() => chain), select: jest.fn().mockResolvedValue(doc) };
+    const chain = { populate: jest.fn(), select: jest.fn().mockResolvedValue(doc) };
+    // ride.service encadeia populate('user').populate('captain'). O segundo populate
+    // resolve a consulta; devolver `chain` nas duas chamadas fazia `await` receber o
+    // dublê (sem status), não a corrida iniciada.
+    chain.populate.mockReturnValueOnce(chain).mockResolvedValueOnce(doc);
     return chain;
 }
 

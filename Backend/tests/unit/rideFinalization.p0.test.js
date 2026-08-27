@@ -174,12 +174,26 @@ describe('finalização financeira P0', () => {
         );
     });
 
+    it('preserva o toque de finalizar offline mesmo quando não havia coordenada no instante', async () => {
+        const { captain, ride } = await createFinancialRide();
+        const realFinishMs = new Date(ride.startedAt).getTime() + 10 * 60 * 1000;
+
+        await rideService.endRide({
+            rideId: ride._id,
+            captain,
+            finishedAt: realFinishMs,
+        });
+
+        expect(PricingEngine.calculateFare).toHaveBeenCalledWith(
+            expect.objectContaining({ time: 600 })
+        );
+    });
+
     // Regressão do achado 01 da auditoria de corrida ativa (2026-08-16): zona rural sem
     // sinal. O motorista finaliza offline, a ação fica na fila e só sincroniza quando o
     // sinal volta — às vezes uma hora depois. A validação de GPS da presencial comparava
     // a idade da posição com Date.now() (o instante em que a requisição CHEGA), então
-    // reprovava com STALE_FINISH_LOCATION → 400 → a fila offline descarta 4xx como
-    // definitivo → corrida presa em `started` pra sempre, motorista sem receber.
+    // reprovava com STALE_FINISH_LOCATION → 400 e a corrida ficava presa em `started`.
     it('finaliza presencial sincronizada muito depois, desde que a GPS fosse fresca no fim real', async () => {
         const finishedAt = Date.now() - 60 * 60 * 1000; // motorista finalizou 1h atrás
         const { captain, ride } = await createPresentialRideWithLastLocationAt(

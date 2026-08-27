@@ -80,7 +80,7 @@ const CaptainHome = () => {
 
     const syncPendingRides = async () => {
         try {
-            const response = await api.get('/rides/pending')
+            const response = await withHardTimeout(api.get('/rides/pending'))
             setPendingRides(Array.isArray(response.data) ? response.data : [])
         } catch (err) {
             // Sem rede/token vencido: mantém a lista atual; a próxima sincronização
@@ -120,7 +120,7 @@ const CaptainHome = () => {
     const refreshApprovalStatus = async ({ silent = false } = {}) => {
         setRefreshingApproval(true)
         try {
-            const response = await api.get('/captains/profile')
+            const response = await withHardTimeout(api.get('/captains/profile'))
             const next = response.data.captain
             setCaptain(next)
             if (!silent) {
@@ -253,7 +253,7 @@ const CaptainHome = () => {
 
     const syncScheduledUpcoming = useCallback(async () => {
         try {
-            const { data } = await api.get('/captains/scheduled-upcoming')
+            const { data } = await withHardTimeout(api.get('/captains/scheduled-upcoming'))
             setScheduledUpcoming(data.upcoming || [])
         } catch {
             /* ignore */
@@ -263,7 +263,7 @@ const CaptainHome = () => {
     const syncPendingParcels = useCallback(async () => {
         if (captainRideRef.current || captainParcelRef.current) return
         try {
-            const parcels = await getPendingParcels()
+            const parcels = await withHardTimeout(getPendingParcels())
             if (Array.isArray(parcels)) {
                 // Antes só parcels[0] entrava na tela — as demais ficavam invisíveis
                 // até o próximo sync. A fila aceita todas (dedup por offerId cuida de
@@ -529,7 +529,7 @@ const CaptainHome = () => {
                     return
                 }
 
-                const response = await api.get('/rides/pending')
+                const response = await withHardTimeout(api.get('/rides/pending'))
                 if (cancelled) return
                 const list = Array.isArray(response.data) ? response.data : []
                 setPendingRides(list)
@@ -568,7 +568,7 @@ const CaptainHome = () => {
         let cancelled = false
         ;(async () => {
             try {
-                const parcels = await getPendingParcels()
+                const parcels = await withHardTimeout(getPendingParcels())
                 if (cancelled) return
                 const list = Array.isArray(parcels) ? parcels : []
                 const target = list.find(p => String(p._id) === String(offerId))
@@ -605,7 +605,7 @@ const CaptainHome = () => {
         // offerQueue.active reabre o painel sozinho com ela.
         offerQueue.remove(targetRide._id)
         try {
-            await api.post(`/rides/${targetRide._id}/decline`, {})
+            await withHardTimeout(api.post(`/rides/${targetRide._id}/decline`, {}))
         } catch {
             /* ACK only — sair da fila já basta pro motorista */
         }

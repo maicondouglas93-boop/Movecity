@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -22,6 +22,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
     enqueued: [],
     hangingCalls: 0,
+    offlinePreview: {
+        amount: 11.06,
+        actualDistance: 100,
+        elapsedSeconds: 120,
+        offline: true,
+        fareBreakdown: { baseFare: 6, distanceFare: 0.15, timeFare: 1.93 },
+    },
 }))
 
 vi.mock('@/shared/services/axios', () => {
@@ -42,13 +49,7 @@ vi.mock('@/shared/services/offlineQueue', () => ({
 }))
 
 vi.mock('@/shared/services/offlineRideFare', () => ({
-    buildOfflineFinishPreview: vi.fn(async () => ({
-        amount: 11.06,
-        actualDistance: 100,
-        elapsedSeconds: 120,
-        offline: true,
-        fareBreakdown: { baseFare: 6, distanceFare: 0.15, timeFare: 1.93 },
-    })),
+    buildOfflineFinishPreview: vi.fn(async () => state.offlinePreview),
 }))
 
 vi.mock('@/shared/services/session', () => ({ getAccessToken: () => 'token' }))
@@ -77,7 +78,7 @@ const ride = {
     user: { fullname: { firstname: 'Cliente' } },
 }
 
-function renderFinishRide() {
+function renderFinishRide({ syncCaptainRide = vi.fn(async () => null) } = {}) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -91,7 +92,7 @@ function renderFinishRide() {
                         }}>
                             <RideContext.Provider value={{
                                 setCaptainRide: vi.fn(),
-                                syncCaptainRide: vi.fn(async () => null),
+                                syncCaptainRide,
                             }}>
                                 <FinishRide ride={ride} setRide={vi.fn()} />
                             </RideContext.Provider>
@@ -109,11 +110,19 @@ describe('app do motorista sem internet', () => {
     beforeEach(() => {
         state.enqueued.length = 0
         state.hangingCalls = 0
+        state.offlinePreview = {
+            amount: 11.06,
+            actualDistance: 100,
+            elapsedSeconds: 120,
+            offline: true,
+            fareBreakdown: { baseFare: 6, distanceFare: 0.15, timeFare: 1.93 },
+        }
         mockNavigate.mockClear()
         onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
     })
 
     afterEach(() => {
+        vi.useRealTimers()
         onLineSpy.mockRestore()
         vi.clearAllMocks()
     })
@@ -193,5 +202,37 @@ describe('app do motorista sem internet', () => {
             expect(state.enqueued.map((a) => a.type)).toEqual(['end-ride'])
         })
         expect(state.enqueued.every((a) => a.rideId === ride._id)).toBe(true)
+    })
+
+    it('permite finalizar offline mesmo quando o celular não consegue calcular o valor', async () => {
+        state.offlinePreview = null
+        const user = userEvent.setup()
+        renderFinishRide()
+
+        await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+
+        expect(await screen.findByText(/não cobre o passageiro/i)).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: /finalizar sem internet/i }))
+
+        await waitFor(() => expect(state.enqueued.map(action => action.type)).toEqual(['end-ride']))
+        expect(await screen.findByRole('button', { name: /voltar para o in.cio/i })).toBeInTheDocument()
+    })
+
+    it('sai da prévia pendurada e oferece finalização offline quando a rede mente que está online', async () => {
+        vi.useFakeTimers()
+        onLineSpy.mockReturnValue(true)
+        state.offlinePreview = null
+        renderFinishRide({ syncCaptainRide: () => new Promise(() => {}) })
+
+        fireEvent.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(5000)
+        })
+
+        expect(screen.getByText(/não cobre o passageiro/i)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /finalizar sem internet/i }))
+        await act(async () => {})
+
+        expect(state.enqueued.map(action => action.type)).toEqual(['end-ride'])
     })
 })

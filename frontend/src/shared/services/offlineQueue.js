@@ -1,6 +1,7 @@
 import api from '@/shared/services/axios'
 import { db } from '@/shared/services/db'
 import { getAccessToken } from '@/shared/services/session'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 // P1.2 da auditoria de concorrência (2026-08-02): antes, a fila offline reexecutava
 // ações via `socket.emit(action.type, ...)` — mas o backend nunca teve handler de
@@ -10,6 +11,8 @@ import { getAccessToken } from '@/shared/services/session'
 // reexecuta via HTTP — os mesmos endpoints REST que o app já chama quando está online —
 // e só remove da fila depois de uma resposta 2xx de verdade.
 const MAX_ATTEMPTS = 5
+let replayPromise = null
+let endRideEnqueuePromise = null
 
 const ACTION_LABELS = {
     'accept-ride': 'aceitar a corrida',
@@ -66,15 +69,18 @@ function buildRequestConfig(action) {
                 url: `${baseURL}/rides/end-ride`,
                 data: {
                     rideId: payload.rideId,
+                    // Sempre envia o instante do toque, mesmo quando não havia um fix GPS
+                    // atual. Sem isso, o atraso até a reconexão virava tempo de corrida.
+                    ...(payload.finishTimestamp != null ? {
+                        finishTimestamp: payload.finishTimestamp,
+                    } : {}),
                     ...(payload.finishLat != null && payload.finishLng != null ? {
                         finishLat: payload.finishLat,
                         finishLng: payload.finishLng,
                         finishAccuracy: payload.finishAccuracy ?? null,
-                        // Preserva o instante real em que o motorista tocou "Finalizar"
-                        // (capturado no enqueue, offline) — Date.now() aqui recalcularia o
-                        // horário só na hora de sincronizar, que é exatamente o atraso que
-                        // esse timestamp existe pra excluir da corrida.
-                        finishTimestamp: payload.finishTimestamp ?? Date.now(),
+                        ...(payload.finishLocationTimestamp != null ? {
+                            finishLocationTimestamp: payload.finishLocationTimestamp,
+                        } : {}),
                     } : {}),
                 },
                 headers,
@@ -103,7 +109,42 @@ async function moveToFailedAndRemove(action, reason) {
 }
 
 export async function enqueueOfflineAction({ type, rideId, payload }) {
-    await db.offlineActions.add({ type, rideId, payload, timestamp: Date.now(), attempts: 0 })
+    const entry = { type, rideId, payload, timestamp: Date.now(), attempts: 0 }
+    if (type !== 'end-ride') return db.offlineActions.add(entry)
+
+    // Finalizar e tocar de novo, ou receber simultaneamente o fallback do timeout e o
+    // evento offline, nunca pode criar duas finalizações para a mesma corrida. O lock
+    // cobre chamadas concorrentes nesta execução; a varredura cobre reinício do app.
+    const previous = endRideEnqueuePromise
+    const current = (async () => {
+        if (previous) await previous.catch(() => {})
+
+        const pending = await db.offlineActions.toArray()
+        const existing = pending.find((action) => (
+            action.type === 'end-ride' && String(action.rideId) === String(rideId)
+        ))
+        if (!existing) return db.offlineActions.add(entry)
+
+        // Mantém o primeiro toque como fim real, mas aproveita um fix GPS mais novo de
+        // um segundo toque. Isso melhora a chance de sincronizar sem cobrar tempo extra.
+        const oldFinish = Number(existing.payload?.finishTimestamp)
+        const newFinish = Number(payload?.finishTimestamp)
+        const validFinishes = [oldFinish, newFinish].filter(Number.isFinite)
+        const mergedPayload = {
+            ...existing.payload,
+            ...payload,
+            ...(validFinishes.length > 0 ? { finishTimestamp: Math.min(...validFinishes) } : {}),
+        }
+        await db.offlineActions.update(existing.id, { payload: mergedPayload })
+        return existing.id
+    })()
+
+    endRideEnqueuePromise = current
+    try {
+        return await current
+    } finally {
+        if (endRideEnqueuePromise === current) endRideEnqueuePromise = null
+    }
 }
 
 /**
@@ -225,7 +266,7 @@ export async function flushQueuedLocations(socket, options = {}) {
 // corromperia a máquina de estados do lado do servidor). Para no primeiro erro
 // retentável (rede/5xx) pra não furar essa ordem; erros definitivos (409/4xx) são
 // removidos e o processamento segue pras ações seguintes.
-export async function replayOfflineActions({ socket, onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater } = {}) {
+async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater } = {}) {
     const actions = await db.offlineActions.orderBy('timestamp').toArray()
 
     for (const action of actions) {
@@ -258,17 +299,24 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
             // tem que bater com o dono da ação, não com o fallback user>captain).
             // Falha de rede continua sem resposta HTTP → cai no branch retentável
             // abaixo, sem deslogar ninguém.
-            const response = await api(config)
+            // O CapacitorHttp pode ignorar o timeout do Axios. Sem um teto no JS, uma
+            // única tentativa sem resposta bloqueia todas as ações seguintes para sempre.
+            const response = await withHardTimeout(api(config))
             await db.offlineActions.delete(action.id)
             onResolved?.(action, response)
         } catch (err) {
             const status = err.response?.status
+            const isPerformedWork = action.type === 'end-ride'
 
-            if (status === 409) {
+            if (status === 409 && !isPerformedWork) {
                 // O servidor está dizendo "isso já foi feito" — normalmente porque uma
                 // tentativa anterior desta mesma ação teve sucesso, mas a confirmação não
                 // chegou até o cliente (rede caiu bem na resposta). Retentar pra sempre
                 // não ajudaria: o 409 já É a confirmação de que o efeito existe.
+                //
+                // end-ride é diferente: finalização em processamento também responde
+                // 409, sem confirmar que terminou. A rota é idempotente e devolve 200 se
+                // já finalizou, portanto só esse 200 permite retirar a ação com segurança.
                 await db.offlineActions.delete(action.id)
                 onAlreadyApplied?.(action, err)
                 continue
@@ -281,7 +329,6 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
             // velha. Esses passam numa tentativa seguinte, então ela entra no contador de
             // retentativas em vez de morrer no primeiro erro. 404 continua definitivo: a
             // corrida não existe mais e nenhuma tentativa muda isso.
-            const isPerformedWork = action.type === 'end-ride'
             const worthRetrying = isPerformedWork && status !== 404
 
             if (status && status >= 400 && status < 500 && !worthRetrying) {
@@ -294,7 +341,7 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
 
             // 5xx ou falha de rede: pode ser transitório.
             const attempts = (action.attempts || 0) + 1
-            if (attempts >= MAX_ATTEMPTS) {
+            if (attempts >= MAX_ATTEMPTS && !isPerformedWork) {
                 await moveToFailedAndRemove(action, err.response?.data?.message || err.message || 'Falha após múltiplas tentativas');
                 onPermanentFailure?.(action, err)
                 continue
@@ -304,5 +351,22 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
             onRetryLater?.(action, err)
             break // preserva a ordem — não tenta as próximas ações nesta rodada
         }
+    }
+}
+
+export async function replayOfflineActions(options = {}) {
+    // Socket connect, evento `online` e o join autenticado podem disparar juntos. Em vez
+    // de três processadores lerem e enviarem o mesmo item, cada rodada espera a anterior.
+    const previous = replayPromise
+    const current = (async () => {
+        if (previous) await previous.catch(() => {})
+        return runOfflineReplay(options)
+    })()
+
+    replayPromise = current
+    try {
+        return await current
+    } finally {
+        if (replayPromise === current) replayPromise = null
     }
 }

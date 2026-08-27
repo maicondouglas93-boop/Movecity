@@ -5,6 +5,7 @@ import api from '@/shared/services/axios'
 import { getAccessToken, getRefreshToken } from '@/shared/services/session'
 import SessionSplash from '@/shared/components/ui/SessionSplash'
 import Button from '@/shared/components/ui/Button'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 // Auditoria de autenticação e sessão persistente (2026-08-02).
 // Mesmo raciocínio de UserProtectWrapper — e aqui o impacto era ainda pior: um
@@ -24,7 +25,7 @@ const CaptainProtectWrapper = ({ children }) => {
         }
 
         setStatus('checking')
-        api.get('/captains/profile')
+        withHardTimeout(api.get('/captains/profile'))
             .then(response => {
                 if (cancelled) return
                 setCaptain(response.data.captain)

@@ -20,6 +20,8 @@ const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
     currency: 'BRL'
 }).format(Number(amount) || 0)
 
+const FINALIZE_PREVIEW_TIMEOUT_MS = 5000
+
 const isNetworkError = (error) => (
     (typeof navigator !== 'undefined' && !navigator.onLine)
     || error?.message === 'Network Error'
@@ -82,6 +84,7 @@ const FinishRide = (props) => {
     const finalBreakdown = chargeRide?.fareBreakdown || {}
     const finalDistanceKm = Math.max(0, Number(chargeRide?.actualDistance) || 0) / 1000
     const finalMinutes = Math.max(0, Number(chargeRide?.actualTime) || 0) / 60
+    const offlineFareUnavailable = previewFare?.offline && previewFare?.amount == null
 
     const queryClient = useQueryClient();
 
@@ -109,6 +112,9 @@ const FinishRide = (props) => {
 
     const endRideMutation = useMutation({
         mutationFn: async () => {
+            // Captura o toque antes de drenar GPS/rede. O servidor não pode cobrar o
+            // tempo gasto tentando sincronizar como se a corrida ainda estivesse ativa.
+            const finishTimestamp = Date.now()
             // A finalização só pode congelar a distância depois que todos os pontos já
             // coletados desta corrida receberam ack do backend. Se a rede oscilar aqui,
             // o botão falha com segurança e os pontos permanecem para retry.
@@ -129,8 +135,9 @@ const FinishRide = (props) => {
                         finishLat: userLocation.lat,
                         finishLng: userLocation.lng,
                         finishAccuracy: userLocation.accuracy ?? null,
-                        finishTimestamp: userLocation.timestamp ?? Date.now(),
+                        finishLocationTimestamp: userLocation.timestamp ?? finishTimestamp,
                     } : {}),
+                    finishTimestamp,
                 }, {
                     headers: {
                         Authorization: `Bearer ${getAccessToken('captain')}`
@@ -178,14 +185,10 @@ const FinishRide = (props) => {
     // Vive fora do onError porque agora também é chamada ANTES de tentar a rede,
     // quando o app já sabe que está sem sinal.
     async function queueFinalizationOffline() {
-        const presentialPending = props.ride?.source === 'driver_initiated'
-            && (props.ride?.destinationPending || !props.ride?.destination)
-        const localPreview = previewFare?.offline ? previewFare : await buildOfflineFinishPreview(props.ride)
-
-        if (presentialPending && !(localPreview?.amount > 0)) {
-            addToast('Sem internet neste destino. Mantenha o app aberto e toque em Finalizar de novo — o valor sai do GPS guardado no celular.', 'error')
-            return
-        }
+        const finishTimestamp = Date.now()
+        const localPreview = previewFare?.offline && previewFare?.amount != null
+            ? previewFare
+            : await buildOfflineFinishPreview(props.ride)
 
         try {
             await enqueueOfflineAction({
@@ -196,7 +199,8 @@ const FinishRide = (props) => {
                     finishLat: userLocation?.lat,
                     finishLng: userLocation?.lng,
                     finishAccuracy: userLocation?.accuracy ?? null,
-                    finishTimestamp: userLocation?.timestamp ?? Date.now(),
+                    finishLocationTimestamp: userLocation?.timestamp ?? finishTimestamp,
+                    finishTimestamp,
                 }
             })
             setEnded(true)
@@ -252,7 +256,7 @@ const FinishRide = (props) => {
         // O motorista via o botão girando pra sempre e, se fechasse o app, perdia a
         // corrida. O replay drena o GPS antes de reenviar, então pular o flush aqui é
         // seguro (ver replayOfflineActions em offlineQueue.js).
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (previewFare?.offline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
             if (queueingOffline) return
             setQueueingOffline(true)
             try {
@@ -279,7 +283,7 @@ const FinishRide = (props) => {
                     setPreviewFare(local)
                     return
                 }
-                addToast('Sem internet e GPS insuficiente para calcular o valor. Deixe o app aberto e tente de novo.', 'error')
+                setPreviewFare({ offline: true, amount: null })
             } finally {
                 setPreviewLoading(false)
             }
@@ -288,7 +292,7 @@ const FinishRide = (props) => {
 
         setPreviewLoading(true)
         try {
-            const fresh = await syncCaptainRide()
+            const fresh = await withHardTimeout(syncCaptainRide(), FINALIZE_PREVIEW_TIMEOUT_MS)
             if (fresh?.liveFare?.amount > 0) {
                 setPreviewFare(fresh.liveFare)
             } else {
@@ -301,7 +305,9 @@ const FinishRide = (props) => {
                 setPreviewFare(local)
                 return
             }
-            endRide()
+            // Sem resposta e sem tarifa local, ainda permite encerrar o serviço. O
+            // servidor calcula depois; a tela proíbe cobrar antes desse valor chegar.
+            setPreviewFare({ offline: true, amount: null })
         } finally {
             setPreviewLoading(false)
         }
@@ -394,45 +400,59 @@ const FinishRide = (props) => {
         <div>
             {!ended ? previewFare ? (
                 <>
-                    <h3 className='text-base font-semibold mb-2.5 text-ink-900'>Confirmar valor final</h3>
+                    <h3 className='text-base font-semibold mb-2.5 text-ink-900'>
+                        {offlineFareUnavailable ? 'Finalizar sem internet' : 'Confirmar valor final'}
+                    </h3>
                     <p className='text-xs text-ink-600 mb-3'>
-                        {previewFare?.offline
+                        {offlineFareUnavailable
+                            ? 'A corrida será encerrada e guardada no celular. O servidor calculará o valor quando a conexão voltar.'
+                            : previewFare?.offline
                             ? 'Sem internet neste destino. Valor calculado no celular com o GPS desta corrida. Cobre este valor agora.'
                             : 'Valor calculado agora, com a distância e o tempo reais desta corrida.'}
                     </p>
 
-                    <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
-                        <div className='space-y-2 text-sm'>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Distância percorrida</span>
-                                <span className='font-semibold text-ink-900'>{(Math.max(0, Number(previewFare.actualDistance) || 0) / 1000).toFixed(1)} km</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Tempo da corrida</span>
-                                <span className='font-semibold text-ink-900'>{Math.round(Math.max(0, Number(previewFare.elapsedSeconds) || 0) / 60)} min</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Tarifa base</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.baseFare || 0)}</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Distância</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.distanceFare || 0)}</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Minutos</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.timeFare || 0)}</span>
+                    {!offlineFareUnavailable && (
+                        <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
+                            <div className='space-y-2 text-sm'>
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Distância percorrida</span>
+                                    <span className='font-semibold text-ink-900'>{(Math.max(0, Number(previewFare.actualDistance) || 0) / 1000).toFixed(1)} km</span>
+                                </div>
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Tempo da corrida</span>
+                                    <span className='font-semibold text-ink-900'>{Math.round(Math.max(0, Number(previewFare.elapsedSeconds) || 0) / 60)} min</span>
+                                </div>
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Tarifa base</span>
+                                    <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.baseFare || 0)}</span>
+                                </div>
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Distância</span>
+                                    <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.distanceFare || 0)}</span>
+                                </div>
+                                <div className='flex justify-between gap-3'>
+                                    <span className='text-ink-600'>Minutos</span>
+                                    <span className='font-semibold text-ink-900'>{formatBRL(previewFare.fareBreakdown?.timeFare || 0)}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
-                        <p className='text-ink-600 text-sm mb-1'>Valor total da corrida</p>
-                        <p className='text-brand-600 text-3xl font-black'>{formatBRL(previewFare.amount)}</p>
-                    </div>
+                    {offlineFareUnavailable ? (
+                        <div className='bg-danger-50 rounded-panel p-4 border border-danger-500/20 mb-5 text-center'>
+                            <p className='text-sm font-semibold text-danger-600'>Não cobre o passageiro até o valor final aparecer no sistema.</p>
+                        </div>
+                    ) : (
+                        <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
+                            <p className='text-ink-600 text-sm mb-1'>Valor total da corrida</p>
+                            <p className='text-brand-600 text-3xl font-black'>{formatBRL(previewFare.amount)}</p>
+                        </div>
+                    )}
 
                     <p className='text-xs text-ink-500 text-center mb-4'>
-                        {previewFare?.offline
+                        {offlineFareUnavailable
+                            ? 'A finalização tentará sincronizar automaticamente quando o sinal voltar.'
+                            : previewFare?.offline
                             ? 'Quando o sinal voltar, o sistema confirma. Pode variar alguns centavos.'
                             : 'Pode variar centavos se o app captar mais deslocamento até você confirmar.'}
                     </p>
@@ -453,7 +473,7 @@ const FinishRide = (props) => {
                             onClick={endRide}
                             loading={endRideMutation.isPending || queueingOffline}
                         >
-                            Confirmar e finalizar
+                            {offlineFareUnavailable ? 'Finalizar sem internet' : 'Confirmar e finalizar'}
                         </Button>
                     </div>
                 </>
@@ -507,7 +527,7 @@ const FinishRide = (props) => {
 
                     <Button
                         onClick={handleFinalizeClick}
-                        loading={previewLoading || endRideMutation.isPending}
+                        loading={previewLoading || endRideMutation.isPending || queueingOffline}
                         className="mt-3 !min-h-[44px] !text-sm"
                     >
                         Finalizar corrida
@@ -538,6 +558,9 @@ const FinishRide = (props) => {
                         <>
                             <p className='text-ink-600 text-center'>A corrida foi guardada para sincronizar. O valor final será calculado pelo servidor quando a internet voltar.</p>
                             <p className='text-sm font-semibold text-danger-600 text-center'>Não cobre o passageiro até receber o valor final.</p>
+                            <Button onClick={() => navigate('/captain-home')}>
+                                Voltar para o início
+                            </Button>
                         </>
                     )}
                 </div>

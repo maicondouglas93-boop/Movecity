@@ -62,13 +62,13 @@ const loadGoogleProvider = async () => {
     return mod.createGoogleMapsProvider()
 }
 
-const initProvider = async (provider) => {
+const initProvider = async (provider, { navigationMode = true } = {}) => {
     // O provider lê o namespace de window.google.maps (padrão da API moderna: o loader
     // popula o global), não do retorno de importLibrary.
     window.google = { maps: currentStub.namespace }
     const node = document.createElement('div')
     document.body.appendChild(node)
-    await provider.init(node, { center: { lat: -23.55, lng: -46.63 }, zoom: 14 })
+    await provider.init(node, { center: { lat: -23.55, lng: -46.63 }, zoom: 14, navigationMode })
     return node
 }
 
@@ -84,6 +84,15 @@ describe('googleMapsProvider — câmera de navegação (Fase D)', () => {
 
         expect(currentStub.MapCtor).toHaveBeenCalled()
         expect(currentStub.MapCtor.mock.calls[0][1].mapId).toBe('movecity-nav-map')
+    })
+
+    it('não ativa o mapa vetorial pesado fora da navegação', async () => {
+        currentStub = makeGoogleStub({ renderingType: 'RASTER' })
+        const provider = await loadGoogleProvider()
+        await initProvider(provider, { navigationMode: false })
+
+        expect(currentStub.MapCtor.mock.calls[0][1].mapId).toBeUndefined()
+        expect(provider.supportsCamera()).toBe(false)
     })
 
     it('em mapa vetorial, aplica heading e tilt junto com centro e zoom', async () => {

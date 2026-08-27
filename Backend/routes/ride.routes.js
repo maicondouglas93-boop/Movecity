@@ -152,6 +152,7 @@ router.post('/end-ride',
     body('finishLng').optional().isFloat({ min: -180, max: 180 }),
     body('finishAccuracy').optional({ values: 'null' }).isFloat({ min: 0 }),
     body('finishTimestamp').optional({ values: 'null' }).isNumeric(),
+    body('finishLocationTimestamp').optional({ values: 'null' }).isNumeric(),
     rideController.endRide
 )
 

@@ -5,6 +5,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { getAccessToken, onSessionChanged } from '@/shared/services/session'
 import { hasPendingFinalization } from '@/shared/services/offlineQueue'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 // Fase A da experiência de corrida ativa (2026-08-03) + restore de encomenda.
 //
@@ -85,7 +86,7 @@ async function fetchActive(kind, endpointMap) {
 
     try {
         // Cliente centralizado: 401 → refresh automático; falha de refresh → forceLogout.
-        const response = await api.get(endpointMap[kind])
+        const response = await withHardTimeout(api.get(endpointMap[kind]))
         return response.data || null
     } catch (err) {
         if (err.response?.status === 404) return null

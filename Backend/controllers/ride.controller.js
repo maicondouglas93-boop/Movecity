@@ -618,7 +618,15 @@ module.exports.endRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId, destination, finishLat, finishLng, finishAccuracy, finishTimestamp } = req.body;
+    const {
+        rideId,
+        destination,
+        finishLat,
+        finishLng,
+        finishAccuracy,
+        finishTimestamp,
+        finishLocationTimestamp,
+    } = req.body;
 
     try {
         const hasFinishCoordinates = finishLat != null && finishLng != null;
@@ -626,11 +634,16 @@ module.exports.endRide = async (req, res) => {
             rideId,
             captain: req.captain,
             destination: destination || null,
+            finishedAt: finishTimestamp == null ? null : Number(finishTimestamp),
             finishLocation: hasFinishCoordinates ? {
                 lat: Number(finishLat),
                 lng: Number(finishLng),
                 accuracy: finishAccuracy == null ? null : Number(finishAccuracy),
-                timestamp: finishTimestamp == null ? null : Number(finishTimestamp),
+                // Apps antigos só enviam finishTimestamp; os novos separam o instante
+                // do fix GPS do instante do toque para não cobrar tempo de sincronização.
+                timestamp: finishLocationTimestamp == null
+                    ? (finishTimestamp == null ? null : Number(finishTimestamp))
+                    : Number(finishLocationTimestamp),
             } : null,
         });
 

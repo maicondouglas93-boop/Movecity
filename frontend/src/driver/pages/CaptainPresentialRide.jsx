@@ -17,6 +17,7 @@ import {
   startPresentialRide,
 } from '@/shared/services/presentialRideApi'
 import { formatBRL } from '@/shared/utils/currency'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 // Falha de sinal não tem `response`, então a mensagem padrão do catch ("não foi
 // possível...") mandava o motorista desistir de algo que talvez tenha dado certo do
@@ -273,10 +274,12 @@ const CaptainPresentialRide = () => {
     }
     setLoading(true)
     try {
-      await api.post(
-        `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
-        { rideId: ride._id, reason: 'Cancelamento de corrida presencial' },
-        { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+      await withHardTimeout(
+        api.post(
+          `${import.meta.env.VITE_BASE_URL}/rides/captain-cancel`,
+          { rideId: ride._id, reason: 'Cancelamento de corrida presencial' },
+          { headers: { Authorization: `Bearer ${getAccessToken('captain')}` } }
+        )
       )
       setCaptainRide(null)
       navigate('/captain-home')

@@ -292,16 +292,35 @@ export function createGoogleMapsProvider() {
     }
 
     function destroy() {
-        Object.values(markers).forEach(m => m.setMap(null))
+        Object.values(markers).forEach((marker) => {
+            googleMaps?.event?.clearInstanceListeners?.(marker)
+            marker.setMap(null)
+        })
         Object.keys(markers).forEach(k => delete markers[k])
         Object.keys(markerTypes).forEach(k => delete markerTypes[k])
         Object.keys(markerRotations).forEach(k => delete markerRotations[k])
-        if (routeLine) { routeLine.setMap(null); routeLine = null }
-        if (radiusCircle) { radiusCircle.setMap(null); radiusCircle = null }
+        if (routeLine) {
+            googleMaps?.event?.clearInstanceListeners?.(routeLine)
+            routeLine.setMap(null)
+            routeLine = null
+        }
+        if (radiusCircle) {
+            googleMaps?.event?.clearInstanceListeners?.(radiusCircle)
+            radiusCircle.setMap(null)
+            radiusCircle = null
+        }
+        if (map) googleMaps?.event?.clearInstanceListeners?.(map)
         map = null // Google não expõe um "map.remove()"; sem containerRef, o GC cuida do resto
     }
 
-    async function init(domNode, { center, zoom = 15, onMoveEnd, onDragStart, onZoomStart } = {}) {
+    async function init(domNode, {
+        center,
+        zoom = 15,
+        navigationMode = false,
+        onMoveEnd,
+        onDragStart,
+        onZoomStart,
+    } = {}) {
         await loadMapsLibrary()
         // importLibrary('maps') só devolve {Map, ...} no objeto retornado. Classes como
         // Size, Point, LatLngBounds, Marker, Polyline, Circle e event ficam disponíveis
@@ -319,7 +338,9 @@ export function createGoogleMapsProvider() {
             zoomControl: false,
             clickableIcons: false,
         }
-        if (MAP_ID) mapOptions.mapId = MAP_ID
+        // O mapa vetorial mantém uma composição gráfica bem mais pesada no WebView.
+        // Heading/tilt só são usados durante uma corrida; a Home fica no raster leve.
+        if (MAP_ID && navigationMode) mapOptions.mapId = MAP_ID
 
         map = new googleMaps.Map(domNode, mapOptions)
 
@@ -329,9 +350,9 @@ export function createGoogleMapsProvider() {
         // girar a câmera sem nada acontecer na tela). Logo após o construtor ele ainda
         // pode responder 'UNINITIALIZED', então o valor definitivo chega pelo evento.
         const readRenderingType = () => {
-            if (typeof map.getRenderingType !== 'function') return Boolean(MAP_ID)
+            if (typeof map.getRenderingType !== 'function') return Boolean(MAP_ID && navigationMode)
             const type = map.getRenderingType()
-            if (type === 'UNINITIALIZED') return Boolean(MAP_ID)
+            if (type === 'UNINITIALIZED') return Boolean(MAP_ID && navigationMode)
             return type === 'VECTOR'
         }
         vectorMap = readRenderingType()
@@ -341,7 +362,7 @@ export function createGoogleMapsProvider() {
             // traiçoeiro daqui: tudo carrega, nada dá erro, e a câmera simplesmente
             // não gira. Sem este aviso, o sintoma seria "a navegação não funciona"
             // sem nenhuma pista de onde olhar.
-            if (MAP_ID && !vectorMap) {
+            if (MAP_ID && navigationMode && !vectorMap) {
                 console.warn(
                     `[maps] O Map ID "${MAP_ID}" está renderizando como RASTER. ` +
                     'A navegação do motorista (rotação e inclinação da câmera) exige um ' +

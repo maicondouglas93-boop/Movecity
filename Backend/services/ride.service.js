@@ -1622,7 +1622,13 @@ async function reconcileWalletAtRideEnd(rideId) {
     return result;
 }
 
-module.exports.endRide = async ({ rideId, captain, destination = null, finishLocation = null }) => {
+module.exports.endRide = async ({
+    rideId,
+    captain,
+    destination = null,
+    finishLocation = null,
+    finishedAt = null,
+}) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
@@ -1724,8 +1730,9 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     const timeBaseMs = new Date(timeBase).getTime();
     const nowMs = Date.now();
     let finishedAtMs = nowMs;
-    if (finishLocation?.timestamp) {
-        const candidate = Number(finishLocation.timestamp);
+    const clientFinishedAt = finishedAt ?? finishLocation?.timestamp;
+    if (clientFinishedAt != null) {
+        const candidate = Number(clientFinishedAt);
         if (Number.isFinite(candidate) && candidate <= nowMs && candidate >= timeBaseMs) {
             finishedAtMs = candidate;
         }

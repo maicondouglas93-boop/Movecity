@@ -15,6 +15,7 @@ import { hasActiveService, resolveServiceKind } from '@/shared/services/captainL
 import { isNativePlatform } from '@/shared/platform/platform'
 import DriverPermissionsPanel from '@/driver/components/DriverPermissionsPanel'
 import { formatBRL } from '@/shared/utils/currency'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 const PANEL_BG = 'bg-[#0B3D2E]'
 const ACCENT_GOLD = 'text-amber-300'
@@ -40,7 +41,7 @@ const CaptainDetails = ({ children = null }) => {
 
     const fetchSummary = async () => {
         try {
-            const response = await api.get('/captains/summary')
+            const response = await withHardTimeout(api.get('/captains/summary'))
             setSummary(response.data)
         } catch (err) {
             console.error('Error fetching captain summary:', err)
@@ -99,9 +100,9 @@ const CaptainDetails = ({ children = null }) => {
 
         setLoadingToggle(true)
         try {
-            const response = await api.post('/captains/toggle-online', {
+            const response = await withHardTimeout(api.post('/captains/toggle-online', {
                 isOnline: nextOnline,
-            })
+            }))
             const updated = response.data.captain
             setIsOnline(updated.isOnline)
             setCaptain((prev) => (prev ? { ...prev, ...updated } : updated))

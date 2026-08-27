@@ -480,6 +480,7 @@ const LiveTracking = (props) => {
         Promise.resolve(provider.init(mapRef.current, {
             center: pos,
             zoom: IDLE_MAP_ZOOM,
+            navigationMode: props.navigationMode,
             onMoveEnd: (center) => {
                 if (onMapCenterChangeRef.current) {
                     onMapCenterChangeRef.current(center);
@@ -510,7 +511,7 @@ const LiveTracking = (props) => {
                 setMapReady(false);
             }
         };
-    }, [hasPosition, retryKey]); // Only when position first becomes available (ou retry manual)
+    }, [hasPosition, retryKey, props.navigationMode]); // Também remonta ao entrar/sair do mapa vetorial.
 
     const handleRetryMap = useCallback(() => {
         setMapError(false);

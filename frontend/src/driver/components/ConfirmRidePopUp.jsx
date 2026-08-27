@@ -68,7 +68,9 @@ const ConfirmRidePopUp = (props) => {
             // Via api (@/shared/services/axios): token do motorista + refresh automático em
             // 401. Antes usava axios cru com header manual — access token de 15 min
             // vencido gerava 401 sem renovação (botões "A caminho"/"Cheguei" mortos).
-            await api.post('/rides/captain-cancel', { rideId: props.ride._id, reason: resolvedReason || undefined })
+            await withHardTimeout(
+                api.post('/rides/captain-cancel', { rideId: props.ride._id, reason: resolvedReason || undefined })
+            )
             addToast('Corrida liberada — buscando outro motorista para o passageiro.', 'info')
             // Limpa a corrida no RideContext na hora — sem isso, o efeito de restauração
             // do CaptainHome ainda veria a corrida antiga até a próxima sincronização.

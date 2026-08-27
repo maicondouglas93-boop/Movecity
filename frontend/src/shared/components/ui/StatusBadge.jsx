@@ -8,7 +8,7 @@ const TONES = {
     neutral: 'bg-surface-alt text-ink-600',
 }
 
-// Selo de status (corrida, PIN de segurança etc.) — sempre cor + texto juntos, nunca
+// Selo de status de corrida — sempre cor + texto juntos, nunca
 // só cor, para não depender de percepção de cor como único significado.
 const StatusBadge = ({ tone = 'neutral', children, className = '' }) => {
     return (

@@ -5,7 +5,6 @@ const paymentModel = require('../models/payment.model');
 const userWalletTransactionModel = require('../models/userWalletTransaction.model');
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
-const crypto = require('crypto');
 const PricingEngine = require('./pricingEngine.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 const { haversineKm } = require('./maps/geo.util');
@@ -50,9 +49,9 @@ const VALID_ORIGINS_BY_TARGET = {
     requested: ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger'],
 };
 
-// `extraFilter` permite exigir dono (captain/user) e outras condições (ex.: OTP) no
+// `extraFilter` permite exigir dono (captain/user) e outras condições no
 // mesmo `findOneAndUpdate` atômico — não só o status. `extraUnset` cobre o caso do
-// motorista desistindo (acima): `captain` e `otp` precisam sair do documento, não só
+// motorista desistindo (acima): dados de atribuição precisam sair do documento, não só
 // mudar de valor. Retorna `null` quando a transição não é válida a partir do estado
 // atual (ou quando `extraFilter` não bate), e quem chama decide a mensagem/status HTTP.
 async function transitionRide(rideId, toStatus, extraFilter = {}, extraSet = {}, extraUnset = {}, extraPush = {}, options = {}) {
@@ -237,13 +236,6 @@ async function getFare(pickup, destination) {
 
 module.exports.getFare = getFare;
 
-function getOtp(num) {
-    function generateOtp(num) {
-        return crypto.randomInt(Math.pow(10, num - 1), Math.pow(10, num)).toString();
-    }
-    return generateOtp(num);
-}
-
 function normalizeIdempotencyKey(idempotencyKey) {
     const normalized = String(idempotencyKey || '').trim().toLowerCase();
     return normalized || null;
@@ -255,7 +247,7 @@ async function findRideByIdempotencyKey({ user, source, createdBy, idempotencyKe
     const filter = source === 'admin'
         ? { source: 'admin', createdBy, idempotencyKey }
         : { source: 'passenger_requested', user, idempotencyKey };
-    let query = rideModel.findOne(filter).select('+otp');
+    let query = rideModel.findOne(filter);
     if (session) query = query.session(session);
     return query;
 }
@@ -494,7 +486,6 @@ module.exports.createRide = async ({
                 user,
                 pickup,
                 destination,
-                otp: getOtp(6),
                 fare: pricing.finalFare,
                 finalPrice,
                 promotionApplied,
@@ -970,7 +961,7 @@ module.exports.listPresentialVehicleOptions = async ({ captain }) => {
     }));
 };
 
-// Corrida presencial iniciada pelo motorista — reutiliza PricingEngine/OTP/busyLock/
+// Corrida presencial iniciada pelo motorista — reutiliza PricingEngine/busyLock/
 // índice de corrida ativa. Nunca despacha (source=driver_initiated + status=accepted).
 module.exports.createPresentialRide = async ({
     captain,
@@ -1093,7 +1084,7 @@ module.exports.createPresentialRide = async ({
     //
     // Esta checagem precisa vir antes do acquire porque o lock é justamente o que a
     // segunda tentativa esbarra — e ali dentro já não dá pra distinguir "ocupado com
-    // outra coisa" de "esta é a sua corrida esperando o PIN". Na rua, esse é o caso
+    // outra coisa" de "esta é a sua corrida esperando o início". Na rua, esse é o caso
     // comum: a primeira tentativa ficou sem resposta por falta de sinal e o motorista
     // tocou de novo.
     const presentialEmAberto = await rideModel.findOne({
@@ -1130,7 +1121,7 @@ module.exports.createPresentialRide = async ({
             // ela já existe". O segundo caso é o mais comum na rua: a primeira tentativa
             // ficou sem resposta (sinal ruim), o motorista tocou de novo, e devolver
             // "você já possui uma corrida em andamento" fazia parecer recusa — quando na
-            // verdade é só a corrida dele esperando o PIN. Devolver o id permite ao app
+            // verdade é só a corrida dele esperando o início. Devolver o id permite ao app
             // levá-lo direto pra lá em vez de deixá-lo tentando criar outra.
             if (existingActive.source === 'driver_initiated' && existingActive.status !== 'started') {
                 const err = new Error('PRESENTIAL_ALREADY_OPEN');
@@ -1147,7 +1138,6 @@ module.exports.createPresentialRide = async ({
             vehicleType,
             serviceKind: 'presential',
         });
-        const otp = getOtp(6);
         const originTimestamp = new Date();
 
         let fare = 0;
@@ -1211,7 +1201,6 @@ module.exports.createPresentialRide = async ({
                 address: pickupAddress,
                 timestamp: originTimestamp,
             },
-            otp,
             fare,
             finalPrice,
             paymentMethod,
@@ -1259,15 +1248,13 @@ module.exports.createPresentialRide = async ({
 
             return await rideModel.findById(ride._id)
                 .populate('user', USER_IDENTITY_FIELDS)
-                .populate('captain', CAPTAIN_IDENTITY_FIELDS)
-                .select('+otp');
+                .populate('captain', CAPTAIN_IDENTITY_FIELDS);
         } catch (postCreateErr) {
             // Corrida já existe e ocupa o captain — mantém busyLock e devolve a ride.
             console.error('[AUDIT] createPresentialRide pós-create:', postCreateErr);
             return rideModel.findById(ride._id)
                 .populate('user', USER_IDENTITY_FIELDS)
-                .populate('captain', CAPTAIN_IDENTITY_FIELDS)
-                .select('+otp');
+                .populate('captain', CAPTAIN_IDENTITY_FIELDS);
         }
     } catch (err) {
         // Só libera o lock se a corrida NÃO chegou a ser criada.
@@ -1414,7 +1401,7 @@ module.exports.acceptRideAtomic = async ({
 
     const ride = await rideModel.findOne({
         _id: rideId
-    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+otp');
+    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
 
     return ride;
 }
@@ -1439,20 +1426,19 @@ function resolveClientMoment(occurredAt, { notBefore = null, now = Date.now() } 
     return candidate;
 }
 
-module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) => {
-    if (!rideId || !otp) {
-        throw new Error('Ride id and OTP are required');
+module.exports.startRide = async ({ rideId, captain, occurredAt = null }) => {
+    if (!rideId) {
+        throw new Error('Ride id is required');
     }
     if (!captain?._id) {
         throw new Error('Captain is required');
     }
 
-    // Pré-checagem só pra mensagens de erro precisas (OTP errado vs. corrida em estado
-    // errado) — a garantia real de concorrência é o findOneAndUpdate atômico abaixo.
+    // A garantia real de concorrência é o findOneAndUpdate atômico abaixo.
     const ride = await rideModel.findOne({
         _id: rideId,
         captain: captain._id,
-    }).populate('user').populate('captain').select('+otp');
+    }).populate('user').populate('captain');
 
     if (!ride) {
         throw new Error('Ride not found');
@@ -1460,10 +1446,6 @@ module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) =
 
     if (!VALID_ORIGINS_BY_TARGET.started.includes(ride.status)) {
         throw new Error('Ride not accepted');
-    }
-
-    if (ride.otp !== otp) {
-        throw new Error('Invalid OTP');
     }
 
     // Embarque real (o toque do motorista), não o instante em que esta requisição foi
@@ -1507,7 +1489,7 @@ module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) =
     const storedLng = ride.captain?.location?.lng;
     const canAnchor = isValidGpsCoord(storedLat, storedLng) && isStoredLocationFresh(ride.captain);
 
-    const updatedRide = await transitionRide(rideId, 'started', { otp, captain: captain._id }, {
+    const updatedRide = await transitionRide(rideId, 'started', { captain: captain._id }, {
         waitTimeSeconds,
         waitTimeFeeCharged,
         startedAt: new Date(startedAtMs),
@@ -1522,12 +1504,12 @@ module.exports.startRide = async ({ rideId, otp, captain, occurredAt = null }) =
         throw new Error('Ride not accepted');
     }
 
-    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
+    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain');
 }
 
 // Só cobre as transições de deslocamento do motorista até o embarque (a caminho /
 // cheguei). 'started'/'finished'/'cancelled' têm funções dedicadas (startRide/endRide/
-// cancelRide) com validação de OTP, cálculo de tarifa e efeitos de carteira que este
+// cancelRide) com cálculo de tarifa e efeitos de carteira que este
 // endpoint genérico não faz — permitir esses destinos aqui seria uma forma de
 // contorná-los (P2.1 da auditoria de concorrência: nenhum endpoint deve conseguir
 // aplicar uma transição de status sem passar pela lógica que ela exige).
@@ -1553,7 +1535,7 @@ module.exports.updateRideStatus = async ({ rideId, captain, status }) => {
         throw new Error('Ride not found or invalid transition');
     }
 
-    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain').select('+otp');
+    return rideModel.findOne({ _id: rideId }).populate('user').populate('captain');
 }
 
 const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -1648,7 +1630,7 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
     let ride = await rideModel.findOne({
         _id: rideId,
         captain: captain._id
-    }).populate('user').populate('captain').select('+otp');
+    }).populate('user').populate('captain');
 
     if (!ride) {
         throw new Error('Ride not found');
@@ -1712,7 +1694,7 @@ module.exports.endRide = async ({ rideId, captain, destination = null, finishLoc
             $unset: { finalizationError: 1 },
         },
         { new: true }
-    ).populate('user').populate('captain').select('+otp');
+    ).populate('user').populate('captain');
 
     if (!claimedForFinalization) {
         const current = await rideModel.findOne({ _id: rideId, captain: captain._id });
@@ -2275,14 +2257,10 @@ module.exports.getCurrentRide = async ({ user }) => {
         throw new Error('User is required');
     }
 
-    // Fase A da experiência de corrida ativa (2026-08-03): '+otp' porque o PIN pertence
-    // ao próprio passageiro — sem isso, a restauração pós-refresh reconstruía a tela de
-    // espera mas o PIN vinha vazio (otp tem select:false no model), e o motorista não
-    // conseguia mais iniciar a corrida.
     let ride = await rideModel.findOne({
         user,
         status: { $in: [ 'requested', 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started', 'ongoing' ] }
-    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS).select('+otp');
+    }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
 
     // Auto-expire stale 'requested' rides (older than 10 minutes)
     //
@@ -2329,22 +2307,10 @@ module.exports.getCurrentRideForCaptain = async ({ captain }) => {
         throw new Error('Captain is required');
     }
 
-    // OTP só é necessário na restauração de corrida presencial (motorista mostra o PIN).
-    // Em corrida normal o PIN pertence ao passageiro — expor aqui quebrava o consentimento
-    // (auditoria presencial C1, 2026-08-04).
     const ride = await rideModel.findOne({
         captain,
         status: { $in: [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ] }
     }).populate('user', USER_IDENTITY_FIELDS).populate('captain', CAPTAIN_IDENTITY_FIELDS);
-
-    if (!ride) return ride;
-
-    if (ride.source === 'driver_initiated') {
-        return rideModel.findById(ride._id)
-            .populate('user', USER_IDENTITY_FIELDS)
-            .populate('captain', CAPTAIN_IDENTITY_FIELDS)
-            .select('+otp');
-    }
 
     return ride;
 }
@@ -2477,7 +2443,7 @@ module.exports.getPendingRidesForCaptain = async ({ captain }) => {
 // fechava os painéis no frontend — a corrida continuava atribuída a esse motorista no
 // banco (e, com o índice único de corrida ativa por motorista, ele ficava impedido de
 // aceitar qualquer outra corrida). Diferente de cancelRide (passageiro), aqui a corrida
-// NÃO termina: volta para 'requested' sem motorista nem OTP, pra reentrar no despacho.
+// NÃO termina: volta para 'requested' sem motorista, para reentrar no despacho.
 // Sem taxa de cancelamento — desistir é responsabilidade do motorista, não do passageiro.
 // Implementação do sistema de cancelamento (2026-08-04): estágios em que o passageiro
 // já teria o motorista literalmente esperando/procurando por ele — cancelar sem dizer
@@ -2556,7 +2522,7 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
         'requested',
         { captain },
         {},
-        { captain: 1, otp: 1 },
+        { captain: 1 },
         { captainCancellations: { captain, reason: reason?.trim() || undefined, atStatus: ride.status, cancelledAt: new Date() } }
     );
     if (!updated) {
@@ -2580,7 +2546,7 @@ module.exports.cancelRideByCaptain = async ({ rideId, captain, reason }) => {
 // direto — sem passar pela máquina de estados, aceitava reatribuir uma corrida em
 // `started` (com o passageiro dentro do carro) e não redespachava pra ninguém, deixando
 // a corrida travada em `requested` pra sempre. Reaproveita a mesma transição de
-// cancelRideByCaptain (volta pra 'requested', limpa captain/otp), mas sem o filtro de
+// cancelRideByCaptain (volta para 'requested' e limpa a atribuição), mas sem o filtro de
 // dono — o admin pode forçar a reatribuição de qualquer corrida, não só a sua própria.
 // VALID_ORIGINS_BY_TARGET.requested não inclui 'started', então essa transição sozinha
 // já barra a reatribuição de uma corrida em andamento.
@@ -2608,7 +2574,7 @@ module.exports.reassignRideByAdmin = async (rideId) => {
         'requested',
         {},
         {},
-        { captain: 1, otp: 1 }
+        { captain: 1 }
     );
     if (!updated) {
         throw new Error('Ride cannot be reassigned at this stage');

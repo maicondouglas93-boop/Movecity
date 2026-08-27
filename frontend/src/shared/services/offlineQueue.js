@@ -50,7 +50,6 @@ function buildRequestConfig(action) {
                 url: `${baseURL}/rides/start-ride`,
                 params: {
                     rideId: payload.rideId,
-                    otp: payload.otp,
                     ...(payload.occurredAt != null ? { occurredAt: payload.occurredAt } : {}),
                 },
                 headers,
@@ -286,7 +285,7 @@ export async function replayOfflineActions({ socket, onResolved, onAlreadyApplie
             const worthRetrying = isPerformedWork && status !== 404
 
             if (status && status >= 400 && status < 500 && !worthRetrying) {
-                // Erro do próprio pedido (corrida não existe mais, OTP inválido, etc.) —
+                // Erro do próprio pedido (corrida não existe mais, estado inválido, etc.) —
                 // tentar de novo não muda o resultado.
                 await moveToFailedAndRemove(action, err.response?.data?.message || err.message);
                 onPermanentFailure?.(action, err)

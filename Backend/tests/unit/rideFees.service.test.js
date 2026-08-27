@@ -44,10 +44,10 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const captain = await createCaptain();
             const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'arrived', arrivedAt: tenMinutesAgo, otp: '1234'
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt: tenMinutesAgo
             });
 
-            const result = await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+            const result = await rideService.startRide({ rideId: ride._id, captain });
 
             // 10 min de espera - 5 min grátis = 5 min excedentes * R$1,00/min = R$5,00
             expect(result.waitTimeFeeCharged).toBeCloseTo(5.0, 1);
@@ -64,11 +64,11 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const arrivedAt = new Date(Date.now() - 65 * 60 * 1000);
             const boardedAt = arrivedAt.getTime() + 8 * 60 * 1000; // embarcou 8 min depois
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'arrived', arrivedAt, otp: '1234'
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt
             });
 
             const result = await rideService.startRide({
-                rideId: ride._id, otp: '1234', captain, occurredAt: boardedAt,
+                rideId: ride._id, captain, occurredAt: boardedAt,
             });
 
             // 8 min de espera − 5 grátis = 3 min × R$1,00 = R$3,00 (e não os ~60 min
@@ -83,11 +83,11 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const captain = await createCaptain();
             const arrivedAt = new Date(Date.now() - 10 * 60 * 1000);
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'arrived', arrivedAt, otp: '1234'
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt
             });
 
             const result = await rideService.startRide({
-                rideId: ride._id, otp: '1234', captain, occurredAt: Date.now() + 60 * 60 * 1000,
+                rideId: ride._id, captain, occurredAt: Date.now() + 60 * 60 * 1000,
             });
 
             // Relógio adulterado no aparelho não encurta a espera devida.
@@ -99,10 +99,10 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const captain = await createCaptain();
             const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'arrived', arrivedAt: oneMinuteAgo, otp: '1234'
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt: oneMinuteAgo
             });
 
-            const result = await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+            const result = await rideService.startRide({ rideId: ride._id, captain });
 
             expect(result.waitTimeFeeCharged).toBe(0);
         });
@@ -121,10 +121,10 @@ describe('Ride Service — cancellation & wait-time fees', () => {
                     lastSeenAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
                 });
                 const ride = await createRide({
-                    user: user._id, captain: captain._id, status: 'arrived', otp: '1234',
+                    user: user._id, captain: captain._id, status: 'arrived',
                 });
 
-                await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+                await rideService.startRide({ rideId: ride._id, captain });
 
                 const stored = await rideModel.findById(ride._id);
                 expect(stored.lastLocation?.lat ?? null).toBeNull();
@@ -135,10 +135,10 @@ describe('Ride Service — cancellation & wait-time fees', () => {
                 const lastSeenAt = new Date(Date.now() - 30 * 1000);
                 const captain = await createCaptain({ location: LAJINHA, lastSeenAt });
                 const ride = await createRide({
-                    user: user._id, captain: captain._id, status: 'arrived', otp: '1234',
+                    user: user._id, captain: captain._id, status: 'arrived',
                 });
 
-                await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+                await rideService.startRide({ rideId: ride._id, captain });
 
                 const stored = await rideModel.findById(ride._id);
                 expect(stored.lastLocation.lat).toBeCloseTo(LAJINHA.ltd, 5);
@@ -152,10 +152,10 @@ describe('Ride Service — cancellation & wait-time fees', () => {
             const user = await createUser();
             const captain = await createCaptain();
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'accepted', otp: '1234'
+                user: user._id, captain: captain._id, status: 'accepted'
             });
 
-            const result = await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+            const result = await rideService.startRide({ rideId: ride._id, captain });
 
             expect(result.waitTimeFeeCharged).toBe(0);
         });
@@ -229,14 +229,13 @@ describe('Ride Service — cancellation & wait-time fees', () => {
                 captain: captain._id,
                 status: 'arrived',
                 arrivedAt: nineMinutesAgo,
-                otp: '1234',
                 pricingSnapshot: {
                     // 10 min grátis → 0 de taxa apesar do live (5 min / R$1)
                     tariffSetting: { maxFreeWaitTime: 600, perMinuteWaitFee: 9, cancellationFee: 0 },
                 },
             });
 
-            const result = await rideService.startRide({ rideId: ride._id, otp: '1234', captain });
+            const result = await rideService.startRide({ rideId: ride._id, captain });
             expect(result.waitTimeFeeCharged).toBe(0);
         });
     });

@@ -3,7 +3,6 @@ const router = express.Router();
 const { body, query, param, header } = require('express-validator');
 const rideController = require('../controllers/ride.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
-const { rideStartPinLimiter } = require('../middlewares/rateLimiter');
 
 
 router.post('/create',
@@ -133,9 +132,8 @@ router.post('/:id/decline',
 
 router.get('/start-ride',
     authMiddleware.authCaptain,
-    rideStartPinLimiter,
     query('rideId').isMongoId().withMessage('Invalid ride id'),
-    query('otp').isString().isLength({ min: 6, max: 6 }).withMessage('Invalid OTP'),
+    query('occurredAt').optional().isNumeric().withMessage('Invalid occurrence timestamp'),
     rideController.startRide
 )
 

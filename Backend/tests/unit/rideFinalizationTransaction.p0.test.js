@@ -49,6 +49,9 @@ function populated(value) {
         populate: jest.fn(() => chain),
         select: jest.fn(async () => value),
     };
+    const result = Promise.resolve(value);
+    chain.then = result.then.bind(result);
+    chain.catch = result.catch.bind(result);
     return chain;
 }
 

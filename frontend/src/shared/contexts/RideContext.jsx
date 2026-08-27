@@ -277,7 +277,7 @@ const RideProvider = ({ children }) => {
             }
         }
 
-        // Presencial pré-início: reconduz ao wizard do PIN de qualquer tela do motorista.
+        // Presencial pré-início: reconduz à confirmação de início de qualquer tela.
         if (
             captainRide?.source === 'driver_initiated'
             && captainPreStart.includes(captainRide.status)

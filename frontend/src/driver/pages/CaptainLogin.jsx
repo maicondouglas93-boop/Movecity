@@ -1,7 +1,6 @@
 import { useContext, useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
-import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import Button from '@/shared/components/ui/Button'
 
@@ -9,12 +8,14 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import { saveSession, getAccessToken } from '@/shared/services/session'
 import { syncTokenWithSW } from '@/shared/services/swCommunication'
 import { getAppRole } from '@/shared/platform/platform'
+import { loginCaptainReliably } from '@/shared/services/loginReadiness'
 
 const Captainlogin = () => {
 
   const [ email, setEmail ] = useState('')
   const [ password, setPassword ] = useState('')
   const [ loading, setLoading ] = useState(false)
+  const [ loginStage, setLoginStage ] = useState('')
   const emailRef = useRef(null)
   const passwordRef = useRef(null)
 
@@ -31,6 +32,7 @@ const Captainlogin = () => {
   const submitHandler = async (e) => {
     e.preventDefault();
     setLoading(true)
+    setLoginStage('Conectando ao servidor...')
 
     // Android WebView/autofill às vezes preenche o DOM sem atualizar o state do React.
     // Lê do form/DOM na hora do submit para não mandar email/senha vazios.
@@ -49,7 +51,7 @@ const Captainlogin = () => {
     }
 
     try {
-      const response = await api.post('/captains/login', captainData)
+      const response = await loginCaptainReliably(captainData, { onStage: setLoginStage })
 
       if (response.status === 200) {
         const data = response.data
@@ -65,23 +67,22 @@ const Captainlogin = () => {
     } catch (err) {
       const status = err.response?.status
       const backendMsg = err.response?.data?.message
-      const base = api.defaults.baseURL || '(sem baseURL)'
       let msg = err.friendlyMessage
       if (!msg && status === 401) msg = backendMsg || 'Email ou senha inválidos'
+      if (!msg && status === 429) msg = backendMsg || 'Muitas tentativas. Aguarde alguns minutos.'
       if (!msg && err.response) msg = backendMsg || `Erro do servidor (${status})`
-      if (!msg) msg = `Não foi possível conectar a ${base}. Backend precisa estar no ar.`
-      // Diagnóstico temporário no toast — confirma se o APK novo está rodando e o que falhou.
-      addToast(`${msg} [${status || err.code || 'rede'} | ${base} | ${emailValue || 'email-vazio'}]`, 'error')
+      if (!msg) msg = 'Não foi possível conectar ao servidor. Tente novamente.'
+      console.error('[CaptainLogin] falha:', { status, code: err.code, message: err.message })
+      addToast(msg, 'error')
     } finally {
       setLoading(false)
+      setLoginStage('')
     }
   }
   return (
     <div className='h-screen flex flex-col justify-between bg-surface'>
       <div className='p-7 flex-1'>
         <img className='h-16 object-contain mb-10' src="/movecity-logo.png" alt="MoveCity Motorista" width="500" height="500" />
-        <p className='text-xs text-ink-400 mb-4'>build-login-fix-2026-08-05</p>
-
         <form onSubmit={(e) => {
           submitHandler(e)
         }}>
@@ -118,7 +119,15 @@ const Captainlogin = () => {
             placeholder='senha'
           />
 
-          <Button type="submit" loading={loading} className="mb-3 shadow-floating">Entrar</Button>
+          <Button type="submit" loading={loading} className="mb-3 shadow-floating">
+            {loading ? (loginStage || 'Entrando...') : 'Entrar'}
+          </Button>
+
+          {loading && (
+            <p className="text-center text-xs text-ink-500 -mt-1 mb-3" role="status">
+              No primeiro acesso, o servidor pode levar até um minuto para iniciar. Não feche o aplicativo.
+            </p>
+          )}
 
         </form>
         <p className='text-center text-ink-600'>Quer dirigir com a gente? <Link to='/captain-signup' className='text-brand-700 font-medium'>Cadastre-se como Motorista</Link></p>

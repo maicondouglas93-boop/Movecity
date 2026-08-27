@@ -30,19 +30,19 @@ const {
     buildPassengerPaymentReportResponse,
 } = require('../utils/paymentReportContract');
 
-/** Resposta de corrida para motorista: sem comissão/bruto; OTP só em presencial. */
-function toCaptainRideResponse(ride, { keepPresentialOtp = false } = {}) {
+/** Resposta de corrida para motorista sem comissão ou valor bruto. */
+function toCaptainRideResponse(ride) {
     if (!ride) return ride;
     const raw = typeof ride.toObject === 'function' ? ride.toObject() : ride;
     if (raw.status === 'requested') return toRideOfferDTO(raw);
-    return toRideCaptainDTO(raw, { includePresentialOtp: keepPresentialOtp });
+    return toRideCaptainDTO(raw);
 }
 
 function sanitizeCaptainRideHistoryPayload(data) {
     if (!data) return data;
     return {
         ...data,
-        activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide, { keepPresentialOtp: true }) : null,
+        activeRide: data.activeRide ? toCaptainRideResponse(data.activeRide) : null,
         pendingOffers: (data.pendingOffers || []).map((ride) => toCaptainRideResponse(ride)),
         rides: (data.rides || []).map((ride) => toRideCaptainHistoryDTO(ride)),
     };
@@ -300,8 +300,8 @@ async function performAcceptRide(rideId, captain, res) {
         // próximo update de localização (~10s), aparecendo como "livre" sem estar.
         emitDriverMapUpdate(captain._id, { busy: true });
 
-        // Privacidade financeira + OTP: motorista não recebe comissão/bruto nem PIN
-        // (exceto presencial, tratado em getCurrentRideForCaptain).
+        // Privacidade financeira: motorista não recebe comissão nem valor bruto
+        // em nenhuma modalidade de corrida.
         const rideForCaptain = toCaptainRideResponse(ride);
 
 
@@ -396,7 +396,7 @@ module.exports.createPresentialRide = async (req, res) => {
         }
 
         // NUNCA despacha — source=driver_initiated já vinculada ao motorista.
-        return res.status(201).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
+        return res.status(201).json(toCaptainRideResponse(ride));
     } catch (err) {
         if (err.code === 'CAPTAIN_NOT_ALLOWED') {
             return res.status(403).json({ message: 'Motorista não autorizado a iniciar corrida presencial.' });
@@ -404,14 +404,14 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
         }
-        // A corrida em aberto é a DELE, esperando o PIN — não um impedimento. Devolve o
+        // A corrida em aberto é a DELE, aguardando início — não um impedimento. Devolve o
         // id para o app levá-lo direto ao passo certo em vez de deixá-lo tentando criar
         // outra corrida que o índice único nunca vai permitir.
         if (err.code === 'PRESENTIAL_ALREADY_OPEN') {
             return res.status(409).json({
                 code: err.code,
                 rideId: err.rideId,
-                message: 'Você já tem uma corrida presencial aberta, esperando o PIN. Abra ela para continuar ou cancele antes de criar outra.',
+                message: 'Você já tem uma corrida presencial aberta, aguardando início. Abra ela para continuar ou cancele antes de criar outra.',
             });
         }
         if (err.code === 'CAPTAIN_BUSY') {
@@ -518,17 +518,16 @@ module.exports.startRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId, otp, occurredAt } = req.query;
+    const { rideId, occurredAt } = req.query;
 
     try {
         const ride = await rideService.startRide({
             rideId,
-            otp,
             captain: req.captain,
             occurredAt: occurredAt == null ? null : Number(occurredAt),
         });
 
-        // Não logar o documento da ride — OTP e PII (auditoria presencial).
+        // Não logar o documento da corrida para não expor dados pessoais.
         console.log(`[AUDIT] startRide ok ride=${ride._id} captain=${req.captain._id} source=${ride.source || 'passenger_requested'}`);
 
         if (ride.user?.socketId) {
@@ -542,16 +541,13 @@ module.exports.startRide = async (req, res) => {
         }
 
 
-        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
+        return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
         }
         if (err.message === 'Ride not accepted') {
             return res.status(409).json({ message: 'Corrida não está mais num estado que permita iniciar (pode ter sido cancelada).' });
-        }
-        if (err.message === 'Invalid OTP') {
-            return res.status(400).json({ message: 'PIN inválido.' });
         }
         return res.status(500).json({ message: err.message });
     }
@@ -583,7 +579,7 @@ module.exports.updateRideStatus = async (req, res) => {
         }
 
 
-        return res.status(200).json(toCaptainRideResponse(ride, { keepPresentialOtp: true }));
+        return res.status(200).json(toCaptainRideResponse(ride));
     } catch (err) {
         if (err.message === 'Invalid status') {
             return res.status(400).json({ message: 'Status inválido para esta ação.' });
@@ -1021,7 +1017,7 @@ module.exports.getCurrentRideForCaptain = async (req, res) => {
             console.error('Erro reconciliando valor ao vivo da corrida (motorista):', fareError);
         }
 
-        const payload = toCaptainRideResponse(ride, { keepPresentialOtp: true });
+        const payload = toCaptainRideResponse(ride);
         return res.status(200).json(liveFare ? { ...payload, liveFare } : payload);
     } catch (err) {
         return res.status(500).json({ message: err.message });

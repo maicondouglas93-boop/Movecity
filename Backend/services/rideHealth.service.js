@@ -37,16 +37,16 @@ const LONG_RIDE_REMINDER_MINUTES = Number(process.env.LONG_RIDE_REMINDER_MINUTES
 // esse lembrete nela seria cutucar quem está fazendo exatamente o combinado.
 const TIME_HIRE_OPTIONAL = 'disposicao_passageiro';
 
-// Presencial parada antes do PIN.
+// Presencial parada antes do início.
 //
-// Ela nasce em `accepted` e só vira `started` quando o motorista digita o PIN. Entre um e
-// outro existe uma conversa real com o passageiro — que pode desistir. Se o motorista
+// Ela nasce em `accepted` e só vira `started` quando o motorista confirma o início. Entre
+// um estado e outro existe uma conversa real com o passageiro, que pode desistir. Se ele
 // fecha o app nesse ponto, a corrida fica em `accepted` com o busyLock ativo: ele para de
 // receber oferta e nada na tela diz por quê. Era o único estado travado do sistema sobre
 // o qual ninguém era avisado (achado P2 da auditoria do presencial, 2026-08-19).
 //
-// 15 min: o PIN é coisa de segundos. Acima disso já não é conversa, é corrida esquecida.
-const PRESENTIAL_AWAITING_PIN_MINUTES = Number(process.env.PRESENTIAL_AWAITING_PIN_MINUTES) || 15;
+// Acima de 15 min provavelmente é uma corrida esquecida.
+const PRESENTIAL_AWAITING_START_MINUTES = Number(process.env.PRESENTIAL_AWAITING_START_MINUTES) || 15;
 
 function minutesAgo(minutes) {
     return new Date(Date.now() - minutes * 60 * 1000);
@@ -57,7 +57,7 @@ function minutesAgo(minutes) {
  * Retorna os grupos encontrados, sem alterar nenhum documento.
  */
 async function findStuckRides() {
-    const [stuckStarted, stuckFinalization, staleRequested, presentialAwaitingPin] = await Promise.all([
+    const [stuckStarted, stuckFinalization, staleRequested, presentialAwaitingStart] = await Promise.all([
         rideModel.find({
             status: 'started',
             startedAt: { $lt: minutesAgo(STUCK_STARTED_HOURS * 60) },
@@ -74,17 +74,17 @@ async function findStuckRides() {
             createdAt: { $lt: minutesAgo(STALE_REQUESTED_MINUTES) },
         }).select('_id user createdAt').lean(),
 
-        // Presencial parada antes do PIN: o motorista segue ocupado (busyLock) sem estar
+        // Presencial parada antes do início: o motorista segue ocupado (busyLock) sem estar
         // rodando nada. Entra no relatório para o operador enxergar, além do lembrete que
         // vai direto pra ele.
         rideModel.find({
             status: 'accepted',
             source: 'driver_initiated',
-            createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_PIN_MINUTES) },
+            createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_START_MINUTES) },
         }).select('_id captain createdAt').lean(),
     ]);
 
-    return { stuckStarted, stuckFinalization, staleRequested, presentialAwaitingPin };
+    return { stuckStarted, stuckFinalization, staleRequested, presentialAwaitingStart };
 }
 
 /**
@@ -137,18 +137,18 @@ async function remindLongRunningRides() {
 }
 
 /**
- * Avisa o motorista de presencial parada esperando o PIN.
+ * Avisa o motorista de presencial parada aguardando início.
  *
  * Mesma trava de repetição do lembrete de corrida longa, e pelo mesmo motivo: a varredura
  * roda a cada 15 min e repetir o aviso ensina a ignorá-lo. Reaproveita
- * `longRideReminderAt` de propósito — uma corrida presa antes do PIN nunca chega a ser
+ * `longRideReminderAt` de propósito — uma corrida presa antes do início nunca chega a ser
  * uma corrida longa em andamento, então os dois avisos jamais disputam o mesmo registro.
  */
-async function remindPresentialAwaitingPin() {
+async function remindPresentialAwaitingStart() {
     const candidatas = await rideModel.find({
         status: 'accepted',
         source: 'driver_initiated',
-        createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_PIN_MINUTES) },
+        createdAt: { $lt: minutesAgo(PRESENTIAL_AWAITING_START_MINUTES) },
         longRideReminderAt: null,
         captain: { $ne: null },
     }).select('_id captain createdAt').lean();
@@ -166,14 +166,14 @@ async function remindPresentialAwaitingPin() {
         const minutesWaiting = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 60000);
         try {
             // eslint-disable-next-line no-await-in-loop
-            await notificationService.sendPresentialAwaitingPinReminder(String(ride.captain), {
+            await notificationService.sendPresentialAwaitingStartReminder(String(ride.captain), {
                 rideId: String(ride._id),
                 referenceId: String(ride._id),
                 minutesWaiting,
             });
             avisadas.push(String(ride._id));
         } catch (err) {
-            console.error('[RideHealth] lembrete de presencial sem PIN não enviado:', String(ride._id), err.message);
+            console.error('[RideHealth] lembrete de presencial sem início não enviado:', String(ride._id), err.message);
         }
     }
 
@@ -189,9 +189,9 @@ async function reportStuckRides() {
             return [];
         });
 
-    const remindedAwaitingPin = await remindPresentialAwaitingPin()
+    const remindedAwaitingStart = await remindPresentialAwaitingStart()
         .catch((err) => {
-            console.error('[RideHealth] varredura de presencial sem PIN falhou:', err.message);
+            console.error('[RideHealth] varredura de presencial sem início falhou:', err.message);
             return [];
         });
 
@@ -199,9 +199,9 @@ async function reportStuckRides() {
     const total = groups.stuckStarted.length
         + groups.stuckFinalization.length
         + groups.staleRequested.length
-        + groups.presentialAwaitingPin.length;
+        + groups.presentialAwaitingStart.length;
 
-    if (total === 0) return { total, remindedLongRides, remindedAwaitingPin, ...groups };
+    if (total === 0) return { total, remindedLongRides, remindedAwaitingStart, ...groups };
 
     // Log estruturado com os ids: é o que permite investigar sem precisar de query
     // manual no banco quando alguém relatar o problema.
@@ -209,7 +209,7 @@ async function reportStuckRides() {
         emAndamentoHaMuitoTempo: groups.stuckStarted.map((r) => String(r._id)),
         liquidacaoPendente: groups.stuckFinalization.map((r) => String(r._id)),
         pedidoSemMotorista: groups.staleRequested.map((r) => String(r._id)),
-        presencialSemPin: groups.presentialAwaitingPin.map((r) => String(r._id)),
+        presencialSemInicio: groups.presentialAwaitingStart.map((r) => String(r._id)),
     });
 
     // Só a liquidação pendente vira alerta ativo: é a única que significa dinheiro não
@@ -224,7 +224,7 @@ async function reportStuckRides() {
         ).catch((err) => console.error('[RideHealth] alerta não enviado:', err.message));
     }
 
-    return { total, remindedLongRides, remindedAwaitingPin, ...groups };
+    return { total, remindedLongRides, remindedAwaitingStart, ...groups };
 }
 
 // A cada 15 minutos: frequente o bastante para você descobrir no mesmo turno de
@@ -238,9 +238,9 @@ if (process.env.NODE_ENV !== 'test') {
 module.exports = {
     STUCK_STARTED_HOURS,
     LONG_RIDE_REMINDER_MINUTES,
-    PRESENTIAL_AWAITING_PIN_MINUTES,
+    PRESENTIAL_AWAITING_START_MINUTES,
     remindLongRunningRides,
-    remindPresentialAwaitingPin,
+    remindPresentialAwaitingStart,
     STUCK_FINALIZATION_MINUTES,
     STALE_REQUESTED_MINUTES,
     findStuckRides,

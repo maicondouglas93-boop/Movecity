@@ -126,32 +126,39 @@ module.exports.updateDocumentInfo = async (req, res, next) => {
 }
 
 module.exports.loginCaptain = async (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const password = String(req.body?.password || '');
+
+        const captain = await captainModel.findOne({ email }).select('+password');
+
+        if (!captain) {
+            return res.status(401).json({ message: 'Email ou senha inválidos' });
+        }
+
+        const isMatch = await captain.comparePassword(password);
+
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Email ou senha inválidos' });
+        }
+
+        if (captain.isBlocked) {
+            await authService.revokeAllForUser({ userId: captain._id, userType: 'captain', reason: 'blocked' });
+            return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
+        }
+
+        return await respondWithCaptainSession(res, { captain, ip: req.ip });
+    } catch (error) {
+        console.error('[AUTH] Falha temporária no login do motorista:', error.message);
+        return res.status(503).json({
+            message: 'Servidor temporariamente indisponível. Aguarde alguns segundos e tente novamente.'
+        });
     }
-
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
-
-    const captain = await captainModel.findOne({ email }).select('+password');
-
-    if (!captain) {
-        return res.status(401).json({ message: 'Email ou senha inválidos' });
-    }
-
-    const isMatch = await captain.comparePassword(password);
-
-    if (!isMatch) {
-        return res.status(401).json({ message: 'Email ou senha inválidos' });
-    }
-
-    if (captain.isBlocked) {
-        await authService.revokeAllForUser({ userId: captain._id, userType: 'captain', reason: 'blocked' });
-        return res.status(403).json({ message: 'Esta conta está desativada. Entre em contato com o suporte.' });
-    }
-
-    return await respondWithCaptainSession(res, { captain, ip: req.ip });
 }
 
 // Auditoria de sessão (2026-08-02): endpoint novo — o motorista não tinha renovação

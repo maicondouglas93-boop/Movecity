@@ -27,7 +27,7 @@ const STEPS = {
   CHOICE: 'choice',
   DESTINATION: 'destination',
   CONFIRM: 'confirm',
-  PIN: 'pin',
+  START: 'start',
 }
 
 const vehicleIcon = (iconKey) =>
@@ -58,7 +58,6 @@ const CaptainPresentialRide = () => {
   const [estimate, setEstimate] = useState(null)
   const [estimating, setEstimating] = useState(false)
   const [ride, setRide] = useState(null)
-  const [otpInput, setOtpInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [passengerPhone, setPassengerPhone] = useState('')
   const [passengerConsent, setPassengerConsent] = useState(false)
@@ -133,7 +132,7 @@ const CaptainPresentialRide = () => {
     if (captainRide && [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ].includes(captainRide.status)) {
       if (captainRide.source === 'driver_initiated' && captainRide.status !== 'started') {
         setRide(captainRide)
-        setStep(STEPS.PIN)
+        setStep(STEPS.START)
       } else if (captainRide.status === 'started') {
         navigate('/captain-riding', { state: { ride: captainRide }, replace: true })
       }
@@ -214,26 +213,26 @@ const CaptainPresentialRide = () => {
       const created = await createPresentialRide(payload)
       setRide(created)
       setCaptainRide(created)
-      setStep(STEPS.PIN)
-      addToast('Corrida criada. Informe o PIN ao passageiro.', 'success')
+      setStep(STEPS.START)
+      addToast('Corrida criada. Confirme a autorização do passageiro para iniciar.', 'success')
     } catch (err) {
       // A corrida já existe e é dele (tentativa anterior que ficou sem resposta): em vez
       // de mostrar um erro e deixá-lo tentando de novo contra um índice único, sincroniza
-      // e cai direto no passo do PIN — que é onde ele precisava chegar.
+      // e cai direto no passo de início — que é onde ele precisava chegar.
       if (err.response?.data?.code === 'PRESENTIAL_ALREADY_OPEN') {
-        addToast('Esta corrida já estava aberta. Informe o PIN ao passageiro.', 'info')
+        addToast('Esta corrida já estava aberta. Confirme a autorização para iniciar.', 'info')
         try {
           const atual = await syncCaptainRide()
           if (atual?._id) setRide(atual)
         } catch { /* sem rede: o efeito de restauração assume quando o contexto sincronizar */ }
-        setStep(STEPS.PIN)
+        setStep(STEPS.START)
         return
       }
       addToast(
         semRede(err)
           // Aqui a corrida PODE ter sido criada e a resposta se perdido no caminho — por
           // isso o texto não manda tentar de novo às cegas. Ao recuperar sinal, o próprio
-          // app restaura a corrida em aberto no passo do PIN.
+          // app restaura a corrida em aberto no passo de início.
           ? 'Sem sinal ao criar a corrida. Ao voltar a rede, confira se ela já foi aberta antes de criar outra.'
           : (err.response?.data?.message || 'Não foi possível criar a corrida.'),
         'error',
@@ -243,27 +242,23 @@ const CaptainPresentialRide = () => {
     }
   }
 
-  const confirmPin = async (e) => {
+  const confirmStart = async (e) => {
     e.preventDefault()
     if (!ride?._id) return
     if (!passengerConsent) {
       addToast('Confirme que o passageiro autorizou a corrida.', 'error')
       return
     }
-    if (!otpInput || otpInput.length !== 6) {
-      addToast('Peça o PIN ao passageiro e digite os 6 dígitos.', 'error')
-      return
-    }
     setLoading(true)
     try {
-      const started = await startPresentialRide({ rideId: ride._id, otp: otpInput })
+      const started = await startPresentialRide({ rideId: ride._id })
       setCaptainRide(started)
       navigate('/captain-riding', { state: { ride: started } })
     } catch (err) {
       addToast(
         semRede(err)
           ? 'Sem sinal para iniciar a corrida. Tente de novo assim que a rede voltar.'
-          : (err.response?.data?.message || 'PIN inválido.'),
+          : (err.response?.data?.message || 'Não foi possível iniciar a corrida.'),
         'error',
       )
     } finally {
@@ -459,7 +454,7 @@ const CaptainPresentialRide = () => {
             </div>
 
             <Button type="button" onClick={createRide} loading={loading} disabled={loading || estimating}>
-              Confirmar e gerar PIN
+              Confirmar corrida
             </Button>
             <Button
               type="button"
@@ -472,17 +467,14 @@ const CaptainPresentialRide = () => {
           </div>
         )}
 
-        {step === STEPS.PIN && ride && (
+        {step === STEPS.START && ride && (
           <div className="space-y-4">
-            <div className="bg-brand-50 border border-brand-200 rounded-panel p-5 text-center">
+            <div className="bg-brand-50 border border-brand-200 rounded-panel p-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700 mb-2">
-                PIN do passageiro
+                Confirmação do passageiro
               </p>
-              <p className="text-4xl font-bold tracking-[0.35em] text-ink-900 tabular-nums">
-                {ride.otp || '······'}
-              </p>
-              <p className="text-xs text-ink-600 mt-3">
-                Mostre este PIN ao passageiro. Ele deve confirmar verbalmente. Em seguida digite o PIN no campo abaixo — não inicie sem a autorização dele.
+              <p className="text-sm text-ink-700">
+                Antes de iniciar, confirme verbalmente o destino e se o passageiro autorizou esta corrida presencial.
               </p>
             </div>
 
@@ -494,24 +486,11 @@ const CaptainPresentialRide = () => {
                 className="mt-1 h-4 w-4 accent-brand-500"
               />
               <span className="text-sm text-ink-900">
-                O passageiro autorizou esta corrida presencial e confirmou o PIN comigo.
+                O passageiro autorizou esta corrida presencial.
               </span>
             </label>
 
-            <form onSubmit={confirmPin} className="space-y-3">
-              <label className="block text-sm font-medium text-ink-600" htmlFor="confirm-otp">
-                Digite o PIN confirmado
-              </label>
-              <input
-                id="confirm-otp"
-                inputMode="numeric"
-                maxLength={6}
-                value={otpInput}
-                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                autoComplete="one-time-code"
-                className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-center text-2xl tracking-[0.4em] font-bold text-ink-900"
-                placeholder="••••••"
-              />
+            <form onSubmit={confirmStart} className="space-y-3">
               <Button type="submit" loading={loading} disabled={loading || !passengerConsent}>
                 Iniciar corrida
               </Button>

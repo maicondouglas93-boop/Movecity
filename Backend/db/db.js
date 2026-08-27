@@ -93,7 +93,6 @@ async function seedTestData() {
                 paymentMethod: 'card',
                 duration: 1200,
                 distance: 9500,
-                otp: '1234'
             });
 
             await couponModel.create({
@@ -146,7 +145,6 @@ async function seedTestData() {
                 paymentMethod: 'upi',
                 duration: 600,
                 distance: 4200,
-                otp: '5678'
             });
 
             await rideModel.create({
@@ -161,7 +159,6 @@ async function seedTestData() {
                 paymentMethod: 'cash',
                 duration: 480,
                 distance: 3100,
-                otp: '9988'
             });
 
             await rideModel.create({
@@ -176,7 +173,6 @@ async function seedTestData() {
                 paymentMethod: 'card',
                 duration: 180,
                 distance: 1200,
-                otp: '4433'
             });
 
             await globalSettingModel.create({

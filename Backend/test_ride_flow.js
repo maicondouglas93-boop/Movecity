@@ -60,10 +60,8 @@ async function runTest() {
         });
 
         // Setup passenger ride confirmed listener
-        let confirmedRideOtp = null;
         passengerSocket.on('ride-confirmed', (data) => {
-            console.log('Passenger Socket Event: ride-confirmed received! OTP is:', data.otp);
-            confirmedRideOtp = data.otp;
+            console.log('Passenger Socket Event: ride-confirmed received! Status is:', data.status);
         });
 
         passengerSocket.on('ride-started', (data) => {
@@ -83,7 +81,6 @@ async function runTest() {
         const ride = createRideRes.data;
         const rideId = ride._id;
         console.log('Ride created successfully! Ride ID:', rideId);
-        console.log('Ride OTP returned in creation response:', ride.otp);
 
         // Wait for captain to receive new-ride socket notification
         console.log('Waiting for captain to receive socket event...');
@@ -92,7 +89,6 @@ async function runTest() {
             captainSocket.on('new-ride', (data) => {
                 clearTimeout(timeout);
                 console.log('Captain Socket Event: new-ride received!');
-                console.log('Ride details sent to Captain (OTP should be hidden/undefined):', data.otp);
                 resolve(data);
             });
         });
@@ -105,21 +101,16 @@ async function runTest() {
             headers: { Authorization: `Bearer ${captainToken}` }
         });
 
-        console.log('Ride accepted! Confirm response (OTP should be hidden/undefined):', confirmRideRes.data.otp);
+        console.log('Ride accepted! Status:', confirmRideRes.data.status);
 
         // Wait a short moment to allow the socket events to propagate
         await new Promise(r => setTimeout(r, 2000));
 
-        if (!confirmedRideOtp) {
-            throw new Error('Passenger did not receive the OTP via ride-confirmed socket event');
-        }
-
         // 7. Start ride (Captain)
-        console.log(`Captain starting the ride with verified OTP: ${confirmedRideOtp}...`);
+        console.log('Captain starting the ride...');
         const startRideRes = await axios.get(`${BASE_URL}/rides/start-ride`, {
             params: {
-                rideId: rideId,
-                otp: confirmedRideOtp
+                rideId: rideId
             },
             headers: { Authorization: `Bearer ${captainToken}` }
         });

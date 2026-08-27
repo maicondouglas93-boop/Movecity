@@ -6,11 +6,11 @@ const notificationController = require('../controllers/notification.controller')
 const monitoringController = require('../controllers/monitoring.controller');
 const uploadController = require('../controllers/upload.controller');
 const { authAdmin, authorizeRoles } = require('../middlewares/adminAuth.middleware');
-const { loginLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
+const { loginLimiter, loginIpLimiter, notificationTokenLimiter } = require('../middlewares/rateLimiter');
 const { body, param, query } = require('express-validator');
 
 // Auth Routes
-router.post('/login', loginLimiter, adminController.login);
+router.post('/login', loginIpLimiter, loginLimiter, adminController.login);
 router.post('/refresh', adminController.refresh);
 router.get('/me', authAdmin, adminController.me);
 router.post('/logout', authAdmin, adminController.logout);
@@ -219,13 +219,6 @@ router.post(
     authorizeRoles('super_admin', 'operador'),
     param('id').isMongoId(),
     adminController.relaunchManualRide
-);
-router.get(
-    '/rides/:id/access-code',
-    authAdmin,
-    authorizeRoles('super_admin', 'operador'),
-    param('id').isMongoId(),
-    adminController.getManualRideAccessCode
 );
 router.get('/rides/:id/timeline', authAdmin, adminController.getRideTimeline);
 router.put('/rides/:id/cancel', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.cancelRide);

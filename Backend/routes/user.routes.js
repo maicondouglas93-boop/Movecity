@@ -3,10 +3,10 @@ const router = express.Router();
 const { body } = require("express-validator")
 const userController = require('../controllers/user.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
-const { loginLimiter, changePasswordLimiter } = require('../middlewares/rateLimiter');
+const { loginLimiter, loginIpLimiter, changePasswordLimiter } = require('../middlewares/rateLimiter');
 
 
-router.post('/register', loginLimiter, [
+router.post('/register', loginIpLimiter, loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('fullname.firstname').isLength({ min: 3 }).withMessage('First name must be at least 3 characters long'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
@@ -16,9 +16,9 @@ router.post('/register', loginLimiter, [
     userController.registerUser
 )
 
-router.post('/google-login', loginLimiter, userController.googleLogin);
+router.post('/google-login', loginIpLimiter, loginLimiter, userController.googleLogin);
 
-router.post('/login', loginLimiter, [
+router.post('/login', loginIpLimiter, loginLimiter, [
     body('email').isEmail().withMessage('Invalid Email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long')
 ],

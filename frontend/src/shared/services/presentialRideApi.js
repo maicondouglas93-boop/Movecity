@@ -33,10 +33,10 @@ export function createPresentialRide(payload) {
   return withHardTimeout(api.post('/rides/presential', payload)).then((r) => r.data)
 }
 
-export function startPresentialRide({ rideId, otp }) {
+export function startPresentialRide({ rideId, occurredAt = Date.now() }) {
   return withHardTimeout(
     api.get('/rides/start-ride', {
-      params: { rideId, otp },
+      params: { rideId, occurredAt },
     }),
   ).then((r) => r.data)
 }

@@ -20,7 +20,7 @@ function manualDispatchState(ride, now = new Date()) {
 
 function manualRideResponse(ride, manualDispatch = {}) {
     const raw = ride?.toObject ? ride.toObject() : ride;
-    const doc = toAdminRideDTO(raw, { includeOtp: true });
+    const doc = toAdminRideDTO(raw);
     const state = manualDispatchState(raw);
     return {
         ...doc,
@@ -33,10 +33,9 @@ function httpError(statusCode, message, code, dispatchState) {
     return Object.assign(new Error(message), { statusCode, code, dispatchState });
 }
 
-async function findManualRide(rideId, { includeOtp = false } = {}) {
-    let query = Ride.findOne({ _id: rideId, source: 'admin' });
-    if (includeOtp) query = query.select('+otp');
-    return query.populate('user captain createdBy', 'fullname phone name');
+async function findManualRide(rideId) {
+    return Ride.findOne({ _id: rideId, source: 'admin' })
+        .populate('user captain createdBy', 'fullname phone name');
 }
 
 async function getManualDispatchStatus(rideId) {
@@ -166,7 +165,7 @@ async function relaunchManualRide({ rideId, admin, ip }) {
         newValue: { offeredCount, dispatchLastAttemptAt: now },
     });
 
-    const result = await findManualRide(rideId, { includeOtp: true });
+    const result = await findManualRide(rideId);
     return manualRideResponse(result, { relaunched: true, offeredCount });
 }
 

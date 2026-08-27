@@ -743,25 +743,6 @@ module.exports.getRides = async (req, res, next) => {
     }
 };
 
-module.exports.getManualRideAccessCode = async (req, res, next) => {
-    if (manualRideValidationError(req, res)) return;
-    try {
-        const Ride = require('../models/ride.model');
-        const ride = await Ride.findOne({ _id: req.params.id, source: 'admin' })
-            .select('+otp status')
-            .lean();
-        if (!ride) {
-            return res.status(404).json({ message: 'Corrida lançada pelo painel não encontrada.' });
-        }
-        if (['finished', 'cancelled'].includes(ride.status)) {
-            return res.status(409).json({ message: 'O PIN não fica disponível depois do encerramento da corrida.' });
-        }
-        return res.status(200).json({ otp: ride.otp });
-    } catch (error) {
-        next(error);
-    }
-};
-
 module.exports.getManualRideDispatchStatus = async (req, res, next) => {
     if (manualRideValidationError(req, res)) return;
     try {
@@ -823,7 +804,6 @@ function manualRideCancellationWasDispatchFailure(ride) {
 
 async function findManualRideForAdmin(Ride, adminId, idempotencyKey) {
     return Ride.findOne({ createdBy: adminId, idempotencyKey, source: 'admin' })
-        .select('+otp')
         .populate('user captain createdBy', 'fullname phone name');
 }
 
@@ -1049,7 +1029,6 @@ module.exports.createManualRide = async (req, res, next) => {
         });
 
         const result = await Ride.findById(ride._id)
-            .select('+otp')
             .populate('user captain createdBy', 'fullname phone name');
         return res.status(201).json(manualRideResponse(result, {
                 mode: captainId ? 'selected' : 'automatic',

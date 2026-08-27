@@ -82,11 +82,10 @@ describe('replay da fila de ações offline', () => {
         expect(state.deleted).toEqual([1])
     })
 
-    // A regra "4xx é definitivo" continua valendo pro resto: um PIN errado não vira
-    // certo por insistir, e retentar 5 vezes só atrasaria as ações seguintes da fila.
+    // A regra "4xx é definitivo" continua valendo para ações não executadas.
     it('mantém 4xx como definitivo em ações que não representam trabalho executado', async () => {
-        state.actions.push({ id: 2, type: 'start-ride', rideId: 'r2', timestamp: 1000, attempts: 0, payload: { rideId: 'r2', otp: '000000' } })
-        api.mockRejectedValue(httpError(400, 'PIN inválido'))
+        state.actions.push({ id: 2, type: 'start-ride', rideId: 'r2', timestamp: 1000, attempts: 0, payload: { rideId: 'r2' } })
+        api.mockRejectedValue(httpError(400, 'Corrida inválida'))
 
         await replayOfflineActions({ socket: socketStub })
 
@@ -111,7 +110,7 @@ describe('replay da fila de ações offline', () => {
         const boardedAt = 1755300000000
         state.actions.push({
             id: 4, type: 'start-ride', rideId: 'r4', timestamp: 1000, attempts: 0,
-            payload: { rideId: 'r4', otp: '123456', occurredAt: boardedAt },
+            payload: { rideId: 'r4', occurredAt: boardedAt },
         })
         api.mockResolvedValue({ status: 200, data: {} })
 

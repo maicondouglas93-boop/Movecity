@@ -315,12 +315,12 @@ const Home = () => {
             setWaitingForDriver(true)
             setRide(ride)
             addToast(
-                `Motorista encontrado! OTP: ${ride.otp}`,
-                'otp',
+                'Motorista encontrado!',
+                'ride',
                 7000,
                 `${ride.captain?.fullname?.firstname} está indo até você`
             )
-            showBrowserNotification('Motorista Confirmado! 🚗', `Seu OTP é ${ride.otp} — compartilhe com o motorista`)
+            showBrowserNotification('Motorista confirmado!', `${ride.captain?.fullname?.firstname || 'Seu motorista'} está indo até você.`)
         }
 
         const handleRideStarted = (ride) => {

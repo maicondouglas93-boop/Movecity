@@ -86,7 +86,6 @@ const mockCreatedRide = {
     _id: 'ride1',
     source: 'driver_initiated',
     status: 'accepted',
-    otp: '123456',
     destinationPending: true,
     captain: 'cap1',
 };
@@ -94,12 +93,12 @@ const mockCreatedRide = {
 jest.mock('../../models/ride.model', () => {
     const create = jest.fn().mockResolvedValue(mockCreatedRide);
     const exists = jest.fn().mockResolvedValue(false);
-    const findById = jest.fn().mockReturnValue({
-        populate: jest.fn().mockReturnValue({
-            populate: jest.fn().mockReturnValue({
-                select: jest.fn().mockResolvedValue({ ...mockCreatedRide, otp: '123456' }),
-            }),
-        }),
+    const findById = jest.fn().mockImplementation(() => {
+        const query = { populate: jest.fn().mockReturnThis() };
+        const result = Promise.resolve(mockCreatedRide);
+        query.then = result.then.bind(result);
+        query.catch = result.catch.bind(result);
+        return query;
     });
     const findOne = jest.fn();
     const findOneAndUpdate = jest.fn();
@@ -149,7 +148,7 @@ describe('createPresentialRide', () => {
         }));
         const payload = rideModel.create.mock.calls[0][0];
         expect(payload.destination).toBeUndefined();
-        expect(ride.otp).toBe('123456');
+        expect(ride.otp).toBeUndefined();
         expect(dispatchService.acquireCaptainBusyLock).toHaveBeenCalled();
     });
 
@@ -176,7 +175,7 @@ describe('createPresentialRide', () => {
     // Achado P4 da auditoria do presencial (2026-08-19): a segunda tentativa (a primeira
     // ficou sem resposta por falta de sinal) devolvia "você já possui uma corrida em
     // andamento" — uma mensagem que soa como recusa, quando na verdade a corrida dele já
-    // existe esperando o PIN. Precisa se identificar como tal E devolver o id, senão o app
+    // existe esperando o início. Precisa se identificar como tal E devolver o id, senão o app
     // não tem como levá-lo de volta.
     test('presencial já aberta se identifica e devolve o id, em vez de "ocupado"', async () => {
         rideModel.findOne.mockReturnValue({
@@ -242,7 +241,7 @@ describe('createPresentialRide', () => {
     });
 });
 
-describe('getCurrentRideForCaptain otp visibility', () => {
+describe('getCurrentRideForCaptain', () => {
     function mockFindOneChain(doc) {
         const chain = {
             populate: jest.fn().mockReturnThis(),
@@ -259,35 +258,20 @@ describe('getCurrentRideForCaptain otp visibility', () => {
         return chain;
     }
 
-    test('não expõe otp em corrida normal', async () => {
+    test.each([
+        ['passenger_requested', 'ride-normal'],
+        ['driver_initiated', 'ride-presential'],
+    ])('restaura corrida %s sem uma segunda consulta', async (source, id) => {
         const normalRide = {
-            _id: 'ride-normal',
-            source: 'passenger_requested',
+            _id: id,
+            source,
             status: 'accepted',
         };
         mockFindOneChain(normalRide);
         rideModel.findById.mockClear();
         const result = await rideService.getCurrentRideForCaptain({ captain: 'cap1' });
-        expect(result.source).toBe('passenger_requested');
+        expect(result.source).toBe(source);
         expect(rideModel.findById).not.toHaveBeenCalled();
-    });
-
-    test('expõe otp só em corrida presencial', async () => {
-        const presential = {
-            _id: 'ride-pres',
-            source: 'driver_initiated',
-            status: 'accepted',
-        };
-        mockFindOneChain(presential);
-        rideModel.findById.mockReturnValue({
-            populate: jest.fn().mockReturnValue({
-                populate: jest.fn().mockReturnValue({
-                    select: jest.fn().mockResolvedValue({ ...presential, otp: '654321' }),
-                }),
-            }),
-        });
-        const result = await rideService.getCurrentRideForCaptain({ captain: 'cap1' });
-        expect(result.otp).toBe('654321');
     });
 });
 

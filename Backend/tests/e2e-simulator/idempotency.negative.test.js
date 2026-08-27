@@ -137,8 +137,7 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
                 // eslint-disable-next-line no-await-in-loop
                 await sim.request(sim.app).post('/rides/update-status').set('Authorization', `Bearer ${rig.token}`).send({ rideId, status });
             }
-            const rideWithOtp = await rideModel.findById(rideId).select('+otp');
-            await sim.request(sim.app).get('/rides/start-ride').set('Authorization', `Bearer ${rig.token}`).query({ rideId, otp: rideWithOtp.otp });
+            await sim.request(sim.app).get('/rides/start-ride').set('Authorization', `Bearer ${rig.token}`).query({ rideId });
             await driveRoute({ socket: rig.socket, points: [{ ltd: pickupPoint.ltd + 0.01, lng: pickupPoint.lng }], delayMs: 0 });
             // Desde 2026-08-16, comissão/repasse liquidam na própria finalização
             // (end-ride) pra qualquer método de pagamento — não mais num toque
@@ -188,39 +187,17 @@ describe('SIMULADOR E2E — Idempotência e casos negativos', () => {
         }
     }, 30000);
 
-    it('OTP errado em /rides/start-ride é rejeitado e não transiciona o status', async () => {
+    it('/rides/start-ride sem rideId é rejeitado', async () => {
         const sim = await startSimServer();
         try {
             await seedCarCategory();
-            const user = await createSimUser();
-            const userToken = generateAuthToken(user, 'user');
             const rig = await onlineCaptain(sim);
-
-            const createRes = await sim.request(sim.app)
-                .post('/rides/create')
-                .set('Authorization', `Bearer ${userToken}`)
-                .set('Idempotency-Key', '30000000-0000-4000-8000-000000000011')
-                .send({ pickup: 'Avenida Paulista, São Paulo', destination: 'Avenida Faria Lima, São Paulo', vehicleType: 'car', paymentMethod: 'pix' });
-            const rideId = createRes.body._id;
-
-            await sim.request(sim.app).post(`/rides/${rideId}/accept`).set('Authorization', `Bearer ${rig.token}`);
-            for (const status of ['going_to_pickup', 'arrived', 'waiting_passenger']) {
-                // eslint-disable-next-line no-await-in-loop
-                await sim.request(sim.app).post('/rides/update-status').set('Authorization', `Bearer ${rig.token}`).send({ rideId, status });
-            }
-
-            const wrongRes = await sim.request(sim.app)
+            const response = await sim.request(sim.app)
                 .get('/rides/start-ride')
-                .set('Authorization', `Bearer ${rig.token}`)
-                .query({ rideId, otp: '000000' });
-            const rejected = wrongRes.statusCode >= 400;
-            results.push({ label: 'OTP errado rejeitado em /rides/start-ride', ok: rejected, detail: `status=${wrongRes.statusCode}` });
+                .set('Authorization', `Bearer ${rig.token}`);
+            const rejected = response.statusCode === 400;
+            results.push({ label: 'rideId obrigatório em /rides/start-ride', ok: rejected, detail: `status=${response.statusCode}` });
             expect(rejected).toBe(true);
-
-            const stillWaiting = await rideModel.findById(rideId).select('status');
-            const noTransition = stillWaiting.status === 'waiting_passenger';
-            results.push({ label: 'Status não transiciona para started com OTP errado', ok: noTransition, detail: `status=${stillWaiting.status}` });
-            expect(noTransition).toBe(true);
         } finally {
             await sim.stop();
         }

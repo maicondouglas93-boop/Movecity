@@ -40,7 +40,7 @@ module.exports.resolveSubject = async ({ subjectType, subjectId, rideId } = {}) 
         };
     }
 
-    const ride = await rideModel.findById(normalized.subjectId).select('+otp');
+    const ride = await rideModel.findById(normalized.subjectId);
     if (!ride) throw new Error('SUBJECT_NOT_FOUND');
     return {
         ...normalized,

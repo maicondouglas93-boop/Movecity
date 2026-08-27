@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, KeyRound, Loader2, MapPin, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, MapPin, RefreshCw, X } from 'lucide-react';
 import api from '../../services/api';
 import AdminAddressAutocomplete from '../AdminAddressAutocomplete';
 import { formatMoney } from '../../utils/format';
@@ -213,14 +213,6 @@ export default function ManualRideModal({ onClose, onCreated }) {
           <div>
             <h2 className="text-xl font-bold text-text">Corrida lançada com sucesso</h2>
             <p className="text-sm text-text-muted mt-1">ID: {result._id}</p>
-          </div>
-          <div className="rounded-xl border-2 border-primary bg-primary/10 p-5">
-            <div className="flex items-center justify-center gap-2 text-primary">
-              <KeyRound className="w-5 h-5" />
-              <span className="text-sm font-semibold">PIN para iniciar a corrida</span>
-            </div>
-            <p className="font-mono text-4xl font-black tracking-[0.2em] mt-2">{result.otp || '—'}</p>
-            <p className="text-xs text-text-muted mt-2">Informe este PIN ao passageiro.</p>
           </div>
           {offeredCount === 0 && (
             <Notice tone="warning">

@@ -13,7 +13,7 @@ import { formatBRL } from '@/shared/utils/currency'
 // Fase A da experiência de corrida ativa (2026-08-03): o status dos botões vem da
 // corrida real (backend), não mais de um useState fixo em 'accepted' — depois de um
 // refresh, os botões voltavam pra "A caminho" mesmo com o motorista já no local.
-// 'waiting_passenger' mostra a mesma UI de 'arrived' (campo do PIN).
+// 'waiting_passenger' mostra a mesma ação de início de 'arrived'.
 const deriveStatusFromRide = (status) => {
     if (status === 'waiting_passenger') return 'arrived'
     if ([ 'accepted', 'going_to_pickup', 'arrived' ].includes(status)) return status
@@ -33,9 +33,7 @@ const CANCEL_REASONS = [
 ]
 
 const ConfirmRidePopUp = (props) => {
-    const [otp, setOtp] = useState('')
     const [loading, setLoading] = useState(false)
-    const [error, setError] = useState('')
     const [rideStatus, setRideStatus] = useState(deriveStatusFromRide(props.ride?.status))
     const [cancelling, setCancelling] = useState(false)
     const [showCancelModal, setShowCancelModal] = useState(false)
@@ -120,10 +118,6 @@ const ConfirmRidePopUp = (props) => {
                 setCaptainRide(optimisticRide)
                 setRideStatus(status); // optimistic
             } else {
-                // Auditoria do app do motorista (2026-08-11, P1): antes ficava em `error`,
-                // um estado só renderizado dentro do formulário de PIN — uma falha aqui
-                // (rideStatus 'accepted'/'going_to_pickup') não aparecia em lugar nenhum
-                // da tela. addToast é visível em qualquer passo, igual ao resto do app.
                 addToast(err.response?.data?.message || 'Não foi possível atualizar o status. Tente novamente.', 'error')
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
@@ -132,18 +126,14 @@ const ConfirmRidePopUp = (props) => {
         }
     }
 
-    const submitHandler = async (e) => {
-        e.preventDefault()
-        if (!otp || otp.length !== 6) {
-            return setError('Digite o PIN de 6 dígitos informado pelo passageiro.')
-        }
-        setError('')
+    const startRide = async () => {
+        const occurredAt = Date.now()
         setLoading(true)
         try {
             const response = await withHardTimeout(api.get('/rides/start-ride', {
                 params: {
                     rideId: props.ride._id,
-                    otp: otp
+                    occurredAt,
                 }
             }))
 
@@ -163,7 +153,7 @@ const ConfirmRidePopUp = (props) => {
                     rideId: props.ride._id,
                     // Instante real do embarque. É a partir daqui que a corrida é
                     // cronometrada e que a espera do motorista para de contar.
-                    payload: { rideId: props.ride._id, otp: otp, occurredAt: Date.now() }
+                    payload: { rideId: props.ride._id, occurredAt }
                 }).catch(e => console.error(e));
                 const optimisticRide = { ...props.ride, status: 'started' }
                 props.setRide?.(optimisticRide)
@@ -172,7 +162,7 @@ const ConfirmRidePopUp = (props) => {
                 props.setRidePopupPanel(false)
                 navigate('/captain-riding', { replace: true, state: { ride: optimisticRide } }) // Optimistic
             } else {
-                setError(err.response?.data?.message || 'PIN inválido. Tente novamente.')
+                addToast(err.response?.data?.message || 'Não foi possível iniciar a corrida. Tente novamente.', 'error')
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
         } finally {
@@ -238,34 +228,9 @@ const ConfirmRidePopUp = (props) => {
                     )}
 
                     {rideStatus === 'arrived' && (
-                        <form onSubmit={submitHandler}>
-                            <label htmlFor="captain-otp-input" className='block text-xs font-medium text-ink-600 mb-1'>PIN do passageiro</label>
-                            <input
-                                id="captain-otp-input"
-                                value={otp}
-                                onChange={(e) => {
-                                    const val = e.target.value.replace(/\D/g, '').slice(0, 6)
-                                    setOtp(val)
-                                    setError('')
-                                }}
-                                type="text"
-                                inputMode="numeric"
-                                className='bg-surface-alt px-4 py-3 font-mono text-xl text-center tracking-widest rounded-panel w-full border-2 border-transparent focus:border-brand-500 focus:bg-brand-50 focus:outline-none transition-colors'
-                                placeholder='• • • • • •'
-                                maxLength={6}
-                            />
-
-                            {error && (
-                                <div className='flex items-center gap-2 bg-danger-50 border border-danger-500/30 rounded-panel p-2.5 mt-2'>
-                                    <i className="ri-error-warning-line text-danger-500"></i>
-                                    <p className='text-xs text-danger-600'>{error}</p>
-                                </div>
-                            )}
-
-                            <Button type="submit" loading={loading} className="mt-2.5 !min-h-[44px] !text-sm">
-                                Iniciar corrida
-                            </Button>
-                        </form>
+                        <Button onClick={startRide} loading={loading} className="!min-h-[44px] !text-sm">
+                            Iniciar corrida
+                        </Button>
                     )}
 
                     <Button

@@ -91,14 +91,14 @@ const CaptainHome = () => {
 
     // Fase A da experiência de corrida ativa (2026-08-03): restauração da corrida
     // aceita (pré-início). Antes, um refresh com corrida em 'accepted'/'going_to_pickup'/
-    // 'arrived' deixava a Home vazia — os botões "A caminho"/"Cheguei"/PIN sumiam, mas o
+    // 'arrived' deixava a Home vazia — os botões "A caminho"/"Cheguei"/"Iniciar" sumiam, mas o
     // motorista continuava vinculado à corrida no banco (índice único), travado sem UI.
     // O RideContext consulta /rides/captain-current a cada abertura/reconexão/retorno do
     // background; aqui só reabrimos o painel certo com o status real do backend.
     // Corrida 'started' não passa por aqui: o RideContext redireciona pra /captain-riding.
     useEffect(() => {
         if (!captainRide) return
-        // Presencial: PIN/confirmação tem tela própria (não o popup de corrida despachada).
+        // Presencial: a confirmação tem tela própria (não o popup de corrida despachada).
         if (captainRide.source === 'driver_initiated') {
             if (captainRide.status === 'started') return
             if ([ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger' ].includes(captainRide.status)) {
@@ -362,7 +362,7 @@ const CaptainHome = () => {
                 // Fase A da experiência de corrida ativa (2026-08-03): também fecha o
                 // ConfirmRidePopUp e limpa o RideContext — antes só o popup de oferta
                 // fechava, e um cancelamento após o aceite deixava a tela de "A caminho/
-                // Cheguei/PIN" pendurada com uma corrida que já não existia.
+                // Cheguei/Iniciar" pendurada com uma corrida que já não existia.
                 setRidePopupPanel(false)
                 setConfirmRidePopupPanel(false)
                 setRide(null)

@@ -25,8 +25,8 @@ describe('Restauração da corrida ativa (Fase A)', () => {
     });
 
     describe('GET /rides/current (passageiro)', () => {
-        it('retorna a corrida ativa COM o PIN (otp) — sem ele a tela de espera restaurada perdia o PIN', async () => {
-            await createRide({ user: user._id, captain: captain._id, status: 'accepted', otp: '654321' });
+        it('retorna a corrida ativa sem código de início', async () => {
+            await createRide({ user: user._id, captain: captain._id, status: 'accepted' });
 
             const res = await request(app)
                 .get('/rides/current')
@@ -34,9 +34,6 @@ describe('Restauração da corrida ativa (Fase A)', () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.body.status).toBe('accepted');
-            // Regressão: otp tem select:false no model; /rides/current precisa
-            // selecioná-lo explicitamente pro PIN sobreviver ao refresh.
-            expect(res.body.otp).toBe('654321');
             expect(res.body.captain).toBeTruthy();
         });
 
@@ -74,8 +71,8 @@ describe('Restauração da corrida ativa (Fase A)', () => {
     });
 
     describe('GET /rides/captain-current (motorista)', () => {
-        it('retorna a corrida ativa do motorista SEM expor o PIN', async () => {
-            await createRide({ user: user._id, captain: captain._id, status: 'going_to_pickup', otp: '654321' });
+        it('retorna a corrida ativa do motorista sem código de início', async () => {
+            await createRide({ user: user._id, captain: captain._id, status: 'going_to_pickup' });
 
             const res = await request(app)
                 .get('/rides/captain-current')
@@ -83,9 +80,6 @@ describe('Restauração da corrida ativa (Fase A)', () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.body.status).toBe('going_to_pickup');
-            // O PIN é do passageiro — o motorista só pode conhecê-lo quando o
-            // passageiro fala em voz alta. Não pode vazar na restauração.
-            expect(res.body.otp).toBeUndefined();
             expect(res.body.user).toBeTruthy();
         });
 
@@ -125,7 +119,7 @@ describe('Restauração da corrida ativa (Fase A)', () => {
 
     describe('Fluxo completo com restauração em cada etapa', () => {
         it('accepted → going_to_pickup → arrived → waiting_passenger → started, com os dois endpoints refletindo cada estado', async () => {
-            const ride = await createRide({ user: user._id, status: 'requested', otp: '111222' });
+            const ride = await createRide({ user: user._id, status: 'requested' });
 
             // Aceite (atômico)
             const acceptRes = await request(app)
@@ -138,7 +132,6 @@ describe('Restauração da corrida ativa (Fase A)', () => {
             let userView = await request(app).get('/rides/current').set('Authorization', `Bearer ${userToken}`);
             let captainView = await request(app).get('/rides/captain-current').set('Authorization', `Bearer ${captainToken}`);
             expect(userView.body.status).toBe('accepted');
-            expect(userView.body.otp).toBe('111222');
             expect(captainView.body.status).toBe('accepted');
 
             // Caminho até o embarque
@@ -153,11 +146,11 @@ describe('Restauração da corrida ativa (Fase A)', () => {
                 expect(captainView.body.status).toBe(status);
             }
 
-            // Início com o PIN
+            // Início sem código adicional
             const startRes = await request(app)
                 .get('/rides/start-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
-                .query({ rideId: ride._id.toString(), otp: '111222' });
+                .query({ rideId: ride._id.toString() });
             expect(startRes.statusCode).toBe(200);
 
             userView = await request(app).get('/rides/current').set('Authorization', `Bearer ${userToken}`);

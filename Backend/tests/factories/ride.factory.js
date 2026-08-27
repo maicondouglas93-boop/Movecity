@@ -17,8 +17,7 @@ module.exports.createRide = async (overrides = {}) => {
         fare: 35.50,
         status: 'accepted',
         paymentMethod: 'cash',
-        vehicleType: 'car',
-        otp: '1234'
+        vehicleType: 'car'
     };
 
     return await rideModel.create({ ...defaultData, ...overrides });

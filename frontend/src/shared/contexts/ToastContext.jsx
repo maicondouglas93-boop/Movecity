@@ -5,7 +5,7 @@ const ToastContext = createContext(null)
 /**
  * Toast types:
  *  'success'  – green   (ride started, payment done)
- *  'info'     – blue    (looking for driver, OTP)
+ *  'info'     – blue    (looking for driver)
  *  'warning'  – yellow  (waiting, pickup)
  *  'error'    – red     (failed)
  *  'dark'     – black   (new ride for captain)
@@ -16,7 +16,6 @@ const ICONS = {
     warning: 'ri-time-line',
     error:   'ri-error-warning-fill',
     dark:    'ri-car-fill',
-    otp:     'ri-lock-2-line',
     money:   'ri-money-rupee-circle-line',
     ride:    'ri-route-fill',
 }
@@ -27,7 +26,6 @@ const COLORS = {
     warning: 'bg-yellow-500 text-black',
     error:   'bg-red-500',
     dark:    'bg-gray-900',
-    otp:     'bg-indigo-600',
     money:   'bg-emerald-600',
     ride:    'bg-blue-700',
 }

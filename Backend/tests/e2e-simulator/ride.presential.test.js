@@ -23,7 +23,7 @@ const { readWalletSnapshot, readTransactions } = require('./helpers/financialAss
 const { printScenarioReport } = require('./helpers/report');
 
 describe('SIMULADOR E2E — Cenário 4: corrida presencial sem destino', () => {
-    it('cria na rua, inicia por PIN, cobra pelo GPS real e liquida a comissão', async () => {
+    it('cria na rua, inicia após confirmação, cobra pelo GPS real e liquida a comissão', async () => {
         const steps = [];
         const problems = [];
         const step = (label, ok, detail) => steps.push({ label, ok, detail });
@@ -70,12 +70,9 @@ describe('SIMULADOR E2E — Cenário 4: corrida presencial sem destino', () => {
             }
 
             const rideId = createRes.body._id;
-            const otp = createRes.body.otp;
-            step('PIN volta pro motorista na criação (ele precisa informar ao passageiro)', Boolean(otp && otp.length === 6), `otp=${otp ? 'presente' : 'ausente'}`);
-
             const created = await rideModel.findById(rideId).select('status source fare destinationPending');
             const nasceAceita = created.status === 'accepted' && created.source === 'driver_initiated';
-            step("Nasce em 'accepted' (espera o PIN), sem despacho", nasceAceita, `status=${created.status} source=${created.source}`);
+            step("Nasce em 'accepted' (aguarda início), sem despacho", nasceAceita, `status=${created.status} source=${created.source}`);
 
             const semPrecoAntes = Number(created.fare) === 0 && created.destinationPending === true;
             step('Sem destino, nasce sem preço — nada de tarifa mínima inventada', semPrecoAntes, `fare=${created.fare} pending=${created.destinationPending}`);
@@ -92,12 +89,12 @@ describe('SIMULADOR E2E — Cenário 4: corrida presencial sem destino', () => {
             step('Recriar aponta a corrida já aberta, em vez de "você está ocupado"', apontaAAberta, `status ${duplicada.statusCode} code=${duplicada.body?.code}`);
             if (!apontaAAberta) problems.push({ severity: '🟡', description: `Segunda criação devolveu ${duplicada.statusCode}/${duplicada.body?.code} — o motorista não é levado de volta à corrida dele.` });
 
-            // ---- PIN ----
+            // ---- início ----
             const startRes = await sim.request(sim.app)
                 .get('/rides/start-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
-                .query({ rideId, otp });
-            step('GET /rides/start-ride com o PIN real', startRes.statusCode === 200, `status ${startRes.statusCode}`);
+                .query({ rideId });
+            step('GET /rides/start-ride', startRes.statusCode === 200, `status ${startRes.statusCode}`);
 
             // ---- percurso real ----
             // A linha do tempo termina agora e começa no passado (horário futuro é

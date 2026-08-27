@@ -225,7 +225,7 @@ test('corrida aceita separa identidade do passageiro e do motorista por ator', (
         '_id', 'fullname', 'lastSeenAt', 'location', 'phone', 'profilePicture',
         'rating', 'vehicle', 'vehicleAuthorization',
     ].sort());
-    assert.equal(passengerView.otp, '4321');
+    assert.equal(passengerView.otp, undefined);
     assertNoForbiddenFields(captainView, 'corrida para motorista');
     assertNoForbiddenFields(passengerView, 'corrida para passageiro');
 });

@@ -6,14 +6,13 @@ import { ToastProvider } from '@/shared/contexts/ToastContext';
 
 // Correção crítica do cancelamento (2026-08-03): a regra de negócio sempre permitiu o
 // passageiro cancelar com motorista já designado (accepted..waiting_passenger — ver
-// VALID_ORIGINS_BY_TARGET.cancelled no backend), mas a tela do motorista/PIN não
+// VALID_ORIGINS_BY_TARGET.cancelled no backend), mas a tela de espera não
 // oferecia o botão. Estes testes fixam o comportamento: botão presente, confirmação em
 // dois toques (há taxa possível) e chamada ao MESMO cancelRide da Home (endpoint real).
 
 const baseRide = {
     _id: 'ride1',
     status: 'accepted',
-    otp: '123456',
     fare: 25.5,
     paymentMethod: 'pix',
     pickup: 'Avenida Paulista, 1000',
@@ -38,10 +37,9 @@ describe('WaitingForDriver — botão Cancelar corrida', () => {
         </ToastProvider>
     )
 
-    it('mostra o PIN e o botão de cancelar quando a corrida permite', () => {
+    it('mostra os dados do motorista e o botão de cancelar quando a corrida permite', () => {
         renderWaiting();
 
-        expect(screen.getByText('123456')).toBeInTheDocument();
         expect(screen.getByText('Motorista confirmado')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /chat/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /abrir central de segurança/i })).toBeInTheDocument();

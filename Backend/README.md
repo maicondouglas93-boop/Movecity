@@ -415,7 +415,6 @@ The request body should be in JSON format and include the following fields:
   - `status` (string): Ride status.
   - `duration` (number): Duration in seconds.
   - `distance` (number): Distance in meters.
-  - `otp` (string): OTP for the ride.
 
 ### Error Response
 

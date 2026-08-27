@@ -408,11 +408,6 @@ const rideSchema = new mongoose.Schema({
         type: String,
     },
 
-    otp: {
-        type: String,
-        select: false,
-        required: true,
-    },
 }, { timestamps: true });
 
 // Índices de Performance

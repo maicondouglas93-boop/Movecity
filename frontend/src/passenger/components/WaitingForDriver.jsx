@@ -4,7 +4,6 @@ import Button from '@/shared/components/ui/Button'
 import DriverIdentityCard from '@/shared/components/DriverIdentityCard'
 import { formatCurrencyBRL, paymentMethodLabel } from '@/shared/utils/formatters'
 import PassengerSafetyCenter from '@/passenger/components/PassengerSafetyCenter'
-import { copyTextToClipboard } from '@/shared/utils/clipboard'
 
 const paymentLabel = paymentMethodLabel
 
@@ -26,16 +25,15 @@ const STATUS = {
     },
     waiting_passenger: {
         title: 'Motorista esperando',
-        text: 'Compartilhe o PIN somente depois de conferir o veículo.',
+        text: 'Aguarde em local seguro e confira a placa do veículo.',
         icon: 'ri-time-fill',
     },
 }
 
-// Painel sempre aberto: identidade + PIN + trajeto + cancelar — sem expandir/rolar.
+// Painel sempre aberto: identidade + trajeto + cancelar, sem expandir ou rolar.
 const WaitingForDriver = (props) => {
     const [ confirmingCancel, setConfirmingCancel ] = useState(false)
     const [ cancelling, setCancelling ] = useState(false)
-    const [ copiedPin, setCopiedPin ] = useState(false)
 
     useEffect(() => {
         if (!confirmingCancel) return
@@ -77,18 +75,6 @@ const WaitingForDriver = (props) => {
     const remainingKm = props.approachProgress?.remainingKm
     const etaMinutes = props.approachProgress?.etaMinutes
 
-    const copyPin = async () => {
-        const pin = String(props.ride?.otp || '')
-        if (!pin) return
-        try {
-            await copyTextToClipboard(pin)
-            setCopiedPin(true)
-            setTimeout(() => setCopiedPin(false), 2000)
-        } catch {
-            setCopiedPin(false)
-        }
-    }
-
     return (
         <div className="pb-1">
             <div className="mb-2.5 flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5" aria-live="polite">
@@ -113,20 +99,6 @@ const WaitingForDriver = (props) => {
                 fareLabel={fareLabel}
                 compact
             />
-
-            <button
-                type="button"
-                onClick={copyPin}
-                className="mt-2.5 w-full flex items-center gap-3 rounded-xl bg-brand-50 border border-brand-200 px-3 py-2 active:bg-brand-100"
-                aria-label="Copiar PIN da corrida"
-            >
-                <p className="text-xs text-ink-500 flex-shrink-0">PIN</p>
-                <p className="flex-1 text-center text-2xl font-bold tracking-[0.35em] text-brand-600 leading-none">
-                    {props.ride?.otp}
-                </p>
-                <i className={`${copiedPin ? 'ri-checkbox-circle-fill' : 'ri-file-copy-line'} text-lg text-brand-500 flex-shrink-0`} aria-hidden="true" />
-            </button>
-            {copiedPin && <p className="mt-1 text-center text-[11px] font-medium text-brand-700">PIN copiado</p>}
 
             <RouteCard
                 layout="split"

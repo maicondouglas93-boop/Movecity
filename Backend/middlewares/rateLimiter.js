@@ -1,23 +1,54 @@
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 
-// Chave por IP + rota: sem isso, /users/login, /captains/login e /api/admin/login
-// compartilham o mesmo balde de 5 tentativas (mesma instância, mesmo módulo
-// importado pelos três routers) — um IP que erra login de passageiro repetidas
-// vezes ficava sem tentar login de admin por 15 minutos, mesmo sem relação alguma
-// entre as contas.
+function loginRoute(req) {
+    return `${req.baseUrl || ''}${req.path || ''}`;
+}
+
+function loginIdentity(req) {
+    const raw = req.body?.email || req.body?.idToken || req.body?.token || 'anonymous';
+    return crypto.createHash('sha256').update(String(raw).trim().toLowerCase()).digest('hex');
+}
+
+function loginIdentityKey(req) {
+    return `login-account:${loginRoute(req)}:${req.ip}:${loginIdentity(req)}`;
+}
+
+function loginIpKey(req) {
+    return `login-ip:${loginRoute(req)}:${req.ip}`;
+}
+
+module.exports.loginIdentityKey = loginIdentityKey;
+module.exports.loginIpKey = loginIpKey;
+
+// Limite amplo por IP para conter ataques sem bloquear várias contas legítimas atrás
+// do mesmo CGNAT de operadora, Wi-Fi de ponto ou empresa.
+module.exports.loginIpLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: loginIpKey,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { message: 'Muitas tentativas nesta conexão. Tente novamente em 15 minutos.' }
+});
+
+// Cinco tentativas por conta + IP + rota. Antes o balde tinha somente o IP: cinco
+// erros de qualquer pessoa podiam bloquear todos os motoristas da mesma operadora.
 module.exports.loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 5, // max 5 tentativas
     standardHeaders: true,
     legacyHeaders: false,
     validate: { keyGeneratorIpFallback: false },
-    keyGenerator: (req) => `login:${req.baseUrl}${req.path}:${req.ip}`,
+    keyGenerator: loginIdentityKey,
     // Suítes de integração legitimamente logam a mesma rota mais de 5 vezes em
     // sequência (uma sessão nova por cenário) — nenhum teste hoje verifica o limite
     // em si, então bloqueá-lo em produção sem travar a suíte é estritamente melhor
     // do que deixar a proteção real mais fraca só para caber no teste.
     skip: () => process.env.NODE_ENV === 'test',
-    message: { message: "Muitas tentativas de login. Tente novamente em 15 minutos." }
+    message: { message: "Muitas tentativas para esta conta. Tente novamente em 15 minutos." }
 });
 
 // A4 da auditoria de push (2026-08-02): registrar um token FCM é reivindicar a
@@ -61,21 +92,6 @@ module.exports.parcelPinLimiter = rateLimit({
         const captainId = req.captain?._id?.toString?.() || req.ip || 'anon';
         const parcelId = req.params?.id || 'unknown';
         return `parcel-pin:${captainId}:${parcelId}`;
-    },
-    message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
-});
-
-// PIN de início de corrida (6 dígitos) — auditoria presencial A6.
-module.exports.rideStartPinLimiter = rateLimit({
-    windowMs: 10 * 60 * 1000,
-    max: 8,
-    standardHeaders: true,
-    legacyHeaders: false,
-    validate: { keyGeneratorIpFallback: false },
-    keyGenerator: (req) => {
-        const captainId = req.captain?._id?.toString?.() || req.ip || 'anon';
-        const rideId = req.query?.rideId || 'unknown';
-        return `ride-start-pin:${captainId}:${rideId}`;
     },
     message: { message: 'Muitas tentativas de PIN. Tente novamente em alguns minutos.' },
 });

@@ -106,9 +106,6 @@ describe('SIMULADOR E2E — Cenário 3: corrida agendada', () => {
             step("Despacho real via Socket.IO na ativação ('new-ride' chega no motorista)", dispatchedOk, `rideId recebido=${dispatchPayload?._id}`);
             if (!dispatchedOk) problems.push({ severity: '🔴', description: 'Ativação não despachou via socket real para o motorista candidato.' });
 
-            const rideWithOtp = await rideModel.findById(rideId).select('+otp');
-            const otp = rideWithOtp.otp;
-
             const acceptRes = await sim.request(sim.app)
                 .post(`/rides/${rideId}/accept`)
                 .set('Authorization', `Bearer ${captainToken}`);
@@ -126,8 +123,8 @@ describe('SIMULADOR E2E — Cenário 3: corrida agendada', () => {
             const startRes = await sim.request(sim.app)
                 .get('/rides/start-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
-                .query({ rideId, otp });
-            step('GET /rides/start-ride (OTP real)', startRes.statusCode === 200, `status ${startRes.statusCode}`);
+                .query({ rideId });
+            step('GET /rides/start-ride', startRes.statusCode === 200, `status ${startRes.statusCode}`);
 
             const route = buildLinearRoute(pickupPoint, endPoint, { stepMeters: 500 });
             await driveRoute({ socket: captainSocket, points: route, delayMs: 15 });

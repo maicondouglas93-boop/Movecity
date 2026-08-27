@@ -150,7 +150,7 @@ function toRideOfferDTO(ride) {
     return dto;
 }
 
-function toRideCaptainDTO(ride, { includePresentialOtp = false } = {}) {
+function toRideCaptainDTO(ride) {
     if (!ride) return ride;
     const raw = plain(ride);
     const dto = rideBase(raw);
@@ -169,9 +169,6 @@ function toRideCaptainDTO(ride, { includePresentialOtp = false } = {}) {
             isGuest: true,
         };
     }
-    if (includePresentialOtp && raw.source === 'driver_initiated' && raw.otp !== undefined) {
-        dto.otp = raw.otp;
-    }
     return dto;
 }
 
@@ -185,7 +182,6 @@ function toRidePassengerDTO(ride) {
             includeLocation: true,
         });
     }
-    if (raw.otp !== undefined) dto.otp = raw.otp;
     return dto;
 }
 
@@ -294,7 +290,7 @@ function toParcelPassengerHistoryDTO(parcel) {
     return dto;
 }
 
-function toAdminRideDTO(ride, { includeOtp = false } = {}) {
+function toAdminRideDTO(ride) {
     if (!ride) return ride;
     const raw = plain(ride);
     const dto = {
@@ -311,7 +307,6 @@ function toAdminRideDTO(ride, { includeOtp = false } = {}) {
     if (raw.user) dto.user = toAdminUserIdentity(raw.user);
     if (raw.captain) dto.captain = toAdminCaptainIdentity(raw.captain);
     if (raw.createdBy) dto.createdBy = toAdminCreatorIdentity(raw.createdBy);
-    if (includeOtp && raw.otp !== undefined) dto.otp = raw.otp;
     return dto;
 }
 

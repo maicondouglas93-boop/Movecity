@@ -292,12 +292,12 @@ describe('Ride API Integration Tests', () => {
             // pertence a quem está autenticado, e o serviço barra na titularidade (404)
             // antes de chegar na máquina de estados. Para exercitar a transição inválida
             // de verdade, a corrida precisa ser deste motorista.
-            const ride = await createRide({ user: user._id, captain: captain._id, status: 'requested', otp: '654321' });
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'requested' });
 
             const res = await request(app)
                 .get('/rides/start-ride')
                 .set('Authorization', `Bearer ${captainToken}`)
-                .query({ rideId: ride._id.toString(), otp: '654321' });
+                .query({ rideId: ride._id.toString() });
 
             expect(res.statusCode).toBe(409);
         });
@@ -343,12 +343,12 @@ describe('Ride API Integration Tests', () => {
 
         it('duas requisições concorrentes (cancelar + iniciar) na mesma corrida: exatamente uma vence', async () => {
             const ride = await createRide({
-                user: user._id, captain: captain._id, status: 'arrived', otp: '112233', arrivedAt: new Date()
+                user: user._id, captain: captain._id, status: 'arrived', arrivedAt: new Date()
             });
 
             const [cancelRes, startRes] = await Promise.all([
                 request(app).post('/rides/cancel').set('Authorization', `Bearer ${userToken}`).send({ rideId: ride._id.toString() }),
-                request(app).get('/rides/start-ride').set('Authorization', `Bearer ${captainToken}`).query({ rideId: ride._id.toString(), otp: '112233' }),
+                request(app).get('/rides/start-ride').set('Authorization', `Bearer ${captainToken}`).query({ rideId: ride._id.toString() }),
             ]);
 
             const statuses = [cancelRes.statusCode, startRes.statusCode].sort();
@@ -413,8 +413,8 @@ describe('Ride API Integration Tests', () => {
     });
 
     describe('POST /rides/captain-cancel (auditoria de UX, 2026-08-02)', () => {
-        it('devolve a corrida para requested, sem motorista nem OTP', async () => {
-            const ride = await createRide({ user: user._id, captain: captain._id, status: 'accepted', otp: '999999' });
+        it('devolve a corrida para requested, sem motorista', async () => {
+            const ride = await createRide({ user: user._id, captain: captain._id, status: 'accepted' });
 
             const res = await request(app)
                 .post('/rides/captain-cancel')
@@ -425,10 +425,9 @@ describe('Ride API Integration Tests', () => {
             expect(res.body.status).toBe('requested');
             expect(res.body.captain).toBeFalsy();
 
-            const persisted = await rideModel.findById(ride._id).select('+otp');
+            const persisted = await rideModel.findById(ride._id);
             expect(persisted.status).toBe('requested');
             expect(persisted.captain).toBeFalsy();
-            expect(persisted.otp).toBeFalsy();
         });
 
         it('rejeita cancelar corrida de outro motorista', async () => {

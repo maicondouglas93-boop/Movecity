@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
@@ -103,6 +103,11 @@ if (role === 'passenger') {
 
 console.log(`[aab:${role}] sincronizando web + Capacitor`)
 run(npm, config.sync, frontendDir, releaseEnv)
+
+// Gradle may vary the output filename by build type. Remove only old bundles so
+// a stale normalized file can never be reported as the result of this build.
+const previousBundleRoot = path.join(config.androidDir, 'app', 'build', 'outputs', 'bundle')
+findAabs(previousBundleRoot).forEach((file) => rmSync(file))
 
 console.log(`[aab:${role}] executando ${config.gradleTask}`)
 run(

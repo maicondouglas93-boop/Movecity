@@ -238,7 +238,7 @@ module.exports.logoutUser = async (req, res, next) => {
 // pro passageiro, então a sessão simplesmente morria quando o token de 24h expirava.
 module.exports.refreshUserSession = async (req, res) => {
     try {
-        const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
+        const presentedToken = req.body?.refreshToken || req.cookies?.refreshToken;
         const { userId, userType, refreshToken } = await authService.rotateRefreshToken({
             refreshToken: presentedToken,
             expectedUserType: 'user',

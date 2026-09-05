@@ -3,10 +3,11 @@ import { calculateOfflinePassengerFare, sumTrailMeters, isNightTime } from '@/sh
 
 describe('offlineRideFare', () => {
     it('soma só segmentos acima de 5 m', () => {
+        const now = Date.now()
         const meters = sumTrailMeters([
-            { lat: -20.0, lng: -41.0, capturedAt: 1 },
-            { lat: -20.0, lng: -41.0, capturedAt: 2 },
-            { lat: -20.01, lng: -41.0, capturedAt: 3 },
+            { lat: -20.0, lng: -41.0, capturedAt: now - 120000 },
+            { lat: -20.0, lng: -41.0, capturedAt: now - 60000 },
+            { lat: -20.01, lng: -41.0, capturedAt: now },
         ])
         expect(meters).toBeGreaterThan(1000)
     })
@@ -29,8 +30,8 @@ describe('offlineRideFare', () => {
                 },
             },
             queuedPoints: [
-                { lat: -20.0, lng: -41.0, capturedAt: 1 },
-                { lat: -20.01, lng: -41.0, capturedAt: 2 },
+                { lat: -20.0, lng: -41.0, capturedAt: Date.now() - 60000 },
+                { lat: -20.01, lng: -41.0, capturedAt: Date.now() },
             ],
             now: Date.now(),
         })

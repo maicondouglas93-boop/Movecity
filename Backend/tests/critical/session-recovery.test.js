@@ -69,6 +69,18 @@ describe.each([
         expect(res.json).toHaveBeenLastCalledWith(expect.objectContaining({ token: 'access-novo', refreshToken: 'novo' }));
     });
 
+    it('prioriza o token do app sobre um cookie antigo ou do outro papel', async () => {
+        await refresh({ ...req, cookies: { refreshToken: 'cookie-de-outra-sessao' } }, res);
+        expect(authService.rotateRefreshToken).toHaveBeenCalledWith(expect.objectContaining({
+            refreshToken: 'salvo', expectedUserType: kind,
+        }));
+    });
+
+    it('mantém suporte ao cookie quando não há token no corpo', async () => {
+        await refresh({ ...req, body: {}, cookies: { refreshToken: 'cookie-valido' } }, res);
+        expect(authService.rotateRefreshToken).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: 'cookie-valido' }));
+    });
+
     it('bloqueio continua revogando e recusando a conta', async () => {
         getProfile.mockResolvedValueOnce({ _id: 'id', isBlocked: true });
         await refresh(req, res);

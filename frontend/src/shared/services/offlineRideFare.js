@@ -1,20 +1,37 @@
-import { db } from '@/shared/services/db'
+import { readTrackingState } from '@/shared/services/rideTrackingCheckpoint'
 import { distanceMeters } from '@/shared/services/maps/navigationMath'
 
 const MIN_SEGMENT_METERS = 5
 
-export function sumTrailMeters(points) {
+export function sumTrailMeters(points, { anchor = null, anchorAt = null, startedAt = null, now = Date.now() } = {}) {
     const sorted = [...(points || [])]
-        .filter((p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)))
         .sort((a, b) => (Number(a.capturedAt) || 0) - (Number(b.capturedAt) || 0))
 
     let total = 0
-    for (let i = 1; i < sorted.length; i += 1) {
-        const segment = distanceMeters(
-            { lat: Number(sorted[i - 1].lat), lng: Number(sorted[i - 1].lng) },
-            { lat: Number(sorted[i].lat), lng: Number(sorted[i].lng) },
-        )
-        if (Number.isFinite(segment) && segment >= MIN_SEGMENT_METERS) total += segment
+    let previous = anchor
+    let previousAt = anchorAt ? new Date(anchorAt).getTime() : (startedAt ? new Date(startedAt).getTime() : null)
+    const start = startedAt ? new Date(startedAt).getTime() : null
+    const seen = new Set()
+    for (const point of sorted) {
+        const lat = Number(point.lat), lng = Number(point.lng), at = Number(point.capturedAt)
+        const accuracy = point.accuracy == null ? null : Number(point.accuracy)
+        // Mesmos limites de captainLocationValidation / rideTracking.service.
+        // Não inventar km a partir de GPS ruim nem contar pontos após o encerramento.
+        if (point.lat == null || point.lng == null || !Number.isFinite(lat) || Math.abs(lat) > 90
+            || !Number.isFinite(lng) || Math.abs(lng) > 180 || !Number.isFinite(at)
+            || at > now || at < now - 86400000 || (start && at < start - 120000)
+            || (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100))) continue
+        if (point.pointId && seen.has(point.pointId)) continue
+        if (point.pointId) seen.add(point.pointId)
+        if (previous && previousAt != null && at <= previousAt) continue
+        if (previous) {
+            const segment = distanceMeters(previous, { lat, lng })
+            const maxDistance = previousAt == null ? Infinity : Math.max(150, ((at - previousAt) / 1000) * 60)
+            if (!Number.isFinite(segment) || segment > maxDistance) continue
+            if (segment > MIN_SEGMENT_METERS) total += segment
+        }
+        previous = { lat, lng }
+        previousAt = at
     }
     return total
 }
@@ -76,12 +93,15 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
     const rates = ride?.fareRates
     if (!rates) return null
 
-    const queuedMeters = sumTrailMeters(queuedPoints)
-    const syncedMeters = Math.max(0, Number(ride?.actualDistance) || 0)
+    const checkpoint = ride?.trackingCheckpoint
+    const queuedMeters = sumTrailMeters(queuedPoints, {
+        anchor: checkpoint?.lastLocation, anchorAt: checkpoint?.lastLocationAt,
+        startedAt: ride?.startedAt, now,
+    })
+    const syncedMeters = Math.max(0, Number(checkpoint?.actualDistance ?? ride?.actualDistance) || 0)
     const actualDistance = syncedMeters + queuedMeters
-    if (!(actualDistance > 0)) return null
-
     const startedMs = new Date(ride?.startedAt || ride?.createdAt || now).getTime()
+    if (!Number.isFinite(startedMs)) return null
     const elapsedSeconds = Math.max(0, Math.round((now - startedMs) / 1000))
 
     const minDistanceMeters = (Number(rates.minDistanceIncludedKm) || 0) * 1000
@@ -128,6 +148,7 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
     return {
         amount,
         actualDistance,
+        syncedDistance: syncedMeters,
         elapsedSeconds,
         offline: true,
         fareBreakdown: {
@@ -142,9 +163,9 @@ export function calculateOfflinePassengerFare({ ride, queuedPoints = [], now = D
     }
 }
 
-export async function buildOfflineFinishPreview(ride) {
+export async function buildOfflineFinishPreview(ride, now = Date.now()) {
     if (!ride?._id) return null
-    const all = await db.driverLocations.orderBy('capturedAt').toArray()
-    const queuedPoints = all.filter((point) => String(point.rideId || '') === String(ride._id))
-    return calculateOfflinePassengerFare({ ride, queuedPoints })
+    const { checkpoint, queuedPoints } = await readTrackingState(ride)
+    const fare = calculateOfflinePassengerFare({ ride: { ...ride, trackingCheckpoint: checkpoint }, queuedPoints, now })
+    return fare ? { ...fare, pendingPoints: queuedPoints.length, trackingCheckpoint: checkpoint } : null
 }

@@ -25,6 +25,7 @@ const FINALIZE_PREVIEW_TIMEOUT_MS = 5000
 const isNetworkError = (error) => (
     (typeof navigator !== 'undefined' && !navigator.onLine)
     || error?.message === 'Network Error'
+    || (!error?.response && ['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(error?.code))
     // Teto de tempo estourado ou GPS que não sincronizou: os dois são falta de
     // conectividade, não erro de regra do servidor. Precisam cair no mesmo caminho
     // (guardar a finalização na fila) em vez de virar um toast que perde a corrida.
@@ -111,10 +112,7 @@ const FinishRide = (props) => {
     }
 
     const endRideMutation = useMutation({
-        mutationFn: async () => {
-            // Captura o toque antes de drenar GPS/rede. O servidor não pode cobrar o
-            // tempo gasto tentando sincronizar como se a corrida ainda estivesse ativa.
-            const finishTimestamp = Date.now()
+        mutationFn: async (finishPayload) => {
             // A finalização só pode congelar a distância depois que todos os pontos já
             // coletados desta corrida receberam ack do backend. Se a rede oscilar aqui,
             // o botão falha com segurança e os pontos permanecem para retry.
@@ -129,16 +127,7 @@ const FinishRide = (props) => {
             }
 
             const response = await withHardTimeout(
-                api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
-                    rideId: props.ride._id,
-                    ...(userLocation?.lat != null && userLocation?.lng != null ? {
-                        finishLat: userLocation.lat,
-                        finishLng: userLocation.lng,
-                        finishAccuracy: userLocation.accuracy ?? null,
-                        finishLocationTimestamp: userLocation.timestamp ?? finishTimestamp,
-                    } : {}),
-                    finishTimestamp,
-                }, {
+                api.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, finishPayload, {
                     headers: {
                         Authorization: `Bearer ${getAccessToken('captain')}`
                     }
@@ -168,10 +157,10 @@ const FinishRide = (props) => {
                 handlePaymentSettled()
             }
         },
-        onError: async (err) => {
+        onError: async (err, finishPayload) => {
             console.error('End ride error:', err)
             if (isNetworkError(err)) {
-                await queueFinalizationOffline()
+                await queueFinalizationOffline(finishPayload)
                 return
             }
             addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
@@ -184,25 +173,17 @@ const FinishRide = (props) => {
     // Guarda a finalização pra sincronizar depois e libera o motorista pra cobrar.
     // Vive fora do onError porque agora também é chamada ANTES de tentar a rede,
     // quando o app já sabe que está sem sinal.
-    async function queueFinalizationOffline() {
-        const finishTimestamp = Date.now()
-        const localPreview = previewFare?.offline && previewFare?.amount != null
-            ? previewFare
-            : await buildOfflineFinishPreview(props.ride)
-
+    async function queueFinalizationOffline(finishPayload) {
         try {
             await enqueueOfflineAction({
                 type: 'end-ride',
                 rideId: props.ride._id,
-                payload: {
-                    rideId: props.ride._id,
-                    finishLat: userLocation?.lat,
-                    finishLng: userLocation?.lng,
-                    finishAccuracy: userLocation?.accuracy ?? null,
-                    finishLocationTimestamp: userLocation?.timestamp ?? finishTimestamp,
-                    finishTimestamp,
-                }
+                payload: finishPayload,
             })
+            // A prévia não pode impedir a persistência do trabalho já realizado.
+            const localPreview = previewFare?.offline && previewFare?.amount != null
+                ? previewFare
+                : await buildOfflineFinishPreview(props.ride, finishPayload.finishTimestamp).catch(() => null)
             setEnded(true)
             setEndedRide(localPreview?.amount > 0
                 ? {
@@ -250,6 +231,18 @@ const FinishRide = (props) => {
     }
 
     async function endRide() {
+        // O mesmo snapshot segue no POST e na fila se houver falha ou timeout.
+        const finishTimestamp = Date.now()
+        const finishPayload = {
+            rideId: props.ride._id,
+            finishTimestamp,
+            ...(userLocation?.lat != null && userLocation?.lng != null ? {
+                finishLat: userLocation.lat,
+                finishLng: userLocation.lng,
+                finishAccuracy: userLocation.accuracy ?? null,
+                finishLocationTimestamp: userLocation.timestamp ?? finishTimestamp,
+            } : {}),
+        }
         // Sem sinal conhecido: guarda direto, sem tentar a rede. Antes a fila só era
         // alimentada pelo onError, então o app precisava que a requisição FALHASSE pra
         // guardar a finalização — e sem conectividade ela não falha, fica pendurada.
@@ -260,13 +253,13 @@ const FinishRide = (props) => {
             if (queueingOffline) return
             setQueueingOffline(true)
             try {
-                await queueFinalizationOffline()
+                await queueFinalizationOffline(finishPayload)
             } finally {
                 setQueueingOffline(false)
             }
             return
         }
-        endRideMutation.mutate();
+        endRideMutation.mutate(finishPayload);
     }
 
     // Busca /rides/captain-current, que agora devolve liveFare com a mesma conta

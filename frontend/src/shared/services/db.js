@@ -34,3 +34,11 @@ db.version(3).stores({
         point.pointId = point.pointId || `legacy:${point.id}:${capturedAt}:${point.lat}:${point.lng}`
     })
 });
+
+// Confirmar um ponto atualiza a âncora e remove a fila na mesma transação.
+db.version(4).stores({
+    offlineActions: '++id, type, rideId, timestamp, attempts',
+    driverLocations: '++id, &pointId, rideId, capturedAt, queuedAt',
+    failedActions: '++id, type, rideId, timestamp, failedAt',
+    rideTracking: 'rideId',
+});

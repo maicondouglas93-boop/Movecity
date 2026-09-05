@@ -6,7 +6,6 @@ import {
     getRefreshToken,
     saveSession,
     clearSession,
-    clearAllSessions,
     sessionKindForUrl,
     LOGIN_ROUTE,
 } from './session';
@@ -32,10 +31,16 @@ api.interceptors.request.use((config) => {
     const explicitAuth = typeof config.headers?.get === 'function'
         ? config.headers.get('Authorization')
         : config.headers?.Authorization;
+    // Preserve o papel que enviou a chamada, inclusive em /wallet, /chat etc.
+    config._sessionKind = config._sessionKind
+        || (getAccessToken('captain') && explicitAuth === `Bearer ${getAccessToken('captain')}` ? 'captain' : null)
+        || (getAccessToken('user') && explicitAuth === `Bearer ${getAccessToken('user')}` ? 'user' : null)
+        || sessionKindForUrl(config.url || '')
+        || (getAccessToken('user') ? 'user' : getAccessToken('captain') ? 'captain' : null);
     if (explicitAuth) return config;
 
     // Escolhe o token com base na rota para evitar conflitos em testes na mesma máquina
-    const kind = sessionKindForUrl(config.url || '');
+    const kind = config._sessionKind;
     const token = kind
         ? getAccessToken(kind)
         : (getAccessToken('user') || getAccessToken('captain'));
@@ -64,9 +69,6 @@ const forceLogout = (kind) => {
     if (kind) {
         clearSession(kind);
         window.location.href = LOGIN_ROUTE[kind];
-    } else {
-        clearAllSessions();
-        window.location.href = LOGIN_ROUTE.user;
     }
 };
 
@@ -82,12 +84,16 @@ api.interceptors.response.use((response) => response, async (error) => {
         return Promise.reject(error);
     }
 
-    const kind = sessionKindForUrl(config?.url || '');
+    const kind = config?._sessionKind || sessionKindForUrl(config?.url || '');
+    const isRefreshCall = (config?.url || '').includes('/refresh');
+    const staleRefresh = isRefreshCall && config?._refreshSnapshot
+        && (getRefreshToken(kind) !== config._refreshSnapshot.refresh
+            || getAccessToken(kind) !== config._refreshSnapshot.access);
 
     // 403 de conta bloqueada é decisão deliberada do backend, não expiração — desloga
     // direto, sem tentar renovar (renovar não resolveria: o backend recusaria de novo).
     if (status === 403 && /bloquead/i.test(error.response?.data?.message || '')) {
-        forceLogout(kind);
+        if (!staleRefresh) forceLogout(kind);
         error.friendlyMessage = error.response?.data?.message;
         return Promise.reject(error);
     }
@@ -97,12 +103,11 @@ api.interceptors.response.use((response) => response, async (error) => {
         return Promise.reject(error);
     }
 
-    const isRefreshCall = (config?.url || '').includes('/refresh');
     const isAuthCall = /\/(login|register|google-login)/.test(config?.url || '');
 
     // 401 no próprio refresh = a sessão realmente acabou.
     if (isRefreshCall) {
-        forceLogout(kind);
+        if (!staleRefresh) forceLogout(kind);
         return Promise.reject(error);
     }
     // 401 no login = credenciais erradas; não tem relação com sessão expirada.
@@ -145,14 +150,27 @@ export function refreshAccessToken(kind) {
 
     const controller = new AbortController();
     const request = (async () => {
+        if (kind === 'captain') {
+            const { restoreNativeCaptainSession } = await import('@/shared/platform/nativeSession.service');
+            await restoreNativeCaptainSession();
+        }
         const refreshToken = getRefreshToken(kind);
+        const accessToken = getAccessToken(kind);
         const endpoint = kind === 'captain' ? '/captains/refresh' : '/users/refresh';
         // Sem refresh token no localStorage ainda vale tentar: ele pode estar no cookie
         // httpOnly, que o JS não enxerga mas o navegador envia (withCredentials).
         const { data } = await withHardTimeout(api.post(
-            endpoint, refreshToken ? { refreshToken } : {}, { signal: controller.signal }
+            endpoint, refreshToken ? { refreshToken } : {}, {
+                signal: controller.signal,
+                _sessionKind: kind,
+                _refreshSnapshot: { refresh: refreshToken, access: accessToken },
+            }
         ));
 
+        // Nunca ressuscitar logout nem sobrescrever outro login com resposta atrasada.
+        if (getRefreshToken(kind) !== refreshToken || getAccessToken(kind) !== accessToken) {
+            throw new axios.CanceledError('A sessão mudou durante a renovação.');
+        }
         saveSession(kind, { token: data.token, refreshToken: data.refreshToken });
         // C1 da auditoria de push (2026-08-02): o Service Worker do motorista só consegue
         // aceitar corrida em segundo plano se tiver um access token válido no IndexedDB —

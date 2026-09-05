@@ -38,7 +38,7 @@ vi.mock('@/shared/services/axios', () => {
         state.hangingCalls += 1
         return new Promise(() => {})
     }
-    return { default: Object.assign(hangForever, { post: hangForever, get: hangForever }) }
+    return { default: Object.assign(hangForever, { post: vi.fn(hangForever), get: vi.fn(hangForever) }) }
 })
 
 vi.mock('@/shared/services/offlineQueue', () => ({
@@ -67,6 +67,9 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { ToastProvider } from '@/shared/contexts/ToastContext'
 import FinishRide from '@/driver/components/FinishRide'
+import api from '@/shared/services/axios'
+import { flushQueuedLocations } from '@/shared/services/offlineQueue'
+import { buildOfflineFinishPreview } from '@/shared/services/offlineRideFare'
 
 const ride = {
     _id: 'ride-offline-1',
@@ -125,6 +128,76 @@ describe('app do motorista sem internet', () => {
         vi.useRealTimers()
         onLineSpy.mockRestore()
         vi.clearAllMocks()
+    })
+
+    it.each(['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'])('guarda a finalização após %s com o horário original', async (code) => {
+        onLineSpy.mockReturnValue(true)
+        let rejectRequest
+        api.post.mockImplementationOnce(() => new Promise((_, reject) => { rejectRequest = reject }))
+        renderFinishRide()
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await waitFor(() => expect(rejectRequest).toBeTypeOf('function'))
+        const sent = api.post.mock.calls[0][1]
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(sent.finishTimestamp + 10000)
+        try {
+            await act(async () => rejectRequest(Object.assign(new Error('timeout of 10000ms exceeded'), { code })))
+            await waitFor(() => expect(state.enqueued).toHaveLength(1))
+            expect(state.enqueued[0].payload).toEqual(sent)
+            expect(buildOfflineFinishPreview).toHaveBeenCalledWith(ride, sent.finishTimestamp)
+        } finally {
+            clock.mockRestore()
+        }
+    })
+
+    it('preserva o toque quando a sincronização do GPS falha antes do POST', async () => {
+        onLineSpy.mockReturnValue(true)
+        let rejectGps
+        flushQueuedLocations.mockImplementationOnce(() => new Promise((_, reject) => { rejectGps = reject }))
+        const touch = 1788616800000
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(touch)
+        try {
+            renderFinishRide()
+            await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+            await waitFor(() => expect(rejectGps).toBeTypeOf('function'))
+            clock.mockReturnValue(touch + 8000)
+            await act(async () => rejectGps(new Error('GPS sem conexão')))
+            await waitFor(() => expect(state.enqueued).toHaveLength(1))
+            expect(state.enqueued[0].payload.finishTimestamp).toBe(touch)
+            expect(api.post).not.toHaveBeenCalled()
+        } finally {
+            clock.mockRestore()
+        }
+    })
+
+    it('não transforma uma rejeição HTTP de regra em finalização offline', async () => {
+        onLineSpy.mockReturnValue(true)
+        api.post.mockRejectedValueOnce({ response: { status: 400, data: { message: 'Localização inválida' } } })
+        renderFinishRide()
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        expect(await screen.findByText('Localização inválida')).toBeInTheDocument()
+        expect(state.enqueued).toHaveLength(0)
+    })
+
+    it('guarda o horário original quando a camada nativa fica sem resposta por 12 segundos', async () => {
+        vi.useFakeTimers()
+        onLineSpy.mockReturnValue(true)
+        renderFinishRide()
+        fireEvent.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await act(async () => {})
+        const sent = api.post.mock.calls[0][1]
+        await act(async () => { await vi.advanceTimersByTimeAsync(12000) })
+        expect(state.enqueued).toHaveLength(1)
+        expect(state.enqueued[0].payload).toEqual(sent)
+    })
+
+    it('guarda a finalização mesmo se a prévia local falhar depois do timeout', async () => {
+        onLineSpy.mockReturnValue(true)
+        api.post.mockRejectedValueOnce({ code: 'ECONNABORTED' })
+        buildOfflineFinishPreview.mockRejectedValueOnce(new Error('Prévia indisponível'))
+        renderFinishRide()
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        expect(await screen.findByText(/aguarde o valor final antes de cobrar/i)).toBeInTheDocument()
+        expect(state.enqueued).toHaveLength(1)
     })
 
     it('finalizar sem rede mostra o valor local em vez de travar', async () => {

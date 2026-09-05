@@ -86,6 +86,15 @@ function createStartedRide(overrides = {}) {
 }
 
 describe('tracking GPS P0', () => {
+    it('primeiro GPS impreciso não vira âncora financeira', async () => {
+        const { ride, captainId, startedAt } = createStartedRide({ lastLocation: null, lastLocationAt: null });
+        const result = await processRideTrackingPoint({ rideId: ride._id, captainId, pointId: 'bad-first',
+            location: { ltd: A.lat, lng: A.lng, accuracy: 200, timestamp: startedAt.getTime() + 1000 } });
+        expect(result.accepted).toBe(false);
+        expect(result.trackingCheckpoint).toEqual({ actualDistance: 0, lastLocation: null, lastLocationAt: null });
+        expect(mockState.lastLocation).toBeNull();
+    });
+
     it('aceita os ~80 km da ida/volta mesmo terminando na origem', async () => {
         const { ride, captainId, startedAt } = createStartedRide();
         const outbound = await processRideTrackingPoint({
@@ -128,6 +137,10 @@ describe('tracking GPS P0', () => {
         const second = await processRideTrackingPoint(input);
 
         expect(second.duplicate).toBe(true);
+        expect(second.trackingCheckpoint).toEqual(first.trackingCheckpoint);
+        expect(first.trackingCheckpoint.lastLocation).toEqual(B);
+        expect(new Date(first.trackingCheckpoint.lastLocationAt).getTime()).toBe(input.location.timestamp);
+        expect(first.trackingCheckpoint.actualDistance).toBe(first.actualDistance);
         expect(mockState.actualDistance).toBeCloseTo(first.countedDistanceMeters, 8);
     });
 

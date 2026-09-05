@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const rideModel = require('../models/ride.model');
 const mapService = require('./maps.service');
+const rideTrackingCheckpoint = require('../utils/rideTrackingCheckpoint');
+const CHECKPOINT_PROJECTION = { actualDistance: 1, lastLocation: 1, lastLocationAt: 1 };
 const {
     MAX_OFFLINE_LOCATION_AGE_MS,
     normalizeCaptainLocation,
@@ -65,7 +67,7 @@ async function confirmRejectedPoint({ ride, captainId, trackingPointId, reason }
             processedTrackingPointIds: { $ne: trackingPointId },
         },
         { $push: { processedTrackingPointIds: { $each: [trackingPointId], $slice: -MAX_PROCESSED_POINT_IDS } } },
-        { new: true, projection: { actualDistance: 1 } }
+        { new: true, projection: CHECKPOINT_PROJECTION }
     );
 
     return {
@@ -73,6 +75,7 @@ async function confirmRejectedPoint({ ride, captainId, trackingPointId, reason }
         accepted: false,
         reason: updated ? reason : 'RIDE_NO_LONGER_TRACKABLE',
         actualDistance: updated?.actualDistance ?? ride.actualDistance ?? 0,
+        trackingCheckpoint: rideTrackingCheckpoint(updated || ride),
         pointId: trackingPointId,
     };
 }
@@ -121,6 +124,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                 duplicate: true,
                 reason: 'ALREADY_PROCESSED',
                 actualDistance: ride.actualDistance || 0,
+                trackingCheckpoint: rideTrackingCheckpoint(ride),
                 pointId: trackingPointId,
             };
         }
@@ -131,6 +135,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                 accepted: false,
                 reason: 'RIDE_NO_LONGER_TRACKABLE',
                 actualDistance: ride.actualDistance || 0,
+                trackingCheckpoint: rideTrackingCheckpoint(ride),
                 pointId: trackingPointId,
             };
         }
@@ -146,6 +151,9 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
         }
 
         const previous = ride.lastLocation;
+        if (!normalized.isAccurateForFare) {
+            return confirmRejectedPoint({ ride, captainId, trackingPointId, reason: 'INACCURATE_POINT' });
+        }
         if (!previous || previous.lat == null || previous.lng == null) {
             const initialized = await rideModel.findOneAndUpdate(
                 {
@@ -163,7 +171,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                     },
                     $push: { processedTrackingPointIds: { $each: [trackingPointId], $slice: -MAX_PROCESSED_POINT_IDS } },
                 },
-                { new: true, projection: { actualDistance: 1 } }
+                { new: true, projection: CHECKPOINT_PROJECTION }
             );
             if (initialized) {
                 return {
@@ -171,6 +179,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                     accepted: true,
                     countedDistanceMeters: 0,
                     actualDistance: initialized.actualDistance || 0,
+                    trackingCheckpoint: rideTrackingCheckpoint(initialized),
                     pointId: trackingPointId,
                 };
             }
@@ -231,7 +240,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                 ...lastLocationFilter(ride),
             },
             update,
-            { new: true, projection: { actualDistance: 1 } }
+            { new: true, projection: CHECKPOINT_PROJECTION }
         );
 
         if (applied) {
@@ -240,6 +249,7 @@ async function processRideTrackingPoint({ rideId, captainId, location, pointId, 
                 accepted: true,
                 countedDistanceMeters: countDistance ? distMeters : 0,
                 actualDistance: applied.actualDistance || 0,
+                trackingCheckpoint: rideTrackingCheckpoint(applied),
                 pointId: trackingPointId,
             };
         }

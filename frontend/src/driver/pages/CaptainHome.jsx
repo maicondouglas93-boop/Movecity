@@ -18,7 +18,6 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import CaptainHeader from '@/driver/components/CaptainHeader'
 import { onForegroundMessage } from '@/shared/services/fcm'
 import { bindPushNavigation } from '@/shared/platform/notification.service'
-import { syncNativeCaptainSession } from '@/shared/platform/nativeSession.service'
 import { isNativePlatform } from '@/shared/platform/platform'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
 import { enqueueOfflineAction, flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
@@ -148,12 +147,6 @@ const CaptainHome = () => {
         }, 15000)
         return () => window.clearInterval(id)
     }, [captain?._id, captain?.approvalStatus, captain?.isBlocked])
-
-    // Espelha JWT + API base no SharedPreferences (Aceitar com app morto / lock screen).
-    useEffect(() => {
-        const token = getAccessToken('captain')
-        if (token) syncNativeCaptainSession({ token }).catch(() => {})
-    }, [])
 
     useEffect(() => {
         let cleanup

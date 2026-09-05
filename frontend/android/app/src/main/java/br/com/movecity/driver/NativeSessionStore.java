@@ -18,6 +18,7 @@ public final class NativeSessionStore {
     public static final String KEY_TOKEN = "movecity_captain_token";
     public static final String KEY_REFRESH = "movecity_captain_refresh";
     public static final String KEY_API_BASE = "movecity_api_base";
+    private static final String KEY_UPDATED_AT = "movecity_session_updated_at";
     private static final String TAG = "NativeSessionStore";
 
     private static volatile SharedPreferences cached;
@@ -73,6 +74,7 @@ public final class NativeSessionStore {
 
     public static void save(Context context, String token, String refreshToken, String apiBase) {
         SharedPreferences.Editor editor = prefs(context).edit();
+        editor.putLong(KEY_UPDATED_AT, System.currentTimeMillis());
         if (token != null) editor.putString(KEY_TOKEN, token);
         if (refreshToken != null) editor.putString(KEY_REFRESH, refreshToken);
         if (apiBase != null) editor.putString(KEY_API_BASE, apiBase);
@@ -106,8 +108,13 @@ public final class NativeSessionStore {
         return prefs(context).getString(KEY_API_BASE, null);
     }
 
+    public static long getUpdatedAt(Context context) {
+        return prefs(context).getLong(KEY_UPDATED_AT, 0L);
+    }
+
     public static void updateTokens(Context context, String token, String refreshToken) {
         SharedPreferences.Editor editor = prefs(context).edit();
+        editor.putLong(KEY_UPDATED_AT, System.currentTimeMillis());
         if (token != null) editor.putString(KEY_TOKEN, token);
         if (refreshToken != null) editor.putString(KEY_REFRESH, refreshToken);
         editor.apply();

@@ -14,9 +14,11 @@ vi.mock('@/shared/services/swCommunication', () => ({
 vi.mock('@/shared/platform/nativeSession.service', () => ({
     syncNativeCaptainSession: vi.fn(),
     clearNativeCaptainSession: vi.fn(),
+    restoreNativeCaptainSession: vi.fn(),
 }))
 
 const { default: api, refreshAccessToken } = await import('@/shared/services/axios')
+const { saveSession, clearSession } = await import('@/shared/services/session')
 
 const originalAdapter = api.defaults.adapter
 
@@ -194,5 +196,52 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         expect(localStorage.getItem('token')).toBeNull()
         expect(localStorage.getItem('refreshToken')).toBeNull()
         expect(localStorage.getItem('captain-token')).toBe('captain-valido')
+    })
+
+    it('renova o motorista em uma rota compartilhada com Authorization explícito', async () => {
+        localStorage.setItem('token', 'user-token')
+        localStorage.setItem('refreshToken', 'user-refresh')
+        localStorage.setItem('captain-token', 'captain-old')
+        localStorage.setItem('captain-refreshToken', 'captain-refresh')
+        const calls = []
+        api.defaults.adapter = async config => {
+            calls.push(config.url)
+            if (config.url === '/captains/refresh') return okResponse(config, { token: 'captain-new' })
+            if (authHeaderOf(config) === 'Bearer captain-old') throw http401(config)
+            return okResponse(config)
+        }
+        await api.get('/wallet/transactions', { headers: { Authorization: 'Bearer captain-old' } })
+        expect(calls).toEqual(['/wallet/transactions', '/captains/refresh', '/wallet/transactions'])
+        expect(localStorage.getItem('token')).toBe('user-token')
+    })
+
+    it.each(['success', '401'])('resposta atrasada de refresh (%s) não substitui nem apaga um login novo', async outcome => {
+        saveSession('user', { token: 'old', refreshToken: 'old-refresh' })
+        let complete
+        api.defaults.adapter = config => new Promise((resolve, reject) => {
+            complete = () => outcome === '401' ? reject(http401(config))
+                : resolve(okResponse(config, { token: 'late', refreshToken: 'late-refresh' }))
+        })
+        const pending = refreshAccessToken('user').catch(error => error)
+        await vi.waitFor(() => expect(complete).toBeTypeOf('function'))
+        saveSession('user', { token: 'new-login', refreshToken: 'new-refresh' })
+        complete()
+        await pending
+        expect(localStorage.getItem('token')).toBe('new-login')
+        expect(localStorage.getItem('refreshToken')).toBe('new-refresh')
+    })
+
+    it('logout durante o refresh não é desfeito pela resposta', async () => {
+        saveSession('user', { token: 'old', refreshToken: 'old-refresh' })
+        let complete
+        api.defaults.adapter = config => new Promise(resolve => {
+            complete = () => resolve(okResponse(config, { token: 'late', refreshToken: 'late-refresh' }))
+        })
+        const pending = refreshAccessToken('user').catch(error => error)
+        await vi.waitFor(() => expect(complete).toBeTypeOf('function'))
+        clearSession('user')
+        complete()
+        await pending
+        expect(localStorage.getItem('token')).toBeNull()
     })
 })

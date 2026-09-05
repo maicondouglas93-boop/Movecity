@@ -405,6 +405,7 @@ function initializeSocket(server) {
                     lng: captainLocation.lng,
                     actualDistance: currentDistance,
                     rideId: ride._id.toString(),
+                    ...(trackingAck?.trackingCheckpoint ? { trackingCheckpoint: trackingAck.trackingCheckpoint } : {}),
                     ...(liveFare ? { liveFare } : {}),
                 };
 
@@ -486,6 +487,7 @@ function initializeSocket(server) {
                         code: trackingAck?.reason,
                         actualDistance: trackingAck?.actualDistance ?? ride.actualDistance ?? 0,
                         pointId: trackingAck?.pointId || data?.pointId,
+                        ...(trackingAck?.trackingCheckpoint ? { trackingCheckpoint: trackingAck.trackingCheckpoint } : {}),
                     });
                 } else {
                     ack({ ok: true, accepted: true, pointId: data?.pointId });

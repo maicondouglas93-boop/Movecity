@@ -1,6 +1,8 @@
 import api from '@/shared/services/axios'
 import { db } from '@/shared/services/db'
-import { getAccessToken } from '@/shared/services/session'
+import { getAccessToken, getSessionOwnerId } from '@/shared/services/session'
+import { clearSavedDriverRide } from '@/shared/services/driverRecoveryStore'
+import { acknowledgeTrackingPoint } from '@/shared/services/rideTrackingCheckpoint'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 // P1.2 da auditoria de concorrência (2026-08-02): antes, a fila offline reexecutava
@@ -111,6 +113,7 @@ async function moveToFailedAndRemove(action, reason) {
 export async function enqueueOfflineAction({ type, rideId, payload }) {
     const entry = { type, rideId, payload, timestamp: Date.now(), attempts: 0 }
     if (type !== 'end-ride') return db.offlineActions.add(entry)
+    const ownerId = getSessionOwnerId('captain')
 
     // Finalizar e tocar de novo, ou receber simultaneamente o fallback do timeout e o
     // evento offline, nunca pode criar duas finalizações para a mesma corrida. O lock
@@ -141,7 +144,9 @@ export async function enqueueOfflineAction({ type, rideId, payload }) {
 
     endRideEnqueuePromise = current
     try {
-        return await current
+        const id = await current
+        clearSavedDriverRide(ownerId, rideId)
+        return id
     } finally {
         if (endRideEnqueuePromise === current) endRideEnqueuePromise = null
     }
@@ -229,10 +234,10 @@ async function runLocationFlush(socket, { rideId } = {}) {
         : all
 
     for (const point of locations) {
-        await emitLocationWithAck(socket, point)
+        const response = await emitLocationWithAck(socket, point)
         // Só remove depois do ack do backend. Se a resposta se perder, o ponto fica e
         // o pointId garante que o replay não conte o segmento novamente.
-        await db.driverLocations.delete(point.id)
+        await acknowledgeTrackingPoint(point, response)
     }
 
     return { synced: locations.length }

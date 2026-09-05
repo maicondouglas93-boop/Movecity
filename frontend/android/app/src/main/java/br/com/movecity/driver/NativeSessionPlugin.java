@@ -10,6 +10,16 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 public class NativeSessionPlugin extends Plugin {
 
     @PluginMethod
+    public void read(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("token", NativeSessionStore.getToken(getContext()));
+        result.put("refreshToken", NativeSessionStore.getRefreshToken(getContext()));
+        result.put("apiBase", NativeSessionStore.getApiBase(getContext()));
+        result.put("updatedAt", NativeSessionStore.getUpdatedAt(getContext()));
+        call.resolve(result);
+    }
+
+    @PluginMethod
     public void save(PluginCall call) {
         String token = call.getString("token");
         String refreshToken = call.getString("refreshToken");

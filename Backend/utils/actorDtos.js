@@ -154,6 +154,7 @@ function toRideCaptainDTO(ride) {
     if (!ride) return ride;
     const raw = plain(ride);
     const dto = rideBase(raw);
+    if (raw.status === 'started') dto.trackingCheckpoint = require('./rideTrackingCheckpoint')(raw);
     dto.driverAmount = computeDriverAmount(raw);
     const fareRates = toPassengerFareRates(raw.pricingSnapshot);
     if (fareRates) dto.fareRates = fareRates;

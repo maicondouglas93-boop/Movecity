@@ -230,6 +230,18 @@ test('corrida aceita separa identidade do passageiro e do motorista por ator', (
     assertNoForbiddenFields(passengerView, 'corrida para passageiro');
 });
 
+test('checkpoint operacional aparece apenas na corrida iniciada do motorista vinculado', () => {
+    const started = { ...secretRide, status: 'started' };
+    const { trackingCheckpoint, ...captainView } = toRideCaptainDTO(started);
+    assert.deepEqual(Object.keys(trackingCheckpoint).sort(), ['actualDistance', 'lastLocation', 'lastLocationAt']);
+    assert.deepEqual(trackingCheckpoint.lastLocation, secretRide.lastLocation);
+    assertNoForbiddenFields(captainView, 'campos fora do checkpoint');
+    assert.equal(toRidePassengerDTO(started).trackingCheckpoint, undefined);
+    assert.equal(toRideOfferDTO(started).trackingCheckpoint, undefined);
+    assert.equal(toRideCaptainHistoryDTO(started).trackingCheckpoint, undefined);
+    assert.equal(toRideCaptainDTO(secretRide).trackingCheckpoint, undefined);
+});
+
 test('históricos removem dados de contato e localização que já não são necessários', () => {
     const captainHistory = toRideCaptainHistoryDTO(secretRide);
     const passengerHistory = toRidePassengerHistoryDTO(secretRide);

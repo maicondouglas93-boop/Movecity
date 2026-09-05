@@ -41,7 +41,7 @@ vi.mock('@/shared/services/db', () => ({
     },
 }))
 
-vi.mock('@/shared/services/session', () => ({ getAccessToken: vi.fn(() => 'token') }))
+vi.mock('@/shared/services/session', () => ({ getAccessToken: vi.fn(() => 'token'), getSessionOwnerId: () => null }))
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock('@/shared/services/axios', () => ({ default: api }))

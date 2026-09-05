@@ -167,7 +167,8 @@ module.exports.loginCaptain = async (req, res, next) => {
 // trabalho.
 module.exports.refreshCaptainSession = async (req, res) => {
     try {
-        const presentedToken = req.cookies?.refreshToken || req.body?.refreshToken;
+        // O corpo identifica a sessão deste app; o cookie pode pertencer ao outro papel.
+        const presentedToken = req.body?.refreshToken || req.cookies?.refreshToken;
         const { userId, userType, refreshToken } = await authService.rotateRefreshToken({
             refreshToken: presentedToken,
             expectedUserType: 'captain',

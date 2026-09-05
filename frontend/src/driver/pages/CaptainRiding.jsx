@@ -22,6 +22,7 @@ import { getAccessToken } from '@/shared/services/session'
 import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
 import { formatBRL } from '@/shared/utils/currency'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
+import { useRideMeter } from '@/shared/hooks/useRideMeter'
 
 const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
@@ -41,8 +42,6 @@ const CaptainRiding = () => {
     const [ bottomInsetPx, setBottomInsetPx ] = useState(0)
     const [ cancelling, setCancelling ] = useState(false)
     const [ elapsedSec, setElapsedSec ] = useState(0)
-    const [ liveDistance, setLiveDistance ] = useState(0)
-    const [ liveFare, setLiveFare ] = useState(null)
     const location = useLocation()
     // Auditoria de UX do motorista (2026-08-02, §2.6): rideData vivia só em
     // location.state, que não sobrevive a um refresh de página nem ao app sendo
@@ -53,10 +52,12 @@ const CaptainRiding = () => {
     // Fase A da experiência de corrida ativa (2026-08-03): o RideContext pode já ter a
     // corrida restaurada (ele consulta /rides/captain-current a cada abertura/retorno) —
     // usa como segunda fonte imediata antes de cair no fetch próprio abaixo.
-    const { captainRide, setCaptainRide, syncCaptainRide } = useContext(RideContext)
+    const { captainRide, captainRideReconciled, setCaptainRide, syncCaptainRide } = useContext(RideContext)
     const [ rideData, setRideData ] = useState(location.state?.ride || captainRide || null)
     const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || captainRide))
     const { socket } = useContext(SocketContext)
+    const meter = useRideMeter(rideData, socket)
+    const liveDistance = meter?.distance ?? rideData?.actualDistance ?? 0
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
     const { addToast } = useToast()
@@ -113,27 +114,6 @@ const CaptainRiding = () => {
     }, [rideData?._id, rideData?.status, rideData?.startedAt, rideData?.updatedAt, rideData?.createdAt])
 
     useEffect(() => {
-        if (rideData?.actualDistance != null) {
-            setLiveDistance(rideData.actualDistance)
-        }
-    }, [rideData?.actualDistance])
-
-    useEffect(() => {
-        if (!socket) return undefined
-        const onLoc = (payload) => {
-            if (payload?.rideId && rideData?._id && String(payload.rideId) !== String(rideData._id)) return
-            if (typeof payload?.actualDistance === 'number') {
-                setLiveDistance(payload.actualDistance)
-            }
-            if (typeof payload?.liveFare?.amount === 'number') {
-                setLiveFare(payload.liveFare.amount)
-            }
-        }
-        socket.on('captain-location-updated', onLoc)
-        return () => socket.off('captain-location-updated', onLoc)
-    }, [socket, rideData?._id])
-
-    useEffect(() => {
         let cancelled = false
 
         ;(async () => {
@@ -159,7 +139,7 @@ const CaptainRiding = () => {
                     return
                 }
 
-                if (!rideData) {
+                if (currentRide === null) {
                     addToast('Nenhuma corrida em andamento encontrada.', 'info')
                     navigate('/captain-home', { replace: true })
                 }
@@ -182,6 +162,12 @@ const CaptainRiding = () => {
         if (rideData?._id && String(rideData._id) !== String(captainRide._id)) return
         setRideData(captainRide)
     }, [captainRide, rideData?._id])
+
+    useEffect(() => {
+        // 404 confirmado após reconexão é diferente de falha de rede (UNKNOWN).
+        // Não manter uma corrida fantasma no estado interno da tela.
+        if (captainRideReconciled && captainRide === null) navigate('/captain-home', { replace: true })
+    }, [captainRideReconciled, captainRide, navigate])
 
     const { requestLock } = useWakeLock();
     useEffect(() => {
@@ -317,7 +303,7 @@ const CaptainRiding = () => {
     const vType = rideData?.vehicleType || 'car'
     const vehicleLabel = vehicleLabels[vType] || 'MoveGo'
     const vehicleImg = vehicleImages[vType] || vehicleImages.car
-    const currentRideAmount = liveFare
+    const currentRideAmount = meter?.amount ?? rideData?.liveFare?.amount
         ?? (rideData?.destinationPending ? null : (rideData?.finalPrice ?? rideData?.fare))
 
     // Etapa atual pra "Abrir no Google Maps": coleta enquanto o motorista ainda
@@ -551,7 +537,13 @@ const CaptainRiding = () => {
                         <p className='text-4xl font-black tabular-nums text-ink-900'>
                             {currentRideAmount != null ? formatBRL(currentRideAmount) : 'Calculando…'}
                         </p>
-                        <p className='text-[11px] text-ink-500'>Atualizado por tempo e distância</p>
+                        <p className='text-[11px] text-ink-500'>
+                            {meter?.local
+                                ? meter.unavailable
+                                    ? 'Sem conexão — aguardando dados da tarifa'
+                                    : 'Contando no aparelho · sincroniza quando o sinal voltar'
+                                : 'Atualizado por tempo e distância'}
+                        </p>
                     </div>
 
                     <div className='flex items-center gap-2.5 min-w-0'>
@@ -666,7 +658,7 @@ const CaptainRiding = () => {
 
             <BottomSheet open={finishRidePanel} onClose={() => setFinishRidePanel(false)}>
                 <FinishRide
-                    ride={rideData}
+                    ride={{ ...rideData, actualDistance: meter?.serverDistance ?? rideData?.actualDistance }}
                     setFinishRidePanel={setFinishRidePanel}
                 />
             </BottomSheet>

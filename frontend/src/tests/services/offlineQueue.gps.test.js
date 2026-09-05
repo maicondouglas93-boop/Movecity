@@ -16,6 +16,8 @@ state.putPoint.mockImplementation(async (point) => {
 
 vi.mock('@/shared/services/db', () => ({
     db: {
+        transaction: (_mode, _points, _tracking, callback) => callback(),
+        rideTracking: { get: vi.fn(), put: vi.fn() },
         driverLocations: {
             put: state.putPoint,
             add: vi.fn(),

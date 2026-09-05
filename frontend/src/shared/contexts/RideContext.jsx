@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
-import { getAccessToken, onSessionChanged } from '@/shared/services/session'
+import { getAccessToken, getRefreshToken, getSessionOwnerId, onSessionChanged } from '@/shared/services/session'
+import { loadDriverRecovery, saveDriverRide } from '@/shared/services/driverRecoveryStore'
 import { hasPendingFinalization } from '@/shared/services/offlineQueue'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
@@ -14,7 +15,8 @@ import { withHardTimeout } from '@/shared/utils/hardTimeout'
 // não sobrevivem a refresh, fechamento do PWA nem retorno do background.
 //
 // Regras deste contexto:
-// - O BACKEND é a fonte da verdade: toda abertura/reconexão/retorno consulta
+// - O aparelho preserva a corrida iniciada; o BACKEND a confirma em cada reconexão.
+//   Toda abertura/reconexão/retorno consulta
 //   /rides/current, /rides/captain-current, /parcels/current e /parcels/captain-current.
 // - O socket apenas ATUALIZA o estado — nunca é a única fonte.
 // - Sessão dupla (passageiro e motorista no mesmo navegador) é suportada.
@@ -82,7 +84,8 @@ const PARCEL_RESTORE_STATUSES = [
 
 async function fetchActive(kind, endpointMap) {
     const token = getAccessToken(kind)
-    if (!token) return null
+    if (!token && !getRefreshToken(kind)) return null
+    if (navigator.onLine === false) return UNKNOWN
 
     try {
         // Cliente centralizado: 401 → refresh automático; falha de refresh → forceLogout.
@@ -96,7 +99,9 @@ async function fetchActive(kind, endpointMap) {
 
 const RideProvider = ({ children }) => {
     const [ userRide, setUserRide ] = useState(null)
-    const [ captainRide, setCaptainRideState ] = useState(null)
+    const [ captainRide, updateCaptainRideState ] = useState(null)
+    const [ captainRideReconciled, setCaptainRideReconciled ] = useState(false)
+    const [ captainOwnerId, setCaptainOwnerId ] = useState(() => getSessionOwnerId('captain'))
     const [ userParcel, setUserParcel ] = useState(null)
     const [ captainParcel, setCaptainParcel ] = useState(null)
     const { socket } = useContext(SocketContext)
@@ -104,6 +109,28 @@ const RideProvider = ({ children }) => {
     const location = useLocation()
 
     const syncSeqRef = useRef({ user: 0, captain: 0, userParcel: 0, captainParcel: 0 })
+    const ownerRef = useRef(getSessionOwnerId('captain'))
+    const captainRideRef = useRef(null)
+    const localRevisionRef = useRef(0)
+    const setCaptainRideState = useCallback((next) => {
+        const ride = typeof next === 'function' ? next(captainRideRef.current) : next
+        localRevisionRef.current += 1
+        captainRideRef.current = ride
+        saveDriverRide(getSessionOwnerId('captain'), ride)
+        updateCaptainRideState(ride)
+    }, [])
+
+    useEffect(() => {
+        let disposed = false
+        const owner = getSessionOwnerId('captain')
+        const revision = localRevisionRef.current
+        loadDriverRecovery(owner).then(saved => {
+            if (disposed || !saved || owner !== getSessionOwnerId('captain')
+                || revision !== localRevisionRef.current) return
+            setCaptainRideState(saved.ride)
+        }).catch(() => {})
+        return () => { disposed = true }
+    }, [setCaptainRideState])
 
     // `force` ignora a proteção anti-retrocesso. Ela existe pra um snapshot antigo não
     // sobrescrever um estado mais avançado, mas quando uma ação offline falha em
@@ -112,8 +139,9 @@ const RideProvider = ({ children }) => {
     // corrida em andamento que o backend não tem.
     const syncRide = useCallback(async (kind, { force = false } = {}) => {
         const seq = ++syncSeqRef.current[kind]
+        const owner = getSessionOwnerId(kind)
         const result = await fetchActive(kind, RIDE_ENDPOINT_BY_KIND)
-        if (seq !== syncSeqRef.current[kind]) return result
+        if (seq !== syncSeqRef.current[kind] || owner !== getSessionOwnerId(kind)) return UNKNOWN
         if (result === UNKNOWN) return result
 
         if (kind === 'user') {
@@ -128,14 +156,16 @@ const RideProvider = ({ children }) => {
         // fechado (com o valor já cobrado do passageiro). Enquanto houver finalização
         // pendente na fila, o estado do servidor está sabidamente atrasado.
         if (result?._id && await hasPendingFinalization(result._id)) {
-            return result
+            return UNKNOWN
         }
-        if (seq !== syncSeqRef.current[kind]) return result
+        if (seq !== syncSeqRef.current[kind] || owner !== getSessionOwnerId(kind)) return UNKNOWN
 
         if (force) setCaptainRideState(result)
         else setCaptainRideState(previous => mergeRideByStatus(previous, result))
-        return result
-    }, [])
+        setCaptainRideReconciled(true)
+        // Não devolver ao chamador o snapshot que o guarda anti-retrocesso rejeitou.
+        return captainRideRef.current
+    }, [setCaptainRideState])
 
     const syncParcel = useCallback(async (kind) => {
         const key = kind === 'user' ? 'userParcel' : 'captainParcel'
@@ -155,8 +185,9 @@ const RideProvider = ({ children }) => {
     const syncCaptainParcel = useCallback(() => syncParcel('captain'), [syncParcel])
 
     const setCaptainRide = useCallback((nextRide) => {
+        if (captainOwnerId !== getSessionOwnerId('captain')) return
         setCaptainRideState(previous => mergeRideByStatus(previous, nextRide))
-    }, [])
+    }, [setCaptainRideState, captainOwnerId])
 
     // Uma ação offline (aceitar/iniciar/finalizar) que falhou em definitivo deixa o app
     // exibindo um estado que o servidor nunca chegou a ter. Só um aviso não bastava: o
@@ -201,8 +232,14 @@ const RideProvider = ({ children }) => {
                 setUserRide(null)
                 setUserParcel(null)
             }
-            if (!getAccessToken('captain')) {
-                setCaptainRideState(null)
+            const owner = getSessionOwnerId('captain')
+            if (owner !== ownerRef.current || (!getAccessToken('captain') && !getRefreshToken('captain'))) {
+                ownerRef.current = owner
+                setCaptainOwnerId(owner)
+                localRevisionRef.current += 1
+                captainRideRef.current = null
+                updateCaptainRideState(null)
+                setCaptainRideReconciled(false)
                 setCaptainParcel(null)
             }
             syncAll()
@@ -345,6 +382,7 @@ const RideProvider = ({ children }) => {
             userRide,
             setUserRide,
             captainRide,
+            captainRideReconciled,
             setCaptainRide,
             syncUserRide,
             syncCaptainRide,

@@ -11,6 +11,8 @@
 // cookie de terceiros (Safari/ITP) — sem ele, esses usuários não conseguiriam manter
 // a sessão. O backend aceita o refresh token do cookie ou do corpo da requisição.
 
+import { clearDriverRecovery } from '@/shared/services/driverRecoveryStore'
+
 const KEYS = {
     user: { access: 'token', refresh: 'refreshToken' },
     captain: { access: 'captain-token', refresh: 'captain-refreshToken' },
@@ -39,16 +41,18 @@ export function hasActiveSession() {
     return !!(getAccessToken('user') || getAccessToken('captain'));
 }
 
-export function saveSession(kind, { token, refreshToken }) {
+export function saveSession(kind, { token, refreshToken }, { syncNative = true, updatedAt = Date.now() } = {}) {
     const keys = KEYS[kind];
     if (!keys) throw new Error(`Tipo de sessão desconhecido: ${kind}`);
     if (token) localStorage.setItem(keys.access, token);
     // O refresh token pode não vir no corpo se o backend decidir entregar só via
     // cookie httpOnly — nesse caso não sobrescreve o que já existe com undefined.
     if (refreshToken) localStorage.setItem(keys.refresh, refreshToken);
+    localStorage.setItem(`${keys.access}:updatedAt`, String(updatedAt));
+    localStorage.removeItem(`${keys.access}:loggedOut`);
     notifySessionChanged();
     // Espelha no nativo (APK) para Aceitar corrida com app morto / lock screen.
-    if (kind === 'captain') {
+    if (kind === 'captain' && syncNative) {
         import('@/shared/platform/nativeSession.service')
             .then(({ syncNativeCaptainSession }) => syncNativeCaptainSession({
                 token: token || getAccessToken('captain'),
@@ -66,10 +70,25 @@ export function getRefreshToken(kind) {
     return localStorage.getItem(KEYS[kind].refresh);
 }
 
+// Identidade para particionar dados LOCAIS, nunca para autorizar no servidor.
+// A expiração não apaga uma corrida em execução durante uma queda de internet.
+export function getSessionOwnerId(kind) {
+    try {
+        const token = getAccessToken(kind) || getRefreshToken(kind)
+        const part = token?.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
+        if (!part) return null
+        const claims = JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, '=')))
+        return claims.actorType === kind && claims._id ? String(claims._id) : null
+    } catch { return null }
+}
+
 export function clearSession(kind) {
     const keys = KEYS[kind];
     localStorage.removeItem(keys.access);
     localStorage.removeItem(keys.refresh);
+    localStorage.setItem(`${keys.access}:loggedOut`, 'true');
+    localStorage.removeItem(`${keys.access}:updatedAt`);
+    if (kind === 'captain') clearDriverRecovery();
     notifySessionChanged();
     if (kind === 'captain') {
         import('@/shared/platform/nativeSession.service')
@@ -79,9 +98,12 @@ export function clearSession(kind) {
 }
 
 export function clearAllSessions() {
+    clearDriverRecovery();
     Object.values(KEYS).forEach(({ access, refresh }) => {
         localStorage.removeItem(access);
         localStorage.removeItem(refresh);
+        localStorage.setItem(`${access}:loggedOut`, 'true');
+        localStorage.removeItem(`${access}:updatedAt`);
     });
     notifySessionChanged();
     import('@/shared/platform/nativeSession.service')

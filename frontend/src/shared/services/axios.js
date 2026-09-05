@@ -11,6 +11,7 @@ import {
     LOGIN_ROUTE,
 } from './session';
 import { syncTokenWithSW } from './swCommunication';
+import { withHardTimeout } from '../utils/hardTimeout';
 
 const api = axios.create({
     baseURL: API_BASE_URL || undefined,
@@ -55,18 +56,9 @@ api.interceptors.request.use((config) => {
 // usuário era deslogado pelo menos uma vez por dia.
 //
 // Agora: um 401 dispara UMA tentativa de renovação silenciosa; só desloga se a
-// renovação também falhar (sessão comprovadamente inválida). isRefreshing + a fila
-// garantem que N requisições falhando juntas disparem um único refresh.
-let isRefreshing = false;
-let refreshQueue = [];
-
-const flushQueue = (error, token = null) => {
-    refreshQueue.forEach(({ resolve, reject }) => {
-        if (error) reject(error);
-        else resolve(token);
-    });
-    refreshQueue = [];
-};
+// renovação for recusada por autenticação. Rede/5xx preservam a sessão.
+// Uma promise por papel evita refresh duplicado e troca de tokens entre contas.
+const refreshRequests = new Map();
 
 const forceLogout = (kind) => {
     if (kind) {
@@ -132,7 +124,9 @@ api.interceptors.response.use((response) => response, async (error) => {
         config.headers.Authorization = `Bearer ${newToken}`;
         return api(config);
     } catch (refreshError) {
-        return Promise.reject(error);
+        // Não mascarar timeout/5xx do refresh com o 401 original: a tela precisa
+        // distinguir indisponibilidade temporária de uma sessão encerrada.
+        return Promise.reject(refreshError);
     }
 });
 
@@ -143,38 +137,36 @@ api.interceptors.response.use((response) => response, async (error) => {
 // periódica, então o token pode ficar vencido por tempo indefinido sem nenhum 401
 // pra disparar a renovação de dentro do interceptor — o motorista caía fora do
 // despacho silenciosamente numa reconexão de socket com token vencido. Mantém a MESMA
-// fila (`isRefreshing`/`refreshQueue`) do interceptor, então uma renovação disparada
+// promise por papel do interceptor, então uma renovação disparada
 // pelo socket e uma disparada por uma chamada REST concorrente nunca duplicam a
 // chamada ao backend.
-export async function refreshAccessToken(kind) {
-    if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-            refreshQueue.push({ resolve, reject });
-        });
-    }
+export function refreshAccessToken(kind) {
+    if (refreshRequests.has(kind)) return refreshRequests.get(kind);
 
-    isRefreshing = true;
-    try {
+    const controller = new AbortController();
+    const request = (async () => {
         const refreshToken = getRefreshToken(kind);
         const endpoint = kind === 'captain' ? '/captains/refresh' : '/users/refresh';
         // Sem refresh token no localStorage ainda vale tentar: ele pode estar no cookie
         // httpOnly, que o JS não enxerga mas o navegador envia (withCredentials).
-        const { data } = await api.post(endpoint, refreshToken ? { refreshToken } : {});
+        const { data } = await withHardTimeout(api.post(
+            endpoint, refreshToken ? { refreshToken } : {}, { signal: controller.signal }
+        ));
 
         saveSession(kind, { token: data.token, refreshToken: data.refreshToken });
         // C1 da auditoria de push (2026-08-02): o Service Worker do motorista só consegue
         // aceitar corrida em segundo plano se tiver um access token válido no IndexedDB —
         // sem sincronizar aqui, ele ficaria com o token antigo até a próxima abertura do app.
         syncTokenWithSW(data.token);
-        isRefreshing = false;
-        flushQueue(null, data.token);
         return data.token;
-    } catch (refreshError) {
-        isRefreshing = false;
-        flushQueue(refreshError);
-        forceLogout(kind);
-        throw refreshError;
-    }
+    })().finally(() => {
+        controller.abort();
+        refreshRequests.delete(kind);
+    });
+    // 401/bloqueio do próprio refresh já são tratados pelo interceptor. Não há
+    // logout genérico aqui: falhas de transporte não invalidam credenciais.
+    refreshRequests.set(kind, request);
+    return request;
 }
 
 export default api;

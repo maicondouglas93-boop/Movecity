@@ -44,7 +44,9 @@ describe('Auth Middleware', () => {
         it('should return 401 if token is invalid', async () => {
             req.headers.authorization = 'Bearer testtoken';
             blackListTokenModel.findOne.mockResolvedValue(null);
-            authService.verifyAccessToken.mockImplementation(() => { throw new Error('Invalid token') });
+            authService.verifyAccessToken.mockImplementation(() => {
+                throw Object.assign(new Error('Invalid token'), { name: 'JsonWebTokenError' });
+            });
 
             await authUser(req, res, next);
             expect(res.status).toHaveBeenCalledWith(401);
@@ -107,6 +109,41 @@ describe('Auth Middleware', () => {
             await authBoth(req, res, next);
             expect(req.captain).toBeDefined();
             expect(next).toHaveBeenCalled();
+        });
+    });
+
+    describe.each([
+        ['user', authUser, userService.getUserProfile],
+        ['captain', authCaptain, captainService.getCaptainProfile],
+        ['both', authBoth, userService.getUserProfile],
+    ])('indisponibilidade em %s', (kind, middleware, getProfile) => {
+        beforeEach(() => {
+            req.headers.authorization = 'Bearer testtoken';
+            blackListTokenModel.findOne.mockResolvedValue(null);
+            authService.verifyAccessToken.mockReset().mockReturnValue({
+                subjectId: 'id', actorType: kind === 'captain' ? 'captain' : 'user',
+            });
+        });
+
+        it('erro ao consultar blacklist responde 503 em vez de deixar a requisição pendurada', async () => {
+            blackListTokenModel.findOne.mockRejectedValueOnce(new Error('Mongo indisponível'));
+            await middleware(req, res, next);
+            expect(res.status).toHaveBeenCalledWith(503);
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it('falha ao consultar perfil não é convertida em sessão inválida', async () => {
+            getProfile.mockRejectedValueOnce(new Error('Mongo indisponível'));
+            await middleware(req, res, next);
+            expect(res.status).toHaveBeenCalledWith(503);
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it('conta bloqueada continua recusada com 403', async () => {
+            getProfile.mockResolvedValueOnce({ _id: 'id', isBlocked: true });
+            await middleware(req, res, next);
+            expect(res.status).toHaveBeenCalledWith(403);
+            expect(next).not.toHaveBeenCalled();
         });
     });
 });

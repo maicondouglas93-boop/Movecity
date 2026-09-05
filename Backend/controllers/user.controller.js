@@ -3,6 +3,7 @@ const userService = require('../services/user.service');
 const { validationResult } = require('express-validator');
 const blackListTokenModel = require('../models/blacklistToken.model');
 const authService = require('../services/auth.service');
+const { sendAuthFailure } = require('../utils/authFailure');
 const { getAuth } = require('firebase-admin/auth');
 
 // Configuração padronizada e segura para os Cookies JWT.
@@ -264,7 +265,7 @@ module.exports.refreshUserSession = async (req, res) => {
 
         return res.status(200).json({ token: accessToken, refreshToken, user });
     } catch (err) {
-        return res.status(401).json({ message: err.message || 'Sessão inválida' });
+        return sendAuthFailure(res, err);
     }
 };
 

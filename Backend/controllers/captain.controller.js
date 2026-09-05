@@ -2,6 +2,7 @@ const captainModel = require('../models/captain.model');
 const captainService = require('../services/captain.service');
 const blackListTokenModel = require('../models/blacklistToken.model');
 const authService = require('../services/auth.service');
+const { sendAuthFailure } = require('../utils/authFailure');
 const { validationResult } = require('express-validator');
 const { getCache, setCache, deleteByPrefix } = require('../cache/cache');
 const notificationService = require('../services/notification.service');
@@ -193,7 +194,7 @@ module.exports.refreshCaptainSession = async (req, res) => {
 
         return res.status(200).json({ token: accessToken, refreshToken, captain });
     } catch (err) {
-        return res.status(401).json({ message: err.message || 'Sessão inválida' });
+        return sendAuthFailure(res, err);
     }
 };
 

@@ -3,6 +3,7 @@ const userService = require('../services/user.service');
 const captainService = require('../services/captain.service');
 const authService = require('../services/auth.service');
 const { resolveAccessToken } = require('../utils/authToken');
+const { sendAuthFailure } = require('../utils/authFailure');
 
 
 module.exports.authUser = async (req, res, next) => {
@@ -16,13 +17,11 @@ module.exports.authUser = async (req, res, next) => {
     req.authSource = source;
 
 
-    const isBlacklisted = await blackListTokenModel.findOne({ token: token });
-
-    if (isBlacklisted) {
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
-
     try {
+        const isBlacklisted = await blackListTokenModel.findOne({ token });
+        if (isBlacklisted) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
 
         const decoded = authService.verifyAccessToken(token, 'user');
         const user = await userService.getUserProfile(decoded.subjectId);
@@ -41,7 +40,7 @@ module.exports.authUser = async (req, res, next) => {
         return next();
 
     } catch (err) {
-        return res.status(401).json({ message: 'Unauthorized' });
+        return sendAuthFailure(res, err, 'Unauthorized');
     }
 }
 
@@ -56,15 +55,11 @@ module.exports.authCaptain = async (req, res, next) => {
     req.authToken = token;
     req.authSource = source;
 
-    const isBlacklisted = await blackListTokenModel.findOne({ token: token });
-
-
-
-    if (isBlacklisted) {
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
-
     try {
+        const isBlacklisted = await blackListTokenModel.findOne({ token });
+        if (isBlacklisted) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
         const decoded = authService.verifyAccessToken(token, 'captain');
         const captain = await captainService.getCaptainProfile(decoded.subjectId);
 
@@ -81,9 +76,7 @@ module.exports.authCaptain = async (req, res, next) => {
 
         return next()
     } catch (err) {
-        console.log(err);
-
-        res.status(401).json({ message: 'Unauthorized' });
+        return sendAuthFailure(res, err, 'Unauthorized');
     }
 }
 
@@ -97,13 +90,11 @@ module.exports.authBoth = async (req, res, next) => {
     req.authToken = token;
     req.authSource = source;
 
-    const isBlacklisted = await blackListTokenModel.findOne({ token: token });
-
-    if (isBlacklisted) {
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
-
     try {
+        const isBlacklisted = await blackListTokenModel.findOne({ token });
+        if (isBlacklisted) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
         const decoded = authService.verifyAccessToken(token, ['user', 'captain']);
 
         if (decoded.actorType === 'user' || decoded.legacy) {
@@ -132,6 +123,6 @@ module.exports.authBoth = async (req, res, next) => {
 
         return res.status(401).json({ message: 'Unauthorized' });
     } catch (err) {
-        return res.status(401).json({ message: 'Unauthorized' });
+        return sendAuthFailure(res, err, 'Unauthorized');
     }
 }

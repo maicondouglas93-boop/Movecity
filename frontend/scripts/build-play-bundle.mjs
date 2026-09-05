@@ -57,11 +57,15 @@ if (!existsSync(path.join(config.androidDir, 'keystore.properties'))) {
 }
 
 function run(command, args, cwd, env = process.env) {
+    // .cmd/.bat precisam do shell no Windows; executáveis (especialmente o Node em
+    // "Program Files") devem ser chamados diretamente para o caminho com espaços
+    // não ser quebrado em `C:\Program`.
+    const needsWindowsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)
     const result = spawnSync(command, args, {
         cwd,
         env,
         stdio: 'inherit',
-        shell: process.platform === 'win32',
+        shell: needsWindowsShell,
     })
     if (result.error) throw result.error
     if (result.status !== 0) process.exit(result.status ?? 1)

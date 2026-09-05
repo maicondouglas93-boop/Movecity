@@ -11,7 +11,12 @@ vi.mock('@/shared/services/swCommunication', () => ({
     clearTokenInSW: vi.fn(),
 }))
 
-const { default: api } = await import('@/shared/services/axios')
+vi.mock('@/shared/platform/nativeSession.service', () => ({
+    syncNativeCaptainSession: vi.fn(),
+    clearNativeCaptainSession: vi.fn(),
+}))
+
+const { default: api, refreshAccessToken } = await import('@/shared/services/axios')
 
 const originalAdapter = api.defaults.adapter
 
@@ -47,6 +52,7 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
 
     afterEach(() => {
         api.defaults.adapter = originalAdapter
+        vi.useRealTimers()
     })
 
     it('tem timeout de 10s e withCredentials habilitado', () => {
@@ -128,5 +134,65 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         await expect(api.post('/users/login', { email: 'a@a.com', password: 'x' })).rejects.toBeTruthy()
         expect(calls).toHaveLength(1)
         expect(calls.some((u) => u.includes('/refresh'))).toBe(false)
+    })
+
+    it.each([undefined, 500, 503, 429])('preserva a sessão e propaga a falha temporária %s do refresh, não o 401 original', async (status) => {
+        localStorage.setItem('token', 'vencido')
+        localStorage.setItem('refreshToken', 'refresh-valido')
+        let refreshFailure
+        api.defaults.adapter = vi.fn(async (config) => {
+            if (config.url === '/users/refresh') {
+                refreshFailure = networkError(config)
+                if (status) refreshFailure.response = { status, data: {} }
+                throw refreshFailure
+            }
+            throw http401(config)
+        })
+        const caught = await api.get('/users/profile').catch(error => error)
+        expect(caught).toBe(refreshFailure)
+        expect(localStorage.getItem('token')).toBe('vencido')
+        expect(localStorage.getItem('refreshToken')).toBe('refresh-valido')
+        api.defaults.adapter = async config => okResponse(config, { token: 'recuperado' })
+        await expect(refreshAccessToken('user')).resolves.toBe('recuperado')
+    })
+
+    it('renovação concorrente da mesma conta compartilha uma única chamada', async () => {
+        const adapter = vi.fn(async config => okResponse(config, { token: 'novo' }))
+        api.defaults.adapter = adapter
+        await expect(Promise.all([refreshAccessToken('user'), refreshAccessToken('user')])).resolves.toEqual(['novo', 'novo'])
+        expect(adapter).toHaveBeenCalledOnce()
+    })
+
+    it('renova passageiro e motorista simultaneamente sem misturar os tokens', async () => {
+        api.defaults.adapter = vi.fn(async config => okResponse(config, {
+            token: config.url === '/users/refresh' ? 'user-novo' : 'captain-novo',
+        }))
+        await expect(Promise.all([refreshAccessToken('user'), refreshAccessToken('captain')])).resolves.toEqual(['user-novo', 'captain-novo'])
+        expect(localStorage.getItem('token')).toBe('user-novo')
+        expect(localStorage.getItem('captain-token')).toBe('captain-novo')
+        expect(api.defaults.adapter).toHaveBeenCalledTimes(2)
+    })
+
+    it('timeout nativo não prende a fila de refresh nem apaga a sessão', async () => {
+        vi.useFakeTimers()
+        localStorage.setItem('token', 'vencido')
+        api.defaults.adapter = () => new Promise(() => {})
+        const result = refreshAccessToken('user').catch(error => error)
+        await vi.advanceTimersByTimeAsync(12000)
+        expect(await result).toMatchObject({ isConnectivityIssue: true })
+        expect(localStorage.getItem('token')).toBe('vencido')
+        api.defaults.adapter = async config => okResponse(config, { token: 'recuperado' })
+        await expect(refreshAccessToken('user')).resolves.toBe('recuperado')
+    })
+
+    it('refresh realmente inválido encerra apenas a conta afetada', async () => {
+        localStorage.setItem('token', 'vencido')
+        localStorage.setItem('refreshToken', 'revogado')
+        localStorage.setItem('captain-token', 'captain-valido')
+        api.defaults.adapter = async config => { throw http401(config) }
+        await expect(refreshAccessToken('user')).rejects.toMatchObject({ response: { status: 401 } })
+        expect(localStorage.getItem('token')).toBeNull()
+        expect(localStorage.getItem('refreshToken')).toBeNull()
+        expect(localStorage.getItem('captain-token')).toBe('captain-valido')
     })
 })

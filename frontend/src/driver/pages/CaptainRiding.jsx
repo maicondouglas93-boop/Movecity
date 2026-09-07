@@ -23,6 +23,7 @@ import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
 import { formatBRL } from '@/shared/utils/currency'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { useRideMeter } from '@/shared/hooks/useRideMeter'
+import { hasRideId, isStartedRide } from '@/shared/utils/rideIdentity'
 
 const RIDE_PICKUP_STATUSES = ['accepted', 'going_to_pickup', 'arrived', 'waiting_passenger']
 
@@ -55,8 +56,9 @@ const CaptainRiding = () => {
     const { captainRide, captainRideReconciled, setCaptainRide, syncCaptainRide } = useContext(RideContext)
     const [ rideData, setRideData ] = useState(location.state?.ride || captainRide || null)
     const [ rehydrating, setRehydrating ] = useState(true)
+    const [ recoveryAttempt, setRecoveryAttempt ] = useState(0)
     const { socket } = useContext(SocketContext)
-    const meter = useRideMeter(rehydrating ? null : rideData, socket)
+    const meter = useRideMeter(!rehydrating && isStartedRide(rideData) ? rideData : null, socket)
     const liveDistance = meter?.distance ?? rideData?.actualDistance ?? 0
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
@@ -102,7 +104,7 @@ const CaptainRiding = () => {
     }, [])
 
     useEffect(() => {
-        if (rehydrating || !rideData || rideData.status !== 'started') return undefined
+        if (rehydrating || !isStartedRide(rideData)) return undefined
         const base = rideData.startedAt || rideData.updatedAt || rideData.createdAt
         const tick = () => {
             const startMs = base ? new Date(base).getTime() : Date.now()
@@ -116,6 +118,7 @@ const CaptainRiding = () => {
     useEffect(() => {
         let cancelled = false
         let pendingChecked = false
+        setRehydrating(true)
 
         ;(async () => {
             try {
@@ -128,14 +131,14 @@ const CaptainRiding = () => {
                 pendingChecked = true
                 if (cancelled) return
                 // Corrida local válida não espera a rede para voltar a contar.
-                if (rideData) setRehydrating(false)
+                if (isStartedRide(rideData)) setRehydrating(false)
                 // Mesmo quando chegamos aqui via navigate(state), reconcilia com o backend:
                 // um snapshot antigo de accepted/going_to_pickup não pode derrubar uma
                 // corrida que acabou de virar started, e o RideContext ignora regressões.
-                const currentRide = await syncCaptainRide()
+                const currentRide = await withHardTimeout(syncCaptainRide(), 15000)
                 if (cancelled) return
 
-                if (currentRide?.status === 'started') {
+                if (isStartedRide(currentRide)) {
                     pendingChecked = false
                     if (await withHardTimeout(hasPendingFinalization(currentRide._id, { throwOnError: true }), 5000)) {
                         if (!cancelled) navigate('/captain/rides', { replace: true })
@@ -148,7 +151,7 @@ const CaptainRiding = () => {
                     return
                 }
 
-                if (currentRide) {
+                if (hasRideId(currentRide?._id) && currentRide.status !== 'started') {
                     setCaptainRide(currentRide)
                     navigate(currentRide.source === 'driver_initiated' ? '/captain-presential' : '/captain-home', {
                         replace: true,
@@ -168,24 +171,35 @@ const CaptainRiding = () => {
                     navigate('/captain/rides', { replace: true })
                     return
                 }
-                if (rideData) return
-                addToast('Nenhuma corrida em andamento encontrada.', 'info')
-                navigate('/captain-home', { replace: true })
+                // Falha de rede não confirma ausência de corrida. Sem snapshot válido,
+                // exibe recuperação com nova tentativa, nunca controles vazios.
             } finally {
                 if (!cancelled && pendingChecked) setRehydrating(false)
             }
         })()
 
         return () => { cancelled = true }
-        // Roda uma vez ao montar; os demais retornos/reconexões são tratados pelo RideContext.
+        // Montagem e nova tentativa explícita; reconexões também chegam pelo contexto.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [recoveryAttempt])
 
     useEffect(() => {
-        if (!captainRide?._id || captainRide.status !== 'started') return
+        if (!isStartedRide(captainRide)) return
         if (rideData?._id && String(rideData._id) !== String(captainRide._id)) return
-        setRideData(captainRide)
-    }, [captainRide, rideData?._id])
+        let cancelled = false
+        withHardTimeout(hasPendingFinalization(captainRide._id, { throwOnError: true }), 5000)
+            .then(pending => {
+                if (cancelled) return
+                if (pending) navigate('/captain/rides', { replace: true })
+                else {
+                    setRideData(captainRide)
+                    setRehydrating(false)
+                }
+            }).catch(() => {
+                if (!cancelled) navigate('/captain/rides', { replace: true })
+            })
+        return () => { cancelled = true }
+    }, [captainRide, rideData?._id, navigate])
 
     useEffect(() => {
         // 404 confirmado após reconexão é diferente de falha de rede (UNKNOWN).
@@ -209,7 +223,7 @@ const CaptainRiding = () => {
      * offline em IndexedDB, então o bloco inteiro era redundante.
      */
     useEffect(() => {
-        if (rehydrating || !captain?._id || !rideData || rideData.status !== 'started') return;
+        if (rehydrating || !captain?._id || !isStartedRide(rideData)) return;
 
         const handleConnect = () => {
             // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
@@ -372,6 +386,17 @@ const CaptainRiding = () => {
         return (
             <div className='h-screen flex items-center justify-center bg-surface-alt'>
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600"></div>
+            </div>
+        )
+    }
+
+    if (!isStartedRide(rideData)) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center gap-4 p-6 bg-surface-alt text-center">
+                <h1 className="text-lg font-semibold">Não foi possível recuperar a corrida</h1>
+                <p role="status">Os dados da viagem ainda não estão disponíveis. Tente novamente ou consulte as finalizações pendentes em Corridas.</p>
+                <Button onClick={() => setRecoveryAttempt(attempt => attempt + 1)}>Tentar novamente</Button>
+                <Button variant="secondary" onClick={() => navigate('/captain/rides', { replace: true })}>Abrir Corridas</Button>
             </div>
         )
     }

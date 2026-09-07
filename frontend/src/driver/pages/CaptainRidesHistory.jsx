@@ -17,6 +17,7 @@ import { RideContext } from '@/shared/contexts/RideContext';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { useToast } from '@/shared/contexts/ToastContext';
 import { formatBRL } from '@/shared/utils/currency';
+import { hasRideId, hasFinalizationTarget } from '@/shared/utils/rideIdentity';
 
 const ACTIVE_STATUSES = [ 'accepted', 'going_to_pickup', 'arrived', 'waiting_passenger', 'started' ];
 
@@ -196,16 +197,18 @@ const CaptainRidesHistory = () => {
     const serverHistory = (data?.pages || []).flatMap((page) => page?.rides || []);
     const knownRides = [captainRide, apiActive, ...serverHistory].filter(Boolean);
     const ownerId = getSessionOwnerId('captain');
-    const pendingRows = (pendingActions || []).filter(action => (
+    const ownedPendingActions = (pendingActions || []).filter(action => (
         (action.apiBase == null || action.apiBase === (import.meta.env.VITE_BASE_URL || ''))
         && (action.ownerId ? action.ownerId === ownerId
-            : knownRides.some(ride => String(ride._id) === String(action.rideId)))
-    )).map(action => ({
+            : hasRideId(action.rideId) && knownRides.some(ride => ride._id === action.rideId))
+    ));
+    const invalidPendingActions = ownedPendingActions.filter(action => !hasFinalizationTarget(action));
+    const pendingRows = ownedPendingActions.filter(hasFinalizationTarget).map(action => ({
         ...action.rideSnapshot,
         ...knownRides.find(ride => String(ride._id) === String(action.rideId)),
         _id: action.rideId, status: 'pending_sync', lastSyncError: action.lastError,
     }));
-    const pendingIds = new Set(pendingRows.map(ride => String(ride._id)));
+    const pendingIds = new Set(ownedPendingActions.filter(action => hasRideId(action.rideId)).map(action => action.rideId));
     const activeRide = pendingActions
         ? [contextActive, apiActive].find(ride => ride && !pendingIds.has(String(ride._id))) || null
         : null;
@@ -335,12 +338,17 @@ const CaptainRidesHistory = () => {
                 <div className="flex flex-col gap-4">
                     {pendingActions === undefined && <p role="status">Verificando finalizações salvas no aparelho...</p>}
                     {pendingActions === null && <p role="alert">Não foi possível verificar as finalizações salvas. Reabra esta tela antes de continuar uma corrida.</p>}
+                    {invalidPendingActions.length > 0 && (
+                        <Card padding="p-4">
+                            <p role="alert">Há {invalidPendingActions.length} registro(s) local(is) de finalização com identificação incompleta. Os dados foram preservados no aparelho para o suporte. Esse aviso não confirma uma nova corrida nem uma cobrança.</p>
+                        </Card>
+                    )}
                     {pendingRows.length > 0 && (
                         <>
                             <SectionTitle>Aguardando confirmação</SectionTitle>
                             {pendingRows.map(ride => <RideRow key={ride._id} ride={ride} footer={(
                                 <div className="mt-3 text-sm text-ink-600">
-                                    {ride.lastSyncError ? <p role="alert">O servidor não aceitou a finalização: {ride.lastSyncError} Consulte o suporte para resolver esta pendência.</p>
+                                    {ride.lastSyncError ? <p role="alert">Finalização não confirmada. {ride.lastSyncError} Consulte o suporte para resolver esta pendência.</p>
                                         : <p>Pedido salvo no aparelho. Será enviado quando houver conexão. Aguarde a confirmação do servidor.</p>}
                                 </div>
                             )} />)}

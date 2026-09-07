@@ -85,7 +85,7 @@ const ride = {
     user: { fullname: { firstname: 'Cliente' } },
 }
 
-function renderFinishRide({ syncCaptainRide = vi.fn(async () => null) } = {}) {
+function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRide = ride } = {}) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -101,7 +101,7 @@ function renderFinishRide({ syncCaptainRide = vi.fn(async () => null) } = {}) {
                                 setCaptainRide: vi.fn(),
                                 syncCaptainRide,
                             }}>
-                                <FinishRide ride={ride} setRide={vi.fn()} />
+                                <FinishRide ride={currentRide} setRide={vi.fn()} />
                             </RideContext.Provider>
                         </LocationContext.Provider>
                     </SocketContext.Provider>
@@ -112,6 +112,13 @@ function renderFinishRide({ syncCaptainRide = vi.fn(async () => null) } = {}) {
 }
 
 describe('app do motorista sem internet', () => {
+    it.each([null, {}, { status: 'started' }, { ...ride, status: 'finished' }])('não finaliza dados ausentes ou corrida inativa (%j)', async currentRide => {
+        renderFinishRide({ currentRide })
+        expect(screen.getByRole('alert')).toHaveTextContent('Os dados da corrida não estão disponíveis')
+        expect(screen.queryByRole('button', { name: /finalizar|confirmar/i })).toBeNull()
+        expect(state.enqueued).toHaveLength(0)
+        expect(state.hangingCalls).toBe(0)
+    })
     let onLineSpy
 
     beforeEach(() => {

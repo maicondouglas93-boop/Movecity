@@ -4,6 +4,8 @@ import { getAccessToken, getSessionOwnerId } from '@/shared/services/session'
 import { clearSavedDriverRide } from '@/shared/services/driverRecoveryStore'
 import { acknowledgeTrackingPoint } from '@/shared/services/rideTrackingCheckpoint'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
+import { hasFinalizationTarget, MISSING_RIDE_MESSAGE } from '@/shared/utils/rideIdentity'
+import { rideFinalizationError } from '@/shared/utils/rideFinalizationError'
 
 // P1.2 da auditoria de concorrência (2026-08-02): antes, a fila offline reexecutava
 // ações via `socket.emit(action.type, ...)` — mas o backend nunca teve handler de
@@ -113,6 +115,7 @@ async function moveToFailedAndRemove(action, reason) {
 export async function enqueueOfflineAction({ type, rideId, payload, rideSnapshot }) {
     const entry = { type, rideId, payload, timestamp: Date.now(), attempts: 0 }
     if (type !== 'end-ride') return db.offlineActions.add(entry)
+    if (!hasFinalizationTarget(entry)) throw new Error(MISSING_RIDE_MESSAGE)
     const ownerId = getSessionOwnerId('captain')
     entry.ownerId = ownerId
     entry.apiBase = import.meta.env.VITE_BASE_URL || ''
@@ -283,6 +286,10 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
             (action.ownerId && action.ownerId !== getSessionOwnerId('captain'))
             || (action.apiBase != null && action.apiBase !== (import.meta.env.VITE_BASE_URL || ''))
         )) continue
+        // Versões anteriores podiam gravar um toque vindo de uma tela sem corrida.
+        // Preservar o registro para diagnóstico, sem POST inválido, drenagem de GPS
+        // de outras viagens ou bloqueio das próximas finalizações legítimas.
+        if (action.type === 'end-ride' && !hasFinalizationTarget(action)) continue
         if (action.type === 'end-ride' && socket) {
             try {
                 await flushQueuedLocations(socket, { rideId: action.rideId })
@@ -363,7 +370,7 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
             await db.offlineActions.update(action.id, {
                 attempts,
                 ...(isPerformedWork && status === 400 ? {
-                    lastError: err.response?.data?.message || 'O servidor não aceitou os dados da finalização.',
+                    lastError: rideFinalizationError(err, 'O servidor não aceitou os dados da finalização.'),
                 } : {}),
             })
             onRetryLater?.(action, err)

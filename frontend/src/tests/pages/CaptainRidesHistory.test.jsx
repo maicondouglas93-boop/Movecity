@@ -31,6 +31,7 @@ function mount(captainRide = null) {
 }
 async function pending(extra = {}) {
     return db.offlineActions.add({ type: 'end-ride', rideId: 'r1', timestamp: Date.now(), ownerId: 'cap1',
+        payload: { rideId: 'r1' },
         rideSnapshot: { pickup: 'Rua A', source: 'driver_initiated' }, ...extra })
 }
 
@@ -42,6 +43,16 @@ beforeEach(async () => {
 afterEach(async () => { cleanup(); client?.clear(); vi.restoreAllMocks(); await db.delete() })
 
 describe('histórico considera a finalização persistida no aparelho', () => {
+    it('separa registro sem identificação da corrida real finalizada e preserva os dados', async () => {
+        const id = await pending({ rideId: undefined, payload: { finishTimestamp: 123 }, rideSnapshot: {} })
+        api.get.mockResolvedValue({ data: { activeRide: null, rides: [{ ...ride, status: 'finished', finalPrice: 7.59 }] } })
+        mount()
+        expect(await screen.findByRole('alert')).toHaveTextContent('identificação incompleta')
+        expect(await screen.findByText('Finalizada')).toBeInTheDocument()
+        expect(screen.queryByText('Finalização pendente')).toBeNull()
+        expect(screen.queryByText('A confirmar')).toBeNull()
+        expect(await db.offlineActions.get(id)).toMatchObject({ payload: { finishTimestamp: 123 }, rideSnapshot: {} })
+    })
     it('não reabre o started do servidor nem mostra R$ 0 para finalização pendente', async () => {
         await pending(); mount({ ...ride, status: 'finished' })
         expect(await screen.findByText('Finalização pendente')).toBeInTheDocument()

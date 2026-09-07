@@ -15,6 +15,8 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { formatBRL } from '@/shared/utils/currency'
+import { isStartedRide, MISSING_RIDE_MESSAGE } from '@/shared/utils/rideIdentity'
+import { rideFinalizationError } from '@/shared/utils/rideFinalizationError'
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -115,6 +117,9 @@ const FinishRide = (props) => {
 
     const endRideMutation = useMutation({
         mutationFn: async (finishPayload) => {
+            if (!isStartedRide(props.ride) || finishPayload?.rideId !== props.ride._id) {
+                throw new Error(MISSING_RIDE_MESSAGE)
+            }
             // A finalização só pode congelar a distância depois que todos os pontos já
             // coletados desta corrida receberam ack do backend. Se a rede oscilar aqui,
             // o botão falha com segurança e os pontos permanecem para retry.
@@ -165,7 +170,7 @@ const FinishRide = (props) => {
                 await queueFinalizationOffline(finishPayload)
                 return
             }
-            addToast(err.response?.data?.message || 'Não foi possível finalizar a corrida.', 'error')
+            addToast(rideFinalizationError(err), 'error')
             if (typeof navigator === 'undefined' || navigator.onLine) {
                 Sentry.captureException(err, { tags: { issue: 'api_error' } });
             }
@@ -177,6 +182,10 @@ const FinishRide = (props) => {
     // quando o app já sabe que está sem sinal.
     async function queueFinalizationOffline(finishPayload) {
         try {
+            if (!isStartedRide(props.ride) || finishPayload?.rideId !== props.ride._id) {
+                setFinishIssue(MISSING_RIDE_MESSAGE)
+                return
+            }
             const issue = await withHardTimeout(getOfflineFinishIssue(props.ride, finishPayload))
             if (issue) {
                 setPreviewFare(null)
@@ -260,6 +269,10 @@ const FinishRide = (props) => {
     }
 
     async function endRide() {
+        if (!isStartedRide(props.ride)) {
+            setFinishIssue(MISSING_RIDE_MESSAGE)
+            return
+        }
         // O mesmo snapshot segue no POST e na fila se houver falha ou timeout.
         const finishPayload = captureFinishPayload()
         // Sem sinal conhecido: guarda direto, sem tentar a rede. Antes a fila só era
@@ -303,6 +316,10 @@ const FinishRide = (props) => {
     // ou a busca falhou) segue direto pra finalização — ela já valida e recalcula
     // corretamente sozinha, então não travar o motorista numa prévia impossível.
     async function handleFinalizeClick() {
+        if (!isStartedRide(props.ride)) {
+            setFinishIssue(MISSING_RIDE_MESSAGE)
+            return
+        }
         setFinishIssue(null)
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             setPreviewLoading(true)
@@ -411,6 +428,13 @@ const FinishRide = (props) => {
         } finally {
             navigate('/captain-home')
         }
+    }
+
+    if (!ended && !isStartedRide(props.ride)) {
+        return <div className="space-y-4">
+            <p role="alert">{MISSING_RIDE_MESSAGE}</p>
+            <Button onClick={() => navigate('/captain/rides', { replace: true })}>Abrir Corridas</Button>
+        </div>
     }
 
     return (

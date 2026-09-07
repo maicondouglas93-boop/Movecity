@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/shared/services/db'
@@ -21,8 +21,8 @@ vi.mock('@/shared/components/ui/ConnectionBanner', () => ({ default: () => null 
 const ride = { _id: 'r1', status: 'started', source: 'driver_initiated', destinationPending: true,
     pickup: 'Rua A', startedAt: new Date(Date.now() - 180000).toISOString() }
 const socket = { connected: false, on: vi.fn(), off: vi.fn() }
-function mount(syncCaptainRide = vi.fn(async () => undefined)) {
-    render(<MemoryRouter initialEntries={[{ pathname: '/captain-riding', state: { ride } }]}>
+function mount(syncCaptainRide = vi.fn(async () => undefined), initialRide = ride) {
+    render(<MemoryRouter initialEntries={[{ pathname: '/captain-riding', state: { ride: initialRide } }]}>
         <CaptainDataContext.Provider value={{ captain: { _id: 'cap1' } }}>
             <SocketContext.Provider value={{ socket }}>
                 <RideContext.Provider value={{ captainRide: null, setCaptainRide: vi.fn(), syncCaptainRide }}>
@@ -41,6 +41,28 @@ beforeEach(async () => { await db.delete(); await db.open(); vi.clearAllMocks() 
 afterEach(async () => { cleanup(); vi.restoreAllMocks(); await db.delete() })
 
 describe('navegação antiga não ressuscita corrida finalizada offline', () => {
+    it.each([null, {}, { status: 'started' }])('não libera corrida vazia após resposta desconhecida (%j)', async initialRide => {
+        mount(vi.fn(async () => undefined), initialRide)
+        expect(await screen.findByText('Não foi possível recuperar a corrida')).toBeInTheDocument()
+        expect(screen.queryByText('Mapa')).toBeNull()
+        expect(screen.queryByRole('button', { name: /finalizar|concluir/i })).toBeNull()
+        expect(state.meter.mock.calls.every(([candidate]) => candidate === null)).toBe(true)
+        expect(state.notify).not.toHaveBeenCalled()
+    })
+    it('permite tentar recuperar novamente sem inventar ausência de corrida', async () => {
+        const sync = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValueOnce(ride)
+        mount(sync, null)
+        fireEvent.click(await screen.findByRole('button', { name: 'Tentar novamente' }))
+        expect(await screen.findByText('Mapa')).toBeInTheDocument()
+        expect(sync).toHaveBeenCalledTimes(2)
+        expect(state.toast).not.toHaveBeenCalledWith('Nenhuma corrida em andamento encontrada.', 'info')
+    })
+    it('recuperação encontra pendência e abre o histórico sem reativar controles', async () => {
+        await db.offlineActions.add({ type: 'end-ride', rideId: 'r1', timestamp: Date.now() })
+        mount(vi.fn(async () => ride), null)
+        expect(await screen.findByText('Histórico de pendências')).toBeInTheDocument()
+        expect(state.meter.mock.calls.every(([candidate]) => candidate === null)).toBe(true)
+    })
     it('desvia para pendências antes de iniciar contador, GPS ou aviso de nova corrida', async () => {
         await db.offlineActions.add({ type: 'end-ride', rideId: 'r1', timestamp: Date.now() })
         const sync = mount()

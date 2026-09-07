@@ -65,6 +65,39 @@ describe('replay da fila de ações offline', () => {
         api.mockReset()
     })
 
+    it.each([undefined, null, '', ' ', 'undefined', 'null'])('recusa nova finalização sem identificação (%j)', async rideId => {
+        await expect(enqueueOfflineAction({ type: 'end-ride', rideId, payload: { rideId } }))
+            .rejects.toThrow('Os dados da corrida não estão disponíveis')
+        expect(state.actions).toHaveLength(0)
+    })
+
+    it('recusa identificações divergentes no registro e no pedido', async () => {
+        await expect(enqueueOfflineAction({ type: 'end-ride', rideId: 'r1', payload: { rideId: 'r2' } }))
+            .rejects.toThrow()
+        expect(state.actions).toHaveLength(0)
+    })
+
+    it('preserva registro antigo inválido sem enviá-lo nem bloquear finalização legítima', async () => {
+        const invalid = { id: 1, type: 'end-ride', timestamp: 1000, payload: { finishTimestamp: 1000 }, rideSnapshot: {} }
+        state.actions.push(invalid, { id: 2, type: 'end-ride', rideId: 'r2', timestamp: 2000, payload: { rideId: 'r2' } })
+        api.mockResolvedValue({ data: { _id: 'r2', status: 'finished' } })
+        await replayOfflineActions({ socket: socketStub })
+        expect(api).toHaveBeenCalledTimes(1)
+        expect(api.mock.calls[0][0].data.rideId).toBe('r2')
+        expect(state.deleted).toEqual([2])
+        expect(state.failed).toHaveLength(0)
+        expect(state.updated).toHaveLength(0)
+        expect(state.actions[0]).toEqual(invalid)
+    })
+
+    it('guarda mensagem útil para erros de validação retornados em lista', async () => {
+        state.actions.push({ id: 1, type: 'end-ride', rideId: 'r1', timestamp: 1000, payload: { rideId: 'r1' } })
+        api.mockRejectedValue({ response: { status: 400, data: { errors: [{ path: 'rideId', msg: 'Invalid value' }] } } })
+        await replayOfflineActions()
+        expect(state.updated[0].patch.lastError).toContain('identificação da corrida não foi aceita')
+        expect(state.deleted).toHaveLength(0)
+    })
+
     // Achado 01 da auditoria de corrida ativa (2026-08-16): a corrida foi feita, o
     // motorista finalizou sem sinal e um único 400 na sincronização apagava a ação pra
     // sempre — corrida presa em `started`, viagem nunca paga.

@@ -49,3 +49,32 @@ anteriores não são canceladas nem liquidadas automaticamente por esta correç�
 - Arquivo entregue na Área de Trabalho: `MoveCity-Motorista-1.1.44-v46.aab`.
 - SHA-256: `49B44C9B9CE89AD1DF5C61F7A437901E3F78C6879AB2BCCA47DAE74C34F1999D`.
 - Nenhum novo pacote do passageiro: a correção afeta o fluxo do motorista.
+
+## Complemento: imagens das 17:44–17:48 (correção local, não publicada)
+
+O último print exibe a viagem das 14:54 finalizada por R$ 7,59, mas também uma
+pendência sem dados. Não há acesso à fila daquele aparelho para confirmar o ID.
+Foi reproduzido no código o caminho: sem state/contexto, uma resposta UNKNOWN de
+syncCaptainRide liberava a tela; FinishRide recebia um objeto sem _id e podia
+enfileirar um end-ride sem identificação, rejeitado pela validação HTTP 400.
+
+- Tela operacional, contador e aviso de início exigem identificação e status started.
+- Recuperação indisponível mostra nova tentativa e acesso a Corridas, sem inventar
+  ausência de viagem. Timeout limitado; snapshot válido segue funcionando offline.
+- Dados que chegam posteriormente pelo contexto também verificam a fila antes de abrir.
+- Painel de finalização e enqueue rejeitam identificações ausentes ou divergentes.
+- Replay preserva registros antigos inválidos sem enviá-los, drenar GPS ou impedir
+  ações legítimas posteriores. Histórico os mostra como aviso de diagnóstico separado.
+- Erros da lista errors da API são interpretados; o histórico não duplica a mensagem.
+- Nenhuma pendência foi apagada e nenhuma viagem foi cobrada/cancelada no servidor.
+
+Verificação: 50 arquivos / 315 testes aprovados, incluindo 19 novas regressões;
+build driver aprovado. Falta publicação (deploy e novo AAB) e teste físico.
+
+### Pacote de correção 1.1.45 (47)
+
+- AAB Play gerado e assinatura verificada em 07/09, mantendo o certificado anterior.
+- Pacote `br.com.movecity.driver`, API de produção validada, minSDK 23 / targetSDK 36.
+- Área de Trabalho: `MoveCity-Motorista-1.1.45-v47.aab` (10.301.308 bytes).
+- SHA-256: `77380F01028224876923958AD42AAF4DAF5E02D37902A1597D2D1C113D333568`.
+- Publicação web e envio ao teste fechado Alpha em andamento; teste físico pendente.

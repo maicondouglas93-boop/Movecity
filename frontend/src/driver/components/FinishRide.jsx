@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
 import { buildOfflineFinishPreview } from '@/shared/services/offlineRideFare'
+import { getOfflineFinishIssue } from '@/shared/services/offlineFinishValidation'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { getAccessToken } from '@/shared/services/session'
 import * as Sentry from '@sentry/react'
@@ -35,14 +36,15 @@ const isNetworkError = (error) => (
 const FinishRide = (props) => {
     const [ended, setEnded] = useState(false)
     const [paymentConfirmed, setPaymentConfirmed] = useState(false)
-    // Finalização e pagamento têm confirmações independentes. Uma corrida finalizada
-    // offline não tem preço final e não pode seguir para cobrança.
+    // Finalização salva offline pode ter um cálculo local, mas preço e pagamento
+    // ainda não estão confirmados pelo servidor.
     const [pendingFinalizationSync, setPendingFinalizationSync] = useState(false)
     const [pendingPaymentSync, setPendingPaymentSync] = useState(false)
     const [endedRide, setEndedRide] = useState(null)
     // Finalização offline não passa pela mutation, então precisa do próprio estado de
     // carregamento — sem ele o botão não trava e um toque duplo enfileira duas vezes.
     const [queueingOffline, setQueueingOffline] = useState(false)
+    const [finishIssue, setFinishIssue] = useState(null)
     // Auditoria de UX do motorista (2026-08-02, Etapa 7): "o motorista nunca avalia o
     // passageiro, embora reviewApi.js exista no projeto" — o backend já suportava o tipo
     // 'driver_to_passenger' no schema de review, só nunca tinha endpoint pra usá-lo.
@@ -175,10 +177,22 @@ const FinishRide = (props) => {
     // quando o app já sabe que está sem sinal.
     async function queueFinalizationOffline(finishPayload) {
         try {
+            const issue = await withHardTimeout(getOfflineFinishIssue(props.ride, finishPayload))
+            if (issue) {
+                setPreviewFare(null)
+                setFinishIssue(issue.message)
+                return
+            }
             await enqueueOfflineAction({
                 type: 'end-ride',
                 rideId: props.ride._id,
                 payload: finishPayload,
+                // Resumo mínimo para a pendência sobreviver ao fechamento do app.
+                // Não armazena identidade do passageiro nem preço como se fosse confirmado.
+                rideSnapshot: {
+                    pickup: props.ride.pickup, destination: props.ride.destination,
+                    source: props.ride.source, createdAt: props.ride.createdAt,
+                },
             })
             // A prévia não pode impedir a persistência do trabalho já realizado.
             const localPreview = previewFare?.offline && previewFare?.amount != null
@@ -213,14 +227,15 @@ const FinishRide = (props) => {
                 } : {}),
             })
             setPendingFinalizationSync(true)
-            // Dinheiro e Pix são pagos em mãos, e a comissão já é debitada na própria
-            // finalização — não existe nada que o motorista precise confirmar depois.
+            queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
+            // Dinheiro e Pix são pagos em mãos. A liquidação no servidor só ocorre
+            // depois da sincronização; não criar uma ação de pagamento redundante.
             // Sem isto o caminho offline caía na tela "Confirmar Pagamento" e exigia um
             // toque em "Pagamento Recebido" que não decide mais nada.
             if (!isWalletPayment) setPaymentConfirmed(true)
             addToast(
                 localPreview?.amount > 0
-                    ? 'Sem sinal — cobre o valor mostrado. A corrida confirma no sistema quando a internet voltar.'
+                    ? 'Finalização salva no aparelho. O valor calculado ainda aguarda confirmação do servidor.'
                     : 'Finalização pendente. Aguarde o valor final antes de cobrar o passageiro.',
                 'warning',
             )
@@ -230,10 +245,9 @@ const FinishRide = (props) => {
         }
     }
 
-    async function endRide() {
-        // O mesmo snapshot segue no POST e na fila se houver falha ou timeout.
+    function captureFinishPayload() {
         const finishTimestamp = Date.now()
-        const finishPayload = {
+        return {
             rideId: props.ride._id,
             finishTimestamp,
             ...(userLocation?.lat != null && userLocation?.lng != null ? {
@@ -243,6 +257,11 @@ const FinishRide = (props) => {
                 finishLocationTimestamp: userLocation.timestamp ?? finishTimestamp,
             } : {}),
         }
+    }
+
+    async function endRide() {
+        // O mesmo snapshot segue no POST e na fila se houver falha ou timeout.
+        const finishPayload = captureFinishPayload()
         // Sem sinal conhecido: guarda direto, sem tentar a rede. Antes a fila só era
         // alimentada pelo onError, então o app precisava que a requisição FALHASSE pra
         // guardar a finalização — e sem conectividade ela não falha, fica pendurada.
@@ -262,21 +281,33 @@ const FinishRide = (props) => {
         endRideMutation.mutate(finishPayload);
     }
 
+    async function showOfflinePreview() {
+        try {
+            const payload = captureFinishPayload()
+            const issue = await withHardTimeout(getOfflineFinishIssue(props.ride, payload))
+            if (issue) {
+                setPreviewFare(null)
+                setFinishIssue(issue.message)
+                return
+            }
+            const local = await buildOfflineFinishPreview(props.ride)
+            setPreviewFare(local?.amount > 0 ? local : { offline: true, amount: null })
+        } catch {
+            setFinishIssue('Não foi possível verificar os dados locais da corrida. Tente novamente. A corrida não foi encerrada.')
+        }
+    }
+
     // Busca /rides/captain-current, que agora devolve liveFare com a mesma conta
     // (distância já registrada + tempo recalculado na hora) que a finalização real vai
     // usar. Sem liveFare utilizável (corrida presencial sem destino/distância ainda,
     // ou a busca falhou) segue direto pra finalização — ela já valida e recalcula
     // corretamente sozinha, então não travar o motorista numa prévia impossível.
     async function handleFinalizeClick() {
+        setFinishIssue(null)
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             setPreviewLoading(true)
             try {
-                const local = await buildOfflineFinishPreview(props.ride)
-                if (local?.amount > 0) {
-                    setPreviewFare(local)
-                    return
-                }
-                setPreviewFare({ offline: true, amount: null })
+                await showOfflinePreview()
             } finally {
                 setPreviewLoading(false)
             }
@@ -293,14 +324,7 @@ const FinishRide = (props) => {
             }
         } catch (err) {
             console.error('Erro buscando prévia do valor final:', err)
-            const local = await buildOfflineFinishPreview(props.ride)
-            if (local?.amount > 0) {
-                setPreviewFare(local)
-                return
-            }
-            // Sem resposta e sem tarifa local, ainda permite encerrar o serviço. O
-            // servidor calcula depois; a tela proíbe cobrar antes desse valor chegar.
-            setPreviewFare({ offline: true, amount: null })
+            await showOfflinePreview()
         } finally {
             setPreviewLoading(false)
         }
@@ -391,6 +415,7 @@ const FinishRide = (props) => {
 
     return (
         <div>
+            {finishIssue && <p role="alert" className="bg-danger-50 text-danger-600 rounded-panel p-3 mb-3 text-sm">{finishIssue}</p>}
             {!ended ? previewFare ? (
                 <>
                     <h3 className='text-base font-semibold mb-2.5 text-ink-900'>
@@ -398,9 +423,9 @@ const FinishRide = (props) => {
                     </h3>
                     <p className='text-xs text-ink-600 mb-3'>
                         {offlineFareUnavailable
-                            ? 'A corrida será encerrada e guardada no celular. O servidor calculará o valor quando a conexão voltar.'
+                            ? 'O pedido de finalização será guardado no celular e enviado quando a conexão voltar. Aguarde a confirmação no sistema.'
                             : previewFare?.offline
-                            ? 'Sem internet neste destino. Valor calculado no celular com o GPS desta corrida. Cobre este valor agora.'
+                            ? 'Sem internet neste destino. Este valor foi calculado no celular e ainda não foi confirmado pelo servidor.'
                             : 'Valor calculado agora, com a distância e o tempo reais desta corrida.'}
                     </p>
 
@@ -446,7 +471,7 @@ const FinishRide = (props) => {
                         {offlineFareUnavailable
                             ? 'A finalização tentará sincronizar automaticamente quando o sinal voltar.'
                             : previewFare?.offline
-                            ? 'Quando o sinal voltar, o sistema confirma. Pode variar alguns centavos.'
+                            ? 'A finalização será enviada quando o sinal voltar. O servidor validará os dados e o valor poderá ser ajustado.'
                             : 'Pode variar centavos se o app captar mais deslocamento até você confirmar.'}
                     </p>
 
@@ -532,24 +557,22 @@ const FinishRide = (props) => {
                         <i className='ri-time-line text-amber-600 text-5xl'></i>
                     </div>
                     <h3 className='text-xl font-bold text-amber-700 text-center'>
-                        {passengerAmount != null ? 'Cobre o cliente agora' : 'Finalização aguardando conexão'}
+                        Finalização pendente
                     </h3>
                     {passengerAmount != null ? (
                         <>
-                            <p className='text-ink-600 text-center'>Sem sinal no destino. Este valor foi calculado com o GPS do celular. Receba em dinheiro ou Pix.</p>
+                            <p className='text-ink-600 text-center'>Valor calculado no aparelho para pagamento em dinheiro ou Pix. Ainda não confirmado pelo servidor.</p>
                             <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
-                            <p className='text-xs text-ink-500 text-center'>A corrida já está encerrada e confirma sozinha quando a internet voltar. Pode variar alguns centavos.</p>
-                            {/* Sem botão de "pagamento recebido": a comissão já foi debitada na
-                                finalização e o dinheiro vai direto pra mão do motorista, então o
-                                toque não decidia mais nada — só prendia o motorista numa tela a
-                                mais depois de a corrida já ter acabado. */}
+                            <p className='text-xs text-ink-500 text-center'>O pedido de finalização está salvo e será enviado quando a conexão voltar. Acompanhe a confirmação em Corridas. O valor poderá ser ajustado após a validação.</p>
+                            {/* A finalização continua pendente no servidor; não simular
+                                confirmação de pagamento nem débito de comissão nesta tela. */}
                             <Button onClick={() => navigate('/captain-home')}>
                                 Voltar para o início
                             </Button>
                         </>
                     ) : (
                         <>
-                            <p className='text-ink-600 text-center'>A corrida foi guardada para sincronizar. O valor final será calculado pelo servidor quando a internet voltar.</p>
+                            <p className='text-ink-600 text-center'>O pedido de finalização foi guardado para sincronizar. Aguarde a validação e o valor final no sistema.</p>
                             <p className='text-sm font-semibold text-danger-600 text-center'>Não cobre o passageiro até receber o valor final.</p>
                             <Button onClick={() => navigate('/captain-home')}>
                                 Voltar para o início

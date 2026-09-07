@@ -1,4 +1,5 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import api from '@/shared/services/axios';
 import { useNavigate } from 'react-router-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,7 +10,9 @@ import EmptyState from '@/shared/components/ui/EmptyState';
 import StatusBadge from '@/shared/components/ui/StatusBadge';
 import Button from '@/shared/components/ui/Button';
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
-import { getAccessToken } from '@/shared/services/session';
+import { getAccessToken, getSessionOwnerId } from '@/shared/services/session';
+import { db } from '@/shared/services/db';
+import { hasPendingFinalization } from '@/shared/services/offlineQueue';
 import { RideContext } from '@/shared/contexts/RideContext';
 import { SocketContext } from '@/shared/contexts/SocketContext';
 import { useToast } from '@/shared/contexts/ToastContext';
@@ -34,6 +37,7 @@ function formatDateTime(value) {
 }
 
 function formatFare(ride) {
+    if (ride.status === 'pending_sync') return 'A confirmar';
     const value = ride?.finalPrice ?? ride?.fare;
     if (value == null || Number.isNaN(Number(value))) return '—';
     return formatBRL(value);
@@ -42,6 +46,9 @@ function formatFare(ride) {
 // Rótulos amigáveis — status reais do Backend/models/ride.model.js (não inventar enum).
 function getStatusInfo(status) {
     switch (status) {
+        // Estado somente da apresentação; não é enviado como status ao backend.
+        case 'pending_sync':
+            return { text: 'Finalização pendente', tone: 'warning' };
         case 'requested':
             return { text: 'Aguardando aceite', tone: 'warning' };
         case 'accepted':
@@ -146,6 +153,11 @@ const CaptainRidesHistory = () => {
     const { socket } = useContext(SocketContext);
     const { captainRide, setCaptainRide, syncCaptainRide } = useContext(RideContext);
     const [ acceptingId, setAcceptingId ] = useState(null);
+    // undefined = lendo, null = falha. Nenhum dos dois autoriza reabrir uma corrida.
+    const pendingActions = useLiveQuery(
+        () => db.offlineActions.where('type').equals('end-ride').toArray().catch(() => null), [],
+    );
+    const previousPendingIds = useRef([]);
 
     const {
         data,
@@ -180,11 +192,26 @@ const CaptainRidesHistory = () => {
     const apiActive = firstPage?.activeRide && ACTIVE_STATUSES.includes(firstPage.activeRide.status)
         ? firstPage.activeRide
         : null;
-    const activeRide = contextActive || apiActive;
     const pendingOffers = firstPage?.pendingOffers || [];
-    const historyRides = (data?.pages || []).flatMap((page) => page?.rides || []);
+    const serverHistory = (data?.pages || []).flatMap((page) => page?.rides || []);
+    const knownRides = [captainRide, apiActive, ...serverHistory].filter(Boolean);
+    const ownerId = getSessionOwnerId('captain');
+    const pendingRows = (pendingActions || []).filter(action => (
+        (action.apiBase == null || action.apiBase === (import.meta.env.VITE_BASE_URL || ''))
+        && (action.ownerId ? action.ownerId === ownerId
+            : knownRides.some(ride => String(ride._id) === String(action.rideId)))
+    )).map(action => ({
+        ...action.rideSnapshot,
+        ...knownRides.find(ride => String(ride._id) === String(action.rideId)),
+        _id: action.rideId, status: 'pending_sync', lastSyncError: action.lastError,
+    }));
+    const pendingIds = new Set(pendingRows.map(ride => String(ride._id)));
+    const activeRide = pendingActions
+        ? [contextActive, apiActive].find(ride => ride && !pendingIds.has(String(ride._id))) || null
+        : null;
+    const historyRides = serverHistory.filter(ride => !pendingIds.has(String(ride._id)));
 
-    const hasNowSection = Boolean(activeRide) || pendingOffers.length > 0;
+    const hasNowSection = Boolean(activeRide) || pendingOffers.length > 0 || pendingRows.length > 0;
     const isEmpty = !hasNowSection && historyRides.length === 0;
 
     useEffect(() => {
@@ -193,6 +220,16 @@ const CaptainRidesHistory = () => {
         // endpoint existir ou de uma sessão anterior.
         queryClient.invalidateQueries({ queryKey: [ 'captainHistory' ] });
     }, [ syncCaptainRide, queryClient ]);
+
+    useEffect(() => {
+        if (!pendingActions) return;
+        const ids = pendingActions.map(action => action.id);
+        if (previousPendingIds.current.some(id => !ids.includes(id))) {
+            queryClient.invalidateQueries({ queryKey: ['captainHistory'] });
+            syncCaptainRide?.();
+        }
+        previousPendingIds.current = ids;
+    }, [pendingActions, queryClient, syncCaptainRide]);
 
     // Realtime: invalida a lista sem abrir outra conexão Socket.IO.
     useEffect(() => {
@@ -222,14 +259,24 @@ const CaptainRidesHistory = () => {
 
     const handleReturnToRide = async (ride) => {
         if (!ride?._id) return;
-        const synced = await syncCaptainRide?.();
-        const target = (synced && synced._id) ? synced : ride;
-        if (target.status === 'started') {
-            navigate('/captain-riding', { state: { ride: target } });
-            return;
+        try {
+            if (await hasPendingFinalization(ride._id, { throwOnError: true })) {
+                addToast('Esta corrida tem uma finalização pendente. Aguarde a confirmação no histórico.', 'warning');
+                return;
+            }
+            const synced = await syncCaptainRide?.();
+            if (synced === null) return;
+            const target = (synced && synced._id) ? synced : ride;
+            if (await hasPendingFinalization(target._id, { throwOnError: true })) return;
+            if (target.status === 'started') {
+                navigate('/captain-riding', { state: { ride: target } });
+                return;
+            }
+            // Pré-início: a Home reabre o ConfirmRidePopUp a partir do RideContext.
+            navigate('/captain-home');
+        } catch {
+            addToast('Não foi possível verificar a corrida e suas pendências. Tente novamente.', 'warning');
         }
-        // Pré-início: a Home reabre o ConfirmRidePopUp a partir do RideContext.
-        navigate('/captain-home');
     };
 
     const handleAccept = async (ride) => {
@@ -286,6 +333,19 @@ const CaptainRidesHistory = () => {
 
             <div className="flex-1 overflow-y-auto p-4 pb-28">
                 <div className="flex flex-col gap-4">
+                    {pendingActions === undefined && <p role="status">Verificando finalizações salvas no aparelho...</p>}
+                    {pendingActions === null && <p role="alert">Não foi possível verificar as finalizações salvas. Reabra esta tela antes de continuar uma corrida.</p>}
+                    {pendingRows.length > 0 && (
+                        <>
+                            <SectionTitle>Aguardando confirmação</SectionTitle>
+                            {pendingRows.map(ride => <RideRow key={ride._id} ride={ride} footer={(
+                                <div className="mt-3 text-sm text-ink-600">
+                                    {ride.lastSyncError ? <p role="alert">O servidor não aceitou a finalização: {ride.lastSyncError} Consulte o suporte para resolver esta pendência.</p>
+                                        : <p>Pedido salvo no aparelho. Será enviado quando houver conexão. Aguarde a confirmação do servidor.</p>}
+                                </div>
+                            )} />)}
+                        </>
+                    )}
                     {/* Card da ativa sempre no topo quando existir — inclusive se o
                         histórico falhar, pra o motorista conseguir voltar à navegação. */}
                     {activeRide && (

@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
     enqueued: [],
     hangingCalls: 0,
+    validationIssue: null,
     offlinePreview: {
         amount: 11.06,
         actualDistance: 100,
@@ -50,6 +51,9 @@ vi.mock('@/shared/services/offlineQueue', () => ({
 
 vi.mock('@/shared/services/offlineRideFare', () => ({
     buildOfflineFinishPreview: vi.fn(async () => state.offlinePreview),
+}))
+vi.mock('@/shared/services/offlineFinishValidation', () => ({
+    getOfflineFinishIssue: vi.fn(async () => state.validationIssue),
 }))
 
 vi.mock('@/shared/services/session', () => ({ getAccessToken: () => 'token' }))
@@ -113,6 +117,7 @@ describe('app do motorista sem internet', () => {
     beforeEach(() => {
         state.enqueued.length = 0
         state.hangingCalls = 0
+        state.validationIssue = null
         state.offlinePreview = {
             amount: 11.06,
             actualDistance: 100,
@@ -238,9 +243,9 @@ describe('app do motorista sem internet', () => {
         await screen.findByText(/R\$\s*11,06/)
         await user.click(screen.getByRole('button', { name: /confirmar e finalizar/i }))
 
-        // A corrida já está encerrada: a tela diz o valor a cobrar e libera o motorista,
-        // sem um botão de "pagamento recebido" que não decide mais nada.
-        expect(await screen.findByText(/cobre o cliente agora/i)).toBeInTheDocument()
+        // Guardada não significa confirmada. Não prometer liquidação offline.
+        expect(await screen.findByRole('heading', { name: 'Finalização pendente' })).toBeInTheDocument()
+        expect(screen.queryByText(/já está encerrada|confirma sozinha|cobre o cliente agora/i)).toBeNull()
         expect(screen.queryByRole('button', { name: /pagamento recebido/i })).toBeNull()
         expect(screen.getByRole('button', { name: /voltar para o in.cio/i })).toBeInTheDocument()
     })
@@ -275,6 +280,38 @@ describe('app do motorista sem internet', () => {
             expect(state.enqueued.map((a) => a.type)).toEqual(['end-ride'])
         })
         expect(state.enqueued.every((a) => a.rideId === ride._id)).toBe(true)
+    })
+
+    it('teste parado não mostra cobrança, não enfileira e mantém a corrida aberta', async () => {
+        state.validationIssue = { message: 'Distância insuficiente para finalizar. A corrida não foi encerrada.' }
+        renderFinishRide()
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Distância insuficiente')
+        expect(screen.queryByRole('button', { name: /confirmar e finalizar/i })).toBeNull()
+        expect(state.enqueued).toHaveLength(0)
+        expect(state.hangingCalls).toBe(0)
+    })
+
+    it('revalida ao confirmar e não usa uma prévia antiga para ignorar a trava', async () => {
+        renderFinishRide()
+        const user = userEvent.setup()
+        await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await screen.findByRole('button', { name: /confirmar e finalizar/i })
+        state.validationIssue = { message: 'Localização desatualizada. A corrida não foi encerrada.' }
+        await user.click(screen.getByRole('button', { name: /confirmar e finalizar/i }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Localização desatualizada')
+        expect(state.enqueued).toHaveLength(0)
+        expect(screen.queryByRole('heading', { name: 'Finalização pendente' })).toBeNull()
+    })
+
+    it('timeout online também respeita a rejeição da validação offline', async () => {
+        onLineSpy.mockReturnValue(true)
+        api.post.mockRejectedValueOnce({ code: 'ECONNABORTED' })
+        state.validationIssue = { message: 'Distância insuficiente para finalizar.' }
+        renderFinishRide()
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Distância insuficiente')
+        expect(state.enqueued).toHaveLength(0)
     })
 
     it('permite finalizar offline mesmo quando o celular não consegue calcular o valor', async () => {

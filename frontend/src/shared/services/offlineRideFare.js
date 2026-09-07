@@ -3,7 +3,7 @@ import { distanceMeters } from '@/shared/services/maps/navigationMath'
 
 const MIN_SEGMENT_METERS = 5
 
-export function sumTrailMeters(points, { anchor = null, anchorAt = null, startedAt = null, now = Date.now() } = {}) {
+export function measureTrail(points, { anchor = null, anchorAt = null, startedAt = null, now = Date.now() } = {}) {
     const sorted = [...(points || [])]
         .sort((a, b) => (Number(a.capturedAt) || 0) - (Number(b.capturedAt) || 0))
 
@@ -33,7 +33,11 @@ export function sumTrailMeters(points, { anchor = null, anchorAt = null, started
         previous = { lat, lng }
         previousAt = at
     }
-    return total
+    return { meters: total, lastLocation: previous, lastLocationAt: previousAt }
+}
+
+export function sumTrailMeters(points, options) {
+    return measureTrail(points, options).meters
 }
 
 function optionalsTotal(ride) {

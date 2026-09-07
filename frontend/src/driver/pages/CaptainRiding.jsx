@@ -12,7 +12,7 @@ import { vehicleImages, vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useToast } from '@/shared/contexts/ToastContext'
 import RideChat from '@/shared/components/RideChat'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
+import { flushQueuedLocations, replayOfflineActions, hasPendingFinalization } from '@/shared/services/offlineQueue'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { formatManeuverDistance, maneuverIcon } from '@/shared/services/maps/navigationMath'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
@@ -54,9 +54,9 @@ const CaptainRiding = () => {
     // usa como segunda fonte imediata antes de cair no fetch próprio abaixo.
     const { captainRide, captainRideReconciled, setCaptainRide, syncCaptainRide } = useContext(RideContext)
     const [ rideData, setRideData ] = useState(location.state?.ride || captainRide || null)
-    const [ rehydrating, setRehydrating ] = useState(!(location.state?.ride || captainRide))
+    const [ rehydrating, setRehydrating ] = useState(true)
     const { socket } = useContext(SocketContext)
-    const meter = useRideMeter(rideData, socket)
+    const meter = useRideMeter(rehydrating ? null : rideData, socket)
     const liveDistance = meter?.distance ?? rideData?.actualDistance ?? 0
     const navigate = useNavigate()
     const { captain } = useContext(CaptainDataContext)
@@ -102,7 +102,7 @@ const CaptainRiding = () => {
     }, [])
 
     useEffect(() => {
-        if (!rideData || rideData.status !== 'started') return undefined
+        if (rehydrating || !rideData || rideData.status !== 'started') return undefined
         const base = rideData.startedAt || rideData.updatedAt || rideData.createdAt
         const tick = () => {
             const startMs = base ? new Date(base).getTime() : Date.now()
@@ -111,13 +111,24 @@ const CaptainRiding = () => {
         tick()
         const id = setInterval(tick, 1000)
         return () => clearInterval(id)
-    }, [rideData?._id, rideData?.status, rideData?.startedAt, rideData?.updatedAt, rideData?.createdAt])
+    }, [rehydrating, rideData?._id, rideData?.status, rideData?.startedAt, rideData?.updatedAt, rideData?.createdAt])
 
     useEffect(() => {
         let cancelled = false
+        let pendingChecked = false
 
         ;(async () => {
             try {
+                // O state do navegador pode conter uma corrida anterior ao toque offline.
+                // Não religar o taxímetro nem os controles a partir desse snapshot.
+                if (await withHardTimeout(hasPendingFinalization(rideData?._id, { throwOnError: true }), 5000)) {
+                    if (!cancelled) navigate('/captain/rides', { replace: true })
+                    return
+                }
+                pendingChecked = true
+                if (cancelled) return
+                // Corrida local válida não espera a rede para voltar a contar.
+                if (rideData) setRehydrating(false)
                 // Mesmo quando chegamos aqui via navigate(state), reconcilia com o backend:
                 // um snapshot antigo de accepted/going_to_pickup não pode derrubar uma
                 // corrida que acabou de virar started, e o RideContext ignora regressões.
@@ -125,6 +136,13 @@ const CaptainRiding = () => {
                 if (cancelled) return
 
                 if (currentRide?.status === 'started') {
+                    pendingChecked = false
+                    if (await withHardTimeout(hasPendingFinalization(currentRide._id, { throwOnError: true }), 5000)) {
+                        if (!cancelled) navigate('/captain/rides', { replace: true })
+                        return
+                    }
+                    pendingChecked = true
+                    if (cancelled) return
                     setRideData(currentRide)
                     setCaptainRide(currentRide)
                     return
@@ -144,11 +162,17 @@ const CaptainRiding = () => {
                     navigate('/captain-home', { replace: true })
                 }
             } catch {
-                if (cancelled || rideData) return
+                if (cancelled) return
+                if (!pendingChecked) {
+                    addToast('Não foi possível verificar a finalização salva. Consulte a tela Corridas.', 'warning')
+                    navigate('/captain/rides', { replace: true })
+                    return
+                }
+                if (rideData) return
                 addToast('Nenhuma corrida em andamento encontrada.', 'info')
                 navigate('/captain-home', { replace: true })
             } finally {
-                if (!cancelled) setRehydrating(false)
+                if (!cancelled && pendingChecked) setRehydrating(false)
             }
         })()
 
@@ -185,7 +209,7 @@ const CaptainRiding = () => {
      * offline em IndexedDB, então o bloco inteiro era redundante.
      */
     useEffect(() => {
-        if (!captain?._id || !rideData) return;
+        if (rehydrating || !captain?._id || !rideData || rideData.status !== 'started') return;
 
         const handleConnect = () => {
             // Auditoria PWA (2026-08-03, C2) + auditoria de regressão de push
@@ -220,7 +244,7 @@ const CaptainRiding = () => {
         return () => {
             socket.off('connect', handleConnect)
         }
-    }, [captain?._id, rideData?._id])  // stable deps only
+    }, [rehydrating, captain?._id, rideData?._id, rideData?.status])  // stable deps only
 
     /* ── Payment / cancel socket events ── */
     useEffect(() => {

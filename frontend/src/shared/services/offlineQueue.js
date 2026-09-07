@@ -110,10 +110,13 @@ async function moveToFailedAndRemove(action, reason) {
     await db.offlineActions.delete(action.id)
 }
 
-export async function enqueueOfflineAction({ type, rideId, payload }) {
+export async function enqueueOfflineAction({ type, rideId, payload, rideSnapshot }) {
     const entry = { type, rideId, payload, timestamp: Date.now(), attempts: 0 }
     if (type !== 'end-ride') return db.offlineActions.add(entry)
     const ownerId = getSessionOwnerId('captain')
+    entry.ownerId = ownerId
+    entry.apiBase = import.meta.env.VITE_BASE_URL || ''
+    if (rideSnapshot) entry.rideSnapshot = rideSnapshot
 
     // Finalizar e tocar de novo, ou receber simultaneamente o fallback do timeout e o
     // evento offline, nunca pode criar duas finalizações para a mesma corrida. O lock
@@ -164,7 +167,7 @@ export async function enqueueOfflineAction({ type, rideId, payload }) {
  * para a corrida, o estado do servidor está sabidamente atrasado e não deve reabrir
  * nada na tela.
  */
-export async function hasPendingFinalization(rideId) {
+export async function hasPendingFinalization(rideId, { throwOnError = false } = {}) {
     if (!rideId) return false
     try {
         // Compara com String() dos dois lados: um _id que chegue como ObjectId/número
@@ -177,6 +180,7 @@ export async function hasPendingFinalization(rideId) {
         ))
     } catch (err) {
         console.error('[OfflineQueue] falha ao consultar finalização pendente:', err)
+        if (throwOnError) throw err
         return false
     }
 }
@@ -275,6 +279,10 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
     const actions = await db.offlineActions.orderBy('timestamp').toArray()
 
     for (const action of actions) {
+        if (action.type === 'end-ride' && (
+            (action.ownerId && action.ownerId !== getSessionOwnerId('captain'))
+            || (action.apiBase != null && action.apiBase !== (import.meta.env.VITE_BASE_URL || ''))
+        )) continue
         if (action.type === 'end-ride' && socket) {
             try {
                 await flushQueuedLocations(socket, { rideId: action.rideId })
@@ -352,7 +360,12 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
                 continue
             }
 
-            await db.offlineActions.update(action.id, { attempts })
+            await db.offlineActions.update(action.id, {
+                attempts,
+                ...(isPerformedWork && status === 400 ? {
+                    lastError: err.response?.data?.message || 'O servidor não aceitou os dados da finalização.',
+                } : {}),
+            })
             onRetryLater?.(action, err)
             break // preserva a ordem — não tenta as próximas ações nesta rodada
         }

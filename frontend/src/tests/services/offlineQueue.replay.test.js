@@ -77,7 +77,7 @@ describe('replay da fila de ações offline', () => {
 
         expect(state.failed).toHaveLength(0)
         expect(state.deleted).toHaveLength(0)
-        expect(state.updated).toEqual([{ id: 1, patch: { attempts: 1 } }])
+        expect(state.updated).toEqual([{ id: 1, patch: { attempts: 1, lastError: 'Localização desatualizada.' } }])
         expect(retried).toEqual(['end-ride'])
     })
 

@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test'
 // incluir entradas de teste no build publicado e sem usar sessão do motorista.
 export default defineConfig({
     testDir: './e2e-driver-shell',
-    testMatch: ['driverShell.spec.js', 'driverHome.spec.js'],
+    testMatch: ['driverShell.spec.js', 'driverHome.spec.js', 'driverTrip.spec.js', 'driverEarnings.spec.js', 'driverAccount.spec.js', 'driverParcels.spec.js'],
     workers: 1,
     reporter: 'list',
     use: { baseURL: 'http://127.0.0.1:5181', browserName: 'chromium', headless: true },

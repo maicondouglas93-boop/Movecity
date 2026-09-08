@@ -124,7 +124,7 @@ export const PwaUpdateProvider = ({ children }) => {
 const NOOP_PWA_UPDATE = {
     needRefresh: false,
     updateServiceWorker: async () => {},
-    checkForUpdate: async () => ({ updated: false, reason: 'disabled' }),
+    checkForUpdate: async () => false,
 }
 
 export const usePwaUpdate = () => useContext(PwaUpdateContext) ?? NOOP_PWA_UPDATE

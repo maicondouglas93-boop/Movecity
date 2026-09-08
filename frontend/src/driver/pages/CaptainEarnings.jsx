@@ -1,182 +1,99 @@
-import React, { useContext, useState } from 'react';
-import api from '@/shared/services/axios';
-import { useQuery } from '@tanstack/react-query';
-import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
-import PageHeader from '@/shared/components/ui/PageHeader';
-import Card from '@/shared/components/ui/Card';
-import EmptyState from '@/shared/components/ui/EmptyState';
-import { RideCardSkeleton } from '@/shared/components/ui/Skeleton';
-import { getAccessToken } from '@/shared/services/session';
-import { formatBRL } from '@/shared/utils/currency';
+import { useContext, useState } from 'react'
+import PropTypes from 'prop-types'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
+import PageHeader from '@/shared/components/ui/PageHeader'
+import Card from '@/shared/components/ui/Card'
+import EmptyState from '@/shared/components/ui/EmptyState'
+import { RideCardSkeleton } from '@/shared/components/ui/Skeleton'
+import { formatBRL } from '@/shared/utils/currency'
+import { EARNINGS_RANGES, fetchDriverEarnings, isEarningsNumber } from '@/driver/services/driverEarnings'
 
-const RANGES = [
-    { value: 'day', label: 'Hoje' },
-    { value: 'week', label: 'Semana' },
-    { value: 'month', label: 'Mês' },
-];
+const money = value => isEarningsNumber(value) ? formatBRL(value) : 'Indisponível'
+const updatedLabel = timestamp => timestamp > 0
+    ? new Date(timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null
 
-const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL'
-}).format(Number(amount) || 0);
-
-const CaptainEarnings = () => {
-    const { captain } = useContext(CaptainDataContext);
-    // Auditoria de UX do motorista (2026-08-02, Etapa 8): a tela só mostrava o total
-    // acumulado vitalício (captain.earnings), sem nenhum recorte temporal nem detalhe
-    // por corrida — "Quanto ganhei hoje/nesta semana/neste mês?" não tinha resposta.
-    const [range, setRange] = useState('day');
-
-    const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-        queryKey: ['captainEarnings', range],
-        queryFn: async () => {
-            const token = getAccessToken('captain');
-            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=${range}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            return res.data;
-        }
-    });
-
-    // Auditoria do app do motorista (2026-08-11, P1): "Ganhos Totais" lia
-    // captain.earnings — bruto (sem descontar comissão), nunca bate com a soma dos
-    // cards de período (líquidos) logo abaixo, na mesma tela. Busca a mesma
-    // metodologia (getEarningsBreakdown, só corridas, líquido) com range='all'.
-    const { data: lifetimeData, isLoading: lifetimeLoading } = useQuery({
-        queryKey: ['captainEarnings', 'all'],
-        queryFn: async () => {
-            const token = getAccessToken('captain');
-            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/earnings?range=all`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            return res.data;
-        }
-    });
-
-    return (
-        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
-            <PageHeader title="Ganhos" className="shadow-raised" />
-
-            <div className="flex-1 overflow-y-auto p-4 pb-6">
-                <div className="bg-ink-900 text-white rounded-panel p-6 shadow-floating mb-6 text-center">
-                    <p className="text-white/70 text-sm mb-1">Ganhos Totais</p>
-                    <h2 className="text-4xl font-bold mb-2">
-                        {lifetimeLoading ? '...' : formatBRL(lifetimeData?.totalEarnings)}
-                    </h2>
-                    <p className="text-white/50 text-xs">Total líquido acumulado (mesmo cálculo dos períodos abaixo)</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <Card shadow="raised" padding="p-5" className="text-center">
-                        <i className="ri-route-line text-2xl text-blue-500 mb-2 block"></i>
-                        <h3 className="text-xl font-bold text-ink-900">{captain?.totalRides || 0}</h3>
-                        <p className="text-xs text-ink-600">Corridas Concluídas</p>
-                    </Card>
-                    <Card shadow="raised" padding="p-5" className="text-center">
-                        <i className="ri-star-fill text-2xl text-yellow-500 mb-2 block"></i>
-                        <h3 className="text-xl font-bold text-ink-900">{captain?.rating ? captain.rating.toFixed(1) : '—'}</h3>
-                        <p className="text-xs text-ink-600">{captain?.rating ? 'Avaliação Média' : 'Sem avaliações ainda'}</p>
-                    </Card>
-                </div>
-
-                {/* Recorte temporal */}
-                <div className="flex bg-surface-alt rounded-panel p-1 mb-4 gap-1">
-                    {RANGES.map(r => (
-                        <button
-                            key={r.value}
-                            type="button"
-                            onClick={() => setRange(r.value)}
-                            className={`flex-1 py-2 rounded-panel text-sm font-semibold transition-colors ${
-                                range === r.value ? 'bg-surface text-ink-900 shadow-raised' : 'text-ink-600'
-                            }`}
-                        >
-                            {r.label}
-                        </button>
-                    ))}
-                </div>
-
-                <Card shadow="raised" padding="p-5" className="mb-4">
-                    <p className="text-xs text-ink-600 font-bold uppercase tracking-wider mb-1">
-                        Ganhos líquidos {RANGES.find(r => r.value === range)?.label.toLowerCase()}
-                    </p>
-                    <h2 className="text-3xl font-black text-ink-900 tracking-tight">
-                        {isLoading ? '...' : formatBRL(data?.totalEarnings)}
-                    </h2>
-                    <p className="text-xs text-ink-600 mt-1">
-                        {isLoading ? '...' : `${data?.totalRides || 0} corrida${data?.totalRides === 1 ? '' : 's'}`}
-                    </p>
-                </Card>
-
-                <h3 className="text-sm font-bold text-ink-900 mb-3">Corridas do período</h3>
-                {isLoading ? (
-                    <div className="flex flex-col gap-3 mb-6">
-                        <RideCardSkeleton />
-                        <RideCardSkeleton />
-                    </div>
-                ) : isError ? (
-                    <div className="mb-6">
-                        <EmptyState
-                            variant="error"
-                            icon="ri-wifi-off-line"
-                            title="Não foi possível carregar seus ganhos"
-                            description="Verifique sua conexão e tente novamente."
-                            actionLabel={isRefetching ? 'Tentando...' : 'Tentar de novo'}
-                            onAction={refetch}
-                        />
-                    </div>
-                ) : !data?.rides?.length ? (
-                    <div className="mb-6">
-                        <EmptyState
-                            icon="ri-car-line"
-                            title="Nenhuma corrida no período"
-                            description="Corridas finalizadas neste recorte aparecem aqui, com o valor líquido de cada uma."
-                        />
-                    </div>
-                ) : (
-                    <div className="flex flex-col gap-3 mb-6">
-                        {data.rides.map(ride => (
-                            <Card key={ride.rideId} shadow="raised" padding="p-4">
-                                <div className="flex justify-between items-start mb-2">
-                                    <div className="min-w-0 flex-1">
-                                        <p className="text-sm font-medium text-ink-900 truncate">{ride.pickup?.split(',')[0]}</p>
-                                        <p className="text-xs text-ink-600 truncate">→ {ride.destination?.split(',')[0]}</p>
-                                    </div>
-                                    <span className="text-xs text-ink-600 flex-shrink-0 ml-2">
-                                        {new Date(ride.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center text-xs border-t border-line pt-2 mt-1">
-                                    <span className="text-ink-600">Você recebeu</span>
-                                    <span className="font-bold text-brand-600">{formatBRL(ride.driverAmount ?? ride.netEarnings)}</span>
-                                </div>
-                            </Card>
-                        ))}
-                    </div>
-                )}
-
-                <Card shadow="raised" padding="p-5">
-                    <h3 className="font-semibold text-ink-900 mb-4">Desempenho</h3>
-                    <div className="space-y-4">
-                        {/* Auditoria de UX do motorista (2026-08-02): "Taxa de Aceitação" foi
-                            removida daqui — o backend nunca calcula esse número (fica sempre
-                            no valor padrão do schema, 100%, para todo motorista, sempre).
-                            Mostrar isso seria fabricar um dado, não exibir um dado real. O
-                            cálculo de verdade fica para uma etapa futura (fora deste escopo). */}
-                        <div>
-                            <div className="flex justify-between text-sm mb-1">
-                                <span className="text-ink-600">Taxa de Cancelamento</span>
-                                <span className="font-medium text-danger-500">{captain?.cancellationRate || 0}%</span>
-                            </div>
-                            <div className="w-full bg-surface-alt rounded-full h-2">
-                                <div className="bg-danger-500 h-2 rounded-full" style={{ width: `${captain?.cancellationRate || 0}%` }}></div>
-                            </div>
-                        </div>
-                    </div>
-                </Card>
-            </div>
-
+function EarningsSummary({ query, title, retryLabel }) {
+    const { data, isPending, isError, isFetching, isPaused, dataUpdatedAt, refetch } = query
+    const waiting = isPending && !data
+    return <section aria-label={title} className="rounded-panel border border-line bg-surface p-5 mb-4">
+        <h2 className="font-semibold text-ink-900">{title}</h2>
+        <p className="mt-2 text-sm text-ink-600">Líquido das corridas finalizadas</p>
+        <p className={`${isEarningsNumber(data?.totalEarnings) ? 'text-3xl' : 'text-xl'} font-bold text-ink-900 break-words`} aria-live="off">
+            {waiting && !isPaused ? 'Carregando...' : money(data?.totalEarnings)}
+        </p>
+        {data && <>
+            <p className="text-sm text-ink-600 mt-1">{data.totalRides} {data.totalRides === 1 ? 'corrida' : 'corridas'}</p>
+            <p className="mt-3 text-xs text-ink-600">Última consulta válida: {updatedLabel(dataUpdatedAt)}</p>
+        </>}
+        <div role="status" className="mt-3 text-sm text-ink-600">
+            {isError ? (data
+                ? 'Não foi possível atualizar. Exibindo a última consulta válida deste período.'
+                : 'Não foi possível consultar estes ganhos. O valor está indisponível, não zerado.')
+                : isPaused ? 'Sem conexão para consultar. Os dados exibidos podem estar desatualizados.'
+                    : isFetching && data ? 'Atualizando dados...' : ''}
         </div>
-    );
-};
+        <button type="button" onClick={() => refetch()} disabled={isFetching || isPaused}
+            className="mt-2 min-h-[44px] rounded-panel border border-line px-4 font-semibold text-brand-700 disabled:opacity-50">
+            {isFetching ? 'Consultando...' : retryLabel}
+        </button>
+    </section>
+}
+EarningsSummary.propTypes = { query: PropTypes.object.isRequired, title: PropTypes.string.isRequired, retryLabel: PropTypes.string.isRequired }
 
-export default CaptainEarnings;
+export default function CaptainEarnings() {
+    const { captain } = useContext(CaptainDataContext)
+    const captainId = captain?._id
+    const [range, setRange] = useState('day')
+    const [showLifetime, setShowLifetime] = useState(false)
+    const period = EARNINGS_RANGES.find(item => item.value === range)
+    const earnings = useQuery({
+        queryKey: ['captainEarnings', captainId, range],
+        queryFn: ({ signal }) => fetchDriverEarnings(range, signal),
+        enabled: Boolean(captainId), retry: false,
+    })
+    const lifetime = useQuery({
+        queryKey: ['captainEarnings', captainId, 'all'],
+        queryFn: ({ signal }) => fetchDriverEarnings('all', signal),
+        enabled: Boolean(captainId) && showLifetime, retry: false,
+    })
+    const { data } = earnings
+
+    return <div className="h-full min-h-0 bg-surface-alt flex flex-col">
+        <PageHeader title="Ganhos" className="shadow-raised" />
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 pb-6">
+            {!captainId ? <p role="status">Aguardando a identificação da sua conta...</p> : <>
+                <div role="group" aria-label="Período dos ganhos" className="flex gap-2 mb-4">
+                    {EARNINGS_RANGES.map(item => <button key={item.value} type="button"
+                        aria-pressed={range === item.value} onClick={() => setRange(item.value)}
+                        className={`flex-1 min-h-[44px] rounded-panel px-2 text-sm font-semibold ${range === item.value ? 'bg-brand-700 text-white' : 'bg-surface text-ink-700 border border-line'}`}>
+                        {item.label}
+                    </button>)}
+                </div>
+                <EarningsSummary query={earnings} title={period.title} retryLabel="Atualizar período" />
+                <p className="mb-5 text-sm text-ink-600">Estes ganhos incluem somente corridas, já descontada a comissão. Não representam saldo disponível para saque. <Link className="underline text-brand-700" to="/captain-wallet">Ver carteira</Link></p>
+
+                <h2 className="font-semibold text-ink-900 mb-3">Corridas do período</h2>
+                {earnings.isPending && !earnings.isPaused ? <RideCardSkeleton />
+                    : !data ? <p className="text-sm text-ink-600 mb-5">A lista aparecerá quando a consulta estiver disponível.</p>
+                        : data.rides.length === 0 ? <EmptyState icon="ri-car-line" title="Nenhuma corrida no período"
+                            description="Corridas finalizadas neste recorte aparecem aqui com o valor líquido." />
+                            : <div className="space-y-3 mb-5">{data.rides.map(ride => <Card key={ride.rideId} shadow="raised" padding="p-4">
+                                <p className="text-sm font-medium text-ink-900 break-words">{ride.pickup || 'Origem indisponível'}</p>
+                                <p className="text-sm text-ink-600 break-words">→ {ride.destination || 'Destino indisponível'}</p>
+                                <p className="text-xs text-ink-600 mt-2">{Number.isFinite(Date.parse(ride.date)) ? new Date(ride.date).toLocaleDateString('pt-BR') : 'Data indisponível'}</p>
+                                <div className="flex flex-wrap justify-between gap-2 text-sm border-t border-line pt-2 mt-2">
+                                    <span>Ganho líquido</span><span className="font-semibold text-brand-700">{money(ride.driverAmount ?? ride.netEarnings)}</span>
+                                </div>
+                            </Card>)}</div>}
+
+                <details className="mt-5 rounded-panel border border-line bg-surface p-4" onToggle={event => setShowLifetime(event.currentTarget.open)}>
+                    <summary className="min-h-[44px] cursor-pointer font-semibold text-ink-900">Ganhos acumulados</summary>
+                    {showLifetime && <EarningsSummary query={lifetime} title="Total líquido acumulado" retryLabel="Atualizar acumulado" />}
+                </details>
+            </>}
+        </main>
+    </div>
+}

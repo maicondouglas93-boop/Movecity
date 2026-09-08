@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { getAccessToken, getRefreshToken, getSessionOwnerId, onSessionChanged, LOGIN_ROUTE } from '@/shared/services/session'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
@@ -184,6 +184,7 @@ export default function SessionGuard({ kind, onAuthenticated, children, readOffl
             <Button onClick={() => retryRef.current()} loading={busy} className="max-w-xs">
                 {busy ? 'Conectando...' : 'Tentar de novo'}
             </Button>
+            {kind === 'captain' && <Link to="/captain-help?category=access" className="min-h-[44px] flex items-center underline text-brand-700">Preciso de ajuda para entrar</Link>}
         </div>
     )
 }

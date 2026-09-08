@@ -87,6 +87,35 @@ describe('taxímetro sem conexão', () => {
         await tick(60000)
         expect(result.current).toMatchObject({ amount: 8, unavailable: true })
     })
+    it('marca leitura local com erro, preserva último valor e recupera depois', async () => {
+        const { result } = renderHook(() => useRideMeter(ride, socket))
+        await tick()
+        const amount = result.current.amount
+        state.read.mockRejectedValueOnce(new Error('Storage unavailable'))
+        await tick(1000)
+        expect(result.current).toMatchObject({ amount, calculationError: true, local: true })
+        await tick(1000)
+        expect(result.current.calculationError).toBe(false)
+        expect(result.current.amount).toBeGreaterThan(amount)
+    })
+    it('primeira leitura com erro preserva a confirmação anterior sem fingir cálculo local', async () => {
+        state.read.mockRejectedValueOnce(new Error('Storage unavailable'))
+        const { result } = renderHook(() => useRideMeter(ride, socket))
+        await tick()
+        expect(result.current).toMatchObject({ amount: 8, calculationError: true })
+    })
+    it('erro atrasado de leitura não substitui uma nova confirmação', async () => {
+        let reject
+        state.read.mockReturnValueOnce(new Promise((_, no) => { reject = no }))
+        const { result } = renderHook(() => useRideMeter(ride, socket))
+        await tick()
+        await act(async () => listeners.get('captain-location-updated')({ rideId: ride._id, actualDistance: 1300, liveFare: { amount: 9.6 } }))
+        await act(async () => reject(new Error('late read')))
+        expect(result.current?.calculationError).not.toBe(true)
+        await tick(1000)
+        expect(result.current.rideId).toBe(ride._id)
+        expect(result.current.calculationError).toBe(false)
+    })
     it('encerra o contador ao finalizar a corrida', async () => {
         const { result, rerender } = renderHook(({ trip }) => useRideMeter(trip, socket), { initialProps: { trip: ride } })
         await tick()

@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react'
+import { useState, useContext, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
@@ -408,6 +408,14 @@ const FinishRide = (props) => {
             navigate('/captain-home')
         }
     }
+
+    const onBusyChange = props.onBusyChange
+    const onFinishedChange = props.onFinishedChange
+    useEffect(() => { onFinishedChange?.(ended) }, [ended, onFinishedChange])
+    useEffect(() => {
+        onBusyChange?.(previewLoading || queueingOffline || endRideMutation.isPending || confirmPaymentMutation.isPending || submittingRating)
+    }, [previewLoading, queueingOffline, endRideMutation.isPending, confirmPaymentMutation.isPending, submittingRating, onBusyChange])
+    useEffect(() => () => onBusyChange?.(false), [onBusyChange])
 
     if (!ended && !isStartedRide(props.ride)) {
         return <div className="space-y-4">

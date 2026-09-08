@@ -1,5 +1,6 @@
-import React, { useContext, useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useContext, useEffect, useState } from 'react'
+import PropTypes from 'prop-types'
+import { useNavigate } from 'react-router-dom'
 import LiveTracking from '@/shared/components/LiveTracking'
 import RideChat from '@/shared/components/RideChat'
 import { SocketContext } from '@/shared/contexts/SocketContext'
@@ -16,16 +17,13 @@ import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { openWhatsApp } from '@/shared/utils/whatsapp'
 import { buildGoogleMapsUrl } from '@/shared/utils/googleMaps'
 import { formatBRL } from '@/shared/utils/currency'
+import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
+import useParcelOperation, { PARCEL_NEXT, validDriverParcel } from '@/driver/hooks/useParcelOperation'
+import DriverOperationalDialog from '@/driver/components/DriverOperationalDialog'
 
 const PARCEL_PICKUP_STATUSES = ['provider_accepted', 'going_to_pickup', 'arrived_pickup']
 
-const NEXT_STATUS = {
-  provider_accepted: 'going_to_pickup',
-  going_to_pickup: 'arrived_pickup',
-  arrived_pickup: 'collected',
-  collected: 'in_transit',
-  in_transit: 'arrived_destination',
-}
+const NEXT_STATUS = PARCEL_NEXT
 
 const NEXT_LABEL = {
   provider_accepted: 'Indo para retirada',
@@ -45,188 +43,70 @@ const CHAT_STATUSES = [
 ]
 
 const CaptainParcelRiding = () => {
-  const { state } = useLocation()
+  const { captain } = useContext(CaptainDataContext)
+  if (!captain?._id) return <p role="status" className="p-6">Aguardando a identificação da sua conta...</p>
+  return <ParcelJourney key={captain._id} owner={captain._id} />
+}
+
+function ParcelJourney({ owner }) {
   const navigate = useNavigate()
   const { socket } = useContext(SocketContext)
-  const { captainParcel, setCaptainParcel, syncCaptainParcel } = useContext(RideContext)
+  const { captainParcel, captainParcelOwnerId, setCaptainParcel, syncCaptainParcel } = useContext(RideContext)
   const { addToast } = useToast()
-  const [parcel, setParcel] = useState(state?.parcel || captainParcel || null)
-  // Auditoria do app do motorista (2026-08-11, P0): sem isto, aceitar a encomenda pelo
-  // botão de ação da notificação nativa Android (o caminho mais comum com o app em
-  // segundo plano) cai direto em /captain-parcel sem location.state — a tela via
-  // `parcel === null` e mostrava "Nenhuma encomenda ativa" imediatamente, antes mesmo da
-  // busca ao servidor terminar (ou travada nesse estado se ela falhasse). Mesmo padrão
-  // já usado e correto em CaptainRiding.jsx (rehydrating + fallback só depois de
-  // sincronizar de verdade com o backend).
-  const [rehydrating, setRehydrating] = useState(!(state?.parcel || captainParcel))
+  const { parcel, busy, confirmed, error, refresh, run } = useParcelOperation({
+    owner, initial: captainParcelOwnerId === owner ? captainParcel : null, sync: syncCaptainParcel, publish: setCaptainParcel,
+    leave: () => navigate('/captain-home', { replace: true }), socket,
+  })
   const [pin, setPin] = useState('')
-  const [loading, setLoading] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
-  const [step, setStep] = useState('active') // active | payment | rating
   const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [ratingValue, setRatingValue] = useState(0)
-  const [submittingRating, setSubmittingRating] = useState(false)
+  useEffect(() => { setPin(''); setRatingValue(0); setIsChatOpen(false) }, [parcel?._id, parcel?.status])
+  const loading = busy || !confirmed
+  const submittingRating = loading
+  const step = parcel?.status === 'finished'
+    ? parcel.paymentStatus === 'paid' ? 'rating' : 'payment'
+    : 'active'
+  const recovery = <div className="space-y-2">
+    <p role={error ? 'alert' : 'status'} className="text-sm text-ink-700">
+      {error || (busy ? 'Consultando o servidor...' : !confirmed ? 'Confirme o estado da encomenda para continuar.' : '')}
+    </p>
+    {(!confirmed || error) && <button type="button" onClick={refresh} disabled={busy}
+      className="min-h-[44px] px-4 border border-line rounded-panel font-semibold disabled:opacity-50">
+      {busy ? 'Consultando...' : 'Consultar estado no servidor'}
+    </button>}
+  </div>
+  if (!parcel) return <main className="min-h-[100dvh] flex flex-col justify-center gap-4 p-6">
+    <h1 className="text-xl font-semibold">Encomenda</h1>{recovery}
+    <button className="min-h-[44px]" onClick={() => navigate('/captain-home')}>Voltar ao início</button>
+  </main>
 
-  const resolveStep = (p) => {
-    if (!p) return 'active'
-    if (p.status === 'finished' && p.paymentStatus !== 'paid') return 'payment'
-    if (p.status === 'finished') return 'rating'
-    return 'active'
-  }
-
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const current = await syncCaptainParcel()
-        if (!alive) return
-        if (current) {
-          setParcel(current)
-          setStep(resolveStep(current))
-          return
-        }
-        if (state?.parcel?.status === 'finished') {
-          setParcel(state.parcel)
-          setStep(state?.step === 'rating' && state.parcel.paymentStatus === 'paid'
-            ? 'rating'
-            : resolveStep(state.parcel))
-          return
-        }
-        // current === null: backend confirma que não há encomenda ativa (404). Sem
-        // nada local pra mostrar, avisa e volta — nunca deixa a tela presa em
-        // "Nenhuma encomenda ativa" por baixo de um rehydrating que nunca termina.
-        if (!parcel) {
-          addToast('Nenhuma encomenda em andamento encontrada.', 'info')
-          navigate('/captain-home', { replace: true })
-        }
-      } catch {
-        // Falha de rede/servidor: só manda pra Home se não havia NADA local — preserva
-        // o que já estava na tela em vez de trocar por um erro.
-        if (alive && !parcel) {
-          addToast('Nenhuma encomenda em andamento encontrada.', 'info')
-          navigate('/captain-home', { replace: true })
-        }
-      } finally {
-        if (alive) setRehydrating(false)
-      }
-    })()
-    return () => { alive = false }
-    // Roda uma vez ao montar — mesmo padrão de CaptainRiding.jsx.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    if (!socket) return undefined
-    const onCancelled = () => {
-      setCaptainParcel(null)
-      addToast('Encomenda cancelada pelo cliente', 'info')
-      navigate('/captain-home')
-    }
-    socket.on('parcel-cancelled', onCancelled)
-    return () => socket.off('parcel-cancelled', onCancelled)
-  }, [socket, navigate, addToast, setCaptainParcel])
-
-  if (rehydrating) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-alt">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600"></div>
-      </div>
-    )
-  }
-
-  if (!parcel) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6">
-        <p className="text-ink-500">Nenhuma encomenda ativa</p>
-        <button
-          type="button"
-          className="min-h-[44px] px-6 rounded-panel bg-brand-500 text-white font-semibold"
-          onClick={() => {
-            setCaptainParcel(null)
-            navigate('/captain-home')
-          }}
-        >
-          Voltar ao início
-        </button>
-      </div>
-    )
-  }
-
-  const advance = async () => {
-    const next = NEXT_STATUS[parcel.status]
-    if (!next) return
-    setLoading(true)
-    try {
-      const updated = await updateParcelStatus(parcel._id, next)
-      setParcel(updated)
-    } catch (err) {
-      addToast(err.response?.data?.message || 'Falha ao atualizar status', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const confirmPin = async () => {
-    setLoading(true)
-    try {
-      const updated = await confirmParcelDelivery(parcel._id, pin)
-      setParcel(updated)
-      setCaptainParcel(updated)
-      // Liquidação (comissão + repasse) agora acontece na própria confirmação de
-      // entrega (2026-08-16), não mais num toque separado de "pagamento recebido"
-      // — resolveStep já detecta paymentStatus:'paid' e manda direto pra avaliação.
-      const nextStep = resolveStep(updated)
-      addToast(
-        nextStep === 'payment'
-          ? 'Entrega confirmada! Confirme o pagamento recebido.'
-          : 'Entrega confirmada! Pagamento já liquidado.',
-        'success'
-      )
-      setStep(nextStep)
-      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: nextStep } })
-    } catch (err) {
-      addToast(err.response?.data?.message || 'PIN inválido', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const confirmPayment = async () => {
-    setLoading(true)
-    try {
-      const updated = await confirmParcelPayment(parcel._id)
-      setParcel(updated)
-      setCaptainParcel(updated)
-      addToast('Pagamento confirmado.', 'success')
-      setStep('rating')
-      navigate('/captain-parcel', { replace: true, state: { parcel: updated, step: 'rating' } })
-    } catch (err) {
-      addToast(err.response?.data?.message || 'Falha ao confirmar pagamento', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const passengerAmount = Number(parcel?.fare ?? 0) || 0
-  const payLabel = parcel?.paymentMethod === 'pix' ? 'Pix' : 'Dinheiro'
-
-  const submitRating = async () => {
-    if (!ratingValue) return
-    setSubmittingRating(true)
-    try {
-      await submitCaptainReview({
-        subjectType: 'parcel',
-        parcelId: parcel._id,
-        rating: ratingValue,
-      })
-      setCaptainParcel(null)
-      navigate('/captain-home')
-    } catch (err) {
-      addToast(err.response?.data?.message || 'Não foi possível avaliar', 'error')
-    } finally {
-      setSubmittingRating(false)
-    }
-  }
+  const sameParcel = (result, snapshot) => validDriverParcel(result) && result._id === snapshot._id
+  const advance = () => run({
+    request: p => updateParcelStatus(p._id, NEXT_STATUS[p.status]),
+    accepts: (result, p) => sameParcel(result, p) && result.status === NEXT_STATUS[p.status],
+  })
+  const confirmPin = () => run({
+    request: p => confirmParcelDelivery(p._id, pin),
+    accepts: (result, p) => sameParcel(result, p) && result.status === 'finished',
+  })
+  const confirmPayment = () => run({
+    request: p => confirmParcelPayment(p._id),
+    accepts: (result, p) => sameParcel(result, p) && result.status === 'finished' && result.paymentStatus === 'paid',
+  })
+  const submitRating = () => ratingValue && run({
+    request: p => submitCaptainReview({ subjectType: 'parcel', parcelId: p._id, rating: ratingValue }),
+    accepts: (result, p) => Boolean(result?._id && result.subjectType === 'parcel' && result.subjectId === p._id),
+    done: true,
+  })
+  const skipRating = () => run({
+    request: p => skipCaptainParcelReview(p._id),
+    accepts: (result, p) => result?.ok === true && result.parcelId === p._id,
+    done: true,
+  })
+  const money = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? formatBRL(value) : 'Indisponível'
+  const passengerAmount = parcel.fare
+  const payLabel = { pix: 'Pix', cash: 'Dinheiro' }[parcel.paymentMethod] || 'Forma não informada'
 
   const canChat = CHAT_STATUSES.includes(parcel.status)
 
@@ -239,9 +119,10 @@ const CaptainParcelRiding = () => {
   const mapsUrl = buildGoogleMapsUrl(mapsTarget)
 
   return (
-    <div className="h-screen flex flex-col bg-surface">
-      <div className="flex-1 relative">
+    <div className="h-[100dvh] min-h-0 flex flex-col bg-surface overflow-hidden">
+      <div className="flex-1 min-h-[100px] relative">
         <LiveTracking
+          observeViewport
           pickup={parcel.pickupCoordinates}
           destination={parcel.destinationCoordinates}
           parcelId={parcel._id}
@@ -274,7 +155,8 @@ const CaptainParcelRiding = () => {
           </div>
         )}
       </div>
-      <div className={`px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating transition-[max-height] duration-300 ease-in-out ${step === 'active' && detailsExpanded ? 'max-h-[70vh] overflow-y-auto' : 'max-h-[60vh]'}`}>
+      <div className={`px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-line space-y-2 rounded-t-3xl -mt-2 relative z-10 bg-surface shadow-floating transition-[max-height] duration-300 ease-in-out max-h-[70dvh] shrink-0 overflow-y-auto`}>
+        {(error || !confirmed || busy) && recovery}
         {step === 'active' ? (
           <button
             type="button"
@@ -296,7 +178,7 @@ const CaptainParcelRiding = () => {
             </p>
             <div className="rounded-panel border border-line bg-surface-alt px-3 py-3 text-center">
               <p className="text-xs text-ink-600 mb-0.5">Cliente deve pagar</p>
-              <p className="text-2xl font-black text-brand-600">{formatBRL(passengerAmount)}</p>
+              <p className="text-2xl font-black text-brand-600">{money(passengerAmount)}</p>
             </div>
             <button
               type="button"
@@ -310,10 +192,13 @@ const CaptainParcelRiding = () => {
           </div>
         ) : step === 'rating' ? (
           <div className="space-y-2.5">
+            <p className="text-base font-semibold text-ink-900">Entrega confirmada pelo servidor</p>
+            <p className="text-sm text-ink-700">Valor do cliente: {money(passengerAmount)} · {payLabel}. Confira o recebimento fora do app; a liquidação da plataforma não comprova dinheiro ou Pix recebido.</p>
+            <p className="text-sm text-ink-700">Seu ganho: {money(parcel.driverAmount)}</p>
             <p className="text-base font-semibold text-ink-900">Avalie o cliente</p>
             <div className="flex justify-center gap-2">
               {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => setRatingValue(n)} className="min-w-[40px] min-h-[40px]">
+                <button key={n} type="button" aria-label={`${n} ${n === 1 ? 'estrela' : 'estrelas'}`} aria-pressed={n === ratingValue} disabled={loading} onClick={() => setRatingValue(n)} className="min-w-[44px] min-h-[44px]">
                   <i className={`text-3xl ${n <= ratingValue ? 'ri-star-fill text-yellow-400' : 'ri-star-line text-ink-400'}`} />
                 </button>
               ))}
@@ -329,15 +214,8 @@ const CaptainParcelRiding = () => {
             <button
               type="button"
               className="w-full min-h-[40px] rounded-panel border border-line text-ink-700 font-medium text-sm"
-              onClick={async () => {
-                try {
-                  await skipCaptainParcelReview(parcel._id)
-                } catch {
-                  /* still leave */
-                }
-                setCaptainParcel(null)
-                navigate('/captain-home')
-              }}
+              disabled={loading}
+              onClick={skipRating}
             >
               Pular
             </button>
@@ -351,7 +229,7 @@ const CaptainParcelRiding = () => {
                 compact
                 trailing={
                   <div className="text-right">
-                    <p className="text-sm font-bold text-ink-900">{formatBRL(passengerAmount)}</p>
+                    <p className="text-sm font-bold text-ink-900">{money(passengerAmount)}</p>
                     <p className="text-[10px] text-ink-400">{payLabel}</p>
                   </div>
                 }
@@ -423,7 +301,7 @@ const CaptainParcelRiding = () => {
                   </div>
                   <div>
                     <p className="text-[10px] text-ink-400 uppercase tracking-wide">Valor</p>
-                    <p className="text-ink-900 font-medium">{formatBRL(passengerAmount)}</p>
+                    <p className="text-ink-900 font-medium">{money(passengerAmount)}</p>
                   </div>
                   {parcel.weightKg != null && (
                     <div>
@@ -452,10 +330,13 @@ const CaptainParcelRiding = () => {
 
             {parcel.status === 'arrived_destination' ? (
               <div className="space-y-2">
+                <p className="text-sm text-ink-600">A entrega só será confirmada após a resposta do servidor.</p>
                 {parcel.requireDeliveryPin !== false && (
                   <>
-                    <p className="text-xs font-medium text-ink-700">PIN do destinatário</p>
+                    <label htmlFor="parcel-pin" className="text-sm font-medium text-ink-700">PIN do destinatário</label>
                     <input
+                      id="parcel-pin"
+                      disabled={loading}
                       inputMode="numeric"
                       maxLength={4}
                       value={pin}
@@ -488,17 +369,19 @@ const CaptainParcelRiding = () => {
         )}
       </div>
 
-      {canChat && (
-        <RideChat
+      {canChat && isChatOpen && (
+        <DriverOperationalDialog title="Chat da encomenda" onClose={() => setIsChatOpen(false)}><RideChat
+          embedded
           subject={parcel}
           subjectType="parcel"
           isOpen={isChatOpen}
           onClose={() => setIsChatOpen(false)}
           currentUserType="captain"
-        />
+        /></DriverOperationalDialog>
       )}
     </div>
   )
 }
 
+ParcelJourney.propTypes = { owner: PropTypes.string.isRequired }
 export default CaptainParcelRiding

@@ -6,6 +6,11 @@ import { compareSemver, evaluateUpdate } from '@/shared/platform/appUpdate.logic
 
 export { compareSemver, evaluateUpdate }
 
+export function getDriverUpdateChannel() {
+    if (!isNativePlatform()) return 'web'
+    return import.meta.env.VITE_DISTRIBUTION_CHANNEL === 'play' ? 'play' : 'sideload'
+}
+
 const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 30 min
 const STORAGE_LAST_CHECK = 'driverAppUpdate_lastCheck'
 const STORAGE_MIN_GATE = 'driverAppUpdate_minGate'

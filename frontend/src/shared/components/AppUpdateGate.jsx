@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { isNativePlatform } from '@/shared/platform/platform'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
+import { RideContext } from '@/shared/contexts/RideContext'
+import { useToast } from '@/shared/contexts/ToastContext'
+import DriverOperationalDialog from '@/driver/components/DriverOperationalDialog'
 import { onAppActive } from '@/shared/platform/appLifecycle.service'
 import {
     checkForUpdate,
@@ -8,14 +12,12 @@ import {
     openApkFallback,
     resumeInstall,
     cancelDownload,
+    getDriverUpdateChannel,
 } from '@/shared/platform/appUpdate.service'
 
-const IS_PLAY_BUILD = import.meta.env.VITE_DISTRIBUTION_CHANNEL === 'play'
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=br.com.movecity.driver'
 
-/**
- * Verificação assíncrona de atualização do APK (não bloqueia o boot).
- * Só ativa no Capacitor Android (build motorista).
- */
+/** Entrada única: Play, APK externo ou navegador. Nunca recarrega a sessão. */
 export default function AppUpdateGate() {
     // A Play Store gerencia atualizações do AAB. O instalador próprio de APK fica
     // restrito ao canal sideload para não solicitar instalação de fontes externas.
@@ -26,15 +28,43 @@ export default function AppUpdateGate() {
     const [error, setError] = useState('')
     const [localPath, setLocalPath] = useState('')
     const busyRef = useRef(false)
+    const installRef = useRef(false)
+    const { captain } = useContext(CaptainDataContext) || {}
+    const { captainRide, captainParcel, captainRideReconciled } = useContext(RideContext) || {}
+    const { pathname } = useLocation()
+    const { addToast } = useToast()
+    const channel = getDriverUpdateChannel()
+    // Não abre instalador/loja durante atendimento, recebimento de ofertas ou restauração.
+    const blocked = Boolean(captainRide || captainParcel || captain?.isOnline
+        || (captain?._id && !captainRideReconciled)
+        || /captain-(riding|parcel)/.test(pathname))
+    const blockedRef = useRef(blocked)
+    blockedRef.current = blocked
+    const mountedRef = useRef(false)
+    useEffect(() => {
+        mountedRef.current = true
+        return () => { mountedRef.current = false }
+    }, [])
+    // Retorno da tela de permissão não deve perder o APK já baixado.
+    useEffect(() => { setLocalPath('') }, [state?.remote?.versionCode])
 
     const runCheck = useCallback(async ({ force = false } = {}) => {
-        if (IS_PLAY_BUILD) return
-        if (!isNativePlatform()) return
-        if (busyRef.current && !force) return
+        if (blockedRef.current) {
+            if (force) addToast('Conclua o atendimento e fique offline antes de atualizar. Se acabou de entrar, aguarde a recuperação da sessão.', 'info')
+            return
+        }
+        if (busyRef.current || installRef.current) return
+        if (channel !== 'sideload') {
+            if (force) { setState({ channel }); setVisible(true) }
+            return
+        }
         busyRef.current = true
+        if (force) addToast('Verificando atualização...', 'info')
         try {
             const result = await checkForUpdate({ force })
-            if (result.available) {
+            if (!mountedRef.current) return
+            setError('')
+            if (result.available === true) {
                 try {
                     const sessionDismissed = sessionStorage.getItem('driverAppUpdate_sessionDismissed')
                     if (
@@ -52,7 +82,7 @@ export default function AppUpdateGate() {
                 return
             }
             if (force) {
-                if (result.offline && !result.mandatory) {
+                if (!result.ok) {
                     setState({
                         ...result,
                         manualOffline: true,
@@ -62,35 +92,42 @@ export default function AppUpdateGate() {
                     setVisible(true)
                     return
                 }
-                if (result.ok || result.skipped) {
-                    setState({ ...result, manualUpToDate: true })
+                if (result.ok) {
+                    setState({ ...result, manualUpToDate: true, noRelease: result.reason !== 'up-to-date' })
                     setVisible(true)
                 }
+            }
+        } catch {
+            if (mountedRef.current && force) {
+                setState({ manualOffline: true })
+                setVisible(true)
             }
         } finally {
             busyRef.current = false
         }
-    }, [])
+    }, [channel, addToast])
 
     useEffect(() => {
-        if (IS_PLAY_BUILD) return undefined
-        if (!isNativePlatform()) return undefined
+        const onManual = () => runCheck({ force: true })
+        window.addEventListener('movecity:check-app-update', onManual)
+        return () => window.removeEventListener('movecity:check-app-update', onManual)
+    }, [runCheck])
+
+    useEffect(() => {
+        if (channel !== 'sideload' || blocked) return undefined
         const t = setTimeout(() => {
             runCheck({ force: false })
         }, 800)
         const off = onAppActive(() => {
             runCheck({ force: false })
         })
-        const onManual = () => runCheck({ force: true })
-        window.addEventListener('movecity:check-app-update', onManual)
         return () => {
             clearTimeout(t)
             off?.()
-            window.removeEventListener('movecity:check-app-update', onManual)
         }
-    }, [runCheck])
+    }, [runCheck, channel, blocked])
 
-    if (IS_PLAY_BUILD || !isNativePlatform() || !visible || !state) return null
+    if (blocked || !visible || !state) return null
 
     const remote = state.remote || {}
     const installed = state.installed || {}
@@ -120,6 +157,8 @@ export default function AppUpdateGate() {
     }
 
     const onUpdate = async () => {
+        if (blockedRef.current || installRef.current) return
+        installRef.current = true
         setError('')
         setDownloading(true)
         setPercent(0)
@@ -141,6 +180,7 @@ export default function AppUpdateGate() {
         } catch (e) {
             setError(e?.message || 'Falha ao baixar a atualização')
         } finally {
+            installRef.current = false
             setDownloading(false)
         }
     }
@@ -148,14 +188,21 @@ export default function AppUpdateGate() {
     const notes = Array.isArray(remote.releaseNotes) ? remote.releaseNotes : []
 
     return (
-        <div
-            className="fixed inset-0 z-[10050] flex items-end sm:items-center justify-center bg-ink-900/60 p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="app-update-title"
-        >
-            <div className="w-full max-w-md bg-surface rounded-2xl shadow-raised p-6 border border-line">
-                {offlineMsg ? (
+        <DriverOperationalDialog title="Atualização do aplicativo" onClose={onClose} busy={downloading} closeLabel="Fechar atualização">
+            <div className="text-ink-900">
+                {state.channel ? (
+                    <>
+                        <p className="text-sm text-ink-600 mt-2">
+                            {state.channel === 'play'
+                                ? 'Esta versão é atualizada pela Google Play. Abra a loja para conferir se há uma atualização disponível para seu aparelho.'
+                                : 'Você está usando a versão no navegador. Não há verificação automática de novas versões neste acesso. Depois do atendimento, feche e abra o site novamente para carregar a versão publicada.'}
+                        </p>
+                        {state.channel === 'play' && <a href={PLAY_URL} target="_blank" rel="noopener noreferrer"
+                            onClick={event => { if (blockedRef.current) event.preventDefault() }}
+                            className="mt-4 block rounded-xl bg-brand-700 text-white text-center p-3 font-semibold">Abrir Google Play</a>}
+                        <button type="button" onClick={onClose} className="mt-4 w-full rounded-xl border border-line p-3">Fechar</button>
+                    </>
+                ) : offlineMsg ? (
                     <>
                         <h2 id="app-update-title" className="text-lg font-bold text-ink-900">
                             Verificação falhou
@@ -174,10 +221,10 @@ export default function AppUpdateGate() {
                 ) : upToDate ? (
                     <>
                         <h2 id="app-update-title" className="text-lg font-bold text-ink-900">
-                            Você já está atualizado
+                            {state.noRelease ? 'Nenhuma atualização publicada neste canal' : 'Você já está atualizado'}
                         </h2>
                         <p className="text-sm text-ink-600 mt-2">
-                            Você já está usando a versão mais recente.
+                            {state.noRelease ? 'Não foi encontrada uma versão disponível para instalação por este canal.' : 'Você já está usando a versão mais recente deste canal.'}
                             {' '}
                             MoveCity Motorista {installed.versionName || '—'}.
                         </p>
@@ -280,7 +327,8 @@ export default function AppUpdateGate() {
                             {remote.apkUrl && (
                                 <button
                                     type="button"
-                                    onClick={() => openApkFallback(remote.apkUrl)}
+                                    disabled={downloading}
+                                    onClick={() => { if (!blockedRef.current) openApkFallback(remote.apkUrl) }}
                                     className="w-full py-2 text-sm text-brand-600 font-semibold"
                                 >
                                     Não conseguiu atualizar? Baixar APK manualmente
@@ -290,7 +338,7 @@ export default function AppUpdateGate() {
                     </>
                 )}
             </div>
-        </div>
+        </DriverOperationalDialog>
     )
 }
 

@@ -19,7 +19,7 @@ const PARCEL_ACTIVE = [
  * - subject / ride: documento com `_id` e `status` (ride mantido por compat)
  * - subjectType: 'ride' | 'parcel' (default 'ride')
  */
-const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, currentUserType, deliveryPin }) => {
+const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, currentUserType, deliveryPin, embedded = false }) => {
     const { socket } = useContext(SocketContext);
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
@@ -197,16 +197,16 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-gray-100 animate-slide-up sm:w-full sm:max-w-md sm:mx-auto sm:border-x">
+        <div className={embedded ? 'h-[60dvh] min-h-0 flex flex-col bg-gray-100' : 'fixed inset-0 z-[100] flex flex-col bg-gray-100 animate-slide-up sm:w-full sm:max-w-md sm:mx-auto sm:border-x'}>
             <div className="bg-white px-4 py-3 flex items-center justify-between border-b shadow-sm">
                 <div className="flex items-center gap-3">
-                    <button onClick={onClose} className="p-2 -ml-2 rounded-full hover:bg-gray-100">
+                    <button onClick={onClose} aria-label="Fechar chat" className="p-2 -ml-2 rounded-full hover:bg-gray-100">
                         <i className="ri-arrow-left-line text-xl"></i>
                     </button>
                     <div>
                         <h3 className="font-semibold text-lg">{peerLabel}</h3>
                         <span className="text-xs text-green-600 font-medium">
-                            {isActive ? 'Online' : (type === 'parcel' ? 'Encomenda finalizada' : 'Corrida Finalizada')}
+                            {isActive ? 'Conversa do atendimento' : (type === 'parcel' ? 'Encomenda finalizada' : 'Corrida Finalizada')}
                         </span>
                     </div>
                 </div>
@@ -281,7 +281,7 @@ const RideChat = ({ ride, subject, subjectType = 'ride', isOpen, onClose, curren
                         <input
                             type="text"
                             placeholder="Mensagem..."
-                            className="bg-transparent flex-1 outline-none text-sm"
+                            className="bg-transparent min-w-0 flex-1 outline-none text-sm"
                             value={inputText}
                             onChange={handleInputChange}
                             onKeyPress={(e) => e.key === 'Enter' && sendMessage()}

@@ -18,6 +18,8 @@ const CaptainRidesHistory = lazy(() => import('@/driver/pages/CaptainRidesHistor
 const CaptainEarnings = lazy(() => import('@/driver/pages/CaptainEarnings'))
 const CaptainProfile = lazy(() => import('@/driver/pages/CaptainProfile'))
 const CaptainDocuments = lazy(() => import('@/driver/pages/CaptainDocuments'))
+const CaptainSupport = lazy(() => import('@/driver/pages/CaptainSupport'))
+const CaptainPublicHelp = lazy(() => import('@/driver/pages/CaptainSupport').then(module => ({ default: module.CaptainPublicHelp })))
 const CaptainScheduled = lazy(() => import('@/driver/pages/CaptainScheduled'))
 const CaptainParcels = lazy(() => import('@/driver/pages/CaptainParcels'))
 const CaptainNotifications = lazy(() => import('@/driver/pages/CaptainNotifications'))
@@ -35,6 +37,7 @@ const CaptainDeleteAccount = lazy(() => import('@/driver/pages/CaptainDeleteAcco
 // separadas de propósito (mapa em modo diferente — seguindo corrida/navegação).
 const driverRoutes = [
   <Route key='captain-login' path='/captain-login' element={<CaptainLogin />} />,
+  <Route key='captain-help' path='/captain-help' element={<CaptainPublicHelp />} />,
   <Route key='captain-signup' path='/captain-signup' element={<CaptainSignup />} />,
 
   <Route key='captain-riding' path='/captain-riding' element={
@@ -73,6 +76,7 @@ const driverRoutes = [
     <Route path='/captain/earnings' element={<CaptainEarnings />} />
     <Route path='/captain/profile' element={<CaptainProfile />} />
     <Route path='/captain/documents' element={<CaptainDocuments />} />
+    <Route path='/captain/support' element={<CaptainSupport />} />
     <Route path='/captain/delete-account' element={<CaptainDeleteAccount />} />
   </Route>,
 ]

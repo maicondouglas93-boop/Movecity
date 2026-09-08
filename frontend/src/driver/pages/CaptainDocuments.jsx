@@ -1,230 +1,153 @@
-import React, { useContext, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useContext, useRef, useState } from 'react'
+import PropTypes from 'prop-types'
+import { Link, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { getAccessToken } from '@/shared/services/session'
 import { isImageFile, postDocumentImageUpload } from '@/shared/services/imageUpload'
-import { useToast } from '@/shared/contexts/ToastContext'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
+import useDocumentActions from '@/driver/hooks/useDocumentActions'
 import PageHeader from '@/shared/components/ui/PageHeader'
-import Card from '@/shared/components/ui/Card'
-import StatusBadge from '@/shared/components/ui/StatusBadge'
-import Button from '@/shared/components/ui/Button'
 
-// Simplificação do cadastro do motorista (2026-08-04): tela dedicada ao envio da
-// documentação, fora do cadastro inicial. Reaproveita exatamente o mesmo pipeline de
-// upload que já existia (POST /uploads/document → PATCH /captains/documents) — antes
-// só acessível embutido no formulário gigante de cadastro, agora extraído pra cá e
-// alcançável pelo perfil a qualquer momento, inclusive para reenvio.
-const DOCUMENT_FIELDS = [
-    { key: 'cnhFront', label: 'CNH (frente)' },
-    { key: 'cnhBack', label: 'CNH (verso)' },
-    { key: 'crlv', label: 'CRLV' },
-    { key: 'vehicleFront', label: 'Foto do veículo' },
-    { key: 'selfie', label: 'Selfie com a CNH' },
-]
+const DOCUMENT_FIELDS = [['cnhFront', 'CNH (frente)'], ['cnhBack', 'CNH (verso)'], ['crlv', 'CRLV'], ['vehicleFront', 'Foto do veículo'], ['selfie', 'Selfie com a CNH']]
+const INPUT = 'mt-1 w-full min-w-0 rounded-panel border border-line bg-surface p-3 text-ink-900'
+const ACTION = 'min-h-[48px] rounded-panel border border-line px-4 py-2 font-semibold text-brand-700 disabled:opacity-50'
+function Feedback({ value }) {
+    return value ? <p role={value.ok ? 'status' : 'alert'} className={`mt-3 text-sm ${value.ok ? 'text-brand-800' : 'text-danger-700'}`}>{value.text}</p> : null
+}
+Feedback.propTypes = { value: PropTypes.object }
 
-// Fase 2 da auditoria de production readiness (H6, 2026-08-05): mesmo limite já
-// aplicado na foto de perfil (CaptainProfile/PersonalData/CaptainSignup) — documentos
-// eram a única tela de upload sem validação nenhuma no cliente: aceitava PDF de 40MB
-// e deixava o erro estourar só no backend, depois do upload inteiro.
-const MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024
-
-const DocumentUploadRow = ({ docKey, label, doc, onUploaded }) => {
-    const [ uploading, setUploading ] = useState(false)
-    const { addToast } = useToast()
-
-    const handleFileChange = async (e) => {
-        const file = e.target.files[0]
+function DocumentRow({ docKey, label, doc, actions }) {
+    const pending = useRef(null)
+    const inputRef = useRef(null)
+    const [localError, setLocalError] = useState('')
+    const [replaceApproved, setReplaceApproved] = useState(false)
+    const status = doc?.verified === true ? 'Aprovado' : doc?.reason ? 'Rejeitado' : doc?.url ? 'Em análise' : 'Não enviado'
+    const send = async () => {
+        const selection = pending.current
+        if (!selection) return
+        const ok = await actions.run(docKey, async assertCurrent => {
+            if (!selection.url) {
+                const upload = await withHardTimeout(postDocumentImageUpload(`${import.meta.env.VITE_BASE_URL}/uploads/document`, selection.file, {
+                    token: getAccessToken('captain'), docType: docKey,
+                }), 65000)
+                assertCurrent()
+                const url = upload?.data?.url
+                if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw new Error('O envio da foto não foi confirmado. Selecione a imagem novamente ou tente reenviar.')
+                selection.url = url
+            }
+            assertCurrent()
+            const { data } = await withHardTimeout(api.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, { docType: docKey, url: selection.url }, {
+                headers: { Authorization: `Bearer ${getAccessToken('captain')}` },
+            }))
+            return { next: data?.captain, confirmed: data?.captain?.documents?.[docKey]?.url === selection.url && data?.captain?.documents?.[docKey]?.verified === false,
+                patch: (previous, next) => ({ ...previous, documents: { ...previous.documents, [docKey]: next.documents[docKey] } }),
+            }
+        }, `${label}: envio confirmado. A foto precisa de análise; isso não aprova a conta automaticamente.`)
+        if (ok) { pending.current = null; setReplaceApproved(false) }
+    }
+    const selectFile = event => {
+        if (actions.busy) return
+        const file = event.target.files?.[0]
+        event.target.value = ''
         if (!file) return
-        if (!isImageFile(file)) {
-            addToast('Selecione uma imagem válida (foto do documento).', 'error')
-            e.target.value = ''
-            return
-        }
-        if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
-            addToast('A foto deve ter no máximo 5 MB.', 'error')
-            e.target.value = ''
-            return
-        }
-        setUploading(true)
-        try {
-            // No navegador usa multipart; no APK envia bytes puros pela rota binária,
-            // evitando o FormData que alguns WebViews Android entregam sem a imagem.
-            const uploadRes = await postDocumentImageUpload(
-                `${import.meta.env.VITE_BASE_URL}/uploads/document`,
-                file,
-                {
-                    token: getAccessToken('captain'),
-                    docType: docKey,
-                },
-            )
-            const patchRes = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/documents`, {
-                docType: docKey,
-                url: uploadRes.data.url
-            }, {
-                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-            })
-            onUploaded(patchRes.data.captain)
-            addToast(`${label} enviado.`, 'success')
-        } catch (err) {
-            addToast(err.response?.data?.message || `Falha ao enviar ${label}.`, 'error')
-        } finally {
-            setUploading(false)
-            e.target.value = ''
-        }
+        setLocalError('')
+        if (!isImageFile(file) || file.size === 0) { setLocalError('Selecione uma foto válida, não vazia.'); return }
+        if (file.size > 5 * 1024 * 1024) { setLocalError('A foto deve ter no máximo 5 MB.'); return }
+        pending.current = { file, url: null }
+        void send()
     }
-
-    const sent = !!doc?.url
-    const verified = !!doc?.verified
-    const rejected = sent && !verified && !!doc?.reason
-
-    return (
-        <div className="py-3 border-b border-line last:border-b-0">
-            <div className="flex justify-between items-center gap-3">
-                <span className="text-sm font-medium text-ink-900">{label}</span>
-                {verified ? (
-                    <StatusBadge tone="success"><i className="ri-checkbox-circle-fill mr-1"></i> Aprovado</StatusBadge>
-                ) : sent ? (
-                    rejected
-                        ? <StatusBadge tone="danger"><i className="ri-close-circle-fill mr-1"></i> Rejeitado</StatusBadge>
-                        : <StatusBadge tone="info"><i className="ri-time-line mr-1"></i> Em análise</StatusBadge>
-                ) : (
-                    <StatusBadge tone="neutral"><i className="ri-close-line mr-1"></i> Não enviado</StatusBadge>
-                )}
-            </div>
-
-            {rejected && (
-                <p className="text-xs text-danger-600 mt-1">{doc.reason}</p>
-            )}
-
-            <label className={`mt-2 flex items-center justify-center gap-2 border-2 border-dashed rounded-panel py-2.5 text-sm font-medium cursor-pointer transition-colors ${uploading ? 'opacity-60 pointer-events-none' : ''} ${verified ? 'border-line text-ink-400' : 'border-brand-200 text-brand-700 hover:bg-brand-50'}`}>
-                <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} disabled={uploading} />
-                <i className={uploading ? 'ri-loader-4-line animate-spin' : 'ri-upload-cloud-2-line'}></i>
-                {uploading ? 'Enviando...' : sent ? 'Reenviar' : 'Enviar foto'}
-            </label>
-        </div>
-    )
+    return <section aria-label={label} className="py-4 border-b border-line last:border-b-0">
+        <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{label}</h3><span className="text-sm font-medium">{status}</span></div>
+        {doc?.reason && !doc.verified && <p className="mt-2 text-sm text-danger-700">Motivo informado: {doc.reason}</p>}
+        {doc?.verified && !replaceApproved
+            ? <button className={`${ACTION} mt-3`} type="button" disabled={Boolean(actions.busy)} onClick={() => setReplaceApproved(true)}>Substituir foto aprovada</button>
+            : <>
+                {doc?.verified && <p className="mt-2 text-sm text-ink-600">A substituição retira a aprovação desta foto e exige nova análise.</p>}
+                <input ref={inputRef} type="file" accept="image/*" aria-label={`Foto: ${label}`} className="sr-only" tabIndex={-1} disabled={Boolean(actions.busy)} onChange={selectFile} />
+                <button className={`${ACTION} mt-3`} type="button" disabled={Boolean(actions.busy)} onClick={() => inputRef.current?.click()}>
+                    {actions.busy === docKey ? 'Enviando...' : doc?.url ? 'Selecionar outra foto' : 'Selecionar foto'}
+                </button>
+            </>}
+        {localError && <p role="alert" className="mt-3 text-sm text-danger-700">{localError}</p>}
+        <Feedback value={actions.feedback[docKey]} />
+        {actions.feedback[docKey]?.ok === false && pending.current && <button type="button" className={`${ACTION} mt-3`} disabled={Boolean(actions.busy)} onClick={send}>Tentar este envio novamente</button>}
+    </section>
 }
+DocumentRow.propTypes = { docKey: PropTypes.string.isRequired, label: PropTypes.string.isRequired, doc: PropTypes.object, actions: PropTypes.object.isRequired }
 
-const CaptainDocuments = () => {
-    const { captain, setCaptain } = useContext(CaptainDataContext)
+function DocumentForm() {
+    const { captain } = useContext(CaptainDataContext)
+    const actions = useDocumentActions()
     const navigate = useNavigate()
-    const { addToast } = useToast()
-
-    const documents = captain?.documents || {}
-
-    // CNH — pré-preenchido com o que já foi salvo, se houver.
-    const [ cnhNumber, setCnhNumber ] = useState(captain?.cnh?.number || '')
-    const [ cnhCategory, setCnhCategory ] = useState(captain?.cnh?.category || '')
-    const [ cnhExpiration, setCnhExpiration ] = useState(captain?.cnh?.expiration ? captain.cnh.expiration.slice(0, 10) : '')
-    const [ cnhUf, setCnhUf ] = useState(captain?.cnh?.uf || '')
-    const [ cnhEar, setCnhEar ] = useState(!!captain?.cnh?.ear)
-    const [ savingCnh, setSavingCnh ] = useState(false)
-
-    // PIX
-    const [ pixKeyType, setPixKeyType ] = useState(captain?.pix?.keyType || '')
-    const [ pixKey, setPixKey ] = useState(captain?.pix?.key || '')
-    const [ savingPix, setSavingPix ] = useState(false)
-
-    const saveDocumentInfo = async (payload, setSaving, successLabel) => {
-        setSaving(true)
-        try {
-            const res = await api.patch(`${import.meta.env.VITE_BASE_URL}/captains/document-info`, payload, {
-                headers: { Authorization: `Bearer ${getAccessToken('captain')}` }
-            })
-            setCaptain(res.data.captain)
-            addToast(`${successLabel} salvo.`, 'success')
-        } catch (err) {
-            addToast(err.response?.data?.errors?.[0]?.msg || err.response?.data?.message || 'Falha ao salvar', 'error')
-        } finally {
-            setSaving(false)
-        }
+    const deadline = Date.parse(captain.documentDeadline)
+    const saveInfo = (event, area) => {
+        event.preventDefault()
+        if (actions.busy) return
+        const form = new FormData(event.currentTarget)
+        const fields = area === 'cnh' ? ['number', 'category', 'expiration', 'uf'] : ['keyType', 'key']
+        const values = Object.fromEntries(fields.map(name => [name, String(form.get(name) || '').trim()]).filter(([, value]) => value))
+        if (area === 'cnh') values.ear = form.get('ear') === 'on'
+        void actions.run(area, async assertCurrent => {
+            if (area === 'pix' && (!values.keyType || !values.key)) throw new Error('Informe o tipo e a chave Pix antes de salvar.')
+            assertCurrent()
+            const { data } = await withHardTimeout(api.patch(`${import.meta.env.VITE_BASE_URL}/captains/document-info`, { [area]: values }, {
+                headers: { Authorization: `Bearer ${getAccessToken('captain')}` },
+            }))
+            const next = data?.captain
+            const confirmed = Object.entries(values).every(([name, value]) => name === 'expiration'
+                ? next?.[area]?.[name]?.slice(0, 10) === value : next?.[area]?.[name] === value)
+            return { next, confirmed, patch: (previous, ack) => ({ ...previous, [area]: ack[area] }) }
+        }, `${area === 'cnh' ? 'CNH' : 'Pix'}: dados salvos e confirmados.`)
     }
-
-    // Só manda o que foi de fato preenchido — o backend trata 'optional()' como "campo
-    // ausente", não como "presente e vazio": mandar uma string vazia em cnh.expiration,
-    // por exemplo, falharia isISO8601() mesmo que a intenção fosse só deixar em branco
-    // por enquanto (envio parcial é permitido, ver PATCH /captains/document-info).
-    const submitCnh = (e) => {
-        e.preventDefault()
-        const cnh = { ear: cnhEar }
-        if (cnhNumber.trim()) cnh.number = cnhNumber.trim()
-        if (cnhCategory.trim()) cnh.category = cnhCategory.trim()
-        if (cnhExpiration) cnh.expiration = cnhExpiration
-        if (cnhUf.trim()) cnh.uf = cnhUf.trim()
-        saveDocumentInfo({ cnh }, setSavingCnh, 'CNH')
-    }
-
-    const submitPix = (e) => {
-        e.preventDefault()
-        const pix = {}
-        if (pixKeyType) pix.keyType = pixKeyType
-        if (pixKey.trim()) pix.key = pixKey.trim()
-        saveDocumentInfo({ pix }, setSavingPix, 'PIX')
-    }
-
-    return (
-        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
-            <PageHeader
-                title="Documentação"
-                className="shadow-raised"
-                onBack={() => navigate('/captain/profile')}
-            />
-
-            <div className="flex-1 overflow-y-auto p-4 pb-10 space-y-6">
-                <Card shadow="raised" padding="p-5">
-                    <h3 className="font-semibold text-ink-900 mb-4">Fotos dos documentos</h3>
-                    <div>
-                        {DOCUMENT_FIELDS.map(({ key, label }) => (
-                            <DocumentUploadRow
-                                key={key}
-                                docKey={key}
-                                label={label}
-                                doc={documents[key]}
-                                onUploaded={setCaptain}
-                            />
-                        ))}
-                    </div>
-                </Card>
-
-                <Card shadow="raised" padding="p-5">
-                    <h3 className="font-semibold text-ink-900 mb-4">Carteira de Motorista (CNH)</h3>
-                    <form onSubmit={submitCnh} className="space-y-3">
-                        <div className="flex gap-3">
-                            <input className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Número da CNH' aria-label='Número da CNH' value={cnhNumber} onChange={(e) => setCnhNumber(e.target.value)} />
-                            <input className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Cat.' aria-label='Categoria' value={cnhCategory} onChange={(e) => setCnhCategory(e.target.value)} />
-                            <input className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/4 rounded-panel px-4 py-3 outline-none' type="text" placeholder='UF' aria-label='UF' value={cnhUf} onChange={(e) => setCnhUf(e.target.value)} />
-                        </div>
-                        <div className="flex gap-3 items-center">
-                            <input className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/2 rounded-panel px-4 py-3 outline-none text-sm' type="date" aria-label="Validade da CNH" value={cnhExpiration} onChange={(e) => setCnhExpiration(e.target.value)} />
-                            <label className='flex items-center gap-2 text-ink-600 cursor-pointer w-1/2 text-sm'>
-                                <input type="checkbox" checked={cnhEar} onChange={(e) => setCnhEar(e.target.checked)} className='w-5 h-5 text-brand-600 rounded focus:ring-brand-500' />
-                                <span>Exerce Atividade Remunerada</span>
-                            </label>
-                        </div>
-                        <Button type="submit" loading={savingCnh} disabled={savingCnh} variant="secondary">Salvar CNH</Button>
-                    </form>
-                </Card>
-
-                <Card shadow="raised" padding="p-5">
-                    <h3 className="font-semibold text-ink-900 mb-4">Recebimento (PIX)</h3>
-                    <form onSubmit={submitPix} className="space-y-3">
-                        <div className="flex gap-3">
-                            <select aria-label="Tipo de Chave Pix" className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-1/3 rounded-panel px-4 py-3 outline-none' value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)}>
-                                <option value="" disabled>Tipo de Chave</option>
-                                <option value="cpf">CPF</option>
-                                <option value="celular">Celular</option>
-                                <option value="email">E-mail</option>
-                                <option value="aleatoria">Aleatória</option>
-                            </select>
-                            <input className='bg-surface-alt text-ink-900 border border-line focus:border-brand-500 w-2/3 rounded-panel px-4 py-3 outline-none' type="text" placeholder='Chave Pix' aria-label='Chave Pix' value={pixKey} onChange={(e) => setPixKey(e.target.value)} />
-                        </div>
-                        <Button type="submit" loading={savingPix} disabled={savingPix} variant="secondary">Salvar PIX</Button>
-                    </form>
-                </Card>
+    return <div className="h-full min-h-0 bg-surface-alt flex flex-col">
+        <PageHeader title="Documentação" onBack={() => navigate('/captain/profile')} />
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 pb-10 space-y-5 text-ink-900">
+            <div className="space-y-2 text-sm">
+                <p>Fotos legíveis, sem cortar o documento. Envie uma imagem de até 5 MB por vez.</p>
+                {Number.isFinite(deadline) && <p>Prazo para envio informado na conta: <strong>{new Date(deadline).toLocaleDateString('pt-BR')}</strong>. Este não é um prazo de aprovação.</p>}
+                <p>O envio não aprova nem desbloqueia a conta automaticamente. Consulte o status após a análise.</p>
+                <Link to="/captain/support?category=documents" className="inline-flex min-h-[44px] items-center text-brand-700 underline">Ajuda com documentos</Link>
             </div>
-        </div>
-    )
+            {actions.busy && <p role="status" className="p-3 rounded-panel bg-blue-50">Aguarde a confirmação deste envio antes de iniciar outro. Mantenha esta tela aberta.</p>}
+            <div className="rounded-panel border border-line bg-surface p-4">
+                <h2 className="text-lg font-semibold">Fotos dos documentos</h2>
+                {DOCUMENT_FIELDS.map(([key, label]) => <DocumentRow key={key} docKey={key} label={label} doc={captain.documents?.[key]} actions={actions} />)}
+            </div>
+            <section className="rounded-panel border border-line bg-surface p-4" aria-label="Dados da CNH">
+                <h2 className="text-lg font-semibold mb-3">Carteira de Motorista (CNH)</h2>
+                <form onSubmit={event => saveInfo(event, 'cnh')}>
+                    <fieldset disabled={Boolean(actions.busy)} className="min-w-0 space-y-3">
+                        <label className="block">Número da CNH<input name="number" defaultValue={captain.cnh?.number || ''} className={INPUT} /></label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <label className="block">Categoria<input name="category" defaultValue={captain.cnh?.category || ''} className={INPUT} /></label>
+                            <label className="block">UF<input name="uf" maxLength={2} defaultValue={captain.cnh?.uf || ''} className={INPUT} /></label>
+                        </div>
+                        <label className="block">Validade da CNH<input name="expiration" type="date" defaultValue={captain.cnh?.expiration?.slice(0, 10) || ''} className={INPUT} /></label>
+                        <label className="flex gap-3 items-start py-2"><input name="ear" type="checkbox" defaultChecked={captain.cnh?.ear === true} className="w-5 h-5 shrink-0 mt-1" />Exerce Atividade Remunerada</label>
+                        <button type="submit" className={`${ACTION} w-full`}>{actions.busy === 'cnh' ? 'Salvando...' : 'Salvar CNH'}</button>
+                    </fieldset>
+                    <Feedback value={actions.feedback.cnh} />
+                </form>
+            </section>
+            <section className="rounded-panel border border-line bg-surface p-4" aria-label="Recebimento Pix">
+                <h2 className="text-lg font-semibold mb-3">Recebimento (Pix)</h2>
+                <form onSubmit={event => saveInfo(event, 'pix')}>
+                    <fieldset disabled={Boolean(actions.busy)} className="min-w-0 space-y-3">
+                        <label className="block">Tipo de chave Pix<select name="keyType" defaultValue={captain.pix?.keyType || ''} className={INPUT} required>
+                            <option value="">Selecione o tipo</option><option value="cpf">CPF</option><option value="celular">Celular</option><option value="email">E-mail</option><option value="aleatoria">Aleatória</option>
+                        </select></label>
+                        <label className="block">Chave Pix<input name="key" defaultValue={captain.pix?.key || ''} className={INPUT} required /></label>
+                        <button type="submit" className={`${ACTION} w-full`}>{actions.busy === 'pix' ? 'Salvando...' : 'Salvar PIX'}</button>
+                    </fieldset>
+                    <Feedback value={actions.feedback.pix} />
+                </form>
+            </section>
+        </main>
+    </div>
 }
 
-export default CaptainDocuments
+export default function CaptainDocuments() {
+    const { captain } = useContext(CaptainDataContext)
+    return captain?._id ? <DocumentForm key={captain._id} /> : <p role="status" className="p-4">Aguardando identificação da conta...</p>
+}

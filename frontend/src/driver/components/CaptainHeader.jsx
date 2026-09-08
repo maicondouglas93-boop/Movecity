@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { usePwaUpdate } from '@/shared/contexts/PwaUpdateContext';
-import { useToast } from '@/shared/contexts/ToastContext';
+import { requestAppUpdateCheck } from '@/shared/components/AppUpdateGate';
 import InstallAppButton from '@/shared/components/ui/InstallAppButton';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { DRIVER_OVERLAY_BACK } from '@/shared/services/driverOverlayBack';
@@ -25,8 +24,6 @@ const CaptainHeader = ({ embedded = false, interactionBlocked = false }) => {
     const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
     const menuButtonRef = useRef(null);
-    const { checkForUpdate, updateServiceWorker } = usePwaUpdate();
-    const { addToast } = useToast();
 
     useEffect(() => { setMenuOpen(false); }, [location.pathname, location.search, interactionBlocked]);
     useEffect(() => {
@@ -45,22 +42,10 @@ const CaptainHeader = ({ embedded = false, interactionBlocked = false }) => {
         };
     }, [menuOpen, interactionBlocked]);
 
-    // Botão manual de atualização (2026-08-04) — ver o mesmo em Header.jsx (passageiro).
-    const handleUpdateClick = async () => {
+    const handleUpdateClick = () => {
         setMenuOpen(false);
-        addToast('Procurando atualização...', 'info');
-        const found = await checkForUpdate();
-        if (found) {
-            addToast('Atualizando o app...', 'info');
-            await updateServiceWorker(true);
-            // Fase 3 (M1, 2026-08-05): sem cleanup de propósito — ver comentário
-            // equivalente em Header.jsx (reload é ação global de aplicar o SW novo).
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
-        } else {
-            addToast('Você já está na versão mais recente.', 'success');
-        }
+        menuButtonRef.current?.focus();
+        requestAppUpdateCheck();
     };
 
     return (

@@ -837,6 +837,22 @@ const LiveTracking = (props) => {
     }, [props.navigationMode, mapReady]);
 
     // Fase D: a cada fix de GPS real, recalcula o ALVO da câmera e a próxima manobra.
+    // Viagem usa uma área de mapa livre, que muda ao abrir os detalhes do painel.
+    // Atualiza o provider sem recriar mapa, rota ou coletor de GPS.
+    useEffect(() => {
+        if (!props.observeViewport || !mapReady || !mapRef.current || typeof ResizeObserver === 'undefined') return undefined;
+        let frame;
+        const observer = new ResizeObserver(() => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(() => {
+                providerRef.current?.invalidateSize?.();
+                navKickRef.current?.();
+            });
+        });
+        observer.observe(mapRef.current);
+        return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+    }, [mapReady, props.observeViewport]);
+
     // Roda por fix (~1/s), nunca por quadro — bearing, zoom e busca de manobra são
     // decisões, não animação.
     useEffect(() => {

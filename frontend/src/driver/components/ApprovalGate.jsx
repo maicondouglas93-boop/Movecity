@@ -1,4 +1,4 @@
-import React from 'react'
+import PropTypes from 'prop-types'
 import { useNavigate } from 'react-router-dom'
 import Button from '@/shared/components/ui/Button'
 
@@ -9,6 +9,10 @@ import Button from '@/shared/components/ui/Button'
 // distinguir "approved" (nunca batia com nada) de "Pendente" (tudo o resto, inclusive
 // reprovado/suspenso/bloqueado, sem nunca dizer ao motorista qual dos casos era o dele).
 const STATUS_CONFIG = {
+    expirado: {
+        icon: 'ri-calendar-close-line', tone: 'text-danger-700 bg-danger-50', title: 'Prazo de documentação expirado',
+        description: 'Envie os documentos para análise ou fale com o suporte. O envio não reativa a conta automaticamente.',
+    },
     iniciado: {
         icon: 'ri-file-list-3-line',
         tone: 'text-blue-500 bg-blue-50',
@@ -19,13 +23,13 @@ const STATUS_CONFIG = {
         icon: 'ri-upload-cloud-2-line',
         tone: 'text-blue-500 bg-blue-50',
         title: 'Documentos recebidos',
-        description: 'Recebemos seus documentos. Em breve nossa equipe inicia a análise do seu cadastro.',
+        description: 'Recebemos seus documentos. Consulte aqui o andamento da análise ou fale com o suporte.',
     },
     em_analise: {
         icon: 'ri-time-line',
         tone: 'text-amber-600 bg-amber-50',
         title: 'Cadastro em análise',
-        description: 'Sua conta está sendo analisada pela nossa equipe. Isso costuma levar até 48 horas úteis.',
+        description: 'Sua conta está sendo analisada pela nossa equipe. O aplicativo não informa prazo de conclusão. Você pode consultar o status novamente ou falar com o suporte.',
     },
     reprovado: {
         icon: 'ri-close-circle-line',
@@ -59,10 +63,14 @@ const ApprovalGate = ({ captain, onRefresh, refreshing }) => {
     // isBlocked (captain.service/admin.service) é um eixo separado de approvalStatus —
     // um motorista aprovado pode ser bloqueado depois, sem que approvalStatus mude.
     const kind = captain?.isBlocked ? 'blocked' : captain?.approvalStatus
-    const config = STATUS_CONFIG[kind] || STATUS_CONFIG.em_analise
+    const config = STATUS_CONFIG[kind] || {
+        icon: 'ri-question-line', tone: 'text-ink-700 bg-surface', title: 'Status da conta indisponível',
+        description: 'Não foi possível identificar a situação do cadastro. Consulte novamente ou fale com o suporte.',
+    }
 
     return (
-        <div className="h-full flex flex-col items-center justify-center bg-surface-alt px-6 text-center">
+        <div className="h-full min-h-0 overflow-y-auto bg-surface-alt px-6 py-6 text-center">
+            <div className="min-h-full flex flex-col items-center justify-center">
             <div className={`h-20 w-20 rounded-full flex items-center justify-center mb-6 ${config.tone}`}>
                 <i className={`${config.icon} text-4xl`}></i>
             </div>
@@ -76,9 +84,13 @@ const ApprovalGate = ({ captain, onRefresh, refreshing }) => {
                 <Button variant="ghost" onClick={() => navigate('/captain/profile')}>
                     Ver meu perfil e documentos
                 </Button>
+                <Button variant="secondary" onClick={() => navigate('/captain/documents')}>Ver documentos e pendências</Button>
+                <Button variant="secondary" onClick={() => navigate(`/captain/support?category=${captain?.isBlocked || kind === 'suspenso' ? 'account' : 'documents'}`)}>Falar com o suporte</Button>
+            </div>
             </div>
         </div>
     )
 }
+ApprovalGate.propTypes = { captain: PropTypes.object, onRefresh: PropTypes.func, refreshing: PropTypes.bool }
 
 export default ApprovalGate

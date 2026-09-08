@@ -71,7 +71,7 @@ import { SocketContext } from '@/shared/contexts/SocketContext'
 import { ToastProvider } from '@/shared/contexts/ToastContext'
 import FinishRide from '@/driver/components/FinishRide'
 import api from '@/shared/services/axios'
-import { flushQueuedLocations } from '@/shared/services/offlineQueue'
+import { flushQueuedLocations, enqueueOfflineAction } from '@/shared/services/offlineQueue'
 import { buildOfflineFinishPreview } from '@/shared/services/offlineRideFare'
 
 const ride = {
@@ -84,7 +84,7 @@ const ride = {
     user: { fullname: { firstname: 'Cliente' } },
 }
 
-function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRide = ride } = {}) {
+function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRide = ride, onBusyChange, onFinishedChange } = {}) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -100,7 +100,7 @@ function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRi
                                 setCaptainRide: vi.fn(),
                                 syncCaptainRide,
                             }}>
-                                <FinishRide ride={currentRide} setRide={vi.fn()} />
+                                <FinishRide ride={currentRide} setRide={vi.fn()} onBusyChange={onBusyChange} onFinishedChange={onFinishedChange} />
                             </RideContext.Provider>
                         </LocationContext.Provider>
                     </SocketContext.Provider>
@@ -111,6 +111,22 @@ function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRi
 }
 
 describe('app do motorista sem internet', () => {
+    it('mantém painel ocupado e só para contador depois da gravação durável', async () => {
+        let saved
+        enqueueOfflineAction.mockImplementationOnce(() => new Promise(resolve => { saved = resolve }))
+        const busy = vi.fn(), finished = vi.fn()
+        renderFinishRide({ onBusyChange: busy, onFinishedChange: finished })
+        const user = userEvent.setup()
+        await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await user.click(await screen.findByRole('button', { name: /confirmar e finalizar/i }))
+        await waitFor(() => expect(saved).toBeTypeOf('function'))
+        expect(busy).toHaveBeenLastCalledWith(true)
+        expect(finished).not.toHaveBeenCalledWith(true)
+        await act(async () => saved())
+        await screen.findByRole('heading', { name: 'Finalização pendente' })
+        expect(finished).toHaveBeenLastCalledWith(true)
+        expect(busy).toHaveBeenLastCalledWith(false)
+    })
     it.each(['carteira', 'card'])('não orienta cobrança externa para %s na finalização offline', async paymentMethod => {
         renderFinishRide({ currentRide: { ...ride, paymentMethod } })
         const user = userEvent.setup()

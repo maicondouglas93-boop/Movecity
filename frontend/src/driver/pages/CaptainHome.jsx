@@ -96,6 +96,11 @@ const CaptainHome = () => {
     const { captainRide, setCaptainRide, syncCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const [ refreshingApproval, setRefreshingApproval ] = useState(false)
+    const approvalRequestRef = useRef(null)
+    useEffect(() => {
+        approvalRequestRef.current = null
+        setRefreshingApproval(false)
+    }, [captain?._id])
     const availabilityRef = useRef(null)
     availabilityRef.current = captain
     const canReceiveOffers = () => {
@@ -193,11 +198,18 @@ const CaptainHome = () => {
     // atualizado no login/refresh de página, então um motorista aprovado enquanto o
     // app estava aberto continuaria vendo a tela de bloqueio até fechar e reabrir.
     const refreshApprovalStatus = async ({ silent = false } = {}) => {
+        const snapshot = availabilityRef.current
+        if (!snapshot?._id || approvalRequestRef.current) return
+        const request = {}
+        approvalRequestRef.current = request
         setRefreshingApproval(true)
         try {
             const response = await withHardTimeout(api.get('/captains/profile'))
             const next = response.data.captain
-            setCaptain(next)
+            // Uma leitura iniciada antes de um envio não pode apagar o documento confirmado.
+            if (!mountedRef.current || approvalRequestRef.current !== request || availabilityRef.current !== snapshot || captainIdRef.current !== snapshot._id) return
+            if (next?._id !== snapshot._id) throw new Error('Resposta de perfil não corresponde à conta atual')
+            setCaptain(previous => previous === snapshot ? next : previous)
             if (!silent) {
                 if (next?.approvalStatus === 'aprovado' && !next?.isBlocked) {
                     addToast('Cadastro aprovado! Você já pode ficar online.', 'success')
@@ -206,12 +218,15 @@ const CaptainHome = () => {
                 }
             }
         } catch (err) {
-            console.error('Failed to refresh approval status:', err)
+            if (!mountedRef.current || captainIdRef.current !== snapshot._id) return
             if (!silent) {
                 addToast(err.friendlyMessage || 'Não foi possível atualizar o status. Verifique a conexão.', 'error')
             }
         } finally {
-            setRefreshingApproval(false)
+            if (approvalRequestRef.current === request) {
+                approvalRequestRef.current = null
+                if (mountedRef.current && captainIdRef.current === snapshot._id) setRefreshingApproval(false)
+            }
         }
     }
 

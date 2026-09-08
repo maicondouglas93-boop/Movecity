@@ -1,6 +1,8 @@
 import LegalPage from './LegalPage'
+import { Navigate } from 'react-router-dom'
+import { getAppRole } from '@/shared/platform/platform'
 
-const PublicSupport = () => (
+const PublicSupport = () => getAppRole() === 'driver' ? <Navigate to="/captain-help" replace /> : (
   <LegalPage title="Suporte MoveCity">
     <p className="text-ink-600 leading-6 mb-6">Fale com o suporte para dúvidas sobre conta, corridas, encomendas, pagamentos, privacidade ou exclusão de dados.</p>
     <div className="space-y-4">

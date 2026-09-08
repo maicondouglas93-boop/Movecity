@@ -5,7 +5,7 @@ import { newestCheckpoint } from '@/shared/services/rideTrackingCheckpoint'
 const SERVER_STALE_MS = 10000
 
 /** O servidor confirma o preço; sem resposta, o aparelho mantém o contador local. */
-export function useRideMeter(ride, socket) {
+export function useRideMeter(ride, socket, retryKey = 0) {
     const [meter, setMeter] = useState(null)
 
     useEffect(() => {
@@ -23,7 +23,8 @@ export function useRideMeter(ride, socket) {
         let hasFreshConfirmation = Number.isFinite(serverAmount)
 
         const publish = (value) => {
-            if (!disposed) setMeter({ rideId: ride._id, serverDistance, ...value })
+            if (!disposed) setMeter({ rideId: ride._id, serverDistance, calculationError: false,
+                lastConfirmedAt: hasFreshConfirmation ? receivedAt : null, ...value })
         }
         const tick = async () => {
             if (navigator.onLine === false || !socket?.connected
@@ -61,6 +62,10 @@ export function useRideMeter(ride, socket) {
                 })
             } catch {
                 // Falha de leitura não desmonta a corrida nem zera o valor mostrado.
+                if (!disposed && startedRevision === revision) setMeter(previous => ({
+                    ...(previous?.rideId === ride._id ? previous : { rideId: ride._id, amount: serverAmount, distance: serverDistance }),
+                    serverDistance, local: true, calculationError: true,
+                }))
             } finally {
                 calculating = false
             }
@@ -96,7 +101,7 @@ export function useRideMeter(ride, socket) {
             window.removeEventListener('offline', tick)
             window.removeEventListener('online', tick)
         }
-    }, [ride, socket])
+    }, [ride, socket, retryKey])
 
     return meter?.rideId === ride?._id && ride?.status === 'started' ? meter : null
 }

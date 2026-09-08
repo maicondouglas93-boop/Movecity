@@ -4,6 +4,21 @@ import DriverOperationalDialog from '@/driver/components/DriverOperationalDialog
 import { dismissDriverOverlay } from '@/shared/services/driverOverlayBack'
 
 describe('diálogo operacional: foco e Voltar', () => {
+    it('painel fechado preserva conteúdo sem capturar foco ou Voltar', async () => {
+        const close = vi.fn()
+        const tree = open => <DriverOperationalDialog title="Recibo" onClose={close} open={open}><input aria-label="Anotação" defaultValue="" /></DriverOperationalDialog>
+        const view = render(tree(false))
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(dismissDriverOverlay()).toBe(false)
+        view.rerender(tree(true))
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'preservar recibo' } })
+        view.rerender(tree(false))
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(dismissDriverOverlay()).toBe(false)
+        view.rerender(tree(true))
+        expect(screen.getByRole('textbox')).toHaveValue('preservar recibo')
+        expect(screen.getByRole('dialog')).toHaveFocus()
+    })
     it('foca o diálogo, contém Tab/Shift+Tab e restaura foco após recolher', async () => {
         const close = vi.fn()
         const view = render(<button>Abrir oferta</button>)

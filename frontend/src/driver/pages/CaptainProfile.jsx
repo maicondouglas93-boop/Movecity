@@ -42,7 +42,7 @@ const DOCUMENT_LABELS = {
 // SEMPRE de captain.documentDeadline (calculado pelo backend) — nunca um número fixo.
 // O relógio do aparelho só decide o "hoje" da conta regressiva, nunca o prazo em si.
 const formatDeadlineDate = (deadline) => {
-    if (!deadline) return '';
+    if (!deadline || !Number.isFinite(Date.parse(deadline))) return 'Não informado';
     return new Date(deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
@@ -61,7 +61,7 @@ const DocumentationCard = ({ captain }) => {
     const navigate = useNavigate();
     const status = captain?.approvalStatus;
     const deadline = captain?.documentDeadline;
-    const daysRemaining = deadline != null
+    const daysRemaining = Number.isFinite(Date.parse(deadline))
         ? Math.ceil((new Date(deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
         : null;
 
@@ -72,7 +72,7 @@ const DocumentationCard = ({ captain }) => {
                     <i className="ri-error-warning-fill text-2xl text-danger-500 flex-shrink-0"></i>
                     <div className="flex-1">
                         <h3 className="font-bold text-danger-700">Prazo expirado</h3>
-                        <p className="text-sm text-danger-600 mt-1">O prazo para envio da documentação expirou. Envie agora para reativar sua conta.</p>
+                        <p className="text-sm text-danger-600 mt-1">O prazo para envio da documentação expirou. Envie os documentos para análise; o envio não reativa a conta automaticamente.</p>
                         <Button onClick={() => navigate('/captain/documents')} variant="dangerSolid" className="mt-3">
                             Enviar documentos
                         </Button>
@@ -144,7 +144,8 @@ const DocumentationCard = ({ captain }) => {
                 <div className="flex items-start gap-3">
                     <i className="ri-shield-check-fill text-2xl text-brand-600 flex-shrink-0"></i>
                     <div className="flex-1">
-                        <h3 className="font-bold text-brand-800">Documentação aprovada</h3>
+                        <h3 className="font-bold text-brand-800">Cadastro aprovado</h3>
+                        <p className="text-sm text-brand-800 mt-1">Confira abaixo o status de cada documento. Fotos reenviadas exigem nova análise.</p>
                         <button type="button" onClick={() => navigate('/captain/documents')} className="text-sm font-semibold text-brand-700 underline mt-1">
                             Ver documentos
                         </button>
@@ -163,7 +164,7 @@ const CaptainProfile = () => {
     const { addToast } = useToast();
     const [photoUploading, setPhotoUploading] = useState(false);
     const [appVersion, setAppVersion] = useState('');
-    const approval = APPROVAL_LABELS[captain?.approvalStatus] || APPROVAL_LABELS.em_analise;
+    const approval = APPROVAL_LABELS[captain?.approvalStatus] || { tone: 'neutral', label: 'Não informado', icon: 'ri-question-line' };
     const documents = captain?.documents || {};
 
     useEffect(() => {
@@ -349,10 +350,7 @@ const CaptainProfile = () => {
                             type="button"
                             variant="secondary"
                             className="mt-4 w-full"
-                            onClick={() => {
-                                addToast('Verificando...', 'info');
-                                requestAppUpdateCheck();
-                            }}
+                            onClick={requestAppUpdateCheck}
                         >
                             Verificar atualizações
                         </Button>
@@ -365,7 +363,7 @@ const CaptainProfile = () => {
                         <button type="button" onClick={() => navigate('/privacy')} className="w-full min-h-[48px] flex items-center justify-between text-left">
                             <span>Política de Privacidade</span><i className="ri-arrow-right-s-line text-xl" aria-hidden="true" />
                         </button>
-                        <button type="button" onClick={() => navigate('/support')} className="w-full min-h-[48px] flex items-center justify-between text-left">
+                        <button type="button" onClick={() => navigate('/captain/support')} className="w-full min-h-[48px] flex items-center justify-between text-left">
                             <span>Suporte</span><i className="ri-arrow-right-s-line text-xl" aria-hidden="true" />
                         </button>
                         <button type="button" onClick={() => navigate('/captain/delete-account')} className="w-full min-h-[48px] flex items-center justify-between text-left text-danger-600 font-semibold">

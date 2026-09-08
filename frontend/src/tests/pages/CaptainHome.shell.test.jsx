@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-    get: vi.fn(), post: vi.fn(), toast: vi.fn(), requestLock: vi.fn(), alert: vi.fn(),
+    get: vi.fn(), post: vi.fn(), toast: vi.fn(), requestLock: vi.fn(), alert: vi.fn(), setCaptain: vi.fn(),
     acceptParcel: vi.fn(), parcelHistory: vi.fn(), setCaptainRide: vi.fn(), setCaptainParcel: vi.fn(),
     socket: { connected: true, on: vi.fn(), off: vi.fn(), emit: vi.fn() },
 }))
@@ -36,7 +36,7 @@ vi.mock('@/driver/components/CaptainDetails', () => ({ default: ({ children, onA
     <button onClick={() => onAvailabilityBusyChange(false)}>Teste: disponibilidade confirmada</button>
     {children}
 </div> }))
-vi.mock('@/driver/components/ApprovalGate', () => ({ default: () => <p>Aprovação necessária</p> }))
+vi.mock('@/driver/components/ApprovalGate', () => ({ default: ({ onRefresh }) => <><p>Aprovação necessária</p><button onClick={() => onRefresh()}>Consultar aprovação</button></> }))
 vi.mock('@/shared/components/LiveTracking', () => ({ default: () => <div data-testid="persistent-map" /> }))
 vi.mock('@/shared/components/PassengerIdentityCard', () => ({ default: () => null }))
 vi.mock('@/shared/components/ui/InstallAppButton', () => ({ default: () => null }))
@@ -47,6 +47,7 @@ import CaptainHome from '@/driver/pages/CaptainHome'
 import CaptainEarnings from '@/driver/pages/CaptainEarnings'
 import CaptainRidesHistory from '@/driver/pages/CaptainRidesHistory'
 import CaptainParcels from '@/driver/pages/CaptainParcels'
+import CaptainSupport from '@/driver/pages/CaptainSupport'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
@@ -58,13 +59,14 @@ function Path() { return <output data-testid="path">{useLocation().pathname}</ou
 function home({ path = '/captain/earnings', ride = null, parcel = null, owner = captain } = {}) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const tree = () => <QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>
-        <CaptainDataContext.Provider value={{ captain: owner }}>
+        <CaptainDataContext.Provider value={{ captain: owner, setCaptain: mocks.setCaptain }}>
             <SocketContext.Provider value={{ socket: mocks.socket }}>
                 <RideContext.Provider value={{ captainRide: ride, captainParcel: parcel, setCaptainRide: mocks.setCaptainRide, setCaptainParcel: mocks.setCaptainParcel }}>
                     <Routes><Route element={<CaptainHome />}>
                         <Route path="/captain-home" element={null} />
                         <Route path="/captain/earnings" element={<CaptainEarnings />} />
                         <Route path="/captain/profile" element={<p>Perfil em edição</p>} />
+                        <Route path="/captain/support" element={<CaptainSupport />} />
                         <Route path="/captain/rides" element={<CaptainRidesHistory />} />
                         <Route path="/captain/parcels" element={<CaptainParcels />} />
                     </Route><Route path="/captain-parcel" element={<p>Encomenda confirmada</p>} /></Routes><Path />
@@ -91,6 +93,45 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('lote 3: shell e atendimento acima das páginas', () => {
+    it('lote 7: consulta de aprovação é única e exige perfil da mesma conta', async () => {
+        let resolve
+        mocks.get.mockImplementation(url => url === '/captains/profile' ? new Promise(done => { resolve = done }) : Promise.resolve({ data: [] }))
+        const owner = { ...captain, approvalStatus: 'em_analise', isOnline: false }
+        home({ owner, path: '/captain-home' })
+        fireEvent.click(screen.getByRole('button', { name: 'Consultar aprovação' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Consultar aprovação' }))
+        expect(mocks.get.mock.calls.filter(([url]) => url === '/captains/profile')).toHaveLength(1)
+        await act(async () => resolve({ data: { captain: { ...owner, approvalStatus: 'aprovado' } } }))
+        expect(mocks.setCaptain).toHaveBeenCalledTimes(1)
+        expect(mocks.setCaptain.mock.calls[0][0](owner).approvalStatus).toBe('aprovado')
+    })
+    it('lote 7: perfil antigo não apaga documento recém-confirmado', async () => {
+        let resolve
+        mocks.get.mockImplementation(url => url === '/captains/profile' ? new Promise(done => { resolve = done }) : Promise.resolve({ data: [] }))
+        const owner = { ...captain, approvalStatus: 'em_analise', isOnline: false }
+        const view = home({ owner, path: '/captain-home' })
+        fireEvent.click(screen.getByRole('button', { name: 'Consultar aprovação' }))
+        view.changeOwner({ ...owner, documents: { cnhBack: { url: 'https://example.test/new.jpg' } } })
+        await act(async () => resolve({ data: { captain: owner } }))
+        expect(mocks.setCaptain).not.toHaveBeenCalled()
+    })
+    it('lote 7: resposta de conta diferente não substitui o cadastro', async () => {
+        mocks.get.mockImplementation(async url => ({ data: url === '/captains/profile' ? { captain: { ...captain, _id: 'c2' } } : [] }))
+        home({ owner: { ...captain, approvalStatus: 'em_analise', isOnline: false }, path: '/captain-home' })
+        fireEvent.click(screen.getByRole('button', { name: 'Consultar aprovação' }))
+        await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining('Não foi possível atualizar'), 'error'))
+        expect(mocks.setCaptain).not.toHaveBeenCalled()
+    })
+    it('lote 7: consulta não atualiza a conta depois de sair da Home', async () => {
+        let resolve
+        mocks.get.mockImplementation(url => url === '/captains/profile' ? new Promise(done => { resolve = done }) : Promise.resolve({ data: [] }))
+        const owner = { ...captain, approvalStatus: 'em_analise', isOnline: false }
+        const view = home({ owner, path: '/captain-home' })
+        fireEvent.click(screen.getByRole('button', { name: 'Consultar aprovação' }))
+        view.unmount()
+        await act(async () => resolve({ data: { captain: owner } }))
+        expect(mocks.setCaptain).not.toHaveBeenCalled()
+    })
     it('lote 4: disponibilidade pendente bloqueia oferta e presencial, sem perder a oferta', async () => {
         home({ path: '/captain-home' })
         fireEvent.click(screen.getByRole('button', { name: 'Teste: disponibilidade pendente' }))
@@ -105,7 +146,7 @@ describe('lote 3: shell e atendimento acima das páginas', () => {
         home()
         expect(await screen.findAllByRole('button', { name: 'Abrir menu' })).toHaveLength(1)
     })
-    it.each(['/captain/earnings', '/captain/profile'])('mostra a oferta fora do shell em %s, sem trocar a página', async path => {
+    it.each(['/captain/earnings', '/captain/profile', '/captain/support'])('mostra a oferta fora do shell em %s, sem trocar a página', async path => {
         home({ path })
         await emit('new-ride', offer())
         const dialog = await screen.findByRole('dialog', { name: 'Oferta de corrida' })

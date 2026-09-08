@@ -1,4 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
+import PropTypes from 'prop-types'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { SocketContext } from '@/shared/contexts/SocketContext'
@@ -90,6 +91,7 @@ async function fetchActive(kind, endpointMap) {
     try {
         // Cliente centralizado: 401 → refresh automático; falha de refresh → forceLogout.
         const response = await withHardTimeout(api.get(endpointMap[kind]))
+        if (endpointMap === PARCEL_ENDPOINT_BY_KIND) return response.data === null ? null : response.data || UNKNOWN
         return response.data || null
     } catch (err) {
         if (err.response?.status === 404) return null
@@ -103,7 +105,7 @@ const RideProvider = ({ children }) => {
     const [ captainRideReconciled, setCaptainRideReconciled ] = useState(false)
     const [ captainOwnerId, setCaptainOwnerId ] = useState(() => getSessionOwnerId('captain'))
     const [ userParcel, setUserParcel ] = useState(null)
-    const [ captainParcel, setCaptainParcel ] = useState(null)
+    const [ captainParcel, updateCaptainParcel ] = useState(null)
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
     const location = useLocation()
@@ -112,6 +114,24 @@ const RideProvider = ({ children }) => {
     const ownerRef = useRef(getSessionOwnerId('captain'))
     const captainRideRef = useRef(null)
     const localRevisionRef = useRef(0)
+    const parcelRef = useRef(null)
+    const parcelRevisionRef = useRef(0)
+    const parcelSyncRef = useRef({ user: null, captain: null })
+    const setCaptainParcel = useCallback((next) => {
+        if (captainOwnerId !== getSessionOwnerId('captain')) return
+        const value = typeof next === 'function' ? next(parcelRef.current) : next
+        const previous = parcelRef.current
+        if (value?._id === previous?._id && value && previous) {
+            const before = PARCEL_RESTORE_STATUSES.indexOf(previous.status)
+            const after = PARCEL_RESTORE_STATUSES.indexOf(value.status)
+            if (after >= 0 && before > after) return
+            if (previous.status === 'finished' && previous.paymentStatus === 'paid'
+                && value.status === 'finished' && value.paymentStatus !== 'paid') return
+        }
+        parcelRevisionRef.current += 1
+        parcelRef.current = value
+        updateCaptainParcel(value)
+    }, [captainOwnerId])
     const setCaptainRideState = useCallback((next) => {
         const ride = typeof next === 'function' ? next(captainRideRef.current) : next
         localRevisionRef.current += 1
@@ -167,17 +187,36 @@ const RideProvider = ({ children }) => {
         return captainRideRef.current
     }, [setCaptainRideState])
 
-    const syncParcel = useCallback(async (kind) => {
+    const syncParcel = useCallback((kind) => {
+        const owner = getSessionOwnerId(kind)
+        if (kind === 'captain' && captainOwnerId !== owner) return Promise.resolve(UNKNOWN)
+        // Screen + online + appStateChange often arrive together. Share this read
+        // so the screen does not receive UNKNOWN merely because another reader won.
+        const inFlight = parcelSyncRef.current[kind]
+        if (inFlight?.owner === owner) return inFlight.promise
         const key = kind === 'user' ? 'userParcel' : 'captainParcel'
         const seq = ++syncSeqRef.current[key]
-        const result = await fetchActive(kind, PARCEL_ENDPOINT_BY_KIND)
-        if (seq !== syncSeqRef.current[key]) return result
-        if (result !== UNKNOWN) {
-            if (kind === 'user') setUserParcel(result)
-            else setCaptainParcel(result)
-        }
-        return result
-    }, [])
+        const revision = parcelRevisionRef.current
+        const job = { owner, promise: null }
+        job.promise = (async () => {
+            try {
+                const result = await fetchActive(kind, PARCEL_ENDPOINT_BY_KIND)
+                if (seq !== syncSeqRef.current[key] || owner !== getSessionOwnerId(kind)) return UNKNOWN
+                if (kind === 'captain' && revision !== parcelRevisionRef.current) return UNKNOWN
+                // A malformed 200 is neither an empty result nor a valid parcel.
+                if (result != null && (!result._id || !PARCEL_RESTORE_STATUSES.includes(result.status))) return UNKNOWN
+                if (result !== UNKNOWN) {
+                    if (kind === 'user') setUserParcel(result)
+                    else setCaptainParcel(result)
+                }
+                return kind === 'captain' && result !== UNKNOWN ? parcelRef.current : result
+            } finally {
+                if (parcelSyncRef.current[kind] === job) parcelSyncRef.current[kind] = null
+            }
+        })()
+        parcelSyncRef.current[kind] = job
+        return job.promise
+    }, [setCaptainParcel, captainOwnerId])
 
     const syncUserRide = useCallback(() => syncRide('user'), [syncRide])
     const syncCaptainRide = useCallback(() => syncRide('captain'), [syncRide])
@@ -240,7 +279,9 @@ const RideProvider = ({ children }) => {
                 captainRideRef.current = null
                 updateCaptainRideState(null)
                 setCaptainRideReconciled(false)
-                setCaptainParcel(null)
+                parcelRevisionRef.current += 1
+                parcelRef.current = null
+                updateCaptainParcel(null)
             }
             syncAll()
         }
@@ -390,6 +431,7 @@ const RideProvider = ({ children }) => {
             userParcel,
             setUserParcel,
             captainParcel,
+            captainParcelOwnerId: captainOwnerId,
             setCaptainParcel,
             syncUserParcel,
             syncCaptainParcel,
@@ -400,4 +442,5 @@ const RideProvider = ({ children }) => {
     )
 }
 
+RideProvider.propTypes = { children: PropTypes.node }
 export default RideProvider

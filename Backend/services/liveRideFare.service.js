@@ -16,21 +16,17 @@ function getRideOptionals(ride) {
 }
 
 /**
- * Segundos cobráveis da corrida — a MESMA regra que a finalização aplica.
- *
- * O piso de 60s (que troca o tempo real pelo estimado numa corrida muito curta) existia
- * só em endRide. A prévia mostrava o tempo real e a cobrança usava o estimado, então o
- * motorista via um valor na tela e o sistema fechava com outro. Fonte única aqui,
- * consumida pelos dois lados.
+ * Tempo efetivamente percorrido, compartilhado pela prévia e pela finalização.
+ * Nunca substituir os primeiros segundos pelo tempo estimado da viagem inteira:
+ * o aparelho calcula com tempo real, inclusive offline. A tarifa mínima continua
+ * sendo aplicada pelo PricingEngine, sem inventar minutos para atingir esse piso.
  */
 function getElapsedSeconds(ride, now) {
     const base = ride?.startedAt || ride?.createdAt;
     const baseMs = base ? new Date(base).getTime() : now;
 
     if (!Number.isFinite(baseMs)) return 0;
-    const elapsed = Math.max(0, Math.round((now - baseMs) / 1000));
-    if (elapsed < 60 && ride?.estimatedTime) return ride.estimatedTime;
-    return elapsed;
+    return Math.max(0, Math.round((now - baseMs) / 1000));
 }
 
 /**

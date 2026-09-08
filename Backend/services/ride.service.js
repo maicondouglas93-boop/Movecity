@@ -6,6 +6,7 @@ const userWalletTransactionModel = require('../models/userWalletTransaction.mode
 const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const PricingEngine = require('./pricingEngine.service');
+const { getElapsedSeconds } = require('./liveRideFare.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
@@ -1840,10 +1841,9 @@ module.exports.endRide = async ({
     }
 
     const actualDistance = finishExtras.actualDistance ?? ride.actualDistance ?? 0;
-    // timeBase/finishedAtMs vêm do topo da finalização (a validação de GPS da presencial
-    // também depende deles). Prefere startedAt; fallback createdAt.
-    let actualTimeSeconds = Math.round((finishedAtMs - timeBaseMs) / 1000);
-    if (actualTimeSeconds < 60 && ride.estimatedTime) actualTimeSeconds = ride.estimatedTime;
+    // Mesma duração real da prévia, usando o instante validado do encerramento.
+    // A espera para sincronizar uma finalização offline não é tempo de corrida.
+    const actualTimeSeconds = getElapsedSeconds(ride, finishedAtMs);
 
     // Auditoria C2: presencial sem destino não pode fechar com distância 0 / preço 0.
     if (isPresentialPendingDest && !(actualDistance > 0)) {

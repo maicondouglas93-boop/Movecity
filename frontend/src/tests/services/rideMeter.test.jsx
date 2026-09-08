@@ -1,6 +1,28 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRideMeter } from '@/shared/hooks/useRideMeter'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { runInNewContext } from 'node:vm'
+
+// Executa as regras reais, sem instalar dependências do backend no job frontend
+// e sem permitir acesso a banco/rede. Somente os adaptadores externos são vazios;
+// um caminho que tente consultá-los em vez do snapshot faz o teste falhar.
+function loadBackendRules(file, dependencies = {}) {
+    const filename = resolve(process.cwd(), '../Backend', file)
+    const context = { module: { exports: {} }, console, require: name => {
+        if (!Object.hasOwn(dependencies, name)) throw new Error(`Dependência não isolada: ${name}`)
+        return dependencies[name]
+    } }
+    runInNewContext(readFileSync(filename, 'utf8'), context, { filename })
+    return context.module.exports
+}
+const pricingEngine = loadBackendRules('services/pricingEngine.service.js', {
+    '../models/tariffSetting.model': {}, '../models/coupon.model': {},
+    './globalTariff.service': {}, './vehicleCategoryCache.service': {}, './globalSettingCache.service': {},
+})
+const { calculateLiveRideFare } = loadBackendRules('services/liveRideFare.service.js', { './pricingEngine.service': pricingEngine })
+const { toPassengerFareRates } = loadBackendRules('utils/financePrivacy.js')
 
 const state = vi.hoisted(() => ({ points: [], read: vi.fn() }))
 vi.mock('@/shared/services/db', () => ({
@@ -41,6 +63,43 @@ describe('taxímetro sem conexão', () => {
         await tick(60000)
         expect(result.current.amount).toBe(9)
         expect(result.current.local).toBe(true)
+    })
+    it.each([
+        ['driver_initiated', 0], ['driver_initiated', 8],
+        ['passenger_requested', 0], ['passenger_requested', 8],
+    ])('mantém paridade ao perder/recuperar sinal no primeiro minuto: %s, mínimo %i', async (source, minimumFare) => {
+        const original = {
+            ...ride, source, startedAt: now - 7000, estimatedTime: 300, actualDistance: 0,
+            pricingSnapshot: {
+                category: { name: 'car', pricing: { baseFare: 6, perKm: 2, perMinute: 1.2, minimumFare, roundingRule: 'none' } },
+                globalSetting: {}, globalTariffs: [],
+            },
+        }
+        original.liveFare = await calculateLiveRideFare({ ride: original, now })
+        const dto = { ...original, fareRates: toPassengerFareRates(original.pricingSnapshot) }
+        vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+        socket.connected = true
+        const { result } = renderHook(() => useRideMeter(dto, socket))
+        await tick()
+        expect(result.current.amount).toBe(Math.max(minimumFare, 6.14))
+        // Inclui a passagem de 59 para 60 segundos: não pode existir queda
+        // causada por trocar o tempo estimado pelo tempo efetivamente percorrido.
+        for (const advanceMs of [0, 11000, 41000, 1000, 1000]) {
+            await tick(advanceMs)
+            const liveFare = await calculateLiveRideFare({ ride: original, now: Date.now() })
+            vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+            socket.connected = true
+            await act(async () => listeners.get('captain-location-updated')({ rideId: dto._id, actualDistance: 0, liveFare }))
+            await tick()
+            expect(result.current.local).toBe(false)
+            const confirmed = result.current.amount
+            vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+            socket.connected = false
+            await act(async () => window.dispatchEvent(new Event('offline')))
+            await tick()
+            expect(result.current).toMatchObject({ local: true, amount: confirmed, distance: 0 })
+            expect(confirmed).toBe(Math.max(minimumFare, Math.round((6 + liveFare.elapsedSeconds / 60 * 1.2) * 100) / 100))
+        }
     })
     it('conta o tempo mesmo parado, com zero quilômetros', async () => {
         const stationary = { ...ride, actualDistance: 0 }

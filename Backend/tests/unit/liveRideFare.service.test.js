@@ -86,4 +86,21 @@ describe('valor da corrida em tempo real', () => {
         expect(getElapsedSeconds({ startedAt: 'invalid-date' }, Date.now())).toBe(0);
         expect(getRideOptionals({ optionals: [ null, {}, 'bagagem' ] })).toEqual({ bagagem: true });
     });
+
+    it.each([0, 7, 18, 59, 60, 61])('usa %i segundos reais, sem antecipar os 5 minutos estimados', async seconds => {
+        const startedAt = new Date('2026-09-08T12:00:00.000Z');
+        const now = startedAt.getTime() + seconds * 1000;
+        const ride = { status: 'started', startedAt, estimatedTime: 300, vehicleType: 'car' };
+        expect(getElapsedSeconds(ride, now)).toBe(seconds);
+        const result = await calculateLiveRideFare({ ride, actualDistance: 0, now });
+        expect(result.elapsedSeconds).toBe(seconds);
+        expect(mockCalculateFare).toHaveBeenCalledWith(expect.objectContaining({ time: seconds, distance: 0 }));
+    });
+
+    it('usa createdAt quando falta startedAt e nunca produz duração negativa', () => {
+        const now = Date.parse('2026-09-08T12:00:18.000Z');
+        expect(getElapsedSeconds({ createdAt: '2026-09-08T12:00:00.000Z', estimatedTime: 300 }, now)).toBe(18);
+        expect(getElapsedSeconds({ startedAt: new Date(now + 1000), estimatedTime: 300 }, now)).toBe(0);
+        expect(getElapsedSeconds({ estimatedTime: 300 }, now)).toBe(0);
+    });
 });

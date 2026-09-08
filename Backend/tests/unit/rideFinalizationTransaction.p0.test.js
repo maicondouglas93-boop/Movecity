@@ -194,4 +194,29 @@ describe('transação da finalização P0', () => {
         expect(result.destinationCoordinates).toEqual({ lat: -20.233, lng: -41.510 });
         expect(result.status).toBe('finished');
     });
+
+    it.each([
+        ['driver_initiated', 7, 0],
+        ['driver_initiated', 18, 600000],
+        ['user_requested', 18, 0],
+        ['user_requested', 18, 600000],
+        ['driver_initiated', 59, 0],
+        ['driver_initiated', 60, 0],
+        ['driver_initiated', 61, 0],
+    ])('finaliza %s com %i segundos reais e atraso de sincronização %i ms', async (source, seconds, syncDelay) => {
+        const startedAt = new Date('2026-09-08T12:00:00.000Z');
+        const finishedAt = startedAt.getTime() + seconds * 1000;
+        jest.spyOn(Date, 'now').mockReturnValue(finishedAt + syncDelay);
+        setupFinalization({ rideOverrides: {
+            source, startedAt, estimatedTime: 300,
+            destinationPending: false, destination: 'Destino informado', actualDistance: 0,
+        } });
+        await rideService.endRide({ rideId: 'ride1', captain: { _id: 'cap1' }, finishedAt });
+        expect(PricingEngine.calculateFare).toHaveBeenCalledWith(expect.objectContaining({
+            time: seconds, distance: 0, serviceKind: source === 'driver_initiated' ? 'presential' : 'ride',
+        }));
+        const [, update] = rideModel.findOneAndUpdate.mock.calls.find(([, value]) => value.$set?.status === 'finished');
+        expect(update.$set.actualTime).toBe(seconds);
+        expect(update.$set.finishedAt.getTime()).toBe(finishedAt);
+    });
 });

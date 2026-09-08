@@ -35,14 +35,16 @@ const socket = () => {
 }
 function home({ owner = captain, busy = false, trip = null, error = null, location = { lat: 0, lng: 0, timestamp: Date.now() } } = {}) {
     const ws = socket()
-    let changeOwner, changeTrip
+    let changeOwner, changeTrip, changeLocation
     function Harness() {
         const [current, setCurrent] = useState(owner)
         const [ride, setRide] = useState(trip)
+        const [currentLocation, setCurrentLocation] = useState(location)
         changeOwner = setCurrent
         changeTrip = setRide
+        changeLocation = setCurrentLocation
         return <CaptainDataContext.Provider value={{ captain: current, setCaptain: update => { mocks.change(update); setCurrent(update) } }}>
-            <SocketContext.Provider value={{ socket: ws }}><LocationRefContext.Provider value={{ locationRef: { current: location }, locationError: error }}>
+            <SocketContext.Provider value={{ socket: ws }}><LocationRefContext.Provider value={{ locationRef: { current: currentLocation }, locationError: error }}>
                 <RideContext.Provider value={{ captainRide: ride }}>
                     <ConnectionBanner inline />
                     <CaptainDetails busy={busy} onAvailabilityBusyChange={mocks.busy} />
@@ -50,7 +52,7 @@ function home({ owner = captain, busy = false, trip = null, error = null, locati
             </LocationRefContext.Provider></SocketContext.Provider>
         </CaptainDataContext.Provider>
     }
-    return { ...render(<Harness />), ws, changeOwner: value => act(() => changeOwner(value)), changeTrip: value => act(() => changeTrip(value)) }
+    return { ...render(<Harness />), ws, changeOwner: value => act(() => changeOwner(value)), changeTrip: value => act(() => changeTrip(value)), changeLocation: value => act(() => changeLocation(value)) }
 }
 beforeEach(() => {
     vi.resetAllMocks()
@@ -74,6 +76,32 @@ describe('disponibilidade: estados independentes', () => {
     ])('deriva %j como %s', (override, key) => expect(driverAvailability({ ...base, ...override }).key).toBe(key))
     it('recusa coordenadas inválidas, futuras ou salvas sem horário', () => {
         for (const location of [null, { lat: 91, lng: 0, timestamp: 1 }, { lat: 0, lng: 181, timestamp: 1 }, { lat: 0, lng: 0 }, { lat: 0, lng: 0, timestamp: 3000 }]) expect(hasRecentLocation(location, 2000)).toBe(false)
+    })
+    it('não pisca aguardando localização ao receber posições entre os ticks de 5s', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(100_000)
+        const view = home({ owner: { ...captain, isOnline: true } })
+        await act(async () => {})
+        for (let second = 1; second <= 12; second++) {
+            act(() => vi.advanceTimersByTime(1000))
+            // O GPS provoca um render na Home antes do próximo tick do card.
+            view.changeLocation({ lat: 0, lng: 0, timestamp: Date.now() })
+            expect(screen.getByRole('heading', { name: 'Disponível para solicitações' })).toBeInTheDocument()
+            expect(screen.queryByRole('heading', { name: 'Aguardando localização' })).not.toBeInTheDocument()
+        }
+        expect(mocks.post).not.toHaveBeenCalled()
+        expect(mocks.change).not.toHaveBeenCalled()
+    })
+    it('continua alertando quando o GPS realmente expira e recupera com nova posição', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(100_000)
+        const view = home({ owner: { ...captain, isOnline: true } })
+        await act(async () => {})
+        act(() => vi.advanceTimersByTime(65_000))
+        expect(screen.getByRole('heading', { name: 'Aguardando localização' })).toBeInTheDocument()
+        act(() => vi.advanceTimersByTime(1000))
+        view.changeLocation({ lat: 0, lng: 0, timestamp: Date.now() })
+        expect(screen.getByRole('heading', { name: 'Disponível para solicitações' })).toBeInTheDocument()
     })
     it('conexão caída não muda a escolha online e banner/card concordam', async () => {
         const view = home({ owner: { ...captain, isOnline: true } })

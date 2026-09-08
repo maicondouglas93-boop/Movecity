@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useContext, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import CaptainDetails from '@/driver/components/CaptainDetails'
+import DriverGoButton from '@/driver/components/DriverGoButton'
 import RidePopUp from '@/driver/components/RidePopUp'
 import ConfirmRidePopUp from '@/driver/components/ConfirmRidePopUp'
 import ParcelPopUp from '@/driver/components/ParcelPopUp'
@@ -945,13 +946,7 @@ const CaptainHome = () => {
                         })}
                         {!assignedRide && !captainParcel && (
                                 <>
-                                    <button type="button" onClick={() => navigate('/captain-presential')}
-                                        disabled={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel)}
-                                        aria-label="Iniciar uma corrida presencial"
-                                        className="w-full rounded-xl border border-line bg-white p-3 text-left disabled:opacity-50 min-h-[48px]">
-                                        <span className="block text-sm font-semibold text-ink-900">Corrida presencial</span>
-                                        <span className="block text-xs text-ink-600 mt-1">Para um passageiro que já está com você.</span>
-                                    </button>
+                                    <DriverGoButton disabled={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel)} />
                                     {scheduledUpcoming.length > 0 && <button type="button"
                                         onClick={() => navigate('/captain/scheduled')}
                                         className="min-h-[44px] w-full text-left text-sm text-ink-700 underline">

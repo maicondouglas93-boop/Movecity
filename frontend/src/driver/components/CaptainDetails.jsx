@@ -30,7 +30,7 @@ const CaptainDetails = ({ children = null, busy = false, assignedRide = null, on
     const [summaryRetry, setSummaryRetry] = useState(0)
     const [loadingToggle, setLoadingToggle] = useState(false)
     const [pendingDesired, setPendingDesired] = useState(null)
-    const [now, setNow] = useState(Date.now)
+    const [, setLocationTick] = useState(0)
     const lockRef = useRef(false)
     const mountedRef = useRef(false)
     const ownerEpochRef = useRef(0)
@@ -44,8 +44,10 @@ const CaptainDetails = ({ children = null, busy = false, assignedRide = null, on
     useEffect(() => () => onAvailabilityBusyChange?.(false), [onAvailabilityBusyChange])
     useEffect(() => {
         mountedRef.current = true
-        // Lê GPS por ref: a apresentação atualiza a cada 5s, não a cada posição.
-        const tick = () => setNow(Date.now())
+        // Reavalia a validade do GPS mesmo se nenhuma posição nova chegar.
+        // O horário da comparação é lido no render: a Home também renderiza
+        // entre ticks, e um relógio salvo rejeitaria o novo fix como "futuro".
+        const tick = () => setLocationTick(value => value + 1)
         const timer = setInterval(tick, 5000)
         window.addEventListener('focus', tick)
         return () => {
@@ -133,7 +135,7 @@ const CaptainDetails = ({ children = null, busy = false, assignedRide = null, on
 
     if (!captain) return null
     const state = driverAvailability({ captain, active, busy, changing: loadingToggle,
-        uncertain: pendingDesired !== null, ...connection, locationError, location: locationRef?.current, now })
+        uncertain: pendingDesired !== null, ...connection, locationError, location: locationRef?.current, now: Date.now() })
     const { loading, data } = summaryState
     const money = value => value != null && Number.isFinite(Number(value)) ? formatBRL(value) : 'Indisponível'
     return <div className="flex flex-col gap-3">

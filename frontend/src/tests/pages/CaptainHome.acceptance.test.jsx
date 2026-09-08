@@ -100,7 +100,7 @@ describe('CaptainHome: aceite operacional', () => {
         expect(mocks.enqueueOffline).not.toHaveBeenCalled()
         expect(mocks.setCaptainRide).not.toHaveBeenCalled()
         expect(screen.queryByRole('button', { name: 'A caminho' })).toBeNull()
-        expect(screen.getByRole('button', { name: 'Iniciar uma corrida presencial' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'GO — Iniciar uma corrida presencial' })).toBeDisabled()
         mocks.get.mockResolvedValue({ data: assigned })
         fireEvent.click(retry)
         expect(await screen.findByRole('button', { name: 'A caminho' })).toBeEnabled()

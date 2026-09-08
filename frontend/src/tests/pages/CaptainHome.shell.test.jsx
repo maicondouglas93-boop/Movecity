@@ -69,7 +69,8 @@ function home({ path = '/captain/earnings', ride = null, parcel = null, owner = 
                         <Route path="/captain/support" element={<CaptainSupport />} />
                         <Route path="/captain/rides" element={<CaptainRidesHistory />} />
                         <Route path="/captain/parcels" element={<CaptainParcels />} />
-                    </Route><Route path="/captain-parcel" element={<p>Encomenda confirmada</p>} /></Routes><Path />
+                    </Route><Route path="/captain-parcel" element={<p>Encomenda confirmada</p>} />
+                        <Route path="/captain-presential" element={<p>Preparação da corrida presencial</p>} /></Routes><Path />
                 </RideContext.Provider>
             </SocketContext.Provider>
         </CaptainDataContext.Provider>
@@ -93,6 +94,25 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('lote 3: shell e atendimento acima das páginas', () => {
+    it('restaura GO na Home e abre a preparação sem iniciar a corrida automaticamente', async () => {
+        home({ path: '/captain-home' })
+        const go = screen.getByRole('button', { name: 'GO — Iniciar uma corrida presencial' })
+        expect(go).toHaveTextContent('GO')
+        expect(go).toBeEnabled()
+        expect(screen.queryByText('Para um passageiro que já está com você.')).not.toBeInTheDocument()
+        fireEvent.click(go)
+        expect(await screen.findByText('Preparação da corrida presencial')).toBeInTheDocument()
+        expect(screen.getByTestId('path')).toHaveTextContent('/captain-presential')
+        expect(mocks.post).not.toHaveBeenCalled()
+    })
+    it.each([
+        { ride: { ...offer(), status: 'started' } },
+        { parcel: { _id: 'p0', status: 'in_transit' } },
+        { owner: { ...captain, approvalStatus: 'em_analise' } },
+    ])('não exibe GO durante serviço ativo ou aprovação pendente: %j', async state => {
+        home({ path: '/captain-home', ...state })
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'GO — Iniciar uma corrida presencial' })).not.toBeInTheDocument())
+    })
     it('lote 7: consulta de aprovação é única e exige perfil da mesma conta', async () => {
         let resolve
         mocks.get.mockImplementation(url => url === '/captains/profile' ? new Promise(done => { resolve = done }) : Promise.resolve({ data: [] }))
@@ -137,7 +157,10 @@ describe('lote 3: shell e atendimento acima das páginas', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Teste: disponibilidade pendente' }))
         await emit('new-ride', offer())
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Iniciar uma corrida presencial' })).toBeDisabled()
+        const go = screen.getByRole('button', { name: 'GO — Iniciar uma corrida presencial' })
+        expect(go).toBeDisabled()
+        fireEvent.click(go)
+        expect(screen.getByTestId('path')).toHaveTextContent('/captain-home')
         expect(screen.getByRole('link', { name: 'Conferir disponibilidade no início' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Teste: disponibilidade confirmada' }))
         expect(await screen.findByRole('dialog', { name: 'Oferta de corrida' })).toBeInTheDocument()

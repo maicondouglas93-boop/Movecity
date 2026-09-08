@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import DriverAccountShell from '@/driver/components/DriverAccountShell'
 import DriverOperationalDialog from '@/driver/components/DriverOperationalDialog'
 import CaptainDetails from '@/driver/components/CaptainDetails'
+import DriverGoButton from '@/driver/components/DriverGoButton'
 import ConfirmRidePopUp from '@/driver/components/ConfirmRidePopUp'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationRefContext } from '@/shared/contexts/LocationContext'
@@ -33,10 +34,7 @@ function Home() {
             <div className="flex-1 min-h-[22%] bg-brand-100 p-4">Área do mapa (simulada)</div>
             <div className="shrink-0 max-h-[70%] min-h-0 p-3 overflow-y-auto pb-6 bg-surface-alt">
                 <CaptainDetails onAvailabilityBusyChange={setBusy}>
-                    {!ride && <button disabled={busy} className="w-full rounded-xl border border-line bg-white p-3 text-left min-h-[48px]">
-                        <span className="block text-sm font-semibold">Corrida presencial</span>
-                        <span className="block text-xs mt-1">Para um passageiro que já está com você.</span>
-                    </button>}
+                    {!ride && <DriverGoButton disabled={busy} />}
                 </CaptainDetails>
             </div>
         </DriverAccountShell>
@@ -50,6 +48,7 @@ createRoot(document.getElementById('root')).render(<ToastProvider>
         <MemoryRouter initialEntries={['/captain-home']}><Routes>
             <Route path="/captain-home" element={<Home />} />
             <Route path="/captain-riding" element={<p>Início confirmado no teste</p>} />
+            <Route path="/captain-presential" element={<p>Preparação da corrida presencial</p>} />
         </Routes></MemoryRouter>
     </LocationRefContext.Provider></SocketContext.Provider>
 </ToastProvider>)

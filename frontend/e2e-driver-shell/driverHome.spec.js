@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 async function isolate(page) {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.route('**/*', route => {
         const url = new URL(route.request().url())
         if (url.pathname === '/captains/summary') return route.fulfill({ json: { earnings: 42, ridesToday: 3, onlineTimeSeconds: 3600 } })
@@ -30,8 +31,13 @@ for (const viewport of [{ width: 320, height: 568, font: 16 }, { width: 360, hei
             const action = page.getByRole('button', { name: mode === 'offline' ? 'Ficar online' : 'Ficar offline' })
             await unobscured(page, action, viewport.height)
             await page.screenshot({ path: testInfo.outputPath('home.png') })
-            await unobscured(page, page.getByRole('button', { name: /Corrida presencial/ }), viewport.height)
+            const go = page.getByRole('button', { name: 'GO — Iniciar uma corrida presencial' })
+            await expect(go).toHaveText('GO')
+            await unobscured(page, go, viewport.height)
+            await page.screenshot({ path: testInfo.outputPath('home-go.png') })
             expect(await page.locator('details').evaluate(node => node.open)).toBe(false)
+            await go.click()
+            await expect(page.getByText('Preparação da corrida presencial')).toBeVisible()
         })
     }
     test(`embarque: ${viewport.width}px, fonte ${viewport.font}`, async ({ page }, testInfo) => {

@@ -213,6 +213,25 @@ test('oferta de corrida revela somente primeiro nome e campos operacionais allow
     assertNoForbiddenFields(dto, 'oferta de corrida');
 });
 
+test('cobrança direta usa o restante informado pelo backend sem revelar dados internos da carteira', () => {
+    for (const method of ['cash', 'pix']) {
+        const dto = toRideCaptainDTO({ ...secretRide, status: 'finished', paymentMethod: method,
+            finalPrice: 28, walletAmountUsed: 10 });
+        assert.equal(dto.collectionAmount, 18);
+        assertNoForbiddenFields(dto, 'cobrança direta');
+        assert.equal(dto.walletAmountUsed, undefined);
+        assert.equal(dto.commissionAmount, undefined);
+    }
+    assert.equal(toRideCaptainDTO({ ...secretRide, status: 'finished', paymentMethod: 'cash',
+        finalPrice: 0, walletAmountUsed: 0 }).collectionAmount, 0);
+    assert.equal(toRideCaptainDTO({ ...secretRide, status: 'finished', paymentMethod: 'cash',
+        finalPrice: null }).collectionAmount, undefined);
+    for (const method of ['carteira', 'card']) {
+        assert.equal(toRideCaptainDTO({ ...secretRide, status: 'finished', paymentMethod: method }).collectionAmount, undefined);
+    }
+    assert.equal(toRideCaptainDTO(secretRide).collectionAmount, undefined);
+});
+
 test('corrida aceita separa identidade do passageiro e do motorista por ator', () => {
     const captainView = toRideCaptainDTO(secretRide);
     const passengerView = toRidePassengerDTO(secretRide);

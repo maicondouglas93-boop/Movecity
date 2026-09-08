@@ -42,7 +42,7 @@ const CaptainScheduled = () => {
   }, [])
 
   return (
-    <div className="min-h-screen bg-surface-alt flex flex-col">
+    <div className="h-full min-h-0 bg-surface-alt flex flex-col">
       <PageHeader title="Serviços agendados" onBack={() => navigate('/captain-home')} />
       <div className="flex-1 p-4 overflow-y-auto space-y-3">
         <p className="text-sm text-ink-500">

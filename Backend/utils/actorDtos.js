@@ -157,6 +157,15 @@ function toRideCaptainDTO(ride) {
     if (raw.status === 'started') dto.trackingCheckpoint = require('./rideTrackingCheckpoint')(raw);
     dto.driverAmount = computeDriverAmount(raw);
     const fareRates = toPassengerFareRates(raw.pricingSnapshot);
+    // Só a instrução operacional de cobrança; não expor saldo, débito de carteira
+    // ou comissão. FinalPrice é o total, não necessariamente o restante em mãos.
+    if (raw.status === 'finished' && ['cash', 'pix'].includes(raw.paymentMethod)) {
+        const total = Number(raw.finalPrice);
+        const used = Number(raw.walletAmountUsed || 0);
+        if (raw.finalPrice != null && Number.isFinite(total) && total >= 0 && Number.isFinite(used) && used >= 0) {
+            dto.collectionAmount = Math.round(Math.max(0, total - used) * 100) / 100;
+        }
+    }
     if (fareRates) dto.fareRates = fareRates;
     // Desconto congelado na estimativa: sem ele o cálculo offline manda cobrar o valor
     // cheio de um passageiro que tem cupom. É o mesmo fallback que a própria

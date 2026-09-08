@@ -151,7 +151,7 @@ export default defineConfig(({ mode }) => {
       // varria e2e/ e tentava executar specs do Playwright (test.describe explode
       // fora do runner dele) — a suíte unitária nunca ficava verde. E2E roda por
       // `npm run test:e2e`, não aqui.
-      exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
+      exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**', 'e2e-driver-shell/**'],
     },
   }
 })

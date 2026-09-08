@@ -2,7 +2,6 @@
 import { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
-import CaptainHeader from '@/driver/components/CaptainHeader';
 import Avatar from '@/shared/components/Avatar';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import Card from '@/shared/components/ui/Card';
@@ -208,7 +207,7 @@ const CaptainProfile = () => {
     };
 
     return (
-        <div className="h-screen bg-surface-alt flex flex-col pt-24">
+        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
             <PageHeader
                 title="Perfil"
                 className="shadow-raised"
@@ -376,7 +375,6 @@ const CaptainProfile = () => {
                 </Card>
             </div>
 
-            <CaptainHeader />
         </div>
     );
 };

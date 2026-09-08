@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { isOfferExpired } from './offerExpiry'
 
 // Auditoria PWA (2026-08-07, P3/P4/P8): antes, a lógica de "qual oferta mostrar
 // agora" ficava espalhada em handleNewRide/handleNewParcel (CaptainHome.jsx) —
@@ -22,7 +23,7 @@ export function useOfferQueue() {
     // pedindo especificamente por ESTA oferta: ela deve aparecer na hora, não
     // esperar atrás de outra já enfileirada.
     const enqueue = useCallback((kind, data, { front = false } = {}) => {
-        if (!data?._id) return false
+        if (!data?._id || isOfferExpired(data)) return false
         const offerId = String(data._id)
         const now = Date.now()
 
@@ -35,7 +36,6 @@ export function useOfferQueue() {
             if (now - ts > DEDUPE_WINDOW_MS) seenRef.current.delete(id)
         }
 
-        let accepted = true
         setQueue((prev) => {
             const rest = prev.filter((o) => o.offerId !== offerId)
             if (!front && rest.length !== prev.length) {
@@ -49,7 +49,7 @@ export function useOfferQueue() {
             const entry = { kind, offerId, data }
             return front ? [entry, ...rest] : [...rest, entry]
         })
-        return accepted
+        return true
     }, [])
 
     // Tira uma oferta específica da fila (aceita/recusada/tomada por outro/
@@ -60,8 +60,28 @@ export function useOfferQueue() {
         setQueue((prev) => prev.filter((o) => o.offerId !== id))
     }, [])
 
-    const clear = useCallback(() => setQueue([]), [])
+    const clear = useCallback(() => {
+        seenRef.current.clear()
+        setQueue([])
+    }, [])
 
-    const active = queue[0] || null
+    useEffect(() => {
+        const prune = () => setQueue(prev => {
+            const next = prev.filter(entry => !isOfferExpired(entry.data))
+            return next.length === prev.length ? prev : next
+        })
+        const timer = window.setInterval(prune, 250)
+        document.addEventListener('visibilitychange', prune)
+        window.addEventListener('focus', prune)
+        window.addEventListener('pageshow', prune)
+        return () => {
+            window.clearInterval(timer)
+            document.removeEventListener('visibilitychange', prune)
+            window.removeEventListener('focus', prune)
+            window.removeEventListener('pageshow', prune)
+        }
+    }, [])
+
+    const active = queue.find(entry => !isOfferExpired(entry.data)) || null
     return { active, queueLength: queue.length, enqueue, remove, clear }
 }

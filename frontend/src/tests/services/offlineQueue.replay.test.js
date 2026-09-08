@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
     failed: [],
     deleted: [],
     updated: [],
+    ownerId: null,
 }))
 
 vi.mock('@/shared/services/db', () => ({
@@ -41,7 +42,7 @@ vi.mock('@/shared/services/db', () => ({
     },
 }))
 
-vi.mock('@/shared/services/session', () => ({ getAccessToken: vi.fn(() => 'token'), getSessionOwnerId: () => null }))
+vi.mock('@/shared/services/session', () => ({ getAccessToken: vi.fn(() => 'token'), getSessionOwnerId: () => state.ownerId }))
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock('@/shared/services/axios', () => ({ default: api }))
@@ -62,7 +63,30 @@ describe('replay da fila de ações offline', () => {
         state.failed.length = 0
         state.deleted.length = 0
         state.updated.length = 0
+        state.ownerId = null
         api.mockReset()
+    })
+
+    it.each(['start-ride', 'update-ride-status'])('preserva snapshot e dono de %s; não envia na conta errada', async type => {
+        state.ownerId = 'captain-1'
+        const payload = { rideId: 'r1', occurredAt: 1000, status: 'arrived' }
+        const rideSnapshot = { _id: 'r1', status: type === 'start-ride' ? 'started' : 'arrived' }
+        await enqueueOfflineAction({ type, rideId: 'r1', payload, rideSnapshot })
+        expect(state.actions[0]).toMatchObject({ ownerId: 'captain-1', payload, rideSnapshot })
+        state.ownerId = 'captain-2'
+        await replayOfflineActions()
+        expect(api).not.toHaveBeenCalled()
+        expect(state.deleted).toHaveLength(0)
+        state.ownerId = 'captain-1'
+        api.mockResolvedValue({ data: rideSnapshot })
+        await replayOfflineActions()
+        expect(api).toHaveBeenCalledTimes(1)
+        expect(state.deleted).toHaveLength(1)
+    })
+
+    it.each(['start-ride', 'update-ride-status'])('não salva %s com IDs divergentes', async type => {
+        await expect(enqueueOfflineAction({ type, rideId: 'r1', payload: { rideId: 'r2' } })).rejects.toThrow(/Corrida inválida/)
+        expect(state.actions).toHaveLength(0)
     })
 
     it.each([undefined, null, '', ' ', 'undefined', 'null'])('recusa nova finalização sem identificação (%j)', async rideId => {
@@ -86,7 +110,7 @@ describe('replay da fila de ações offline', () => {
         expect(api.mock.calls[0][0].data.rideId).toBe('r2')
         expect(state.deleted).toEqual([2])
         expect(state.failed).toHaveLength(0)
-        expect(state.updated).toHaveLength(0)
+        expect(state.updated.every(update => update.id === 2)).toBe(true)
         expect(state.actions[0]).toEqual(invalid)
     })
 
@@ -94,7 +118,7 @@ describe('replay da fila de ações offline', () => {
         state.actions.push({ id: 1, type: 'end-ride', rideId: 'r1', timestamp: 1000, payload: { rideId: 'r1' } })
         api.mockRejectedValue({ response: { status: 400, data: { errors: [{ path: 'rideId', msg: 'Invalid value' }] } } })
         await replayOfflineActions()
-        expect(state.updated[0].patch.lastError).toContain('identificação da corrida não foi aceita')
+        expect(state.updated.at(-1).patch.lastError).toContain('identificação da corrida não foi aceita')
         expect(state.deleted).toHaveLength(0)
     })
 
@@ -110,18 +134,19 @@ describe('replay da fila de ações offline', () => {
 
         expect(state.failed).toHaveLength(0)
         expect(state.deleted).toHaveLength(0)
-        expect(state.updated).toEqual([{ id: 1, patch: { attempts: 1, lastError: 'Localização desatualizada.' } }])
+        expect(state.updated.at(-1)).toMatchObject({ id: 1, patch: { attempts: 1, lastError: 'Localização desatualizada.', lastHttpStatus: 400 } })
         expect(retried).toEqual(['end-ride'])
     })
 
-    it('desiste da finalização quando a corrida não existe mais (404)', async () => {
+    it('preserva finalização 404 para suporte e bloqueia repetição automática', async () => {
         state.actions.push({ id: 1, type: 'end-ride', rideId: 'r1', timestamp: 1000, attempts: 0, payload: { rideId: 'r1' } })
         api.mockRejectedValue(httpError(404, 'Corrida não encontrada'))
 
         await replayOfflineActions({ socket: socketStub })
 
-        expect(state.failed).toHaveLength(1)
-        expect(state.deleted).toEqual([1])
+        expect(state.failed).toHaveLength(0)
+        expect(state.deleted).toHaveLength(0)
+        expect(state.updated.at(-1)).toMatchObject({ id: 1, patch: { retryBlocked: true, lastHttpStatus: 404 } })
     })
 
     // A regra "4xx é definitivo" continua valendo para ações não executadas.
@@ -145,7 +170,7 @@ describe('replay da fila de ações offline', () => {
 
         expect(state.failed).toHaveLength(0)
         expect(state.deleted).toHaveLength(0)
-        expect(state.updated).toEqual([{ id: 3, patch: { attempts: 1 } }])
+        expect(state.updated.at(-1)).toMatchObject({ id: 3, patch: { attempts: 1, lastHttpStatus: 409 } })
         expect(retried).toEqual(['end-ride'])
     })
 
@@ -169,7 +194,7 @@ describe('replay da fila de ações offline', () => {
 
         expect(state.failed).toHaveLength(0)
         expect(state.deleted).toHaveLength(0)
-        expect(state.updated).toEqual([{ id: 6, patch: { attempts: 5 } }])
+        expect(state.updated.at(-1)).toMatchObject({ id: 6, patch: { attempts: 5, lastHttpStatus: 503 } })
     })
 
     it('deduplica dois pedidos de finalização da mesma corrida', async () => {

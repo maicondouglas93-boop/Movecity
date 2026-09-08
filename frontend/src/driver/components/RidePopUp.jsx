@@ -1,10 +1,12 @@
-import React, { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import Button from '@/shared/components/ui/Button'
 import PassengerIdentityCard from '@/shared/components/PassengerIdentityCard'
 import { LocationContext } from '@/shared/contexts/LocationContext'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
 import { formatBRL } from '@/shared/utils/currency'
+import { paymentMethodLabel } from '@/shared/utils/ridePaymentPresentation'
+import { isOfferExpired } from '@/shared/services/rideOffer/offerExpiry'
 
 // Fase B da experiência de corrida ativa (2026-08-03): o countdown de 20s saiu. Ele só
 // escondia o painel no frontend, sem declinar nada no servidor — a corrida continuava
@@ -37,7 +39,9 @@ const rideTypeHeading = (vehicleType) => {
 
 const RidePopUp = (props) => {
     const { userLocation } = useContext(LocationContext)
-    const [accepting, setAccepting] = useState(false)
+    const [localAccepting, setAccepting] = useState(false)
+    const acceptingRef = useRef(false)
+    const accepting = localAccepting || props.accepting
     const { remainingSeconds, expired } = useOfferCountdown(props.ride?.offerExpiresAt)
 
     // Zera sozinho quando o prazo acaba — some da tela e desabilita Aceitar, mas
@@ -56,11 +60,7 @@ const RidePopUp = (props) => {
     const tripKm = props.ride?.estimatedDistance
         ? (props.ride.estimatedDistance / 1000).toFixed(1)
         : null
-    const payLabel = props.ride?.paymentMethod === 'card'
-        ? 'Cartão'
-        : props.ride?.paymentMethod === 'pix'
-            ? 'PIX'
-            : 'Dinheiro'
+    const payLabel = paymentMethodLabel(props.ride?.paymentMethod)
 
     return (
         <div className="pb-1">
@@ -133,20 +133,21 @@ const RidePopUp = (props) => {
                 <Button
                     disabled={accepting || expired}
                     onClick={async () => {
-                        if (accepting || expired) return
+                        if (acceptingRef.current || accepting || expired || isOfferExpired(props.ride)) return
+                        acceptingRef.current = true
                         setAccepting(true)
-                        props.setConfirmRidePopupPanel(true)
                         try {
                             await props.confirmRide()
                         } finally {
+                            acceptingRef.current = false
                             setAccepting(false)
                         }
                     }}
                     fullWidth={false}
                     className="flex-1 !min-h-[44px] !text-sm disabled:opacity-50"
                 >
-                    <i className="ri-checkbox-circle-line mr-1"></i>
-                    {expired ? 'Oferta expirada' : (accepting ? 'Aceitando...' : 'Aceitar')}
+                    <i className="ri-checkbox-circle-line mr-1" aria-hidden="true"></i>
+                    {accepting ? 'Confirmando aceite...' : (expired ? 'Oferta expirada' : 'Aceitar')}
                 </Button>
                 <Button
                     variant="secondary"

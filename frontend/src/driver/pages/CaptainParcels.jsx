@@ -1,7 +1,6 @@
-import React, { useContext, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useContext, useEffect } from 'react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import CaptainHeader from '@/driver/components/CaptainHeader'
 import PageHeader from '@/shared/components/ui/PageHeader'
 import Card from '@/shared/components/ui/Card'
 import EmptyState from '@/shared/components/ui/EmptyState'
@@ -10,9 +9,7 @@ import Button from '@/shared/components/ui/Button'
 import { RideCardSkeleton } from '@/shared/components/ui/Skeleton'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
-import { useToast } from '@/shared/contexts/ToastContext'
 import {
-    acceptParcel,
     getCaptainParcelHistory,
 } from '@/shared/services/parcelApi'
 import { vehicleLabels } from '@/shared/assets/vehicleAssets'
@@ -135,10 +132,9 @@ const ParcelRow = ({ parcel, footer = null, highlight = false }) => {
 const CaptainParcels = () => {
     const navigate = useNavigate()
     const queryClient = useQueryClient()
-    const { addToast } = useToast()
     const { socket } = useContext(SocketContext)
-    const { captainParcel, setCaptainParcel, syncCaptainParcel } = useContext(RideContext)
-    const [acceptingId, setAcceptingId] = useState(null)
+    const { captainParcel, syncCaptainParcel } = useContext(RideContext)
+    const operations = useOutletContext()
 
     const {
         data,
@@ -198,24 +194,9 @@ const CaptainParcels = () => {
     }, [socket, queryClient, syncCaptainParcel])
 
     const handleAccept = async (parcel) => {
-        if (!parcel?._id || acceptingId) return
-        setAcceptingId(parcel._id)
-        try {
-            const accepted = await acceptParcel(parcel._id)
-            setCaptainParcel(accepted)
-            await queryClient.invalidateQueries({ queryKey: ['captainParcelHistory'] })
-            addToast('Encomenda aceita.', 'success')
-            navigate('/captain-parcel', { state: { parcel: accepted } })
-        } catch (err) {
-            if (err.response?.status === 409) {
-                addToast('Essa encomenda já foi aceita por outro motorista.', 'info')
-                queryClient.invalidateQueries({ queryKey: ['captainParcelHistory'] })
-            } else {
-                addToast(err.response?.data?.message || 'Não foi possível aceitar a encomenda.', 'error')
-            }
-        } finally {
-            setAcceptingId(null)
-        }
+        if (!parcel?._id || !operations?.acceptParcel || operations.blocked) return
+        await operations.acceptParcel(parcel)
+        await queryClient.invalidateQueries({ queryKey: ['captainParcelHistory'] })
     }
 
     const handleReturn = async () => {
@@ -226,7 +207,7 @@ const CaptainParcels = () => {
     }
 
     return (
-        <div className="h-screen bg-surface-alt flex flex-col pt-24">
+        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
             <PageHeader title="Encomendas" onBack={() => navigate('/captain-home')} className="shadow-raised" />
 
             <div className="flex-1 overflow-y-auto p-4 pb-28">
@@ -279,8 +260,8 @@ const CaptainParcels = () => {
                                             footer={(
                                                 <div className="mt-4">
                                                     <Button
-                                                        loading={acceptingId === parcel._id}
-                                                        disabled={Boolean(acceptingId)}
+                                                        loading={operations?.acceptingParcelId === parcel._id}
+                                                        disabled={!operations?.acceptParcel || operations.blocked}
                                                         onClick={() => handleAccept(parcel)}
                                                     >
                                                         Aceitar encomenda
@@ -313,7 +294,6 @@ const CaptainParcels = () => {
                     )}
                 </div>
             </div>
-            <CaptainHeader />
         </div>
     )
 }

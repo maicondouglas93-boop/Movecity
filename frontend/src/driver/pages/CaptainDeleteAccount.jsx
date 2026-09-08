@@ -28,7 +28,7 @@ const CaptainDeleteAccount = () => {
   }
 
   return (
-    <div className="min-h-screen bg-surface-alt">
+    <div className="min-h-full bg-surface-alt">
       <PageHeader title="Excluir conta" onBack={() => navigate('/captain/profile')} />
       <main className="max-w-xl mx-auto p-5">
         <div className="rounded-panel border border-danger-500/20 bg-danger-50 p-4 mb-6 flex gap-3">

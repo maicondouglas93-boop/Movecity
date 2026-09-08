@@ -58,7 +58,7 @@ function formatDate(dateStr) {
  * Central de notificações compartilhada (passageiro + motorista).
  * @param {{ backTo?: string, homeTo?: string }} props
  */
-const NotificationCenter = ({ backTo = '/home' }) => {
+const NotificationCenter = ({ backTo = '/home', embedded = false }) => {
   const navigate = useNavigate()
   const { addToast } = useToast()
   const { clearBadge, markReadLocal, markAllReadLocal, refreshUnread } = useNotificationInbox()
@@ -178,7 +178,7 @@ const NotificationCenter = ({ backTo = '/home' }) => {
 
   return (
     <div
-      className="min-h-screen bg-surface pb-8"
+      className={`${embedded ? 'min-h-full' : 'min-h-screen'} bg-surface pb-8`}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >

@@ -1,4 +1,5 @@
-import React, { useContext, useState, useEffect } from 'react'
+/* eslint-disable react/prop-types -- Mesma convenção dos painéis JSX de permissões, sem dependência runtime de prop-types. */
+import { useContext, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
@@ -6,339 +7,158 @@ import { LocationRefContext } from '@/shared/contexts/LocationContext'
 import { RideContext } from '@/shared/contexts/RideContext'
 import { useToast } from '@/shared/contexts/ToastContext'
 import api from '@/shared/services/axios'
-import {
-    requestLocationPermission,
-    syncTrackingLifecycle,
-} from '@/shared/platform/location.service'
+import { requestLocationPermission, syncTrackingLifecycle } from '@/shared/platform/location.service'
 import { openDriverAppSettings } from '@/shared/platform/driverPermissions.service'
 import { hasActiveService, resolveServiceKind } from '@/shared/services/captainLocationSync'
 import { isNativePlatform } from '@/shared/platform/platform'
 import DriverPermissionsPanel from '@/driver/components/DriverPermissionsPanel'
+import DriverAvailabilityCard from '@/driver/components/DriverAvailabilityCard'
+import useConnectionState from '@/shared/hooks/useConnectionState'
+import { driverAvailability } from '@/driver/services/driverAvailability'
 import { formatBRL } from '@/shared/utils/currency'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
-const PANEL_BG = 'bg-[#0B3D2E]'
-const ACCENT_GOLD = 'text-amber-300'
-
-const CaptainDetails = ({ children = null }) => {
+const CaptainDetails = ({ children = null, busy = false, assignedRide = null, onAvailabilityBusyChange }) => {
     const { captain, setCaptain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    // Auditoria de performance (2026-08-08, P1): LocationRefContext, não
-    // LocationContext — este componente só lê locationError (muda raríssimo, só
-    // pro banner de "sem GPS"), não userLocation. Sem essa separação, o card
-    // inteiro (ganhos, ações rápidas, sempre visível na Home) re-renderizava a
-    // cada fix de GPS por nada.
-    const { locationError } = useContext(LocationRefContext)
+    const { locationRef, locationError } = useContext(LocationRefContext)
     const { captainRide, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const navigate = useNavigate()
-    const [summary, setSummary] = useState(null)
-    const [loadingSummary, setLoadingSummary] = useState(true)
-
-    // Hooks sempre antes de return condicional (auditoria UX 2026-08-02).
-    const [isOnline, setIsOnline] = useState(captain?.isOnline || false)
+    const connection = useConnectionState()
+    const [summaryState, setSummaryState] = useState({ loading: true, data: null })
+    const [summaryRetry, setSummaryRetry] = useState(0)
     const [loadingToggle, setLoadingToggle] = useState(false)
-
-    const fetchSummary = async () => {
-        try {
-            const response = await withHardTimeout(api.get('/captains/summary'))
-            setSummary(response.data)
-        } catch (err) {
-            console.error('Error fetching captain summary:', err)
-        } finally {
-            setLoadingSummary(false)
-        }
-    }
-
+    const [pendingDesired, setPendingDesired] = useState(null)
+    const [now, setNow] = useState(Date.now)
+    const lockRef = useRef(false)
+    const mountedRef = useRef(false)
+    const ownerEpochRef = useRef(0)
+    const currentRef = useRef(null)
+    if (currentRef.current?.captain?._id !== captain?._id) ownerEpochRef.current += 1
+    currentRef.current = { captain, captainRide: assignedRide || captainRide, captainParcel, busy }
+    const active = hasActiveService(currentRef.current)
     useEffect(() => {
-        fetchSummary()
-
-        const handleSummaryUpdated = () => {
-            fetchSummary()
-        }
-
-        if (socket) {
-            socket.on('summary-updated', handleSummaryUpdated)
-        }
-
+        onAvailabilityBusyChange?.(loadingToggle || pendingDesired !== null)
+    }, [loadingToggle, pendingDesired, onAvailabilityBusyChange])
+    useEffect(() => () => onAvailabilityBusyChange?.(false), [onAvailabilityBusyChange])
+    useEffect(() => {
+        mountedRef.current = true
+        // Lê GPS por ref: a apresentação atualiza a cada 5s, não a cada posição.
+        const tick = () => setNow(Date.now())
+        const timer = setInterval(tick, 5000)
+        window.addEventListener('focus', tick)
         return () => {
-            if (socket) {
-                socket.off('summary-updated', handleSummaryUpdated)
+            mountedRef.current = false
+            clearInterval(timer)
+            window.removeEventListener('focus', tick)
+        }
+    }, [])
+    useEffect(() => {
+        setPendingDesired(null)
+        setLoadingToggle(false)
+        lockRef.current = false
+    }, [captain?._id])
+    useEffect(() => {
+        let disposed = false
+        let sequence = 0
+        const epoch = ownerEpochRef.current
+        setSummaryState({ loading: true, data: null })
+        const fetchSummary = async () => {
+            const request = ++sequence
+            try {
+                const response = await withHardTimeout(api.get('/captains/summary'))
+                if (!disposed && epoch === ownerEpochRef.current && request === sequence) setSummaryState({ loading: false, data: response.data })
+            } catch {
+                if (!disposed && epoch === ownerEpochRef.current && request === sequence) setSummaryState({ loading: false, data: null })
             }
         }
-    }, [socket])
-
-    useEffect(() => {
-        if (captain?.isOnline != null) setIsOnline(captain.isOnline)
-    }, [captain?.isOnline])
-
-    if (!captain) return null
+        if (captain?._id) fetchSummary()
+        socket?.on('summary-updated', fetchSummary)
+        return () => { disposed = true; socket?.off('summary-updated', fetchSummary) }
+    }, [captain?._id, socket, summaryRetry])
 
     const toggleOnline = async () => {
-        if (captain.approvalStatus !== 'aprovado') {
-            addToast('Você não pode ficar online até que seu cadastro seja aprovado.', 'error')
-            return
-        }
-
-        const nextOnline = !isOnline
-        // Pedir GPS ao ficar ONLINE (não no GO — GO é corrida presencial).
-        // Ajustes avançados (segundo plano, bateria e OEM) ficam no painel de
-        // permissões. Não empilhamos diálogos do Android ao tocar em ONLINE.
-        if (nextOnline) {
-            const perm = await requestLocationPermission()
-            if (!perm.granted) {
-                addToast(
-                    'Precisamos da localização para você ficar online e receber serviços.',
-                    'error'
-                )
-                if (isNativePlatform()) {
-                    addToast('Ative a localização nas configurações do app se o pedido não aparecer.', 'info')
-                }
-                return
-            }
-        }
-
+        const current = currentRef.current
+        if (lockRef.current || current.busy || navigator.onLine === false) return
+        const desired = pendingDesired ?? !current.captain?.isOnline
+        if (desired && (current.captain?.approvalStatus !== 'aprovado' || current.captain?.isBlocked)) return
+        // Trava ANTES da permissão nativa: dois toques não abrem dois pedidos.
+        lockRef.current = true
+        onAvailabilityBusyChange?.(true)
         setLoadingToggle(true)
+        const owner = current.captain._id
+        const epoch = ownerEpochRef.current
+        const isCurrent = () => mountedRef.current && epoch === ownerEpochRef.current && currentRef.current.captain?._id === owner
+        let submitted = false
         try {
-            const response = await withHardTimeout(api.post('/captains/toggle-online', {
-                isOnline: nextOnline,
-            }))
-            const updated = response.data.captain
-            setIsOnline(updated.isOnline)
-            setCaptain((prev) => (prev ? { ...prev, ...updated } : updated))
-            if (import.meta.env.DEV) {
-                console.log('[DriverStatus]', updated.isOnline ? 'ONLINE' : 'OFFLINE')
-            }
-            const active = hasActiveService({ captainRide, captainParcel })
-            try {
-                const fgs = await syncTrackingLifecycle({
-                    isOnline: updated.isOnline,
-                    hasActiveTrip: active,
-                    serviceKind: resolveServiceKind({ captainRide, captainParcel }) || 'ride',
-                })
-                if (updated.isOnline && fgs?.started === false) {
-                    addToast(
-                        fgs?.reason === 'no_location_permission'
-                            ? 'Online, mas a localização está bloqueada. Revise o aviso de permissões.'
-                            : 'Online, mas o rastreamento em segundo plano ainda não iniciou. Revise o aviso de permissões.',
-                        'info'
-                    )
+            if (desired) {
+                const permission = await requestLocationPermission()
+                if (!isCurrent()) return
+                if (!permission.granted) {
+                    addToast('Ative a localização para ficar online e receber serviços.', 'error')
+                    return
                 }
-            } catch (fgsErr) {
-                console.warn('[DriverStatus] FGS após toggle:', fgsErr?.message || fgsErr)
+            }
+            if (!isCurrent() || currentRef.current.busy || hasActiveService(currentRef.current)) return
+            submitted = true
+            // Repetir após resposta perdida envia o MESMO estado, nunca inverte.
+            const response = await withHardTimeout(api.post('/captains/toggle-online', { isOnline: desired }))
+            const updated = response.data?.captain
+            if (!isCurrent()) return
+            if (updated?._id !== owner || updated.isOnline !== desired) throw new Error('ACK de disponibilidade inválido')
+            setCaptain(prev => prev?._id === owner ? { ...prev, ...updated } : prev)
+            setPendingDesired(null)
+            const latest = currentRef.current
+            try {
+                const result = await syncTrackingLifecycle({
+                    isOnline: desired, hasActiveTrip: hasActiveService(latest),
+                    serviceKind: resolveServiceKind(latest) || 'ride',
+                })
+                if (isCurrent() && desired && result?.started === false) addToast('Disponibilidade confirmada. Revise as permissões de rastreamento em segundo plano.', 'info')
+            } catch {
+                if (isCurrent()) addToast('Revise as permissões de localização para manter o rastreamento.', 'info')
             }
         } catch (error) {
-            console.error('Error toggling online status:', error)
-            addToast(error.response?.data?.message || 'Erro ao alterar status online', 'error')
+            if (!isCurrent()) return
+            const rejected = error.response?.status >= 400 && error.response?.status < 500
+            if (submitted) setPendingDesired(rejected ? null : desired)
+            addToast(error.response?.data?.message || (submitted
+                ? 'Não foi possível confirmar a disponibilidade. Tente confirmar novamente quando a conexão voltar.'
+                : 'Não foi possível verificar a localização. Tente novamente.'), 'error')
         } finally {
-            setLoadingToggle(false)
+            if (isCurrent()) { lockRef.current = false; setLoadingToggle(false) }
         }
     }
 
-    const formatOnlineTime = (totalSeconds) => {
-        if (!totalSeconds) return '0m'
-        const h = Math.floor(totalSeconds / 3600)
-        const m = Math.floor((totalSeconds % 3600) / 60)
-        if (h > 0) return `${h}h${m}m`
-        return `${m}m`
-    }
-
-    const formatMoney = formatBRL
-
-    const openHelp = () => {
-        const wa = String(import.meta.env.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '')
-        if (wa) {
-            window.open(`https://wa.me/${wa}`, '_blank', 'noopener,noreferrer')
-            return
-        }
-        navigate('/captain/profile')
-        addToast('Abra o perfil ou fale com o suporte pelo WhatsApp configurado.', 'info')
-    }
-
-    // Créditos zerados desligam o motorista do despacho. Ele continua "online" e nada na
-    // tela dizia isso — só a tela Carteira, que ele teria que abrir por conta própria.
-    // Ficava esperando corrida que nunca vinha, achando que o app quebrou.
-    const creditsBlocked = captain?.canReceiveRides === false
-
-    const statusTitle = creditsBlocked
-        ? 'Sem créditos'
-        : isOnline && locationError
-            ? 'Online, sem GPS'
-            : isOnline
-                ? 'Você está online'
-                : 'Você está offline'
-
-    const statusSubtitle = creditsBlocked
-        ? 'Recarregue para voltar a receber corridas'
-        : isOnline && locationError
-            ? 'Ative a localização para receber solicitações'
-            : isOnline
-                ? 'Disponível para receber solicitações'
-                : 'Fique online para receber solicitações'
-
-    const bannerClass = creditsBlocked || (isOnline && locationError)
-        ? 'bg-danger-600'
-        : isOnline
-            ? PANEL_BG
-            : 'bg-ink-900'
-
-    const quickActions = [
-        { label: 'Carteira', icon: 'ri-wallet-3-line', onClick: () => navigate('/captain-wallet') },
-        { label: 'Histórico', icon: 'ri-history-line', onClick: () => navigate('/captain/rides') },
-        { label: 'Ganhos', icon: 'ri-bar-chart-box-line', onClick: () => navigate('/captain/earnings') },
-        { label: 'Ajuda', icon: 'ri-question-line', onClick: openHelp },
-    ]
-
-    return (
-        <div className="flex flex-col gap-4">
-            {creditsBlocked && (
-                <div className="flex flex-col gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
-                    <div className="flex items-center gap-2">
-                        <i className="ri-wallet-3-line text-base" aria-hidden="true" />
-                        Seus créditos acabaram — você não está recebendo corridas.
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/captain-wallet')}
-                        className="self-start underline font-bold"
-                    >
-                        Recarregar créditos
-                    </button>
-                </div>
-            )}
-            {isOnline && locationError && (
-                <div className="flex flex-col gap-2 bg-danger-50 border border-danger-500/20 text-danger-600 text-xs font-semibold px-3 py-2 rounded-2xl">
-                    <div className="flex items-center gap-2">
-                        <i className="ri-map-pin-off-line text-base" aria-hidden="true" />
-                        Sem sinal de GPS — você pode não estar recebendo corridas.
-                    </div>
-                    {isNativePlatform() && (
-                        <button
-                            type="button"
-                            onClick={() => openDriverAppSettings()}
-                            className="self-start underline font-bold"
-                        >
-                            Abrir configurações do app
-                        </button>
-                    )}
-                </div>
-            )}
-
-            <DriverPermissionsPanel />
-
-            {/* Status online */}
-            <div className={`${bannerClass} text-white rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 shadow-raised`}>
-                <div className="min-w-0">
-                    <h3 className="font-bold text-[15px] flex items-center gap-2">
-                        <span
-                            className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                                isOnline && !locationError
-                                    ? 'bg-brand-500 animate-pulse'
-                                    : isOnline
-                                        ? 'bg-white/70'
-                                        : 'bg-white/40'
-                            }`}
-                            aria-hidden="true"
-                        />
-                        <span className="truncate">{statusTitle}</span>
-                    </h3>
-                    <p className="text-[12px] text-white/80 mt-0.5 font-medium truncate">
-                        {statusSubtitle}
-                    </p>
-                </div>
-                <button
-                    type="button"
-                    onClick={toggleOnline}
-                    disabled={loadingToggle || captain.approvalStatus !== 'aprovado'}
-                    className={`flex-shrink-0 px-4 py-2.5 rounded-full font-bold text-sm transition-all active:scale-95 ${
-                        isOnline
-                            ? 'bg-white text-[#0B3D2E]'
-                            : 'bg-brand-500 text-white'
-                    } ${(loadingToggle || captain.approvalStatus !== 'aprovado') ? 'opacity-70 cursor-not-allowed' : ''}`}
-                >
-                    {loadingToggle ? '…' : isOnline ? 'Ficar Offline' : 'Ficar Online'}
-                </button>
-            </div>
-
-            {children}
-
-            {/* Seus ganhos */}
-            <div className={`${PANEL_BG} text-white rounded-2xl p-4 shadow-raised`}>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                    <h3 className="font-bold text-base">Seus ganhos</h3>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/captain/earnings')}
-                        className="text-[11px] font-semibold text-white/90 border border-white/35 rounded-full px-2.5 py-1 active:bg-white/10"
-                    >
-                        Ver detalhes &gt;
-                    </button>
-                </div>
-
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-500 flex items-center gap-1.5">
-                    Ganhos hoje
-                    <i className="ri-eye-line text-sm" aria-hidden="true" />
-                </p>
-                <p className="text-3xl font-black tracking-tight mt-1">
-                    {loadingSummary ? '…' : formatMoney(summary?.earnings)}
-                </p>
-
-                <div className="flex items-stretch mt-4 pt-3 border-t border-white/15">
-                    <div className="flex-1 min-w-0 pr-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Tempo online</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <p className="text-base font-bold truncate">
-                                {loadingSummary ? '…' : formatOnlineTime(summary?.onlineTimeSeconds)}
-                            </p>
-                            <i className={`ri-time-line text-sm ${ACCENT_GOLD}`} aria-hidden="true" />
-                        </div>
-                    </div>
-                    <div className="w-px bg-white/15" aria-hidden="true" />
-                    <div className="flex-1 min-w-0 px-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Corridas hoje</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <p className="text-base font-bold truncate">
-                                {loadingSummary ? '…' : `${summary?.ridesToday || 0}`}
-                            </p>
-                            <i className={`ri-line-chart-line text-sm ${ACCENT_GOLD}`} aria-hidden="true" />
-                        </div>
-                    </div>
-                    <div className="w-px bg-white/15" aria-hidden="true" />
-                    <div className="flex-1 min-w-0 pl-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Carteira</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <p className="text-base font-bold truncate">
-                                {loadingSummary ? '…' : formatMoney(summary?.walletBalance)}
-                            </p>
-                            <i className={`ri-wallet-3-line text-sm ${ACCENT_GOLD}`} aria-hidden="true" />
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Ações rápidas */}
-            <div>
-                <h3 className="text-[11px] font-bold text-ink-400 uppercase tracking-wider mb-2.5 px-0.5">
-                    Ações rápidas
-                </h3>
-                <div className="grid grid-cols-4 gap-2.5">
-                    {quickActions.map((action) => (
-                        <button
-                            key={action.label}
-                            type="button"
-                            onClick={action.onClick}
-                            className="flex flex-col items-center gap-1.5 bg-white border border-line rounded-2xl py-3 px-1 shadow-raised active:scale-[0.97] transition-transform"
-                        >
-                            <i className={`${action.icon} text-2xl text-brand-600`} aria-hidden="true" />
-                            <span className="text-[11px] font-semibold text-ink-900 text-center leading-tight">
-                                {action.label}
-                            </span>
-                        </button>
-                    ))}
-                </div>
-            </div>
-        </div>
-    )
+    if (!captain) return null
+    const state = driverAvailability({ captain, active, busy, changing: loadingToggle,
+        uncertain: pendingDesired !== null, ...connection, locationError, location: locationRef?.current, now })
+    const { loading, data } = summaryState
+    const money = value => value != null && Number.isFinite(Number(value)) ? formatBRL(value) : 'Indisponível'
+    return <div className="flex flex-col gap-3">
+        <DriverAvailabilityCard state={state} isOnline={captain.isOnline} loading={loadingToggle}
+            uncertain={pendingDesired !== null} {...connection} onToggle={toggleOnline}
+            disabled={loadingToggle || busy || active || !connection.internet || (!captain.isOnline && (captain.approvalStatus !== 'aprovado' || captain.isBlocked))}
+            onResolveIssue={() => state.key === 'credits' ? navigate('/captain-wallet')
+                : isNativePlatform() ? openDriverAppSettings() : addToast('Permita a localização nas configurações deste navegador e verifique o GPS do aparelho.', 'info')} />
+        {children}
+        <details className="rounded-xl border border-line bg-white p-3">
+            <summary className="min-h-[44px] cursor-pointer text-sm font-semibold text-ink-900 py-2">
+                Ganhos hoje · {loading ? 'Carregando...' : money(data?.earnings)}
+            </summary>
+            {data ? <div className="text-sm text-ink-700 space-y-2 pt-2">
+                <p>Corridas hoje: {data.ridesToday ?? 'Indisponível'}</p>
+                <p>Tempo online: {data.onlineTimeSeconds != null ? Math.floor(data.onlineTimeSeconds / 60) + ' min' : 'Indisponível'}</p>
+                <p>Carteira: {money(data.walletBalance)}</p>
+                <button type="button" onClick={() => navigate('/captain/earnings')} className="min-h-[44px] font-semibold underline">Ver detalhes dos ganhos</button>
+            </div> : !loading && <div className="text-sm text-ink-700">
+                <p>Não foi possível carregar o resumo. Seus ganhos não foram alterados.</p>
+                <button type="button" onClick={() => setSummaryRetry(value => value + 1)} className="min-h-[44px] font-semibold underline">Tentar carregar resumo</button>
+            </div>}
+        </details>
+        <DriverPermissionsPanel />
+    </div>
 }
 
 export default CaptainDetails

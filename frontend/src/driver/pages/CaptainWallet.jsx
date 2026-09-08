@@ -4,7 +4,6 @@ import api from '@/shared/services/axios'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
-import CaptainHeader from '@/driver/components/CaptainHeader'
 import StatusBadge from '@/shared/components/ui/StatusBadge'
 import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
@@ -96,7 +95,7 @@ const CaptainWallet = () => {
     }
 
     return (
-        <div className='h-screen bg-surface-alt flex flex-col pt-24'>
+        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
             {/* Header */}
             <div className='bg-black text-white p-6 pt-8 flex items-center justify-between'>
                 <h1 className='text-xl font-bold'>Minha Carteira</h1>
@@ -269,7 +268,6 @@ const CaptainWallet = () => {
                 )}
             </div>
 
-            <CaptainHeader />
 
             {/* Recharge Modal */}
             {showRechargeModal && (

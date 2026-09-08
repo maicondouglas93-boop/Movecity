@@ -1,13 +1,13 @@
-import React, { useRef, useState, useEffect, useContext, useCallback } from 'react'
-import { Link, useNavigate, useLocation, useSearchParams, Outlet } from 'react-router-dom'
+import { useRef, useState, useEffect, useContext, useCallback } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import CaptainDetails from '@/driver/components/CaptainDetails'
 import RidePopUp from '@/driver/components/RidePopUp'
 import ConfirmRidePopUp from '@/driver/components/ConfirmRidePopUp'
 import ParcelPopUp from '@/driver/components/ParcelPopUp'
 import { acceptParcel, declineParcel, getPendingParcels } from '@/shared/services/parcelApi'
 import ApprovalGate from '@/driver/components/ApprovalGate'
-import BottomSheet from '@/shared/components/ui/BottomSheet'
-import ConnectionBanner from '@/shared/components/ui/ConnectionBanner'
+import DriverAccountShell from '@/driver/components/DriverAccountShell'
+import DriverOperationalDialog from '@/driver/components/DriverOperationalDialog'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { LocationContext } from '@/shared/contexts/LocationContext'
@@ -15,14 +15,12 @@ import { RideContext } from '@/shared/contexts/RideContext'
 import api from '@/shared/services/axios'
 import LiveTracking from '@/shared/components/LiveTracking'
 import { useToast } from '@/shared/contexts/ToastContext'
-import CaptainHeader from '@/driver/components/CaptainHeader'
 import { onForegroundMessage } from '@/shared/services/fcm'
 import { bindPushNavigation } from '@/shared/platform/notification.service'
 import { isNativePlatform } from '@/shared/platform/platform'
 import { useWakeLock } from '@/shared/hooks/useWakeLock'
-import { enqueueOfflineAction, flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
+import { flushQueuedLocations, replayOfflineActions } from '@/shared/services/offlineQueue'
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
-import { getAccessToken } from '@/shared/services/session'
 import { joinWithRetry } from '@/shared/services/socketAuth'
 import { showBrowserNotification } from '@/shared/services/browserNotify'
 import { presentNativeRideOffer } from '@/shared/platform/nativeRideOffer.service'
@@ -30,7 +28,9 @@ import { vehicleLabels } from '@/shared/assets/vehicleAssets'
 import { useOfferQueue } from '@/shared/services/rideOffer/useOfferQueue'
 import { useOfferAlert } from '@/shared/services/rideOffer/useOfferAlert'
 import { formatBRL } from '@/shared/utils/currency'
-import * as Sentry from '@sentry/react'
+import { acceptDriverRide } from '@/driver/services/acceptDriverRide'
+import { isRideAssignedToCaptain, PICKUP_STATES } from '@/shared/utils/driverRideState'
+import { isOfferExpired } from '@/shared/services/rideOffer/offerExpiry'
 
 const haversineKm = (a, b) => {
     if (!a || !b || a.lat == null || b.lat == null) return null
@@ -55,6 +55,20 @@ const CaptainHome = () => {
     const [ searchParams, setSearchParams ] = useSearchParams()
 
     const [ ride, setRide ] = useState(null)
+    const [ acceptingRideId, setAcceptingRideId ] = useState(null)
+    const [ uncertainAcceptance, setUncertainAcceptance ] = useState(null)
+    const acceptRequestRef = useRef(null)
+    const uncertainAcceptanceRef = useRef(null)
+    const captainIdRef = useRef(null)
+    const mountedRef = useRef(true)
+    const offerEpochRef = useRef(0)
+    const pendingRideSyncRef = useRef(0)
+    const pendingParcelSyncRef = useRef(0)
+    const restoredRideIdRef = useRef(null)
+    useEffect(() => {
+        mountedRef.current = true
+        return () => { mountedRef.current = false }
+    }, [])
     // Fase B da experiência de corrida ativa (2026-08-03): corridas 'requested'
     // compatíveis vindas do pull GET /rides/pending — a fonte persistente das ofertas.
     // O evento 'new-ride' (socket) só adiciona/atualiza; quem garante que nada se perde
@@ -62,25 +76,76 @@ const CaptainHome = () => {
     const [ pendingRides, setPendingRides ] = useState([])
     const [ parcelOffer, setParcelOffer ] = useState(null)
     const [ parcelPopupOpen, setParcelPopupOpen ] = useState(false)
+    const [ dismissedOfferKey, setDismissedOfferKey ] = useState(null)
+    const [ acceptingParcel, setAcceptingParcel ] = useState(null)
+    const [ pickupBusy, setPickupBusy ] = useState(false)
+    const [ availabilityBusy, setAvailabilityBusy ] = useState(false)
+    const availabilityBusyRef = useRef(false)
+    const onAvailabilityBusyChange = useCallback(value => {
+        availabilityBusyRef.current = value
+        setAvailabilityBusy(value)
+    }, [])
+    const parcelAcceptRef = useRef(null)
     const [ scheduledUpcoming, setScheduledUpcoming ] = useState([])
 
     const navigate = useNavigate()
-    const location = useLocation()
     const { socket } = useContext(SocketContext)
     const { captain, setCaptain } = useContext(CaptainDataContext)
+    captainIdRef.current = captain?._id
     const { userLocation } = useContext(LocationContext)
     const { captainRide, setCaptainRide, syncCaptainRide, setCaptainParcel, captainParcel } = useContext(RideContext)
     const { addToast } = useToast()
     const [ refreshingApproval, setRefreshingApproval ] = useState(false)
+    const availabilityRef = useRef(null)
+    availabilityRef.current = captain
+    const canReceiveOffers = () => {
+        const current = availabilityRef.current
+        return Boolean(current?._id) && current.approvalStatus === 'aprovado'
+            && !current.isBlocked && current.isOnline !== false && current.canReceiveRides !== false
+            && !captainRideRef.current && !captainParcelRef.current
+    }
+
+    const clearUncertainAcceptance = () => {
+        uncertainAcceptanceRef.current = null
+        setUncertainAcceptance(null)
+    }
+    const invalidateAcceptance = (rideId) => {
+        if (acceptRequestRef.current?.rideId === rideId) acceptRequestRef.current.invalidated = true
+        if (uncertainAcceptanceRef.current?._id === rideId) clearUncertainAcceptance()
+    }
+    useEffect(() => {
+        if (acceptRequestRef.current) acceptRequestRef.current.invalidated = true
+        clearUncertainAcceptance()
+        offerEpochRef.current += 1
+        offerQueue.clear()
+        setPendingRides([])
+        setRide(null)
+        setParcelOffer(null)
+        setRidePopupPanel(false)
+        setParcelPopupOpen(false)
+        setConfirmRidePopupPanel(false)
+        setDismissedOfferKey(null)
+        if (parcelAcceptRef.current) parcelAcceptRef.current.invalidated = true
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [captain?._id])
 
     const removePendingRide = (rideId) => {
+        offerEpochRef.current += 1
         setPendingRides(prev => prev.filter(r => r._id !== rideId))
     }
 
     const syncPendingRides = async () => {
+        const ownerId = captainIdRef.current
+        if (!canReceiveOffers()) return
+        const epoch = offerEpochRef.current
+        const sequence = ++pendingRideSyncRef.current
         try {
             const response = await withHardTimeout(api.get('/rides/pending'))
-            setPendingRides(Array.isArray(response.data) ? response.data : [])
+            if (!mountedRef.current || captainIdRef.current !== ownerId || !canReceiveOffers()
+                || epoch !== offerEpochRef.current || sequence !== pendingRideSyncRef.current) return
+            const list = Array.isArray(response.data) ? response.data : []
+            setPendingRides(list)
+            list.forEach(item => offerQueue.enqueue('ride', item))
         } catch (err) {
             // Sem rede/token vencido: mantém a lista atual; a próxima sincronização
             // (reconnect/visibilidade/online) corrige.
@@ -96,7 +161,18 @@ const CaptainHome = () => {
     // background; aqui só reabrimos o painel certo com o status real do backend.
     // Corrida 'started' não passa por aqui: o RideContext redireciona pra /captain-riding.
     useEffect(() => {
-        if (!captainRide) return
+        const previousId = restoredRideIdRef.current
+        restoredRideIdRef.current = captainRide?._id || null
+        if (!captainRide || !PICKUP_STATES.includes(captainRide.status)) {
+            if (previousId) {
+                setRide(current => current?._id === previousId ? null : current)
+                setConfirmRidePopupPanel(false)
+            }
+            if (!captainRide) return
+        }
+        if (!isRideAssignedToCaptain(captainRide, captain?._id)) return
+        uncertainAcceptanceRef.current = null
+        setUncertainAcceptance(null)
         // Presencial: a confirmação tem tela própria (não o popup de corrida despachada).
         if (captainRide.source === 'driver_initiated') {
             if (captainRide.status === 'started') return
@@ -110,7 +186,7 @@ const CaptainHome = () => {
             setRidePopupPanel(false)
             setConfirmRidePopupPanel(true)
         }
-    }, [captainRide?._id, captainRide?.status, captainRide?.source, navigate])
+    }, [captainRide?._id, captainRide?.status, captainRide?.source, captain?._id, navigate])
 
     // Auditoria de UX do motorista (2026-08-02, §2.7): busca o perfil de novo sob
     // demanda (botão "Verificar novamente" do ApprovalGate) — o contexto só é
@@ -217,15 +293,39 @@ const CaptainHome = () => {
     // silenciosamente uma oferta cruzada, ora deixava a mais nova sobrescrever
     // a mais antiga sem fila.
     const offerQueue = useOfferQueue()
+    const assignedRide = isRideAssignedToCaptain(captainRide, captain?._id) ? captainRide
+        : isRideAssignedToCaptain(ride, captain?._id) ? ride : null
+    const offerEntry = !availabilityBusy && !assignedRide && !captainParcel && !acceptingRideId && !uncertainAcceptance && !acceptingParcel
+        && captain?.approvalStatus === 'aprovado' && !captain.isBlocked && captain.isOnline !== false
+        && captain.canReceiveRides !== false && offerQueue.active && !isOfferExpired(offerQueue.active.data)
+        ? offerQueue.active : null
+    const offerKey = offerEntry ? `${offerEntry.kind}:${offerEntry.offerId}:${offerEntry.data.offerExpiresAt || ''}` : null
+    const visibleOffer = offerKey && dismissedOfferKey !== offerKey ? offerEntry : null
+    const pickupOpen = Boolean(confirmRidePopupPanel && assignedRide && PICKUP_STATES.includes(assignedRide.status))
+    const modalKind = pickupOpen ? 'pickup' : acceptingParcel ? 'parcel' : acceptingRideId && ridePopupPanel ? 'ride' : visibleOffer?.kind
+    const modalOpen = Boolean(modalKind)
     // Som em loop + vibração reforçada enquanto a oferta em destaque não muda;
     // para sozinho ao aceitar/recusar/expirar (offerId muda ou some).
-    useOfferAlert(offerQueue.active?.offerId)
+    useOfferAlert(visibleOffer?.offerId)
+
+    useEffect(() => {
+        if (!captainRide && !captainParcel && captain?.isOnline !== false && captain?.canReceiveRides !== false && !captain?.isBlocked && captain?.approvalStatus === 'aprovado') return
+        offerEpochRef.current += 1
+        offerQueue.clear()
+        setPendingRides([])
+        setRidePopupPanel(false)
+        setParcelPopupOpen(false)
+        // Só reage à identidade/indisponibilidade, não a cada atualização do GPS.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [captainRide?._id, captainParcel?._id, captain?.isOnline, captain?.canReceiveRides, captain?.isBlocked, captain?.approvalStatus, offerQueue.clear])
 
     // Espelha a oferta em destaque da fila nos painéis existentes (RidePopUp /
     // ParcelPopUp) — nunca zera `ride`/`parcelOffer` aqui: eles continuam vivos
     // por trás de um painel fechado (ex.: `ride` também representa a corrida já
     // aceita exibida no ConfirmRidePopUp, que não é gerido pela fila).
     useEffect(() => {
+        if (acceptingRideId || uncertainAcceptance || acceptingParcel) return
+        if (assignedRide || captainParcel) return
         const active = offerQueue.active
         if (!active) {
             setRidePopupPanel(false)
@@ -242,7 +342,7 @@ const CaptainHome = () => {
             setRidePopupPanel(false)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [offerQueue.active])
+    }, [offerQueue.active, acceptingRideId, uncertainAcceptance, acceptingParcel, assignedRide?._id, assignedRide?.status, captainParcel?._id])
 
     const syncScheduledUpcoming = useCallback(async () => {
         try {
@@ -254,9 +354,14 @@ const CaptainHome = () => {
     }, [])
 
     const syncPendingParcels = useCallback(async () => {
-        if (captainRideRef.current || captainParcelRef.current) return
+        if (!canReceiveOffers()) return
+        const ownerId = captainIdRef.current
+        const epoch = offerEpochRef.current
+        const sequence = ++pendingParcelSyncRef.current
         try {
             const parcels = await withHardTimeout(getPendingParcels())
+            if (!mountedRef.current || captainIdRef.current !== ownerId || !canReceiveOffers()
+                || epoch !== offerEpochRef.current || sequence !== pendingParcelSyncRef.current) return
             if (Array.isArray(parcels)) {
                 // Antes só parcels[0] entrava na tela — as demais ficavam invisíveis
                 // até o próximo sync. A fila aceita todas (dedup por offerId cuida de
@@ -299,8 +404,9 @@ const CaptainHome = () => {
         socket.on('connect', handleConnect)
 
         const handleNewRide = (data) => {
+            if (!data?._id || !canReceiveOffers() || isOfferExpired(data)) return
             const TRACE_ID = `Ride:${data._id}`;
-            console.log(`[AUDIT][${TRACE_ID}] Evento 'new-ride' recebido no Frontend via Socket. Dados:`, data);
+            console.log(`[AUDIT][${TRACE_ID}] Oferta recebida via socket.`);
 
             // Fase B: a oferta também entra na lista persistente — se o motorista
             // ignorar o popup, ela continua acessível no card "Corrida disponível".
@@ -312,7 +418,7 @@ const CaptainHome = () => {
             // Auditoria PWA (2026-08-07, P3): antes, chegar aqui com uma encomenda
             // pendente na tela descartava a corrida sem sequer guardar no pendingRides.
             // A fila decide sozinha quem fica em destaque — nunca perde a oferta.
-            offerQueue.enqueue('ride', data)
+            if (!offerQueue.enqueue('ride', data)) return
             console.log(`[AUDIT][${TRACE_ID}] Oferta enfileirada.`);
 
             const rideType = rideTypeAnnouncement(data.vehicleType)
@@ -346,6 +452,7 @@ const CaptainHome = () => {
         const handleRideCancelled = (data) => {
             // Fase B: a corrida deixa de estar disponível — sai do card persistente.
             const cancelledId = data?.rideId
+            invalidateAcceptance(cancelledId)
             removePendingRide(cancelledId)
             offerQueue.remove(cancelledId)
             const matchesActive =
@@ -389,11 +496,10 @@ const CaptainHome = () => {
                 (data.captainId && data.captainId === captain._id) ||
                 (captainRideRef.current && captainRideRef.current._id === data.rideId)
             if (wonByThisCaptain) return
+            invalidateAcceptance(data.rideId)
 
             if (rideRef.current && rideRef.current._id === data.rideId) {
-                // Fecha os DOIS painéis: o RidePopUp abre o ConfirmRidePopUp de forma
-                // otimista antes da resposta da API — um perdedor com o confirm aberto
-                // ficava com ele pendurado quando só o popup de oferta era fechado.
+                // Evento definitivo invalida também uma resposta HTTP atrasada.
                 setRidePopupPanel(false)
                 setConfirmRidePopupPanel(false)
                 setRide(null)
@@ -408,8 +514,8 @@ const CaptainHome = () => {
             // (aceite em outro dispositivo bem no meio do despacho). Oferta de CORRIDA
             // pendente não bloqueia mais encomenda (P3) — a fila decide quem fica em
             // destaque.
-            if (captainRideRef.current || captainParcelRef.current) return
-            offerQueue.enqueue('parcel', data)
+            if (!data?._id || !canReceiveOffers() || isOfferExpired(data)) return
+            if (!offerQueue.enqueue('parcel', data)) return
             addToast(
                 `Nova encomenda · ${data.vehicleType?.toUpperCase() || 'entrega'} · ${formatBRL(data.fare)}`,
                 'ride',
@@ -435,7 +541,9 @@ const CaptainHome = () => {
         }
 
         const handleParcelTaken = (data) => {
+            offerEpochRef.current += 1
             if (data?.captainId && data.captainId === captain._id) return
+            if (parcelAcceptRef.current?.parcelId === data?.parcelId) parcelAcceptRef.current.invalidated = true
             offerQueue.remove(data?.parcelId)
             const currentOffer = parcelOfferRef.current
             if (currentOffer && String(currentOffer._id) === String(data?.parcelId)) {
@@ -524,7 +632,8 @@ const CaptainHome = () => {
 
                 const response = await withHardTimeout(api.get('/rides/pending'))
                 if (cancelled) return
-                const list = Array.isArray(response.data) ? response.data : []
+                if (!canReceiveOffers()) return
+                const list = (Array.isArray(response.data) ? response.data : []).filter(item => !isOfferExpired(item))
                 setPendingRides(list)
                 const target = list.find(r => String(r._id) === String(offerId))
                 if (target) {
@@ -563,7 +672,8 @@ const CaptainHome = () => {
             try {
                 const parcels = await withHardTimeout(getPendingParcels())
                 if (cancelled) return
-                const list = Array.isArray(parcels) ? parcels : []
+                if (!canReceiveOffers()) return
+                const list = (Array.isArray(parcels) ? parcels : []).filter(item => !isOfferExpired(item))
                 const target = list.find(p => String(p._id) === String(offerId))
                 if (target) {
                     offerQueue.enqueue('parcel', target, { front: true })
@@ -589,6 +699,7 @@ const CaptainHome = () => {
 
     // ACK de recusa — espelha declineParcel e o fluxo nativo (RideOfferAcceptHelper).
     async function declineRideOffer(rideToDecline) {
+        if (acceptRequestRef.current || uncertainAcceptanceRef.current) return
         const targetRide = rideToDecline || rideRef.current
         if (!targetRide?._id) {
             setRidePopupPanel(false)
@@ -605,10 +716,8 @@ const CaptainHome = () => {
         removePendingRide(targetRide._id)
     }
 
-    // Auditoria PWA (2026-08-07, P1): contador chegou a zero — sai da fila (some da
-    // tela, para som/vibração), mas NÃO é uma recusa: sem chamada ao backend, sem
-    // sair de pendingRides. A corrida continua disponível no card "Corrida
-    // disponível" até o prazo real do servidor (10 min) ou outro motorista aceitar.
+    // Destaque encerrado: retira só o popup sem recusar ou renovar o relógio.
+    // O backend mantém a solicitação por mais tempo; o card ainda pode consultar/aceitar.
     function expireRideOffer(rideToExpire) {
         const targetRide = rideToExpire || rideRef.current
         if (!targetRide?._id) return
@@ -618,64 +727,64 @@ const CaptainHome = () => {
     // Fase B: aceita um parâmetro opcional pra permitir aceitar direto do card
     // "Corrida disponível" (sem passar pelo popup) — o default preserva o fluxo do
     // RidePopUp, que chama sem argumentos.
-    async function confirmRide(rideToAccept) {
+    async function confirmRide(rideToAccept, { fromPendingList = false } = {}) {
         const targetRide = rideToAccept || rideRef.current
-        if (!targetRide?._id) return
+        if (!targetRide?._id || acceptRequestRef.current || parcelAcceptRef.current || availabilityBusyRef.current) return
+        if (!fromPendingList && !uncertainAcceptanceRef.current && isOfferExpired(targetRide)) {
+            expireRideOffer(targetRide)
+            addToast('O prazo dessa oferta terminou. Aguarde uma nova solicitação.', 'info')
+            return
+        }
+        if (uncertainAcceptanceRef.current && uncertainAcceptanceRef.current._id !== targetRide._id) {
+            addToast('Confira o aceite pendente antes de aceitar outra corrida.', 'info')
+            return
+        }
+        if (isRideAssignedToCaptain(captainRideRef.current, captain?._id)) return
         if (captainParcelRef.current || parcelPopupOpen) {
             addToast('Finalize a encomenda atual antes de aceitar uma corrida.', 'info')
             return
         }
+        const attempt = { rideId: targetRide._id, captainId: captain?._id, invalidated: false }
+        acceptRequestRef.current = attempt
+        setAcceptingRideId(targetRide._id)
+        setRide(targetRide)
+        const isCurrent = () => mountedRef.current && !attempt.invalidated
+            && captainIdRef.current === attempt.captainId
         try {
-            // Endpoint atômico (P1.3 da auditoria de concorrência, 2026-08-01) — antes
-            // usava /rides/confirm, que sobrescrevia sem checar status: dois motoristas
-            // aceitando a mesma corrida ao mesmo tempo recebiam 200 os dois.
-            const response = await withHardTimeout(api.post(`/rides/${targetRide._id}/accept`, {}))
-
-            if (response.data) {
-                setRide(response.data)
-                // Espelha no RideContext na hora — é ele quem restaura a corrida num
-                // refresh e alimenta o efeito de restauração acima.
-                setCaptainRide(response.data)
-            }
+            const assigned = await acceptDriverRide(targetRide, attempt.captainId, {
+                reconcileFirst: Boolean(uncertainAcceptanceRef.current),
+            })
+            if (!isCurrent()) return
+            clearUncertainAcceptance()
+            setRide(assigned)
+            captainRideRef.current = assigned
+            setCaptainRide(assigned)
             removePendingRide(targetRide._id)
-            // Corrida aceita: motorista tem trabalho ativo agora — nenhuma outra
-            // oferta (corrida ou encomenda) deveria continuar na fila.
             offerQueue.clear()
-            setConfirmRidePopupPanel(true)
+            setRidePopupPanel(false)
+            setConfirmRidePopupPanel(assigned.status !== 'started')
+            if (assigned._id !== targetRide._id) addToast('Você já tem uma corrida atribuída. Retomando essa viagem.', 'info')
+            if (assigned.status === 'started') navigate('/captain-riding', { replace: true, state: { ride: assigned } })
         } catch (err) {
-            console.error('Confirm ride error:', err);
-            if (err.response?.status === 409) {
-                // Outro motorista já aceitou (ou o passageiro cancelou, ou o motorista já
-                // tinha outra corrida ativa) — desfecho esperado da concorrência, não um
-                // erro de rede. O backend já distingue a causa na mensagem (P5 da
-                // auditoria PWA, 2026-08-07) — usar o texto real em vez de um genérico.
-                // Fecha os DOIS painéis: o RidePopUp (botão "Aceitar" já abre o
-                // ConfirmRidePopUp de forma otimista, antes da resposta da API, pro caso
-                // de rede offline — sem fechar os dois aqui, um 409 real deixava o
-                // ConfirmRidePopUp pendurado aberto com a corrida zerada, Etapa 6 da
-                // auditoria de UX, 2026-08-02).
-                addToast(err.response?.data?.message || 'Essa corrida já foi aceita por outro motorista.', 'info');
+            if (!isCurrent()) return
+            if (err.acceptanceUncertain) {
+                uncertainAcceptanceRef.current = targetRide
+                setUncertainAcceptance(targetRide)
+                setRidePopupPanel(false)
+                addToast('Aceite ainda não confirmado. Confira a confirmação antes de se deslocar.', 'info')
+            } else if ([404, 409, 410].includes(err.response?.status)) {
+                clearUncertainAcceptance()
+                addToast(err.response?.data?.message || 'Essa corrida não está mais disponível.', 'info')
                 removePendingRide(targetRide._id)
                 offerQueue.remove(targetRide._id)
                 setConfirmRidePopupPanel(false)
                 setRide(null)
-            } else if (!navigator.onLine || err.code === 'ERR_NETWORK') {
-                enqueueOfflineAction({
-                    type: 'accept-ride',
-                    rideId: targetRide._id,
-                    payload: { rideId: targetRide._id }
-                }).catch(e => console.error(e));
-
-                // Optimistic UI updates
-                const optimisticRide = { ...targetRide, status: 'accepted', captain };
-                setRide(optimisticRide);
-                removePendingRide(targetRide._id)
-                offerQueue.clear()
-                setConfirmRidePopupPanel(true)
             } else {
-                addToast('Falha ao confirmar corrida. Pode já ter sido aceita.', 'error');
-                Sentry.captureException(err, { tags: { issue: 'api_error' } });
+                addToast(err.response?.data?.message || err.message || 'Não foi possível confirmar o aceite.', 'error')
             }
+        } finally {
+            if (acceptRequestRef.current === attempt) acceptRequestRef.current = null
+            if (mountedRef.current) setAcceptingRideId(null)
         }
     }
 
@@ -685,37 +794,81 @@ const CaptainHome = () => {
     // na Home operacional inteira e só descobria a restrição ao tocar em "Ficar Online".
     const needsApprovalGate = captain && (captain.isBlocked || captain.approvalStatus !== 'aprovado')
 
+    const modalRide = acceptingRideId ? ride : visibleOffer?.data
+    const modalParcel = acceptingParcel || visibleOffer?.data
+    const closeOperationalPanel = () => {
+        if (acceptRequestRef.current || parcelAcceptRef.current || pickupBusy) return
+        if (pickupOpen) setConfirmRidePopupPanel(false)
+        else setDismissedOfferKey(offerKey)
+    }
+
+    async function confirmParcel(target, { fromPendingList = false } = {}) {
+        if (!target?._id || parcelAcceptRef.current || acceptRequestRef.current || uncertainAcceptanceRef.current || availabilityBusyRef.current) return
+        if (!canReceiveOffers() || (!fromPendingList && isOfferExpired(target))) return
+        const attempt = { parcelId: target._id, captainId: captainIdRef.current, invalidated: false }
+        parcelAcceptRef.current = attempt
+        setAcceptingParcel(target)
+        try {
+            const accepted = await withHardTimeout(acceptParcel(target._id))
+            if (!mountedRef.current || attempt.invalidated || captainIdRef.current !== attempt.captainId) return
+            if (accepted?._id !== target._id || !['provider_accepted', 'going_to_pickup', 'arrived_pickup', 'collected', 'in_transit', 'arrived_destination'].includes(accepted.status)) {
+                throw new Error('Resposta de aceite não confirmada. Confira a encomenda antes de se deslocar.')
+            }
+            offerQueue.clear()
+            captainParcelRef.current = accepted
+            setCaptainParcel(accepted)
+            navigate('/captain-parcel', { state: { parcel: accepted } })
+        } catch (err) {
+            if (!mountedRef.current || attempt.invalidated || captainIdRef.current !== attempt.captainId) return
+            addToast(err.response?.data?.message || 'Não foi possível confirmar o aceite. Confira Encomendas antes de se deslocar.', 'error')
+            if (err.response?.status === 409) offerQueue.remove(target._id)
+        } finally {
+            if (parcelAcceptRef.current === attempt) parcelAcceptRef.current = null
+            if (mountedRef.current) setAcceptingParcel(null)
+        }
+    }
+
+    const notice = acceptingRideId || uncertainAcceptance ? (
+        <div role="status" className="rounded-panel border border-amber-300 bg-amber-50 p-3">
+            <p className="text-sm font-semibold text-ink-900">{acceptingRideId ? 'Confirmando aceite...' : 'Aceite ainda não confirmado'}</p>
+            <p className="text-sm text-ink-700">Aguarde a confirmação antes de se deslocar.</p>
+            {!acceptingRideId && <button type="button" className="mt-2 min-h-[48px] w-full rounded-panel border border-ink-700 text-ink-900 font-semibold"
+                onClick={() => confirmRide(uncertainAcceptance)}>Tentar confirmar aceite</button>}
+        </div>
+    ) : assignedRide ? (
+        assignedRide.status === 'started'
+            ? <Link to="/captain-riding" state={{ ride: assignedRide }} className="flex min-h-[44px] items-center justify-center rounded-panel bg-brand-700 text-white font-semibold">Corrida em andamento — voltar</Link>
+            : <button type="button" onClick={() => { setRide(assignedRide); setConfirmRidePopupPanel(true) }} className="w-full min-h-[44px] rounded-panel bg-brand-700 text-white font-semibold">Retomar embarque</button>
+    ) : captainParcel?._id ? (
+        <Link to="/captain-parcel" state={{ parcel: captainParcel }} className="flex min-h-[44px] items-center justify-center rounded-panel bg-brand-700 text-white font-semibold">Retomar encomenda</Link>
+    ) : availabilityBusy ? (
+        <Link to="/captain-home" className="flex min-h-[44px] items-center justify-center rounded-panel bg-amber-50 text-ink-900 font-semibold">Conferir disponibilidade no início</Link>
+    ) : offerEntry && !visibleOffer ? (
+        <button type="button" onClick={() => setDismissedOfferKey(null)} className="w-full min-h-[44px] rounded-panel bg-brand-700 text-white font-semibold">Ver oferta disponível</button>
+    ) : null
+
     return (
-        <div className='h-screen flex flex-col overflow-hidden bg-surface-alt'>
-            <ConnectionBanner />
-
-            {/* Fase A da experiência de corrida ativa (2026-08-03): atalho de volta à
-                corrida em andamento — o RideContext redireciona uma vez por corrida na
-                restauração, mas se o motorista voltar à Home de propósito (botão Home do
-                CaptainRiding) este é o caminho visível de retorno. */}
-            {/* Abaixo do CaptainHeader (fixed top-0 z-[60] ~64px) — antes ficava em
-                top-3/z-40 e o header tampava o atalho por completo. */}
-            {captainRide?.status === 'started' && (
-                <Link
-                    to='/captain-riding'
-                    state={{ ride: captainRide }}
-                    className='fixed top-[4.75rem] left-1/2 -translate-x-1/2 z-[55] flex items-center gap-2 bg-brand-500 text-white font-semibold text-sm px-5 py-3 rounded-full shadow-floating active:scale-95 transition-transform'
-                >
-                    <i className="ri-navigation-fill" aria-hidden="true"></i>
-                    Corrida em andamento — voltar
-                </Link>
-            )}
-
+        <>
+        <DriverAccountShell notice={notice} modalOpen={modalOpen} operations={{
+            acceptRide: target => confirmRide(target, { fromPendingList: true }),
+            acceptParcel: target => confirmParcel(target, { fromPendingList: true }),
+            acceptingRideId,
+            acceptingParcelId: acceptingParcel?._id,
+            blocked: Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel || assignedRide || captainParcel || needsApprovalGate),
+        }}>
             {needsApprovalGate ? (
                 <div className='flex-1 overflow-y-auto overscroll-y-contain pb-20'>
                     <ApprovalGate captain={captain} onRefresh={refreshApprovalStatus} refreshing={refreshingApproval} />
                 </div>
             ) : (
                 <>
-                    <div className='h-[40vh] relative shadow-raised z-panel'>
+                    <div className='flex-1 min-h-[22%] relative z-panel'>
                         <LiveTracking ride={ride} showSearchRadius={true} />
                     </div>
-                    <div className='h-[60vh] p-4 overflow-y-auto overscroll-y-contain pb-24 bg-surface-alt'>
+                    <div className='shrink-0 max-h-[70%] min-h-0 p-3 overflow-y-auto overscroll-y-contain pb-6 bg-surface-alt'>
+                        <CaptainDetails assignedRide={assignedRide}
+                            busy={Boolean(acceptingRideId || uncertainAcceptance || acceptingParcel)}
+                            onAvailabilityBusyChange={onAvailabilityBusyChange}>
                         {/* Fase B da experiência de corrida ativa (2026-08-03): card
                             persistente de corrida pendente. Diferente do popup (que o
                             motorista pode ignorar ou perder), este card fica na Home
@@ -723,7 +876,7 @@ const CaptainHome = () => {
                             some apenas quando alguém aceita, o passageiro cancela ou
                             ela expira no servidor. Escondido se já há corrida ativa
                             (o índice único impede aceitar duas). */}
-                        {!captainRide && !captainParcel && !parcelPopupOpen && pendingRides.length > 0 && pendingRides.map(pending => {
+                        {!assignedRide && !captainParcel && !parcelPopupOpen && pendingRides.map(pending => {
                             const distKm = haversineKm(userLocation, pending.pickupCoordinates)
                             return (
                                 <div key={pending._id} className='mb-4 bg-brand-50 border-2 border-brand-200 rounded-panel p-4'>
@@ -748,186 +901,93 @@ const CaptainHome = () => {
                                     </div>
                                     <p className='text-xs text-ink-600 mb-3'>
                                         {vehicleLabels[pending.vehicleType] || pending.vehicleType}
-                                        {distKm != null && ` • ${distKm.toFixed(1)} km até o passageiro`}
+                                        {distKm != null && ` • ${distKm.toFixed(1)} km em linha reta até o passageiro (aproximado)`}
                                     </p>
                                     <div className='flex gap-2'>
                                         <button
                                             type='button'
+                                            disabled={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel)}
                                             onClick={() => {
                                                 setRide(pending)
-                                                confirmRide(pending)
+                                                confirmRide(pending, { fromPendingList: true })
                                             }}
-                                            className='flex-1 min-h-[44px] rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold'
+                                            className='flex-1 min-h-[44px] rounded-full bg-brand-500 active:bg-brand-600 text-white text-sm font-semibold disabled:opacity-50'
                                         >
                                             <i className="ri-checkbox-circle-line mr-1" aria-hidden="true"></i>
                                             Aceitar corrida
                                         </button>
                                         <button
                                             type='button'
-                                            onClick={() => offerQueue.enqueue('ride', pending, { front: true })}
+                                            onClick={() => { setDismissedOfferKey(null); offerQueue.enqueue('ride', pending, { front: true }) }}
+                                            disabled={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel || isOfferExpired(pending))}
                                             className='flex-1 min-h-[44px] rounded-full border border-line text-ink-900 text-sm font-medium'
                                         >
-                                            Ver detalhes
+                                            {isOfferExpired(pending) ? 'Destaque encerrado' : 'Ver detalhes'}
                                         </button>
                                     </div>
                                 </div>
                             )
                         })}
-                        <CaptainDetails>
-                            {!captainRide && !captainParcel && (
+                        {!assignedRide && !captainParcel && (
                                 <>
-                                    {/* GO solto — corrida presencial, sem card e sem vizinhos */}
-                                    <div className="flex flex-col items-center py-1 gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => navigate('/captain-presential')}
-                                            aria-label="Iniciar uma corrida presencial"
-                                            className="relative w-16 h-16 rounded-full bg-brand-500 text-white flex items-center justify-center shadow-floating active:scale-95 animate-go-pulse"
-                                        >
-                                            <span
-                                                className="absolute inset-0 rounded-full bg-brand-500 animate-go-ring pointer-events-none"
-                                                aria-hidden="true"
-                                            />
-                                            <span className="relative text-lg font-black tracking-wide">GO</span>
-                                        </button>
-                                        <p className="text-xs font-semibold text-ink-600">
-                                            Iniciar uma corrida
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <p className="text-[11px] font-bold tracking-wider text-ink-400 uppercase mb-2.5 px-0.5">
-                                            Escolha o modo
-                                        </p>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div
-                                                className="relative flex flex-col bg-white border-2 border-brand-500 rounded-2xl p-2.5 min-h-[120px] shadow-raised"
-                                                aria-current="true"
-                                            >
-                                                <span
-                                                    className="absolute top-2 right-2 w-5 h-5 rounded-full bg-brand-500 text-white flex items-center justify-center"
-                                                    aria-hidden="true"
-                                                >
-                                                    <i className="ri-check-line text-xs leading-none" />
-                                                </span>
-                                                <i className="ri-taxi-line text-lg text-[#0B3D2E]" aria-hidden="true" />
-                                                <p className="text-[12px] font-bold text-ink-900 mt-2 leading-snug">
-                                                    Corrida pelo MoveCity
-                                                </p>
-                                                <p className="text-[10px] text-ink-600 mt-1 leading-snug">
-                                                    Receba solicitações de passageiros próximos.
-                                                </p>
-                                            </div>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => navigate('/captain/parcels')}
-                                                className="relative flex flex-col bg-white border border-line rounded-2xl p-2.5 min-h-[120px] shadow-raised text-left active:scale-[0.98] transition-transform"
-                                            >
-                                                <i className="ri-user-star-line text-lg text-[#0B3D2E]" aria-hidden="true" />
-                                                <p className="text-[12px] font-bold text-ink-900 mt-2 leading-snug">
-                                                    Encomendas
-                                                </p>
-                                                <p className="text-[10px] text-ink-600 mt-1 leading-snug">
-                                                    Faça entregas e coletas para seus clientes.
-                                                </p>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/captain/scheduled')}
-                                        className="w-full text-left bg-white border border-line rounded-2xl p-3.5 active:scale-[0.99] transition-transform shadow-raised"
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
-                                                <i className="ri-calendar-event-line text-brand-600" aria-hidden="true" />
-                                                Serviços agendados
-                                            </p>
-                                            {scheduledUpcoming.length > 0 && (
-                                                <span className="text-xs font-bold bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full">
-                                                    {scheduledUpcoming.length}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-ink-600 mt-1">
-                                            {scheduledUpcoming.length > 0
-                                                ? `Próximo: ${new Date(scheduledUpcoming[0].scheduledAt).toLocaleString('pt-BR', {
-                                                    day: '2-digit',
-                                                    month: 'short',
-                                                    hour: '2-digit',
-                                                    minute: '2-digit',
-                                                })} · ${scheduledUpcoming[0].kind === 'parcel' ? 'encomenda' : 'corrida'}`
-                                                : 'Prévia filtrada (raio e veículo). Aceite só na oferta real.'}
-                                        </p>
+                                    <button type="button" onClick={() => navigate('/captain-presential')}
+                                        disabled={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance || acceptingParcel)}
+                                        aria-label="Iniciar uma corrida presencial"
+                                        className="w-full rounded-xl border border-line bg-white p-3 text-left disabled:opacity-50 min-h-[48px]">
+                                        <span className="block text-sm font-semibold text-ink-900">Corrida presencial</span>
+                                        <span className="block text-xs text-ink-600 mt-1">Para um passageiro que já está com você.</span>
                                     </button>
+                                    {scheduledUpcoming.length > 0 && <button type="button"
+                                        onClick={() => navigate('/captain/scheduled')}
+                                        className="min-h-[44px] w-full text-left text-sm text-ink-700 underline">
+                                        Ver serviços agendados ({scheduledUpcoming.length})
+                                    </button>}
                                 </>
                             )}
                         </CaptainDetails>
                     </div>
                 </>
             )}
-            <BottomSheet expandable open={ridePopupPanel} onClose={() => declineRideOffer(ride)}>
-                <RidePopUp
-                    ride={ride}
-                    open={ridePopupPanel}
+        </DriverAccountShell>
+        {modalOpen && <DriverOperationalDialog
+            key={modalKind === 'pickup' ? `pickup:${assignedRide._id}` : `${modalKind}:${(modalKind === 'parcel' ? modalParcel : modalRide)?._id}`}
+            title={modalKind === 'pickup' ? 'Embarque da corrida' : modalKind === 'parcel' ? 'Oferta de encomenda' : 'Oferta de corrida'}
+            busy={Boolean(acceptingRideId || acceptingParcel || pickupBusy)} onClose={closeOperationalPanel}>
+            {modalKind === 'ride' && <RidePopUp
+                    key={modalRide?._id}
+                    ride={modalRide}
+                    open
+                    accepting={Boolean(availabilityBusy || acceptingRideId || uncertainAcceptance)}
                     setRidePopupPanel={setRidePopupPanel}
-                    setConfirmRidePopupPanel={setConfirmRidePopupPanel}
-                    confirmRide={confirmRide}
+                    confirmRide={() => confirmRide(modalRide)}
                     onDecline={declineRideOffer}
                     onExpire={expireRideOffer}
-                />
-            </BottomSheet>
-            <BottomSheet expandable open={confirmRidePopupPanel} onClose={() => setConfirmRidePopupPanel(false)}>
-                <ConfirmRidePopUp
-                    ride={ride}
+                />}
+            {modalKind === 'pickup' && <ConfirmRidePopUp
+                    key={assignedRide._id}
+                    ride={assignedRide}
+                    onBusyChange={setPickupBusy}
                     setRide={setRide}
-                    setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />
-            </BottomSheet>
-            {parcelPopupOpen && parcelOffer && (
-                <ParcelPopUp
-                    parcel={parcelOffer}
+                    setConfirmRidePopupPanel={setConfirmRidePopupPanel} setRidePopupPanel={setRidePopupPanel} />}
+            {modalKind === 'parcel' && <ParcelPopUp
+                    key={modalParcel?._id}
+                    embedded
+                    accepting={Boolean(availabilityBusy || acceptingParcel)}
+                    parcel={modalParcel}
                     onDecline={async () => {
                         // Sai da fila na hora — se houver próxima oferta, reabre sozinha.
-                        offerQueue.remove(parcelOffer._id)
+                        offerQueue.remove(modalParcel._id)
                         try {
-                            await declineParcel(parcelOffer._id)
+                            await declineParcel(modalParcel._id)
                         } catch {
                             /* ACK only */
                         }
                     }}
-                    onAccept={async () => {
-                        try {
-                            const accepted = await acceptParcel(parcelOffer._id)
-                            // Encomenda aceita: motorista tem trabalho ativo agora —
-                            // nenhuma outra oferta deveria continuar na fila.
-                            offerQueue.clear()
-                            setCaptainParcel(accepted)
-                            navigate('/captain-parcel', { state: { parcel: accepted } })
-                        } catch (err) {
-                            addToast(err.response?.data?.message || 'Não foi possível aceitar', 'error')
-                            if (err.response?.status === 409) {
-                                offerQueue.remove(parcelOffer._id)
-                            }
-                        }
-                    }}
+                    onAccept={() => confirmParcel(modalParcel)}
                     onExpire={(p) => offerQueue.remove(p?._id)}
-                />
-            )}
-            <CaptainHeader />
-
-            {/* Otimização de mapa persistente (2026-08-16): telas de conta (Carteira,
-                Ganhos, Perfil etc.) renderizam aqui via <Outlet />, por cima do mapa, em
-                vez de serem rotas irmãs que desmontariam CaptainHome (e recriariam o
-                mapa do zero) a cada ida e volta. Em '/captain-home' a rota filha
-                correspondente é `element={null}`. */}
-            {location.pathname !== '/captain-home' && (
-                <div className='fixed inset-0 z-modal bg-surface-alt'>
-                    <Outlet />
-                </div>
-            )}
-        </div>
+                />}
+        </DriverOperationalDialog>}
+        </>
     )
 }
 

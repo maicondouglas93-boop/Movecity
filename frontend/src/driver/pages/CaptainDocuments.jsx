@@ -164,7 +164,7 @@ const CaptainDocuments = () => {
     }
 
     return (
-        <div className="h-screen bg-surface-alt flex flex-col pt-24">
+        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
             <PageHeader
                 title="Documentação"
                 className="shadow-raised"

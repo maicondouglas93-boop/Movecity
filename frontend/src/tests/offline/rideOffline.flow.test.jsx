@@ -1,4 +1,3 @@
-import React from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -112,6 +111,49 @@ function renderFinishRide({ syncCaptainRide = vi.fn(async () => null), currentRi
 }
 
 describe('app do motorista sem internet', () => {
+    it.each(['carteira', 'card'])('não orienta cobrança externa para %s na finalização offline', async paymentMethod => {
+        renderFinishRide({ currentRide: { ...ride, paymentMethod } })
+        const user = userEvent.setup()
+        await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await user.click(await screen.findByRole('button', { name: /confirmar e finalizar/i }))
+        await screen.findByRole('heading', { name: 'Finalização pendente' })
+        expect(screen.queryByText(/para pagamento em dinheiro ou Pix/i)).toBeNull()
+        expect(screen.getByText(/Não solicite dinheiro ou Pix diretamente/i)).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /pagamento recebido/i })).toBeNull()
+    })
+
+    it.each(['cash', 'pix'])('liquidação de %s não afirma que o motorista recebeu dinheiro', async paymentMethod => {
+        onLineSpy.mockReturnValue(true)
+        api.post.mockResolvedValueOnce({ data: { ...ride, status: 'finished', paymentMethod,
+            paymentStatus: 'paid', finalPrice: 20, collectionAmount: 15, driverAmount: 16 } })
+        renderFinishRide({ currentRide: { ...ride, paymentMethod } })
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await screen.findByRole('heading', { name: 'Serviço concluído' })
+        expect(screen.queryByText('Pagamento confirmado')).toBeNull()
+        expect(screen.getByText(/não comprova esse recebimento/i)).toBeInTheDocument()
+        expect(screen.getByText(/R\$\s*15,00/)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /voltar para o in.cio/i })).toBeInTheDocument()
+    })
+    it.each(['card', 'carteira'])('pagamento %s pendente não oferece confirmação de recebimento manual', async paymentMethod => {
+        onLineSpy.mockReturnValue(true)
+        api.post.mockResolvedValueOnce({ data: { ...ride, status: 'finished', paymentMethod,
+            paymentStatus: 'pending', finalPrice: 20, driverAmount: 16 } })
+        renderFinishRide({ currentRide: { ...ride, paymentMethod } })
+        await userEvent.setup().click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await screen.findByRole('heading', { name: 'Serviço concluído' })
+        expect(screen.queryByRole('button', { name: /pagamento recebido/i })).toBeNull()
+        expect(screen.getByText(/Pagamento no aplicativo ainda pendente/)).toBeInTheDocument()
+    })
+    it('prévia indisponível não reaproveita finalPrice zero do snapshot antigo', async () => {
+        state.offlinePreview = null
+        renderFinishRide({ currentRide: { ...ride, finalPrice: 0 } })
+        const user = userEvent.setup()
+        await user.click(screen.getByRole('button', { name: /finalizar corrida/i }))
+        await user.click(await screen.findByRole('button', { name: /finalizar sem internet/i }))
+        await screen.findByRole('heading', { name: 'Finalização pendente' })
+        expect(screen.queryByText(/R\$\s*0,00/)).toBeNull()
+        expect(screen.getByText(/Não cobre o passageiro até receber o valor final/)).toBeInTheDocument()
+    })
     it.each([null, {}, { status: 'started' }, { ...ride, status: 'finished' }])('não finaliza dados ausentes ou corrida inativa (%j)', async currentRide => {
         renderFinishRide({ currentRide })
         expect(screen.getByRole('alert')).toHaveTextContent('Os dados da corrida não estão disponíveis')

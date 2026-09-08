@@ -28,7 +28,8 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:driver-shell": "playwright test --config playwright.driver-shell.config.js"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

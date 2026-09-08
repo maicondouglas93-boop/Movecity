@@ -6,6 +6,7 @@ import { acknowledgeTrackingPoint } from '@/shared/services/rideTrackingCheckpoi
 import { withHardTimeout } from '@/shared/utils/hardTimeout'
 import { hasFinalizationTarget, MISSING_RIDE_MESSAGE } from '@/shared/utils/rideIdentity'
 import { rideFinalizationError } from '@/shared/utils/rideFinalizationError'
+import { canRetryFinalization } from '@/shared/utils/pendingFinalization'
 
 // P1.2 da auditoria de concorrência (2026-08-02): antes, a fila offline reexecutava
 // ações via `socket.emit(action.type, ...)` — mas o backend nunca teve handler de
@@ -114,7 +115,15 @@ async function moveToFailedAndRemove(action, reason) {
 
 export async function enqueueOfflineAction({ type, rideId, payload, rideSnapshot }) {
     const entry = { type, rideId, payload, timestamp: Date.now(), attempts: 0 }
-    if (type !== 'end-ride') return db.offlineActions.add(entry)
+    if (type !== 'end-ride') {
+        if (type === 'start-ride' || type === 'update-ride-status') {
+            if (!hasFinalizationTarget(entry)) throw new Error('Corrida inválida para salvar esta etapa.')
+            entry.ownerId = getSessionOwnerId('captain')
+            entry.apiBase = import.meta.env.VITE_BASE_URL || ''
+            if (rideSnapshot) entry.rideSnapshot = rideSnapshot
+        }
+        return db.offlineActions.add(entry)
+    }
     if (!hasFinalizationTarget(entry)) throw new Error(MISSING_RIDE_MESSAGE)
     const ownerId = getSessionOwnerId('captain')
     entry.ownerId = ownerId
@@ -278,11 +287,27 @@ export async function flushQueuedLocations(socket, options = {}) {
 // corromperia a máquina de estados do lado do servidor). Para no primeiro erro
 // retentável (rede/5xx) pra não furar essa ordem; erros definitivos (409/4xx) são
 // removidos e o processamento segue pras ações seguintes.
-async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater } = {}) {
-    const actions = await db.offlineActions.orderBy('timestamp').toArray()
+async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPermanentFailure, onRetryLater, targetActionId } = {}) {
+    let actions = await db.offlineActions.orderBy('timestamp').toArray()
+    if (targetActionId != null) {
+        const index = actions.findIndex(action => action.id === targetActionId)
+        if (index < 0) return
+        const target = actions[index]
+        const owner = getSessionOwnerId('captain')
+        if (!canRetryFinalization(target, owner)) throw new Error('Esta pendência precisa de verificação pelo suporte.')
+        // Preservar chegada/início anteriores do mesmo serviço, sem disparar outras
+        // viagens nem pagamentos. A fila global e a tentativa manual usam o mesmo lock.
+        actions = actions.slice(0, index + 1).filter(action => action.rideId === target.rideId)
+        if (actions.some(action => !['start-ride', 'update-ride-status', 'end-ride'].includes(action.type)
+            || !hasFinalizationTarget(action) || action.ownerId !== owner || action.retryBlocked
+            || (action.apiBase != null && action.apiBase !== (import.meta.env.VITE_BASE_URL || '')))) {
+            throw new Error('Há etapas anteriores que precisam de verificação pelo suporte.')
+        }
+    }
 
     for (const action of actions) {
-        if (action.type === 'end-ride' && (
+        const requestOwner = getSessionOwnerId('captain')
+        if (CAPTAIN_ACTION_TYPES.has(action.type) && (
             (action.ownerId && action.ownerId !== getSessionOwnerId('captain'))
             || (action.apiBase != null && action.apiBase !== (import.meta.env.VITE_BASE_URL || ''))
         )) continue
@@ -290,10 +315,17 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
         // Preservar o registro para diagnóstico, sem POST inválido, drenagem de GPS
         // de outras viagens ou bloqueio das próximas finalizações legítimas.
         if (action.type === 'end-ride' && !hasFinalizationTarget(action)) continue
-        if (action.type === 'end-ride' && socket) {
+        if (action.type === 'end-ride' && action.retryBlocked) continue
+        if (action.type === 'end-ride') {
             try {
                 await flushQueuedLocations(socket, { rideId: action.rideId })
             } catch (err) {
+                if (requestOwner !== getSessionOwnerId('captain')) break
+                await db.offlineActions.update(action.id, {
+                    lastAttemptAt: Date.now(), lastHttpStatus: null,
+                    lastError: 'Os pontos GPS desta corrida ainda não sincronizaram. Confira a conexão e tente novamente.',
+                    attempts: (action.attempts || 0) + 1,
+                })
                 onRetryLater?.(action, err)
                 break
             }
@@ -313,6 +345,8 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
         }
 
         try {
+            if (CAPTAIN_ACTION_TYPES.has(action.type) && requestOwner !== getSessionOwnerId('captain')) break
+            if (action.type === 'end-ride') await db.offlineActions.update(action.id, { lastAttemptAt: Date.now() })
             // Fase 1 (C1, 2026-08-05): via instância configurada — timeout de 10s,
             // withCredentials e refresh automático em 401. O header Authorization
             // explícito de buildRequestConfig é respeitado pelo interceptor (o token
@@ -322,9 +356,14 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
             // O CapacitorHttp pode ignorar o timeout do Axios. Sem um teto no JS, uma
             // única tentativa sem resposta bloqueia todas as ações seguintes para sempre.
             const response = await withHardTimeout(api(config))
+            if (CAPTAIN_ACTION_TYPES.has(action.type) && requestOwner !== getSessionOwnerId('captain')) break
+            if (action.type === 'end-ride' && (response.data?._id !== action.rideId || response.data?.status !== 'finished')) {
+                throw new Error('O servidor respondeu sem confirmar o encerramento desta corrida.')
+            }
             await db.offlineActions.delete(action.id)
             onResolved?.(action, response)
         } catch (err) {
+            if (CAPTAIN_ACTION_TYPES.has(action.type) && requestOwner !== getSessionOwnerId('captain')) break
             const status = err.response?.status
             const isPerformedWork = action.type === 'end-ride'
 
@@ -347,9 +386,9 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
             // vários 400 desta rota são ambientais — GPS que ainda não terminou de
             // sincronizar, tarifa indisponível no instante, localização considerada
             // velha. Esses passam numa tentativa seguinte, então ela entra no contador de
-            // retentativas em vez de morrer no primeiro erro. 404 continua definitivo: a
-            // corrida não existe mais e nenhuma tentativa muda isso.
-            const worthRetrying = isPerformedWork && status !== 404
+            // retentativas em vez de morrer no primeiro erro. 403/404 ficam visíveis
+            // para o suporte, com repetição bloqueada, sem apagar trabalho executado.
+            const worthRetrying = isPerformedWork
 
             if (status && status >= 400 && status < 500 && !worthRetrying) {
                 // Erro do próprio pedido (corrida não existe mais, estado inválido, etc.) —
@@ -369,8 +408,12 @@ async function runOfflineReplay({ socket, onResolved, onAlreadyApplied, onPerman
 
             await db.offlineActions.update(action.id, {
                 attempts,
-                ...(isPerformedWork && status === 400 ? {
-                    lastError: rideFinalizationError(err, 'O servidor não aceitou os dados da finalização.'),
+                ...(isPerformedWork ? {
+                    lastHttpStatus: status ?? null,
+                    retryBlocked: status === 404 || status === 403,
+                    lastError: rideFinalizationError(err, status
+                        ? 'O servidor não confirmou a finalização. Tente novamente ou consulte o suporte.'
+                        : 'Sem confirmação do servidor. Confira a conexão e tente sincronizar novamente.'),
                 } : {}),
             })
             onRetryLater?.(action, err)
@@ -394,4 +437,15 @@ export async function replayOfflineActions(options = {}) {
     } finally {
         if (replayPromise === current) replayPromise = null
     }
+}
+
+export async function retryPendingFinalization(actionId, { socket } = {}) {
+    if (navigator.onLine === false) throw new Error('Conecte-se à internet para tentar sincronizar. O pedido continua salvo.')
+    const owner = getSessionOwnerId('captain')
+    const action = await db.offlineActions.get(actionId)
+    if (!action) return { status: 'resolved' }
+    if (!canRetryFinalization(action, owner)) throw new Error('Esta pendência precisa de verificação pelo suporte.')
+    await replayOfflineActions({ socket, targetActionId: actionId })
+    if (getSessionOwnerId('captain') !== owner) throw new Error('A conta mudou. Abra Corridas novamente.')
+    return { status: await db.offlineActions.get(actionId) ? 'pending' : 'resolved' }
 }

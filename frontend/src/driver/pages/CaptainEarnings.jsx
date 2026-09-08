@@ -1,7 +1,6 @@
 import React, { useContext, useState } from 'react';
 import api from '@/shared/services/axios';
 import { useQuery } from '@tanstack/react-query';
-import CaptainHeader from '@/driver/components/CaptainHeader';
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext';
 import PageHeader from '@/shared/components/ui/PageHeader';
 import Card from '@/shared/components/ui/Card';
@@ -55,7 +54,7 @@ const CaptainEarnings = () => {
     });
 
     return (
-        <div className="h-screen bg-surface-alt flex flex-col pt-24">
+        <div className="h-full min-h-0 bg-surface-alt flex flex-col">
             <PageHeader title="Ganhos" className="shadow-raised" />
 
             <div className="flex-1 overflow-y-auto p-4 pb-6">
@@ -176,7 +175,6 @@ const CaptainEarnings = () => {
                 </Card>
             </div>
 
-            <CaptainHeader />
         </div>
     );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useRef } from 'react'
+import { useState, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import { enqueueOfflineAction, flushQueuedLocations } from '@/shared/services/offlineQueue'
@@ -17,6 +17,8 @@ import { useToast } from '@/shared/contexts/ToastContext'
 import { formatBRL } from '@/shared/utils/currency'
 import { isStartedRide, MISSING_RIDE_MESSAGE } from '@/shared/utils/rideIdentity'
 import { rideFinalizationError } from '@/shared/utils/rideFinalizationError'
+import { paymentMethodLabel, ridePaymentPresentation } from '@/shared/utils/ridePaymentPresentation'
+import RidePaymentSummary from '@/driver/components/RidePaymentSummary'
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -26,13 +28,13 @@ const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', {
 const FINALIZE_PREVIEW_TIMEOUT_MS = 5000
 
 const isNetworkError = (error) => (
-    (typeof navigator !== 'undefined' && !navigator.onLine)
+    !error?.response && ((typeof navigator !== 'undefined' && !navigator.onLine)
     || error?.message === 'Network Error'
     || (!error?.response && ['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(error?.code))
     // Teto de tempo estourado ou GPS que não sincronizou: os dois são falta de
     // conectividade, não erro de regra do servidor. Precisam cair no mesmo caminho
     // (guardar a finalização na fila) em vez de virar um toast que perde a corrida.
-    || error?.isConnectivityIssue === true
+    || error?.isConnectivityIssue === true)
 )
 
 const FinishRide = (props) => {
@@ -68,51 +70,19 @@ const FinishRide = (props) => {
     const { userLocation } = useContext(LocationContext)
     const { socket } = useContext(SocketContext)
 
-    // Fase 3 (M1, 2026-08-05): os setTimeout de navegação/avaliação pós-corrida eram
-    // órfãos — desmontar este painel (ex.: corrida cancelada no meio) deixava um
-    // navigate/setState pendente disparar em componente morto.
-    const timersRef = useRef([])
-    const scheduleTimer = (fn, ms) => {
-        timersRef.current.push(setTimeout(fn, ms))
-    }
-    useEffect(() => () => {
-        timersRef.current.forEach(clearTimeout)
-    }, [])
-
     const chargeRide = endedRide || props.ride
-    const hasFinalPrice = chargeRide?.finalPrice !== null && chargeRide?.finalPrice !== undefined
-    const finalGross = hasFinalPrice ? Number(chargeRide.finalPrice) || 0 : null
-    const walletAmountUsed = Math.max(0, Number(chargeRide?.walletAmountUsed) || 0)
-    const passengerAmount = finalGross === null ? null : Math.max(0, finalGross - walletAmountUsed)
-    const isWalletPayment = chargeRide?.paymentMethod === 'carteira'
-    const walletPaymentPending = isWalletPayment && chargeRide?.paymentStatus !== 'paid'
-    const finalBreakdown = chargeRide?.fareBreakdown || {}
-    const finalDistanceKm = Math.max(0, Number(chargeRide?.actualDistance) || 0) / 1000
-    const finalMinutes = Math.max(0, Number(chargeRide?.actualTime) || 0) / 60
+    const payment = ridePaymentPresentation(chargeRide, { pendingFinalization: pendingFinalizationSync })
     const offlineFareUnavailable = previewFare?.offline && previewFare?.amount == null
 
     const queryClient = useQueryClient();
 
-    // Liquidação (comissão + repasse) agora acontece na própria finalização da
-    // corrida (2026-08-16), não mais num toque separado de "Pagamento Recebido" —
-    // exceto no caso raro de carteira com saldo insuficiente, que segue pendente
-    // (ver isWalletPayment/walletPaymentPending mais abaixo). Extraído porque o
-    // mesmo efeito colateral agora dispara em dois lugares: aqui (finalização) e no
-    // confirmPaymentMutation abaixo (fallback manual, ainda usado se a liquidação
-    // automática não fechar por algum motivo).
+    // Liquidação contábil não comprova dinheiro/Pix recebido. O resumo permanece
+    // visível até o motorista escolher sair ou avaliar, sem redirecionamento por timer.
     function handlePaymentSettled() {
         setPaymentConfirmed(true)
         queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
         queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
         queryClient.invalidateQueries({ queryKey: ['captainHistory'] })
-        if (props.ride?.user) {
-            scheduleTimer(() => setShowRating(true), 1200)
-        } else {
-            scheduleTimer(() => {
-                setCaptainRide(null)
-                navigate('/captain-home')
-            }, 1500)
-        }
     }
 
     const endRideMutation = useMutation({
@@ -140,6 +110,11 @@ const FinishRide = (props) => {
                     }
                 }),
             )
+            if (response.data?._id !== finishPayload.rideId || response.data?.status !== 'finished') {
+                const error = new Error('Resposta de finalização sem confirmação da corrida.')
+                error.isConnectivityIssue = true
+                throw error
+            }
             return response.data;
         },
         onSuccess: (data) => {
@@ -201,6 +176,7 @@ const FinishRide = (props) => {
                 rideSnapshot: {
                     pickup: props.ride.pickup, destination: props.ride.destination,
                     source: props.ride.source, createdAt: props.ride.createdAt,
+                    paymentMethod: props.ride.paymentMethod,
                 },
             })
             // A prévia não pode impedir a persistência do trabalho já realizado.
@@ -216,7 +192,7 @@ const FinishRide = (props) => {
                     actualTime: localPreview.elapsedSeconds,
                     fareBreakdown: localPreview.fareBreakdown,
                 }
-                : null)
+                : { ...props.ride, finalPrice: null })
             // Espelha a finalização no RideContext, igual ao que o caminho online faz no
             // onSuccess. Sem isto o contexto seguia com a corrida em 'started': o guarda de
             // finalização pendente impede o SERVIDOR de reabrir a corrida quando a internet
@@ -241,7 +217,6 @@ const FinishRide = (props) => {
             // depois da sincronização; não criar uma ação de pagamento redundante.
             // Sem isto o caminho offline caía na tela "Confirmar Pagamento" e exigia um
             // toque em "Pagamento Recebido" que não decide mais nada.
-            if (!isWalletPayment) setPaymentConfirmed(true)
             addToast(
                 localPreview?.amount > 0
                     ? 'Finalização salva no aparelho. O valor calculado ainda aguarda confirmação do servidor.'
@@ -360,7 +335,10 @@ const FinishRide = (props) => {
             )
             return response.data;
         },
-        onSuccess: handlePaymentSettled,
+        onSuccess: (data) => {
+            if (data?._id === props.ride._id) setEndedRide(data)
+            handlePaymentSettled()
+        },
         onError: async (err) => {
             console.error('Confirm payment error:', err)
             if (isNetworkError(err)) {
@@ -384,7 +362,6 @@ const FinishRide = (props) => {
             setPaymentConfirmed(true)
             setPendingPaymentSync(true)
             setCaptainRide(null)
-            scheduleTimer(() => navigate('/captain-home'), 2500)
         } catch (queueError) {
             console.error('Could not queue payment confirmation:', queueError)
             addToast('Não foi possível guardar a confirmação de pagamento. Tente novamente com internet.', 'error')
@@ -392,6 +369,8 @@ const FinishRide = (props) => {
     }
 
     async function confirmPayment() {
+        if (!payment.direct || payment.collectionAmount == null || pendingFinalizationSync
+            || paymentConfirmed || pendingPaymentSync || confirmPaymentMutation.isPending || queueingOffline) return
         // Sem sinal conhecido: guarda direto. A finalização enfileirada já liquida o
         // pagamento sozinha quando sincroniza (desde 2026-08-16), então esta ação vira
         // um 409 "já confirmado" no replay — que a fila trata como sucesso.
@@ -438,12 +417,12 @@ const FinishRide = (props) => {
     }
 
     return (
-        <div>
+        <div className="max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain pb-2">
             {finishIssue && <p role="alert" className="bg-danger-50 text-danger-600 rounded-panel p-3 mb-3 text-sm">{finishIssue}</p>}
             {!ended ? previewFare ? (
                 <>
                     <h3 className='text-base font-semibold mb-2.5 text-ink-900'>
-                        {offlineFareUnavailable ? 'Finalizar sem internet' : 'Confirmar valor final'}
+                        {offlineFareUnavailable ? 'Finalizar sem internet' : previewFare.offline ? 'Conferir estimativa no aparelho' : 'Confirmar valor final'}
                     </h3>
                     <p className='text-xs text-ink-600 mb-3'>
                         {offlineFareUnavailable
@@ -452,6 +431,8 @@ const FinishRide = (props) => {
                             ? 'Sem internet neste destino. Este valor foi calculado no celular e ainda não foi confirmado pelo servidor.'
                             : 'Valor calculado agora, com a distância e o tempo reais desta corrida.'}
                     </p>
+
+                    <p className="text-xs text-ink-700 mb-3">{payment.instruction}</p>
 
                     {!offlineFareUnavailable && (
                         <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
@@ -486,7 +467,7 @@ const FinishRide = (props) => {
                         </div>
                     ) : (
                         <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
-                            <p className='text-ink-600 text-sm mb-1'>Valor total da corrida</p>
+                            <p className='text-ink-600 text-sm mb-1'>{previewFare.offline ? 'Estimativa total no aparelho' : 'Valor total da corrida'}</p>
                             <p className='text-brand-600 text-3xl font-black'>{formatBRL(previewFare.amount)}</p>
                         </div>
                     )}
@@ -562,7 +543,7 @@ const FinishRide = (props) => {
                                     : `Estimativa: ${formatCurrency(props.ride?.fare)}`}
                             </span>
                             <span className="text-ink-500">
-                                · {props.ride?.paymentMethod === 'pix' ? 'Pix' : props.ride?.paymentMethod === 'carteira' ? 'Carteira' : props.ride?.paymentMethod === 'card' ? 'Cartão' : 'Dinheiro'}
+                                · {paymentMethodLabel(props.ride?.paymentMethod)}
                             </span>
                         </p>
                     </div>
@@ -576,33 +557,12 @@ const FinishRide = (props) => {
                     </Button>
                 </>
             ) : pendingFinalizationSync ? (
-                <div className='flex flex-col items-center justify-center py-10 gap-4'>
-                    <div className='bg-amber-100 rounded-full p-4'>
-                        <i className='ri-time-line text-amber-600 text-5xl'></i>
-                    </div>
-                    <h3 className='text-xl font-bold text-amber-700 text-center'>
-                        Finalização pendente
-                    </h3>
-                    {passengerAmount != null ? (
-                        <>
-                            <p className='text-ink-600 text-center'>Valor calculado no aparelho para pagamento em dinheiro ou Pix. Ainda não confirmado pelo servidor.</p>
-                            <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
-                            <p className='text-xs text-ink-500 text-center'>O pedido de finalização está salvo e será enviado quando a conexão voltar. Acompanhe a confirmação em Corridas. O valor poderá ser ajustado após a validação.</p>
-                            {/* A finalização continua pendente no servidor; não simular
-                                confirmação de pagamento nem débito de comissão nesta tela. */}
-                            <Button onClick={() => navigate('/captain-home')}>
-                                Voltar para o início
-                            </Button>
-                        </>
-                    ) : (
-                        <>
-                            <p className='text-ink-600 text-center'>O pedido de finalização foi guardado para sincronizar. Aguarde a validação e o valor final no sistema.</p>
-                            <p className='text-sm font-semibold text-danger-600 text-center'>Não cobre o passageiro até receber o valor final.</p>
-                            <Button onClick={() => navigate('/captain-home')}>
-                                Voltar para o início
-                            </Button>
-                        </>
-                    )}
+                <div className="flex flex-col items-center py-6 gap-4">
+                    <h3 className="text-xl font-bold text-amber-800">Finalização pendente</h3>
+                    <RidePaymentSummary ride={chargeRide} pendingFinalization />
+                    {payment.total == null && <p className="text-sm font-semibold text-danger-600">Não cobre o passageiro até receber o valor final.</p>}
+                    <Button onClick={() => navigate('/captain/rides')}>Acompanhar em Corridas</Button>
+                    <Button variant="secondary" onClick={() => navigate('/captain-home')}>Voltar para o início</Button>
                 </div>
             ) : showRating ? (
                 <div className='flex flex-col items-center justify-center py-8 gap-4'>
@@ -631,96 +591,24 @@ const FinishRide = (props) => {
                         </Button>
                     </div>
                 </div>
-            ) : paymentConfirmed ? (
-                <div className='flex flex-col items-center justify-center py-10 gap-4'>
-                    <div className={pendingPaymentSync ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
-                        <i className={pendingPaymentSync ? 'ri-time-line text-amber-600 text-5xl' : 'ri-checkbox-circle-fill text-brand-500 text-5xl'}></i>
-                    </div>
-                    {pendingPaymentSync ? (
+            ) : (
+                <div className="flex flex-col items-center py-6 gap-4">
+                    <h3 className="text-xl font-bold text-ink-900">Serviço concluído</h3>
+                    <RidePaymentSummary ride={chargeRide} pendingPayment={pendingPaymentSync} />
+                    {payment.direct && !paymentConfirmed && !pendingPaymentSync && (
                         <>
-                            <h3 className='text-xl font-bold text-amber-700'>Serviço concluído</h3>
-                            <p className='text-ink-600 text-center'>Sem conexão no momento — vamos confirmar com o servidor assim que a internet voltar.</p>
-                            <p className='text-2xl font-bold text-ink-900 mt-2'>Valor do passageiro</p>
-                            <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
-                            <p className='text-ink-600 text-sm'>Redirecionando...</p>
-                        </>
-                    ) : (
-                        <>
-                            <h3 className='text-xl font-bold text-brand-700'>Serviço concluído</h3>
-                            <p className='text-ink-600 text-center'>Pagamento confirmado</p>
-                            <p className='text-3xl font-black text-brand-600'>{formatBRL(passengerAmount)}</p>
+                            <p className="text-sm text-ink-700">O registro financeiro ainda está pendente. Confirme abaixo somente se já recebeu o valor devido.</p>
+                            <Button onClick={confirmPayment}
+                                disabled={payment.collectionAmount == null}
+                                loading={confirmPaymentMutation.isPending || queueingOffline}>
+                                Pagamento Recebido
+                            </Button>
                         </>
                     )}
-                </div>
-            ) : isWalletPayment ? (
-                <div className='flex flex-col items-center justify-center py-8 gap-4'>
-                    <div className={walletPaymentPending ? 'bg-amber-100 rounded-full p-4' : 'bg-brand-100 rounded-full p-4'}>
-                        <i className={walletPaymentPending ? 'ri-time-line text-amber-600 text-5xl' : 'ri-wallet-3-fill text-brand-600 text-5xl'}></i>
-                    </div>
-                    <h3 className='text-xl font-bold text-ink-900 text-center'>
-                        {walletPaymentPending ? 'Pagamento pela carteira pendente' : 'Pagamento pela carteira confirmado'}
-                    </h3>
-                    <p className='text-ink-600 text-center'>Esta corrida é paga pela carteira do passageiro. Não solicite dinheiro ou Pix diretamente.</p>
-                    <p className='text-sm text-ink-500 text-center'>
-                        {walletPaymentPending
-                            ? 'O valor final excedeu o saldo disponível e o passageiro será avisado para regularizar no app.'
-                            : 'O repasse líquido foi conciliado pela plataforma.'}
-                    </p>
                     <Button onClick={() => navigate('/captain-home')}>Voltar para o início</Button>
+                    <Button variant="secondary" onClick={() => navigate('/captain/rides')}>Abrir Corridas</Button>
+                    {props.ride?.user && <Button variant="ghost" onClick={() => setShowRating(true)}>Avaliar passageiro</Button>}
                 </div>
-            ) : (
-                <>
-                    <h3 className='text-2xl font-semibold mb-3 text-ink-900'>Confirmar Pagamento</h3>
-                    <p className='text-ink-600 mb-5'>Receba o pagamento do passageiro e confirme abaixo.</p>
-
-                    <div className='bg-surface border border-line rounded-panel p-4 mb-4'>
-                        <p className='text-sm font-semibold text-ink-900 mb-3'>Cálculo da corrida</p>
-                        <div className='space-y-2 text-sm'>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Distância percorrida</span>
-                                <span className='font-semibold text-ink-900'>{finalDistanceKm.toFixed(1)} km</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Tempo da corrida</span>
-                                <span className='font-semibold text-ink-900'>{Math.round(finalMinutes)} min</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Tarifa base</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.baseFare || 0)}</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Distância</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.distanceFare || 0)}</span>
-                            </div>
-                            <div className='flex justify-between gap-3'>
-                                <span className='text-ink-600'>Minutos</span>
-                                <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.timeFare || 0)}</span>
-                            </div>
-                            {Number(finalBreakdown.minimumFareAdjustment) > 0 && (
-                                <div className='flex justify-between gap-3'>
-                                    <span className='text-ink-600'>Ajuste da tarifa mínima</span>
-                                    <span className='font-semibold text-ink-900'>{formatBRL(finalBreakdown.minimumFareAdjustment)}</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Valor que o passageiro deve pagar (sem comissão/%). */}
-                    <div className='bg-surface-alt rounded-panel p-5 border border-line mb-5 text-center'>
-                        <p className='text-ink-600 text-sm mb-1'>Cliente deve pagar</p>
-                        <p className='text-brand-600 text-3xl font-black'>{formatBRL(passengerAmount)}</p>
-                    </div>
-
-                    <div className='bg-surface-alt border border-line rounded-panel p-3 mb-5 flex items-start gap-2'>
-                        <i className="ri-information-line text-ink-400 mt-0.5"></i>
-                        <p className='text-sm text-ink-600'>Cliente paga direto a você. Confirme quando o pagamento for recebido.</p>
-                    </div>
-
-                    <Button onClick={confirmPayment} loading={confirmPaymentMutation.isPending || queueingOffline}>
-                        <i className="ri-hand-coin-fill text-xl"></i>
-                        Pagamento Recebido
-                    </Button>
-                </>
             )}
         </div>
     )

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { onBackButton } from '@/shared/platform/appLifecycle.service'
 import { isNativePlatform } from '@/shared/platform/platform'
+import { dismissDriverOverlay } from '@/shared/services/driverOverlayBack'
 
 const HOME_PATHS = new Set(['/captain-home', '/', '/captain-login'])
 
@@ -17,6 +18,7 @@ export default function DriverBackButton() {
         if (!isNativePlatform()) return undefined
 
         return onBackButton(() => {
+            if (dismissDriverOverlay()) return true
             const path = location.pathname
             if (path === '/captain-riding' || path === '/captain-parcel' || path === '/captain-presential') {
                 // Corrida/encomenda ativa: volta para home do motorista sem cancelar.

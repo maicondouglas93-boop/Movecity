@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { isOfferExpired } from '@/shared/services/rideOffer/offerExpiry'
 import { useOfferCountdown } from '@/shared/services/rideOffer/useOfferCountdown'
 import { formatBRL } from '@/shared/utils/currency'
 
@@ -6,8 +7,10 @@ const SIZE_LABEL = { small: 'Pequeno', medium: 'Médio', large: 'Grande' }
 
 // Auditoria PWA (2026-08-07, P1): mesmo contador do RidePopUp, sincronizado com
 // `parcel.offerExpiresAt` (backend) — ver RidePopUp.jsx para o raciocínio completo.
-const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
-  const [busy, setBusy] = useState(false)
+const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire, embedded = false, accepting = false }) => {
+  const [localBusy, setBusy] = useState(false)
+  const busy = localBusy || accepting
+  const busyRef = useRef(false)
   const { remainingSeconds, expired } = useOfferCountdown(parcel?.offerExpiresAt)
 
   useEffect(() => {
@@ -18,17 +21,19 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
   if (!parcel) return null
 
   const run = async (fn) => {
-    if (busy || expired) return
+    if (busyRef.current || busy || expired || isOfferExpired(parcel)) return
+    busyRef.current = true
     setBusy(true)
     try {
       await fn()
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 bg-surface border-t border-line rounded-t-3xl px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-floating">
+    <div className={embedded ? 'bg-surface' : 'fixed inset-x-0 bottom-0 z-40 bg-surface border-t border-line rounded-t-3xl px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-floating'}>
       <div className="w-10 h-1 bg-line rounded-full mx-auto mb-2" />
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
@@ -58,7 +63,7 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
         </p>
       </div>
 
-      {remainingSeconds != null && (
+      {!busy && remainingSeconds != null && (
         <p
           className={
             'text-center text-xs font-bold tabular-nums mb-2 ' +
@@ -84,7 +89,7 @@ const ParcelPopUp = ({ parcel, onAccept, onDecline, onExpire }) => {
           onClick={() => run(onAccept)}
           className="min-h-[44px] rounded-panel bg-brand-500 text-white font-semibold text-sm disabled:opacity-50"
         >
-          {expired ? 'Oferta expirada' : (busy ? 'Aceitando...' : 'Aceitar')}
+          {busy ? 'Aceitando...' : (expired ? 'Oferta expirada' : 'Aceitar')}
         </button>
       </div>
     </div>

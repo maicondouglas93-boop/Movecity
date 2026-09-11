@@ -33,7 +33,7 @@ export function markOemPermissionsOnboardingSeen() {
     }
 }
 
-export async function getDriverPermissionStatus() {
+export async function getDriverPermissionStatus({ strict = false } = {}) {
     if (!isNativePlatform()) {
         return {
             native: false,
@@ -47,6 +47,8 @@ export async function getDriverPermissionStatus() {
         const status = await NativeDriverPermissions.getStatus()
         return { native: true, ...status }
     } catch (err) {
+        // A central permanente precisa distinguir falha de leitura de autorização.
+        if (strict) throw err
         console.warn('[DriverPermissions] getStatus failed:', err?.message || err)
         return {
             native: true,
@@ -65,6 +67,27 @@ export async function openDriverAppSettings() {
     } catch (err) {
         console.warn('[DriverPermissions] openAppSettings:', err?.message || err)
     }
+}
+
+// Atalhos da central: propaga erros para a tela, sem declarar sucesso silencioso.
+// A consulta de status nunca chama estes métodos; só o toque do motorista.
+const SETTINGS_METHODS = {
+    app: 'openAppSettings',
+    overlay: 'openOverlaySettings',
+    notifications: 'openNotificationSettings',
+    offers: 'openOfferNotificationSettings',
+    battery: 'openBatteryOptimizationSettings',
+    fullScreen: 'openFullScreenIntentSettings',
+    dnd: 'openNotificationPolicySettings',
+    autostart: 'openOemAutostartSettings',
+    oem: 'openOemOtherPermissions',
+}
+
+export async function openDriverPermissionSettings(setting) {
+    if (!isNativePlatform()) throw new Error('Disponível no aplicativo Android')
+    const method = Object.hasOwn(SETTINGS_METHODS, setting) && SETTINGS_METHODS[setting]
+    if (!method) throw new Error('Configuração desconhecida')
+    return NativeDriverPermissions[method]()
 }
 
 export async function openOverlaySettings() {

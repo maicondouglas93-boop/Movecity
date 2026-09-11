@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types -- Mesma convenção dos painéis JSX de permissões, sem dependência runtime de prop-types. */
 import { useContext, useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { CaptainDataContext } from '@/driver/contexts/CaptainContext'
 import { SocketContext } from '@/shared/contexts/SocketContext'
 import { LocationRefContext } from '@/shared/contexts/LocationContext'
@@ -145,6 +145,12 @@ const CaptainDetails = ({ children = null, busy = false, assignedRide = null, on
             onResolveIssue={() => state.key === 'credits' ? navigate('/captain-wallet')
                 : isNativePlatform() ? openDriverAppSettings() : addToast('Permita a localização nas configurações deste navegador e verifique o GPS do aparelho.', 'info')} />
         {children}
+        {isNativePlatform() && <Link to="/captain/permissions"
+            className="flex min-h-[48px] items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-brand-700">
+            <i className="ri-shield-keyhole-line text-xl" aria-hidden="true" />
+            Permissões do aplicativo
+            <i className="ri-arrow-right-s-line ml-auto text-xl" aria-hidden="true" />
+        </Link>}
         <details className="rounded-xl border border-line bg-white p-3">
             <summary className="min-h-[44px] cursor-pointer text-sm font-semibold text-ink-900 py-2">
                 Ganhos hoje · {loading ? 'Carregando...' : money(data?.earnings)}

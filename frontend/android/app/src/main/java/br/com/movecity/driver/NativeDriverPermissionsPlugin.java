@@ -9,8 +9,10 @@ import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.app.NotificationManager;
+import android.app.NotificationChannel;
 
 import androidx.core.content.ContextCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -64,6 +66,16 @@ public class NativeDriverPermissionsPlugin extends Plugin {
         ret.put("canUseFullScreenIntent", canFsi);
         ret.put("supportsFullScreenIntent", supportsFsi);
         ret.put("canDrawOverlays", Settings.canDrawOverlays(getContext()));
+        ret.put("notificationsEnabled", NotificationManagerCompat.from(getContext()).areNotificationsEnabled());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = getContext().getSystemService(NotificationManager.class);
+            NotificationChannel channel = manager != null
+                ? manager.getNotificationChannel(RideOfferNotifier.CHANNEL_ID) : null;
+            if (channel != null) {
+                ret.put("offerAlertsConfigured", channel.getImportance() >= NotificationManager.IMPORTANCE_HIGH
+                    && channel.getSound() != null);
+            }
+        }
 
         PowerManager pm = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
         boolean ignoringBattery = true;
@@ -160,6 +172,39 @@ public class NativeDriverPermissionsPlugin extends Plugin {
             call.resolve();
         } catch (Exception e) {
             call.reject(e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        openNotificationSettings(call, false);
+    }
+
+    @PluginMethod
+    public void openOfferNotificationSettings(PluginCall call) {
+        openNotificationSettings(call, true);
+    }
+
+    private void openNotificationSettings(PluginCall call, boolean offerChannel) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent intent = new Intent(offerChannel
+                    ? Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS : Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+                if (offerChannel) intent.putExtra(Settings.EXTRA_CHANNEL_ID, RideOfferNotifier.CHANNEL_ID);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+            } else {
+                openAppDetails();
+            }
+            call.resolve();
+        } catch (Exception e) {
+            try {
+                openAppDetails();
+                call.resolve();
+            } catch (Exception fallbackError) {
+                call.reject("Não foi possível abrir as notificações do aplicativo", fallbackError);
+            }
         }
     }
 

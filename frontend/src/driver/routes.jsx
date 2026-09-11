@@ -19,6 +19,7 @@ const CaptainEarnings = lazy(() => import('@/driver/pages/CaptainEarnings'))
 const CaptainProfile = lazy(() => import('@/driver/pages/CaptainProfile'))
 const CaptainDocuments = lazy(() => import('@/driver/pages/CaptainDocuments'))
 const CaptainSupport = lazy(() => import('@/driver/pages/CaptainSupport'))
+const CaptainPermissions = lazy(() => import('@/driver/pages/CaptainPermissions'))
 const CaptainPublicHelp = lazy(() => import('@/driver/pages/CaptainSupport').then(module => ({ default: module.CaptainPublicHelp })))
 const CaptainScheduled = lazy(() => import('@/driver/pages/CaptainScheduled'))
 const CaptainParcels = lazy(() => import('@/driver/pages/CaptainParcels'))
@@ -77,6 +78,7 @@ const driverRoutes = [
     <Route path='/captain/profile' element={<CaptainProfile />} />
     <Route path='/captain/documents' element={<CaptainDocuments />} />
     <Route path='/captain/support' element={<CaptainSupport />} />
+    <Route path='/captain/permissions' element={<CaptainPermissions />} />
     <Route path='/captain/delete-account' element={<CaptainDeleteAccount />} />
   </Route>,
 ]

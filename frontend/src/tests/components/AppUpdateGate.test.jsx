@@ -41,6 +41,7 @@ describe('atualização do motorista unificada por canal', () => {
     it('menu abre instrução da Play e link do pacote correto, sem verificar ou instalar APK', async () => {
         mount({}, true)
         fireEvent.click(screen.getByRole('button', { name: 'Abrir menu' }))
+        expect(screen.getByRole('link', { name: 'Permissões do aplicativo' })).toHaveAttribute('href', '/captain/permissions')
         fireEvent.click(screen.getByRole('button', { name: 'Atualizar app' }))
         expect(await screen.findByRole('dialog', { name: 'Atualização do aplicativo' })).toHaveFocus()
         expect(screen.getByRole('link', { name: 'Abrir Google Play' })).toHaveAttribute('href', 'https://play.google.com/store/apps/details?id=br.com.movecity.driver')

@@ -15,6 +15,9 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 import android.view.View;
+import android.view.Gravity;
+import android.view.WindowInsets;
+import android.view.WindowMetrics;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
@@ -29,7 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 /**
- * Oferta full-screen (corrida ou encomenda) sobre o lock screen.
+ * Oferta nativa centralizada (corrida ou encomenda), inclusive sobre o lock screen.
  * Aceitar → API nativa. Recusar → só fecha (fica em pending no app).
  */
 public class RideOfferActivity extends AppCompatActivity {
@@ -60,6 +63,19 @@ public class RideOfferActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // O toque fora não pode fechar a oferta nem atravessar para outro app.
+        setFinishOnTouchOutside(false);
+        int availableWidth = getResources().getDisplayMetrics().widthPixels;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowMetrics metrics = getWindowManager().getCurrentWindowMetrics();
+            android.graphics.Insets insets = metrics.getWindowInsets().getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            availableWidth = metrics.getBounds().width() - insets.left - insets.right;
+        }
+        getWindow().setGravity(Gravity.CENTER);
+        getWindow().setLayout(RideOfferModalSizing.width(availableWidth,
+            getResources().getDisplayMetrics().density), WindowManager.LayoutParams.WRAP_CONTENT);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);

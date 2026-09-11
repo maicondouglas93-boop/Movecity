@@ -18,6 +18,7 @@ const NAV_LINKS = [
     { to: '/captain-wallet', label: 'Carteira', icon: 'ri-wallet-3-line' },
     { to: '/captain/earnings', label: 'Ganhos', icon: 'ri-bar-chart-line' },
     { to: '/captain/profile', label: 'Perfil', icon: 'ri-user-3-line' },
+    { to: '/captain/permissions', label: 'Permissões do aplicativo', icon: 'ri-shield-keyhole-line' },
 ];
 
 const CaptainHeader = ({ embedded = false, interactionBlocked = false }) => {

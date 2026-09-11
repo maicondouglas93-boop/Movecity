@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Permissões exclusivas da distribuição externa. A variante Google Play usa
-     notificações heads-up e a própria Play Store para atualizações. -->
+     notificações e, com SYSTEM_ALERT_WINDOW autorizado pelo motorista, a tela
+     nativa de oferta. Não depende de alarmes nem de full-screen intent. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove" />

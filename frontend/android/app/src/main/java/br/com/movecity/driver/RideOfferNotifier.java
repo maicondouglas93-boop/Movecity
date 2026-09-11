@@ -2,7 +2,6 @@ package br.com.movecity.driver;
 
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.app.ActivityOptions;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -10,12 +9,13 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -29,8 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Oferta de corrida/encomenda no Android.
  *
  * UI principal em foreground: RideOfferActivity (tela verde).
- * UI principal em background/lock screen: notificação nativa rica com
- * Aceitar/Recusar, som e vibração insistentes até uma ação ou expiração.
+ * Com autorização SYSTEM_ALERT_WINDOW, a tela nativa também abre em background.
+ * A notificação fica como fallback até a Activity confirmar sua abertura.
  */
 public final class RideOfferNotifier {
     // Auditoria Android (2026-08-07, H3): bump v4 → v5 — canal já existente no
@@ -42,20 +42,14 @@ public final class RideOfferNotifier {
     private static final int LEGACY_NOTIFICATION_ID = 22001;
     private static final String TAG = "RideOfferNotifier";
 
-    // Auditoria Android (2026-08-07, H2): a mesma oferta chega por dois canais
-    // independentes (Socket.IO com o app em foreground + FCM sempre, sem o backend
-    // checar se o socket já entregou) — sem isto, os dois podiam disparar
-    // showFullScreenOffer() quase ao mesmo tempo para o mesmo offerId. singleTop já
-    // evita uma segunda Activity, mas não evita reprocessar (segunda notificação,
-    // segundo wakeScreen, etc.). TTL curto: só suprime duplicata do mesmo evento, não
-    // uma oferta genuinamente nova que reaproveitasse o mesmo id (nunca acontece — é
-    // um ObjectId do Mongo).
-    private static final long DEDUP_WINDOW_MS = 8_000L;
+    // Socket + FCM não reiniciam a mesma janela de destaque. Redispatch com
+    // offerExpiresAt novo continua permitido, mesmo para o mesmo id de corrida.
+    private static final long DEDUP_WINDOW_MS = RideOfferPresentationPolicy.HIGHLIGHT_MS;
     private static final Map<String, Long> recentOffers = new ConcurrentHashMap<>();
 
     private RideOfferNotifier() {}
 
-    /** true se já processamos este offerId há menos de DEDUP_WINDOW_MS. */
+    /** A mesma janela de oferta não abre duas telas via socket e FCM. */
     private static boolean isDuplicateOffer(String offerId) {
         long now = System.currentTimeMillis();
         // Limpeza oportunista — mapa nunca cresce sem limite numa sessão longa.
@@ -63,8 +57,10 @@ public final class RideOfferNotifier {
         while (it.hasNext()) {
             if (now - it.next().getValue() > DEDUP_WINDOW_MS) it.remove();
         }
-        Long last = recentOffers.put(offerId, now);
-        return last != null && (now - last) <= DEDUP_WINDOW_MS;
+        Long last = recentOffers.get(offerId);
+        if (last != null && (now - last) <= DEDUP_WINDOW_MS) return true;
+        recentOffers.put(offerId, now);
+        return false;
     }
 
     public static int notificationIdFor(String offerId) {
@@ -124,8 +120,36 @@ public final class RideOfferNotifier {
     }
 
     public static void showFullScreenOffer(Context context, Map<String, String> data) {
-        ensureChannel(context);
-        wakeScreen(context);
+        // FCM chama em worker; serializar a apresentação evita corrida socket + push.
+        if (data == null) return;
+        Map<String, String> copy = new java.util.HashMap<>(data);
+        Context app = context.getApplicationContext();
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            presentOfferOnMain(app, copy);
+            return;
+        }
+        // Não devolver onMessageReceived antes de publicar o fallback: depois
+        // desse callback o Android pode encerrar o processo que recebeu o FCM.
+        java.util.concurrent.CountDownLatch posted = new java.util.concurrent.CountDownLatch(1);
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                presentOfferOnMain(app, copy);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "falha ao apresentar oferta", e);
+            } finally {
+                posted.countDown();
+            }
+        });
+        try {
+            if (!posted.await(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                RideOfferFlowLog.w("OFFER_PRESENTATION_DELAYED", "thread principal ocupada");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void presentOfferOnMain(Context context, Map<String, String> data) {
         boolean isParcel = "NEW_PARCEL".equals(data.get("type"));
         String kind = isParcel ? RideOfferAcceptHelper.KIND_PARCEL : RideOfferAcceptHelper.KIND_RIDE;
         String offerId = firstNonEmpty(
@@ -134,26 +158,42 @@ public final class RideOfferNotifier {
         );
         if (offerId == null || offerId.isEmpty()) return;
 
-        if (isDuplicateOffer(offerId)) {
+        long now = System.currentTimeMillis();
+        long deadline = RideOfferPresentationPolicy.deadline(data.get("offerExpiresAt"), now);
+        if (RideOfferPresentationPolicy.remaining(deadline, now) == 0) {
+            RideOfferFlowLog.i("OFFER_EXPIRED", "oferta recebida fora do prazo");
+            return;
+        }
+
+        String deliveryKey = kind + ":" + offerId + ":" + firstNonEmpty(data.get("offerExpiresAt"), "legacy");
+        if (isDuplicateOffer(deliveryKey)) {
             Log.i(TAG, "oferta duplicada ignorada (socket+FCM quase simultâneos) offerId=" + offerId);
             return;
         }
 
         Intent offerScreen = buildOfferIntent(context, data, kind, offerId);
+        offerScreen.putExtra(RideOfferActivity.EXTRA_EXPIRES_AT, deadline);
         boolean foreground = isAppInForeground(context);
+        boolean overlayGranted = Settings.canDrawOverlays(context);
 
         Log.i(TAG, "oferta recebida kind=" + kind
             + " offerId=" + offerId + " foreground=" + foreground);
 
-        if (foreground) {
-            // App aberto: mantém a experiência da tela verde.
-            launchOfferActivityNow(context, offerScreen, offerId);
-            return;
+        // Não remover o fallback ao apenas solicitar startActivity: alguns OEMs
+        // bloqueiam silenciosamente. A Activity cancela apenas em onPostResume.
+        try {
+            ensureChannel(context);
+            postRichOfferNotification(context, data, offerScreen, offerId, isParcel);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "notificação indisponível; preservando tentativa da tela nativa", e);
         }
-
-        // App em segundo plano ou tela bloqueada: não tentar abrir Activity por
-        // background start. A UI confiável passa a ser a notificação nativa rica.
-        postRichOfferNotification(context, data, offerScreen, offerId, isParcel);
+        if (RideOfferPresentationPolicy.mayOpenActivity(foreground, overlayGranted)) {
+            RideOfferFlowLog.i("OFFER_NATIVE_REQUESTED", "foreground=" + foreground
+                + " overlayGranted=" + overlayGranted);
+            launchOfferActivityNow(context, offerScreen, offerId);
+        } else {
+            RideOfferFlowLog.i("OFFER_NOTIFICATION_FALLBACK", "autorização de sobreposição ausente");
+        }
     }
 
     /**
@@ -169,6 +209,11 @@ public final class RideOfferNotifier {
         String offerId,
         boolean isParcel
     ) {
+        long remaining = RideOfferPresentationPolicy.remaining(
+            fullScreen.getLongExtra(RideOfferActivity.EXTRA_EXPIRES_AT, 0),
+            System.currentTimeMillis()
+        );
+        if (remaining == 0) return;
         int notificationId = notificationIdFor(offerId);
         PendingIntent contentPi = activityPi(context, offerId.hashCode(), fullScreen);
 
@@ -199,23 +244,26 @@ public final class RideOfferNotifier {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
             .setOngoing(true)
             .setOnlyAlertOnce(false)
             .setVibrate(new long[]{0, 700, 300, 700, 300, 1000})
             .setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE))
             .setContentIntent(contentPi)
-            // Auditoria Android (2026-08-07, H1): sem isto, a tela verde (RideOfferActivity)
-            // só abria quando o motorista tocava a notificação — com a tela bloqueada,
-            // Full-Screen Intent é o único mecanismo do Android que abre uma Activity por
-            // cima do lock screen automaticamente (com a tela ligada/desbloqueada, o
-            // próprio sistema degrada isto para heads-up, então não interfere no
-            // comportamento já correto desse caso). contentPi já é o PendingIntent de
-            // Activity certo — reaproveitado aqui, não duplica lógica.
-            .setFullScreenIntent(contentPi, true)
             .addAction(0, "Recusar", rejectPi)
             .addAction(0, "Aceitar", acceptPi)
-            .setTimeoutAfter(45_000);
+            .setTimeoutAfter(remaining);
+
+        // A Play não declara FSI. Não depender de uma permissão ausente nem
+        // solicitar tela cheia no sistema sem a autorização correspondente.
+        boolean canFsi = context.getPackageManager().checkPermission(
+            android.Manifest.permission.USE_FULL_SCREEN_INTENT, context.getPackageName()
+        ) == PackageManager.PERMISSION_GRANTED;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (Build.VERSION.SDK_INT >= 34) {
+            canFsi = canFsi && manager != null && manager.canUseFullScreenIntent();
+        }
+        if (canFsi) builder.setFullScreenIntent(contentPi, true);
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
@@ -364,12 +412,9 @@ public final class RideOfferNotifier {
     }
 
     /**
-     * Usado apenas com o app em foreground ou quando o usuário toca no corpo da
-     * notificação. Em background, não forçamos mais abertura automática da Activity.
+     * Uma única solicitação autorizada. Sem alarmes ou repetição para contornar BAL.
      */
     public static void launchOfferActivityNow(Context context, Intent fullScreen, String offerId) {
-        wakeScreen(context);
-
         Activity resumed = CurrentActivityHolder.get();
         if (resumed != null && !resumed.isFinishing()) {
             try {
@@ -382,47 +427,14 @@ public final class RideOfferNotifier {
             }
         }
 
-        sendFullScreenPendingIntent(context, fullScreen, offerId);
-
-        Handler main = new Handler(Looper.getMainLooper());
-        Runnable tryStart = () -> {
-            try {
-                context.startActivity(fullScreen);
-                Log.i(TAG, "RideOfferActivity via context.startActivity");
-            } catch (Exception e) {
-                Log.w(TAG, "startActivity bloqueado (BAL/OEM)", e);
-            }
-        };
-        main.post(tryStart);
-        main.postDelayed(tryStart, 200);
-        main.postDelayed(tryStart, 700);
-
-        scheduleLaunchAlarm(context, fullScreen, offerId);
-    }
-
-    private static void sendFullScreenPendingIntent(Context context, Intent fullScreen, String offerId) {
         try {
-            PendingIntent pi = activityPi(
-                context,
-                offerId != null ? offerId.hashCode() : LEGACY_NOTIFICATION_ID,
-                fullScreen
-            );
-            if (Build.VERSION.SDK_INT >= 34) {
-                ActivityOptions options = ActivityOptions.makeBasic();
-                options.setPendingIntentBackgroundActivityStartMode(
-                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                );
-                pi.send(context, 0, null, null, null, null, options.toBundle());
-            } else {
-                pi.send(context, 0, null);
-            }
-            Log.i(TAG, "RideOfferActivity solicitada via PendingIntent.send");
-        } catch (PendingIntent.CanceledException e) {
-            Log.w(TAG, "PendingIntent da RideOfferActivity cancelado", e);
+            context.startActivity(fullScreen);
+            Log.i(TAG, "abertura solicitada; aguardando OFFER_NATIVE_VISIBLE");
         } catch (Exception e) {
-            Log.w(TAG, "PendingIntent.send bloqueado (BAL/OEM)", e);
+            Log.w(TAG, "startActivity bloqueado; notificação mantida", e);
         }
     }
+
 
     public static void cancelNotification(Context context) {
         cancelNotification(context, null);
@@ -456,35 +468,6 @@ public final class RideOfferNotifier {
         am.cancel(legacy);
     }
 
-    private static void scheduleLaunchAlarm(Context context, Intent fullScreen, String offerId) {
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        if (am == null) return;
-
-        Intent launch = new Intent(context, RideOfferLaunchReceiver.class);
-        launch.setAction(RideOfferLaunchReceiver.ACTION_LAUNCH);
-        copyOfferExtras(fullScreen, launch);
-        PendingIntent pi = launchReceiverPi(context, alarmRequestCodeFor(offerId), launch);
-
-        long when = System.currentTimeMillis() + 350L;
-        try {
-            am.setAlarmClock(new AlarmManager.AlarmClockInfo(when, pi), pi);
-            Log.i(TAG, "AlarmClock → LaunchReceiver agendado");
-        } catch (Exception e) {
-            Log.e(TAG, "Falha AlarmClock", e);
-        }
-
-        // Backup se OEM limitar AlarmClock de apps de terceiros
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when + 400L, pi);
-                Log.i(TAG, "setExactAndAllowWhileIdle backup agendado");
-            }
-        } catch (SecurityException se) {
-            Log.w(TAG, "exact alarm sem permissão — só AlarmClock/FSI", se);
-        } catch (Exception e) {
-            Log.w(TAG, "backup exact alarm falhou", e);
-        }
-    }
 
     private static Intent buildOfferIntent(Context context, Map<String, String> data, String kind, String offerId) {
         boolean isParcel = RideOfferAcceptHelper.KIND_PARCEL.equals(kind);
@@ -523,6 +506,7 @@ public final class RideOfferNotifier {
         to.putExtra(RideOfferActivity.EXTRA_DESTINATION, from.getStringExtra(RideOfferActivity.EXTRA_DESTINATION));
         to.putExtra(RideOfferActivity.EXTRA_VEHICLE_TYPE, from.getStringExtra(RideOfferActivity.EXTRA_VEHICLE_TYPE));
         to.putExtra(RideOfferActivity.EXTRA_DEEP_LINK, from.getStringExtra(RideOfferActivity.EXTRA_DEEP_LINK));
+        to.putExtra(RideOfferActivity.EXTRA_EXPIRES_AT, from.getLongExtra(RideOfferActivity.EXTRA_EXPIRES_AT, 0));
     }
 
     private static PendingIntent activityPi(Context context, int requestCode, Intent intent) {
@@ -545,20 +529,6 @@ public final class RideOfferNotifier {
         return broadcastPi(context, requestCode, intent);
     }
 
-    private static void wakeScreen(Context context) {
-        try {
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm == null) return;
-            @SuppressWarnings("deprecation")
-            PowerManager.WakeLock wl = pm.newWakeLock(
-                PowerManager.FULL_WAKE_LOCK
-                    | PowerManager.ACQUIRE_CAUSES_WAKEUP
-                    | PowerManager.ON_AFTER_RELEASE,
-                "movecity:rideoffer"
-            );
-            wl.acquire(4000L);
-        } catch (Exception ignored) {}
-    }
 
     private static String firstNonEmpty(String a, String b) {
         return a != null && !a.isEmpty() ? a : b;

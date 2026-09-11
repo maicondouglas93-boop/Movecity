@@ -14,8 +14,8 @@ import java.util.Map;
  * FCM = transporte (acordar/receber data message em background).
  *
  * Ofertas (NEW_RIDE / NEW_PARCEL): RideOfferNotifier → RideOfferActivity.
- * Em background ainda há notificação mínima com fullScreenIntent (sem botões
- * Aceitar/Recusar) para o Android permitir abrir a Activity.
+ * Em background a tela abre com autorização de sobreposição; a notificação
+ * com Aceitar/Recusar permanece como fallback se a abertura não for possível.
  *
  * Alertas com título/corpo: DriverAlertNotifier (nativa).
  * Fallback Capacitor só quando não há payload apresentável nativamente.

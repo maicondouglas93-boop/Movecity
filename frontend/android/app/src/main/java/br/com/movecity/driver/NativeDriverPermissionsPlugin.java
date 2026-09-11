@@ -45,12 +45,25 @@ public class NativeDriverPermissionsPlugin extends Plugin {
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         ret.put("isXiaomiFamily", isXiaomiFamily(manufacturer, brand));
 
-        boolean canFsi = true;
-        if (Build.VERSION.SDK_INT >= 34) {
+        boolean supportsFsi = false;
+        try {
+            String[] declared = getContext().getPackageManager().getPackageInfo(
+                getContext().getPackageName(), PackageManager.GET_PERMISSIONS
+            ).requestedPermissions;
+            if (declared != null) {
+                for (String permission : declared) {
+                    if (Manifest.permission.USE_FULL_SCREEN_INTENT.equals(permission)) supportsFsi = true;
+                }
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {}
+        boolean canFsi = supportsFsi;
+        if (supportsFsi && Build.VERSION.SDK_INT >= 34) {
             NotificationManager nm = getContext().getSystemService(NotificationManager.class);
             canFsi = nm != null && nm.canUseFullScreenIntent();
         }
         ret.put("canUseFullScreenIntent", canFsi);
+        ret.put("supportsFullScreenIntent", supportsFsi);
+        ret.put("canDrawOverlays", Settings.canDrawOverlays(getContext()));
 
         PowerManager pm = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
         boolean ignoringBattery = true;
@@ -71,6 +84,19 @@ public class NativeDriverPermissionsPlugin extends Plugin {
         ret.put("hasNotificationPolicyAccess", hasDndAccess);
 
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openOverlaySettings(PluginCall call) {
+        // Somente após o botão e a explicação no app; nunca conceder por conta própria.
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            getActivity().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Não foi possível abrir Aparecer sobre outros apps", e);
+        }
     }
 
     @PluginMethod

@@ -42,8 +42,8 @@ public class RideOfferActivity extends AppCompatActivity {
     public static final String EXTRA_DESTINATION = "destination";
     public static final String EXTRA_VEHICLE_TYPE = "vehicleType";
     public static final String EXTRA_DEEP_LINK = "deepLink";
+    public static final String EXTRA_EXPIRES_AT = "offerDeadlineMs";
 
-    private static final long AUTO_DISMISS_MS = 45_000L;
     private static final Pattern COORDS_SUFFIX = Pattern.compile(
         "\\s*\\(-?\\d+(?:\\.\\d+)?\\s*,\\s*-?\\d+(?:\\.\\d+)?\\)\\s*$"
     );
@@ -53,6 +53,7 @@ public class RideOfferActivity extends AppCompatActivity {
     private String offerId;
     private String kind;
     private boolean busy = false;
+    private long deadline;
     private MediaPlayer ringtonePlayer;
     private Vibrator vibrator;
 
@@ -60,8 +61,6 @@ public class RideOfferActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setShowWhenLocked(true);
-        setTurnScreenOn(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             setTurnScreenOn(true);
@@ -76,16 +75,42 @@ public class RideOfferActivity extends AppCompatActivity {
                 km.requestDismissKeyguard(this, null);
             }
         } else {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
 
-        setContentView(R.layout.activity_ride_offer);
-        startAlertFeedback();
+        bindOffer(getIntent());
+    }
 
-        Intent intent = getIntent();
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // Não trocar o alvo de um aceite HTTP que já começou. A nova oferta
+        // continua disponível na notificação independente e na fila do app.
+        if (busy) return;
+        if (intent != null && java.util.Objects.equals(offerId, intent.getStringExtra(EXTRA_RIDE_ID))
+            && deadline == intent.getLongExtra(EXTRA_EXPIRES_AT, 0)) return;
+        setIntent(intent);
+        bindOffer(intent);
+    }
+
+    private void bindOffer(Intent intent) {
+        mainHandler.removeCallbacksAndMessages(null);
+        stopAlertFeedback();
+        if (intent == null) { finish(); return; }
         kind = intent.getStringExtra(EXTRA_KIND);
         if (kind == null || kind.isEmpty()) kind = RideOfferAcceptHelper.KIND_RIDE;
         offerId = intent.getStringExtra(EXTRA_RIDE_ID);
+        long now = System.currentTimeMillis();
+        deadline = intent.getLongExtra(EXTRA_EXPIRES_AT, now + RideOfferPresentationPolicy.HIGHLIGHT_MS);
+        long remaining = RideOfferPresentationPolicy.remaining(deadline, now);
+        if (offerId == null || offerId.isEmpty() || remaining == 0) {
+            if (offerId != null) RideOfferNotifier.cancelNotification(this, offerId);
+            finish();
+            return;
+        }
+        busy = false;
+        setContentView(R.layout.activity_ride_offer);
         String title = intent.getStringExtra(EXTRA_TITLE);
         String fare = intent.getStringExtra(EXTRA_FARE);
         String pickup = intent.getStringExtra(EXTRA_PICKUP);
@@ -130,7 +155,7 @@ public class RideOfferActivity extends AppCompatActivity {
         }
 
         btnReject.setOnClickListener(v -> {
-            if (busy) return;
+            if (busy || expireIfNeeded()) return;
             busy = true;
             stopAlertFeedback();
             btnAccept.setEnabled(false);
@@ -152,7 +177,7 @@ public class RideOfferActivity extends AppCompatActivity {
         });
 
         btnAccept.setOnClickListener(v -> {
-            if (busy) return;
+            if (busy || expireIfNeeded()) return;
             if (offerId == null || offerId.isEmpty()) {
                 Toast.makeText(this, "Oferta inválida", Toast.LENGTH_SHORT).show();
                 finish();
@@ -184,6 +209,7 @@ public class RideOfferActivity extends AppCompatActivity {
                         RideOfferFlowLog.e("ACCEPT_HTTP_ERROR",
                             result.message != null ? result.message : "falha");
                         busy = false;
+                        if (expireIfNeeded()) return;
                         btnAccept.setEnabled(true);
                         btnReject.setEnabled(true);
                         statusView.setText(result.message != null ? result.message : "Não foi possível aceitar");
@@ -194,14 +220,35 @@ public class RideOfferActivity extends AppCompatActivity {
         });
 
         mainHandler.postDelayed(() -> {
-            if (!isFinishing()) {
-                stopAlertFeedback();
+            stopAlertFeedback();
+            // Um aceite já enviado deve receber sua resposta, mesmo se o prazo
+            // de destaque vencer durante o HTTP (o servidor é autoritativo).
+            if (!isFinishing() && !busy) {
                 finish();
             }
-        }, AUTO_DISMISS_MS);
+        }, remaining);
 
+    }
+
+    @Override
+    protected void onPostResume() {
+        super.onPostResume();
+        if (isFinishing() || offerId == null || busy || expireIfNeeded()) return;
+        if (ringtonePlayer == null) startAlertFeedback();
+        RideOfferFlowLog.i("OFFER_NATIVE_VISIBLE", "kind=" + kind + " remainingMs="
+            + RideOfferPresentationPolicy.remaining(deadline, System.currentTimeMillis()));
+        // onCreate pode acontecer sem a janela chegar ao primeiro plano. Só
+        // retirar a alternativa da bandeja quando a tela for de fato retomada.
         RideOfferNotifier.cancelNotification(this, offerId);
         RideOfferNotifier.cancelLaunchAlarm(this, offerId);
+    }
+
+    private boolean expireIfNeeded() {
+        if (RideOfferPresentationPolicy.remaining(deadline, System.currentTimeMillis()) > 0) return false;
+        stopAlertFeedback();
+        RideOfferNotifier.cancelNotification(this, offerId);
+        finish();
+        return true;
     }
 
     private static String rideTypeLabel(String vehicleType) {
@@ -232,6 +279,8 @@ public class RideOfferActivity extends AppCompatActivity {
             ringtonePlayer.prepare();
             ringtonePlayer.start();
         } catch (Exception e) {
+            RideOfferFlowLog.e("OFFER_AUDIO_FAILED", e.getClass().getSimpleName());
+            if (ringtonePlayer != null) ringtonePlayer.release();
             ringtonePlayer = null;
         }
 
@@ -309,6 +358,7 @@ public class RideOfferActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null);
         stopAlertFeedback();
         super.onDestroy();
         executor.shutdownNow();

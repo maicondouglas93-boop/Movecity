@@ -6,9 +6,8 @@ import android.content.Intent;
 import android.util.Log;
 
 /**
- * Disparado pelo AlarmManager / AlarmClock. Receivers despertados por alarme
- * têm isenção BAL para startActivity — mais confiável que startActivity direto
- * do FirebaseMessagingService com a tela desbloqueada.
+ * Compatibilidade com alarmes de versões antigas. Não agendamos novos alarmes
+ * para abrir ofertas nem usamos alarmes para contornar a autorização do usuário.
  */
 public class RideOfferLaunchReceiver extends BroadcastReceiver {
     public static final String ACTION_LAUNCH = "br.com.movecity.driver.ACTION_LAUNCH_RIDE_OFFER";
@@ -17,6 +16,11 @@ public class RideOfferLaunchReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
+        if (!RideOfferPresentationPolicy.mayOpenActivity(
+            RideOfferNotifier.isAppInForeground(context), android.provider.Settings.canDrawOverlays(context)
+        )) return;
+        long deadline = intent.getLongExtra(RideOfferActivity.EXTRA_EXPIRES_AT, 0);
+        if (RideOfferPresentationPolicy.remaining(deadline, System.currentTimeMillis()) == 0) return;
         Log.i(TAG, "alarme/broadcast → abrindo RideOfferActivity");
         Intent fullScreen = new Intent(context, RideOfferActivity.class);
         fullScreen.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK

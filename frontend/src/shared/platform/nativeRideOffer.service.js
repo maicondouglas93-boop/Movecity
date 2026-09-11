@@ -21,6 +21,7 @@ export async function presentNativeRideOffer(payload = {}) {
             destination: payload.destination || undefined,
             vehicleType: payload.vehicleType || undefined,
             deepLink: payload.deepLink || undefined,
+            offerExpiresAt: payload.offerExpiresAt || undefined,
         }
         Object.keys(data).forEach((k) => {
             if (data[k] === undefined) delete data[k]

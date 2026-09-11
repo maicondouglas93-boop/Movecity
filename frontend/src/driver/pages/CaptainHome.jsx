@@ -444,6 +444,7 @@ const CaptainHome = () => {
             presentNativeRideOffer({
                 type: 'NEW_RIDE',
                 rideId: data._id,
+                offerExpiresAt: data.offerExpiresAt,
                 title: rideType.heading,
                 message: `${data.pickup?.split(',')[0] || 'Origem'} → ${data.destination?.split(',')[0] || 'Destino'} • ${formatBRL(data.fare)}`,
                 fare: data.fare,
@@ -539,6 +540,7 @@ const CaptainHome = () => {
             presentNativeRideOffer({
                 type: 'NEW_PARCEL',
                 parcelId: data._id,
+                offerExpiresAt: data.offerExpiresAt,
                 title: 'Nova encomenda disponível',
                 message: `${data.pickup?.split(',')[0] || 'Coleta'} → ${data.destination?.split(',')[0] || 'Entrega'} • ${formatBRL(data.fare)}`,
                 fare: data.fare,

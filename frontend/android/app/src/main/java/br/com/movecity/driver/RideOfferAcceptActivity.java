@@ -60,6 +60,15 @@ public class RideOfferAcceptActivity extends AppCompatActivity {
             return;
         }
 
+        long deadline = getIntent().getLongExtra(RideOfferActivity.EXTRA_EXPIRES_AT,
+            System.currentTimeMillis() + RideOfferPresentationPolicy.HIGHLIGHT_MS);
+        if (RideOfferPresentationPolicy.remaining(deadline, System.currentTimeMillis()) == 0) {
+            RideOfferNotifier.cancelNotification(this, offerId);
+            Toast.makeText(this, "Prazo da oferta encerrado. Confira as disponíveis no app.", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
         if (started) return;
         started = true;
 

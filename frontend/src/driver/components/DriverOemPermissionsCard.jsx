@@ -7,6 +7,7 @@ import {
     markOemPermissionsOnboardingSeen,
     openBatteryOptimizationSettings,
     openDriverAppSettings,
+    openOverlaySettings,
     openFullScreenIntentSettings,
     openNotificationPolicySettings,
     openOemAutostartSettings,
@@ -23,6 +24,7 @@ import {
 export default function DriverOemPermissionsCard() {
     const [visible, setVisible] = useState(false)
     const [status, setStatus] = useState(null)
+    const [settingsError, setSettingsError] = useState('')
 
     const refresh = async () => {
         if (!isNativePlatform()) return
@@ -55,14 +57,30 @@ export default function DriverOemPermissionsCard() {
                 <i className="ri-shield-keyhole-line text-xl text-amber-700 mt-0.5" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                     <h3 className="font-bold text-[15px] text-ink-900">
-                        Para receber ofertas com o app fechado
+                        Receber ofertas sobre outros aplicativos
                     </h3>
                     <p className="text-[12px] text-ink-700 mt-1 leading-snug">
-                        No Android (especialmente Xiaomi/Redmi) é preciso liberar algumas
-                        permissões nas configurações do sistema. Isso não altera ONLINE nem o botão GO.
+                        Autorize “Aparecer sobre outros apps” para o MoveCity abrir a tela de
+                        oferta com Aceitar e Recusar enquanto você usa outro aplicativo.
+                        Ela fecha ao responder ou terminar o prazo. É opcional: sem essa
+                        permissão, você continua recebendo notificações. Não altera ONLINE nem GO.
                     </p>
 
                     <ul className="mt-3 space-y-2">
+                        {status.canDrawOverlays === false && (
+                            <li>
+                                <ActionRow
+                                    label="Permitir aparecer sobre outros apps"
+                                    hint="Nas configurações do Android, selecione MoveCity Motorista e autorize. Depois volte ao app."
+                                    onClick={async () => {
+                                        setSettingsError('')
+                                        try { await openOverlaySettings() } catch {
+                                            setSettingsError('Não foi possível abrir a configuração. Procure Aparecer sobre outros apps nas configurações do Android.')
+                                        }
+                                    }}
+                                />
+                            </li>
+                        )}
                         {status.hasForegroundLocation === false && (
                             <li>
                                 <ActionRow
@@ -76,7 +94,7 @@ export default function DriverOemPermissionsCard() {
                                 />
                             </li>
                         )}
-                        {!status.canUseFullScreenIntent && (
+                        {status.supportsFullScreenIntent !== false && !status.canUseFullScreenIntent && (
                             <li>
                                 <ActionRow
                                     label="Permitir tela cheia (ofertas)"
@@ -142,6 +160,7 @@ export default function DriverOemPermissionsCard() {
                             />
                         </li>
                     </ul>
+                    {settingsError && <p role="alert" className="mt-2 text-sm">{settingsError}</p>}
 
                     <div className="mt-3 flex flex-wrap gap-2">
                         <button
@@ -155,7 +174,8 @@ export default function DriverOemPermissionsCard() {
                                 const dndOk = next.hasNotificationPolicyAccess !== false
                                 if (
                                     fgOk
-                                    && next.canUseFullScreenIntent
+                                    && next.canDrawOverlays !== false
+                                    && (next.supportsFullScreenIntent === false || next.canUseFullScreenIntent)
                                     && next.ignoringBatteryOptimizations
                                     && dndOk
                                     && bgOk
@@ -182,6 +202,8 @@ export default function DriverOemPermissionsCard() {
     )
 }
 
+// Helper interno, com as mesmas props locais do PermissionNotice da Home.
+// eslint-disable-next-line react/prop-types
 function ActionRow({ label, hint, onClick }) {
     return (
         <button

@@ -3,7 +3,7 @@ import { isNativePlatform } from '@/shared/platform/platform'
 
 const NativeDriverPermissions = registerPlugin('NativeDriverPermissions')
 
-const STORAGE_KEY = 'driverOemPermsSeen_v1'
+const STORAGE_KEY = 'driverOemPermsSeen_v2'
 
 // Auditoria Android (2026-08-07, M1): antes, "Agora não" (ou "Já configurei") gravava
 // um '1' fixo e o card nunca mais reaparecia — um motorista que dispensasse sem
@@ -65,6 +65,11 @@ export async function openDriverAppSettings() {
     } catch (err) {
         console.warn('[DriverPermissions] openAppSettings:', err?.message || err)
     }
+}
+
+export async function openOverlaySettings() {
+    if (!isNativePlatform()) return
+    await NativeDriverPermissions.openOverlaySettings()
 }
 
 export async function openFullScreenIntentSettings() {
@@ -135,7 +140,8 @@ export async function shouldShowOemPermissionsCard(statusOverride = null) {
     if (hasSeenOemPermissionsOnboarding()) return false
     const status = statusOverride || await getDriverPermissionStatus()
     if (status.hasForegroundLocation === false) return true
-    if (!status.canUseFullScreenIntent) return true
+    if (status.canDrawOverlays === false) return true
+    if (status.supportsFullScreenIntent !== false && !status.canUseFullScreenIntent) return true
     if (!status.ignoringBatteryOptimizations) return true
     if (status.hasNotificationPolicyAccess === false) return true
     if (status.hasBackgroundLocation === false) return true

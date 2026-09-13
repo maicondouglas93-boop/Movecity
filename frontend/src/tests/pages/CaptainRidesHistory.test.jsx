@@ -44,6 +44,23 @@ beforeEach(async () => {
 afterEach(async () => { cleanup(); client?.clear(); vi.restoreAllMocks(); await db.delete() })
 
 describe('histórico considera a finalização persistida no aparelho', () => {
+    it('exibe o nome informado na corrida presencial sem conta vinculada', async () => {
+        api.get.mockResolvedValue({ data: {
+            activeRide: null,
+            rides: [{ ...ride, status: 'finished', passengerName: 'João da Silva' }],
+            pendingOffers: [],
+        } })
+        mount()
+        expect(await screen.findByText('João da Silva')).toBeInTheDocument()
+    })
+
+    it('mantém o nome no histórico enquanto a finalização aguarda sincronização', async () => {
+        api.get.mockResolvedValue({ data: { activeRide: null, rides: [], pendingOffers: [] } })
+        await pending({ rideSnapshot: { ...ride, passengerName: 'Ana Souza' } })
+        mount()
+        expect(await screen.findByText('Ana Souza')).toBeInTheDocument()
+    })
+
     it('detalhes oferecem referência e suporte sem inventar ID para registro inválido', async () => {
         await pending({ rideId: undefined, payload: { finishTimestamp: 123 }, rideSnapshot: { user: { name: 'Dado privado' } } })
         mount()

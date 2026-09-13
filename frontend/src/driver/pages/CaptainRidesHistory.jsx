@@ -82,7 +82,7 @@ function passengerName(ride) {
     const first = ride?.user?.fullname?.firstname;
     const last = ride?.user?.fullname?.lastname;
     const name = [ first, last ].filter(Boolean).join(' ').trim();
-    return name || null;
+    return name || (ride?.source === 'driver_initiated' ? ride.passengerName : null) || null;
 }
 
 const SectionTitle = ({ children }) => (

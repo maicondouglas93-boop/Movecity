@@ -11,6 +11,7 @@ import {
 } from './session';
 import { syncTokenWithSW } from './swCommunication';
 import { withHardTimeout } from '../utils/hardTimeout';
+import { isNativePlatform } from '../platform/platform';
 
 const api = axios.create({
     baseURL: API_BASE_URL || undefined,
@@ -22,6 +23,13 @@ const api = axios.create({
 
 // Interceptor de Requisição: Injeta o token se existir
 api.interceptors.request.use((config) => {
+    // CapacitorHttp repassa os headers sem acrescentar a Origin do WebView.
+    // Cookies antigos podem acompanhar login/cadastro/refresh sem Bearer e exigir
+    // essa origem no CSRF. Na web, o próprio navegador controla o header Origin.
+    if (isNativePlatform()) {
+        config.headers.set('Origin', window.location.origin);
+    }
+
     // Fase 1 da auditoria de production readiness (C1, 2026-08-05): as chamadas
     // migradas do axios cru podem trazer Authorization explícito — em rotas que
     // sessionKindForUrl não classifica (ex: /captains/wallet vem com o prefixo
@@ -37,7 +45,7 @@ api.interceptors.request.use((config) => {
         || (getAccessToken('user') && explicitAuth === `Bearer ${getAccessToken('user')}` ? 'user' : null)
         || sessionKindForUrl(config.url || '')
         || (getAccessToken('user') ? 'user' : getAccessToken('captain') ? 'captain' : null);
-    if (explicitAuth) return config;
+    if (explicitAuth || explicitAuth === false) return config;
 
     // Escolhe o token com base na rota para evitar conflitos em testes na mesma máquina
     const kind = config._sessionKind;
@@ -75,6 +83,10 @@ const forceLogout = (kind) => {
 api.interceptors.response.use((response) => response, async (error) => {
     const config = error.config;
     const status = error.response?.status;
+
+    // Logout e limpeza de push usam a credencial capturada ao sair. Uma resposta
+    // atrasada nunca deve renovar a sessão nem encerrar um login posterior.
+    if (config?._skipSessionRecovery) return Promise.reject(error);
 
     // Sem resposta = rede caiu, timeout, backend hibernando. NUNCA desloga por isso —
     // era exatamente o que acontecia antes e derrubava a sessão de quem só passou por

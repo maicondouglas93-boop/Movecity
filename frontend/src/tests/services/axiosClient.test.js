@@ -72,6 +72,14 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         expect(authHeaderOf(adapter.mock.calls[0][0])).toBe('Bearer user-token')
     })
 
+    it('não acrescenta a sessão atual quando a limpeza explicitamente não tem Bearer', async () => {
+        localStorage.setItem('captain-token', 'new-login')
+        const adapter = vi.fn(async config => okResponse(config))
+        api.defaults.adapter = adapter
+        await api.post('/captains/logout', {}, { headers: { Authorization: false }, _skipSessionRecovery: true })
+        expect(authHeaderOf(adapter.mock.calls[0][0])).toBe(false)
+    })
+
     it('respeita Authorization explícito — não sobrescreve com o fallback user>captain (sessão dupla)', async () => {
         // Cenário real: motorista e passageiro logados no mesmo navegador; a rota
         // /wallet não é classificável por sessionKindForUrl e o fallback preferiria
@@ -136,6 +144,22 @@ describe('cliente axios configurado (Fase 1 — C1)', () => {
         await expect(api.post('/users/login', { email: 'a@a.com', password: 'x' })).rejects.toBeTruthy()
         expect(calls).toHaveLength(1)
         expect(calls.some((u) => u.includes('/refresh'))).toBe(false)
+    })
+
+    it.each([401, 403])('resposta %s da limpeza de uma sessão antiga não renova nem apaga o login atual', async status => {
+        saveSession('captain', { token: 'new-login', refreshToken: 'new-refresh' })
+        api.defaults.adapter = vi.fn(async config => {
+            const error = http401(config)
+            error.response.status = status
+            error.response.data.message = 'Conta bloqueada'
+            throw error
+        })
+        await expect(api.post('/captains/logout', { refreshToken: 'old-refresh' }, {
+            headers: { Authorization: 'Bearer old-token' }, _skipSessionRecovery: true,
+        })).rejects.toMatchObject({ response: { status } })
+        expect(api.defaults.adapter).toHaveBeenCalledOnce()
+        expect(localStorage.getItem('captain-token')).toBe('new-login')
+        expect(localStorage.getItem('captain-refreshToken')).toBe('new-refresh')
     })
 
     it.each([undefined, 500, 503, 429])('preserva a sessão e propaga a falha temporária %s do refresh, não o 401 original', async (status) => {

@@ -152,6 +152,34 @@ describe('createPresentialRide', () => {
         expect(dispatchService.acquireCaptainBusyLock).toHaveBeenCalled();
     });
 
+    test('salva o nome do passageiro sem procurar ou vincular uma conta', async () => {
+        await rideService.createPresentialRide({
+            captain: mockCaptainDoc,
+            destinationPending: true,
+            passengerName: '  João da Silva  ',
+            clientLat: -20.15,
+            clientLng: -41.62,
+        });
+
+        expect(rideModel.create).toHaveBeenCalledWith(expect.objectContaining({
+            passengerName: 'João da Silva',
+            user: undefined,
+            source: 'driver_initiated',
+        }));
+        expect(require('../../models/user.model').findOne).not.toHaveBeenCalled();
+    });
+
+    test('nome em branco continua opcional', async () => {
+        await rideService.createPresentialRide({
+            captain: mockCaptainDoc,
+            destinationPending: true,
+            passengerName: '   ',
+            clientLat: -20.15,
+            clientLng: -41.62,
+        });
+        expect(rideModel.create.mock.calls[0][0].passengerName).toBeUndefined();
+    });
+
     test('com destino informa PricingEngine e persiste estimativa', async () => {
         await rideService.createPresentialRide({
             captain: mockCaptainDoc,

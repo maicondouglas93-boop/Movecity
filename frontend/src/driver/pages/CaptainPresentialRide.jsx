@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '@/shared/services/axios'
 import CaptainHeader from '@/driver/components/CaptainHeader'
@@ -60,7 +60,7 @@ const CaptainPresentialRide = () => {
   const [estimating, setEstimating] = useState(false)
   const [ride, setRide] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [passengerPhone, setPassengerPhone] = useState('')
+  const [passengerName, setPassengerName] = useState('')
   const [passengerConsent, setPassengerConsent] = useState(false)
   // Motorista autorizado a carro E moto tem um único veículo cadastrado — sem esta
   // escolha o preço saía sempre na categoria do cadastro, independente do que ele
@@ -208,8 +208,8 @@ const CaptainPresentialRide = () => {
       if (!destinationPending) {
         payload.destination = destination.trim()
       }
-      if (passengerPhone.trim()) {
-        payload.passengerPhone = passengerPhone.trim()
+      if (passengerName.trim()) {
+        payload.passengerName = passengerName.trim()
       }
       const created = await createPresentialRide(payload)
       setRide(created)
@@ -442,18 +442,21 @@ const CaptainPresentialRide = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-ink-600 mb-1" htmlFor="passenger-phone">
-                Telefone do passageiro (opcional)
+              <label className="block text-sm font-medium text-ink-600 mb-1" htmlFor="passenger-name">
+                Nome do passageiro (opcional)
               </label>
               <input
-                id="passenger-phone"
-                type="tel"
-                value={passengerPhone}
-                onChange={(e) => setPassengerPhone(e.target.value)}
-                placeholder="+55…"
+                id="passenger-name"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="words"
+                maxLength={100}
+                value={passengerName}
+                onChange={(e) => setPassengerName(e.target.value)}
+                placeholder="Digite o nome do passageiro"
                 className="w-full min-h-[48px] px-4 rounded-panel border border-line bg-surface text-ink-900"
               />
-              <p className="text-xs text-ink-400 mt-1">Se cadastrado no MoveCity, vinculamos ao histórico dele.</p>
+              <p className="text-xs text-ink-400 mt-1">O nome ajuda a identificar esta corrida no seu histórico.</p>
             </div>
 
             <Button type="button" onClick={createRide} loading={loading} disabled={loading || estimating}>

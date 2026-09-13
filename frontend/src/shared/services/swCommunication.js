@@ -14,9 +14,9 @@ export const syncTokenWithSW = async (token) => {
     }
 }
 
-export const clearTokenInSW = async () => {
+export const clearTokenInSW = async ({ shouldClear = () => true } = {}) => {
     const registration = await getFcmRegistration()
-    if (registration?.active) {
+    if (registration?.active && shouldClear()) {
         registration.active.postMessage({
             type: 'CLEAR_TOKEN'
         })

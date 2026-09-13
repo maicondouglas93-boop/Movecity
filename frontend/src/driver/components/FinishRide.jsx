@@ -176,6 +176,7 @@ const FinishRide = (props) => {
                 rideSnapshot: {
                     pickup: props.ride.pickup, destination: props.ride.destination,
                     source: props.ride.source, createdAt: props.ride.createdAt,
+                    passengerName: props.ride.passengerName,
                     paymentMethod: props.ride.paymentMethod,
                 },
             })
@@ -527,6 +528,7 @@ const FinishRide = (props) => {
                     ) : props.ride?.source === 'driver_initiated' ? (
                         <div className='rounded-panel border border-line bg-surface-alt px-3 py-2'>
                             <p className='text-sm font-semibold text-brand-700'>Corrida presencial</p>
+                            {props.ride.passengerName && <p className='text-sm text-ink-900 break-words'>{props.ride.passengerName}</p>}
                             <p className='text-xs text-ink-600 mt-0.5'>Passageiro sem conta vinculada</p>
                         </div>
                     ) : null}

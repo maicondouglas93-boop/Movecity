@@ -970,6 +970,7 @@ module.exports.createPresentialRide = async ({
     destinationPending = false,
     paymentMethod = 'cash',
     passengerPhone = null,
+    passengerName = null,
     clientLat = null,
     clientLng = null,
     vehicleType: requestedVehicleType = null,
@@ -1194,6 +1195,7 @@ module.exports.createPresentialRide = async ({
 
         const ridePayload = {
             user: linkedUserId || undefined,
+            passengerName: passengerName?.trim() || undefined,
             captain: freshCaptain._id,
             pickup: pickupAddress,
             pickupCoordinates: { lat: origin.lat, lng: origin.lng },

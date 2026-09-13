@@ -66,7 +66,8 @@ export default function DriverTripView({ children, ride, presentation, elapsedSe
                     {expanded ? 'Recolher detalhes da corrida' : 'Ver detalhes da corrida e do sinal'}
                 </button>
                 {expanded && <div id="trip-details" className="border-t border-line pt-3 space-y-3 text-sm text-ink-700">
-                    {ride.user ? <PassengerIdentityCard user={ride.user} showPhoto compact /> : <p>Passageiro presencial sem conta vinculada.</p>}
+                    {ride.user ? <PassengerIdentityCard user={ride.user} showPhoto compact />
+                        : <p className="break-words">{presential && ride.passengerName ? `Passageiro: ${ride.passengerName}` : 'Passageiro presencial sem conta vinculada.'}</p>}
                     <p><strong>Embarque:</strong> {ride.pickup || 'Endereço indisponível'}</p>
                     <p><strong>Destino:</strong> {destination}</p>
                     <p><strong>Pagamento:</strong> {paymentMethodLabel(ride.paymentMethod)}</p>

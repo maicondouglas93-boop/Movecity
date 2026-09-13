@@ -72,7 +72,7 @@ async function postNativeImageUpload(url, file, { token, timeout, params } = {})
  * NÃO definir Content-Type manualmente — sem boundary o multer recebe req.file=undefined
  * ("Nenhuma imagem enviada"), especialmente no WebView do APK.
  */
-export async function postImageUpload(url, file, { token, timeout = 60000, fields = {} } = {}) {
+export async function postImageUpload(url, file, { token, timeout = 60000, fields = {}, signal, skipSessionRecovery = false } = {}) {
     if (isNativePlatform() && Object.keys(fields).length === 0) {
         const nativeResponse = await postNativeImageUpload(url, file, { token, timeout })
         if (nativeResponse) return nativeResponse
@@ -85,7 +85,11 @@ export async function postImageUpload(url, file, { token, timeout = 60000, field
     })
     const headers = {}
     if (token) headers.Authorization = `Bearer ${token}`
-    return api.post(url, formData, { headers, timeout })
+    return api.post(url, formData, {
+        headers, timeout,
+        ...(signal ? { signal } : {}),
+        ...(skipSessionRecovery ? { _skipSessionRecovery: true } : {}),
+    })
 }
 
 /**

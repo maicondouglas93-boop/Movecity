@@ -92,7 +92,11 @@ export function clearSession(kind) {
     notifySessionChanged();
     if (kind === 'captain') {
         import('@/shared/platform/nativeSession.service')
-            .then(({ clearNativeCaptainSession }) => clearNativeCaptainSession())
+            .then(({ clearNativeCaptainSession }) => {
+                if (localStorage.getItem('captain-token:loggedOut') && !getAccessToken('captain')) {
+                    return clearNativeCaptainSession();
+                }
+            })
             .catch(() => {});
     }
 }

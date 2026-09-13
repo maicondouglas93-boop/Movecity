@@ -60,6 +60,14 @@ describe('sessão Android entre atualizações e aceite em segundo plano', () =>
         await pending
         expect(getAccessToken('captain')).toBe('web-access')
     })
+
+    it('limpeza adiada pela importação não apaga um novo login', async () => {
+        clearSession('captain')
+        saveSession('captain', { token: 'new-access', refreshToken: 'new-refresh' })
+        await vi.waitFor(() => expect(native.save).toHaveBeenCalledWith(expect.objectContaining({ token: 'new-access' })))
+        expect(native.clear).not.toHaveBeenCalled()
+        expect(getAccessToken('captain')).toBe('new-access')
+    })
     it('falha da ponte não apaga nem sobrescreve credenciais', async () => {
         webSession()
         native.read.mockRejectedValueOnce(new Error('Ponte indisponível'))

@@ -9,13 +9,14 @@ import EmptyState from '@/shared/components/ui/EmptyState'
 import Skeleton from '@/shared/components/ui/Skeleton'
 import { getAccessToken } from '@/shared/services/session'
 import { formatBRL } from '@/shared/utils/currency'
-import { openWhatsApp } from '@/shared/utils/whatsapp'
-import { useToast } from '@/shared/contexts/ToastContext'
+import { supportWhatsAppUrl } from '@/shared/utils/supportContacts'
+import { withHardTimeout } from '@/shared/utils/hardTimeout'
 
 const CaptainWallet = () => {
     const { captain } = useContext(CaptainDataContext)
     const { socket } = useContext(SocketContext)
-    const { addToast } = useToast()
+    const captainId = captain?._id
+    const hasSession = Boolean(captainId && getAccessToken('captain'))
 
     const queryClient = useQueryClient();
 
@@ -24,34 +25,37 @@ const CaptainWallet = () => {
     // Queries
     const {
         data: walletData,
-        isLoading: walletLoading,
+        isPending: walletQueryLoading,
         isError: walletIsError,
         refetch: refetchWallet,
         isRefetching: walletRefetching,
     } = useQuery({
-        queryKey: ['captainWallet'],
-        queryFn: async () => {
+        queryKey: ['captainWallet', captainId],
+        enabled: hasSession,
+        queryFn: async ({ signal }) => {
             const token = getAccessToken('captain')
-            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/wallet`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await withHardTimeout(api.get('/captains/wallet', { signal, headers: { Authorization: `Bearer ${token}` } }))
             return res.data.wallet
         }
     })
 
     const {
         data: transactionsData,
-        isLoading: transLoading,
+        isPending: transLoading,
         isError: transIsError,
         refetch: refetchTransactions,
         isRefetching: transRefetching,
     } = useQuery({
-        queryKey: ['captainTransactions'],
-        queryFn: async () => {
+        queryKey: ['captainTransactions', captainId],
+        enabled: hasSession,
+        queryFn: async ({ signal }) => {
             const token = getAccessToken('captain')
-            const res = await api.get(`${import.meta.env.VITE_BASE_URL}/captains/transactions`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await withHardTimeout(api.get('/captains/transactions', { signal, headers: { Authorization: `Bearer ${token}` } }))
             return res.data.transactions
         }
     })
 
+    const walletLoading = !hasSession || walletQueryLoading;
     const loading = walletLoading || transLoading;
     const wallet = walletData;
     const transactions = transactionsData || [];
@@ -59,18 +63,18 @@ const CaptainWallet = () => {
     // Socket invalidation
     useEffect(() => {
         const handleWalletUpdated = () => {
-            queryClient.invalidateQueries({ queryKey: ['captainWallet'] })
-            queryClient.invalidateQueries({ queryKey: ['captainTransactions'] })
+            queryClient.invalidateQueries({ queryKey: ['captainWallet', captainId] })
+            queryClient.invalidateQueries({ queryKey: ['captainTransactions', captainId] })
         }
 
-        if (socket) {
+        if (socket && hasSession) {
             socket.on('wallet-updated', handleWalletUpdated)
         }
 
         return () => {
             if (socket) socket.off('wallet-updated', handleWalletUpdated)
         }
-    }, [socket, queryClient])
+    }, [socket, queryClient, captainId, hasSession])
 
     // Novos saldos
     const creditBalance = wallet?.creditBalance || 0;
@@ -81,18 +85,9 @@ const CaptainWallet = () => {
     // frontend que podia divergir do limite real.
     const isBlocked = captain?.canReceiveRides === false;
     const status = isBlocked ? 'BLOQUEADO' : 'ATIVO';
-    const supportPhone = import.meta.env.VITE_SUPPORT_WHATSAPP
-
-    const contactSupport = () => {
-        const firstName = captain?.fullname?.firstname || 'motorista'
-        const opened = openWhatsApp(
-            supportPhone,
-            `Olá! Sou ${firstName}, motorista MoveCity, e quero fazer uma recarga de créditos.`,
-        )
-        if (!opened) {
-            addToast('WhatsApp do suporte indisponível. Peça o contato à equipe MoveCity.', 'info')
-        }
-    }
+    const rechargeSupportUrl = supportWhatsAppUrl(
+        `Olá! Sou ${captain?.fullname?.firstname || 'motorista'}, motorista MoveCity, e quero fazer uma recarga de créditos.`,
+    )
 
     return (
         <div className="h-full min-h-0 bg-surface-alt flex flex-col">
@@ -112,7 +107,12 @@ const CaptainWallet = () => {
                     silenciosamente pro fallback `|| 0` — o motorista via "R$ 0,00" como se
                     fosse o saldo real, sem nenhum aviso de que a chamada tinha falhado
                     (podia até mascarar um bloqueio por saldo negativo real). */}
-                {walletIsError ? (
+                {walletLoading ? (
+                    <div role="status" className="mb-6 space-y-3">
+                        <p className="text-sm text-ink-600">Carregando sua carteira...</p>
+                        <Skeleton className="h-40 w-full" />
+                    </div>
+                ) : walletIsError ? (
                     <EmptyState
                         variant="error"
                         icon="ri-wifi-off-line"
@@ -271,8 +271,8 @@ const CaptainWallet = () => {
 
             {/* Recharge Modal */}
             {showRechargeModal && (
-                <div className='fixed inset-0 z-modal flex items-center justify-center bg-black/60 px-4'>
-                    <div className='bg-surface w-full max-w-sm rounded-panel p-6 relative shadow-floating'>
+                <div className='fixed inset-0 z-modal flex items-center justify-center bg-black/60 p-4'>
+                    <div role="dialog" aria-modal="true" aria-labelledby="recharge-title" className='bg-surface w-full max-w-sm max-h-full overflow-y-auto rounded-panel p-6 relative shadow-floating'>
                         <button
                             type="button"
                             onClick={() => setShowRechargeModal(false)}
@@ -286,7 +286,7 @@ const CaptainWallet = () => {
                             <div className='h-14 w-14 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-4'>
                                 <i className="ri-tools-fill text-2xl"></i>
                             </div>
-                            <h2 className='text-xl font-bold mb-2'>Recarregar créditos</h2>
+                            <h2 id="recharge-title" className='text-xl font-bold mb-2'>Recarregar créditos</h2>
                             <p className='text-sm text-ink-600'>Nesta fase inicial, nossa equipe faz a recarga para você pelo suporte.</p>
                             <div className='w-full bg-surface-alt border border-line rounded-panel p-4 my-5 text-left'>
                                 <p className='text-sm font-semibold text-ink-900 mb-3'>É simples:</p>
@@ -296,14 +296,16 @@ const CaptainWallet = () => {
                                     <li className='flex gap-2'><span className='font-bold text-brand-600'>3.</span> Envie o comprovante e aguarde o crédito aparecer aqui.</li>
                                 </ol>
                             </div>
-                            <button
-                                type="button"
-                                onClick={contactSupport}
+                            <a
+                                href={rechargeSupportUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className='w-full bg-green-600 text-white font-semibold py-3 rounded-panel hover:bg-green-700 transition-colors flex items-center justify-center gap-2'
                             >
                                 <i className='ri-whatsapp-fill text-xl' aria-hidden='true'></i>
                                 Falar com o suporte
-                            </button>
+                            </a>
+                            <Link to="/captain/support?category=payment" className="mt-2 min-h-[44px] flex items-center underline text-brand-700">Outras opções de suporte</Link>
                             <p className='text-xs text-ink-500 mt-3'>O crédito é usado apenas para comissões. O pagamento das corridas continua indo direto para você.</p>
                         </div>
                     </div>

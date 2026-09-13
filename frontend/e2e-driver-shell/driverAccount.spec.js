@@ -11,7 +11,7 @@ async function visible(control, viewport) {
     })).toBe(true)
 }
 for (const viewport of [{ width: 320, height: 568, font: 16 }, { width: 360, height: 640, font: 24 }, { width: 844, height: 390, font: 16 }]) {
-    for (const mode of ['login', 'documents', 'help', 'approval']) {
+    for (const mode of ['login', 'signup', 'wallet', 'documents', 'help', 'approval']) {
         test(`conta ${mode}: ${viewport.width}x${viewport.height}, fonte ${viewport.font}`, async ({ page }, testInfo) => {
             await page.setViewportSize(viewport)
             await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort())
@@ -30,6 +30,32 @@ for (const viewport of [{ width: 320, height: 568, font: 16 }, { width: 360, hei
                 await page.screenshot({ path: testInfo.outputPath('login-erro.png') })
                 await help.click()
                 await expect(page.getByRole('region', { name: 'Recuperação de acesso' })).toBeVisible()
+            } else if (mode === 'signup') {
+                await page.getByLabel('Nome', { exact: true }).fill('Teste')
+                await expect(page.getByRole('alert')).toContainText('Não foi possível carregar as categorias')
+                await page.evaluate(() => { window.fixtureAccountFailure = false })
+                const retry = page.getByRole('button', { name: 'Tentar carregar categorias novamente' })
+                await visible(retry, viewport)
+                await retry.click()
+                await page.getByLabel('Categoria do Veículo').selectOption('car')
+                await expect(page.getByLabel('Nome', { exact: true })).toHaveValue('Teste')
+                for (const [label, value] of Object.entries({ 'E-mail': 'synthetic@example.test', Senha: 'synthetic-secret', 'Confirmar senha': 'synthetic-secret', Marca: 'Marca', Modelo: 'Modelo', Ano: '2024', Cor: 'Branco', Placa: 'ABC1D23' })) {
+                    await page.getByLabel(label, { exact: true }).fill(value)
+                }
+                await visible(page.getByRole('link', { name: 'Política de Privacidade' }), viewport)
+                const submit = page.getByRole('button', { name: 'Criar Conta', exact: true })
+                await visible(submit, viewport)
+                await page.screenshot({ path: testInfo.outputPath('cadastro-recuperado.png') })
+                await submit.click()
+                await expect(page.getByText('Entrada confirmada pela fixture')).toBeVisible()
+            } else if (mode === 'wallet') {
+                await expect(page.getByText('R$ 35,00')).toBeVisible()
+                await page.getByRole('button', { name: 'Recarregar com o suporte' }).click()
+                const contact = page.getByRole('link', { name: 'Falar com o suporte' })
+                await visible(contact, viewport)
+                await expect(contact).toHaveAttribute('href', /https:\/\/wa.me\//)
+                await visible(page.getByRole('link', { name: 'Outras opções de suporte' }), viewport)
+                await page.screenshot({ path: testInfo.outputPath('recarga-suporte.png') })
             } else if (mode === 'documents') {
                 const row = page.getByRole('region', { name: 'CNH (verso)', exact: true })
                 await expect(row).toContainText('Motivo informado:')

@@ -165,21 +165,21 @@ export async function registerPush(options = {}) {
     return requestWebFcmToken()
 }
 
-export async function unregisterPush() {
+export async function unregisterPush(requestConfig = {}) {
+    const previousNativeToken = nativeToken
+    nativeToken = null
     try {
         let token = null
         if (isNativePlatform()) {
-            token = nativeToken
+            token = previousNativeToken
         } else {
             token = await getCurrentWebFcmToken()
         }
-        if (token) {
-            await api.delete('/notifications/token', { data: { token } })
+        if (token && !requestConfig.signal?.aborted) {
+            await api.delete('/notifications/token', { ...requestConfig, data: { token } })
         }
     } catch (err) {
         console.warn('[push] unregister:', err?.message || err)
-    } finally {
-        nativeToken = null
     }
 }
 

@@ -90,6 +90,7 @@ app.get('/api/health', (req, res) => {
     const memory = process.memoryUsage();
     res.status(200).json({
         status: 'OK',
+        revision: process.env.RENDER_GIT_COMMIT || null,
         uptime: process.uptime(),
         memory: {
             rss: `${Math.round(memory.rss / 1024 / 1024)} MB`,

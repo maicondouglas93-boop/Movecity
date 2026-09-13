@@ -154,6 +154,7 @@ function toRideCaptainDTO(ride) {
     if (!ride) return ride;
     const raw = plain(ride);
     const dto = rideBase(raw);
+    if (raw.source === 'driver_initiated' && raw.passengerName) dto.passengerName = raw.passengerName;
     if (raw.status === 'started') dto.trackingCheckpoint = require('./rideTrackingCheckpoint')(raw);
     dto.driverAmount = computeDriverAmount(raw);
     const fareRates = toPassengerFareRates(raw.pricingSnapshot);
@@ -199,6 +200,7 @@ function toRideCaptainHistoryDTO(ride) {
     if (!ride) return ride;
     const raw = plain(ride);
     const dto = rideBase(raw);
+    if (raw.source === 'driver_initiated' && raw.passengerName) dto.passengerName = raw.passengerName;
     dto.driverAmount = computeDriverAmount(raw);
     if (raw.user) dto.user = toUserIdentity(raw.user);
     return dto;

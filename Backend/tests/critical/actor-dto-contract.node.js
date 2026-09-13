@@ -232,6 +232,19 @@ test('cobrança direta usa o restante informado pelo backend sem revelar dados i
     assert.equal(toRideCaptainDTO(secretRide).collectionAmount, undefined);
 });
 
+test('nome da corrida presencial chega ao motorista e histórico sem inventar conta vinculada', () => {
+    const ride = { ...secretRide, source: 'driver_initiated', user: undefined, passengerName: 'João da Silva' };
+    for (const serialize of [toRideCaptainDTO, toRideCaptainHistoryDTO]) {
+        const dto = serialize(ride);
+        assert.equal(dto.passengerName, 'João da Silva');
+        assert.equal(dto.user, undefined);
+        assertNoForbiddenFields(dto, 'corrida presencial');
+    }
+    assert.equal(toRideOfferDTO(ride).passengerName, undefined);
+    assert.equal(toRidePassengerDTO(ride).passengerName, undefined);
+    assert.equal(toRideCaptainDTO({ ...ride, source: 'passenger_requested' }).passengerName, undefined);
+});
+
 test('corrida aceita separa identidade do passageiro e do motorista por ator', () => {
     const captainView = toRideCaptainDTO(secretRide);
     const passengerView = toRidePassengerDTO(secretRide);

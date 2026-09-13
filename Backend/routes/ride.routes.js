@@ -34,6 +34,8 @@ router.post('/presential',
     body('destination').optional().isString().isLength({ min: 3 }).withMessage('Invalid destination'),
     body('paymentMethod').optional().isIn([ 'cash' ]),
     body('passengerPhone').optional().isString().isLength({ max: 20 }),
+    body('passengerName').optional().isString().bail().trim().isLength({ max: 100 })
+        .withMessage('O nome do passageiro deve ter no máximo 100 caracteres.'),
     body('lat').optional().isFloat({ min: -90, max: 90 }),
     body('lng').optional().isFloat({ min: -180, max: 180 }),
     body('vehicleType').optional().isString().isLength({ min: 1, max: 60 }),

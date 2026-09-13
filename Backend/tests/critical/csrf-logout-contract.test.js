@@ -152,7 +152,7 @@ test('contrato de logout usa POST e nunca transporta refresh token na URL', () =
     const userController = read('Backend/controllers/user.controller.js');
     const captainController = read('Backend/controllers/captain.controller.js');
     const userLogout = read('frontend/src/passenger/pages/UserLogout.jsx');
-    const captainLogout = read('frontend/src/driver/pages/CaptainLogout.jsx');
+    const captainLogout = read('frontend/src/driver/services/logoutCaptain.js');
 
     assert.match(userRoutes, /router\.post\(['"]\/logout['"]/);
     assert.match(captainRoutes, /router\.post\(['"]\/logout['"]/);

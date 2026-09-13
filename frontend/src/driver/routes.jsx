@@ -57,9 +57,7 @@ const driverRoutes = [
     </CaptainProtectWrapper>
   } />,
   <Route key='captain-logout' path='/captain/logout' element={
-    <CaptainProtectWrapper>
-      <CaptainLogout />
-    </CaptainProtectWrapper>
+    <CaptainLogout />
   } />,
 
   <Route key='captain-home-shell' element={

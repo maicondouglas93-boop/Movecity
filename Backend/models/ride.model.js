@@ -37,6 +37,8 @@ const rideSchema = new mongoose.Schema({
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser' },
     createdByRole: { type: String, enum: ['admin'] },
+    // Identificação informada pelo motorista na corrida presencial, sem vínculo de conta.
+    passengerName: { type: String, trim: true, maxlength: 100 },
     adminPassenger: {
         name: { type: String, trim: true },
         phone: { type: String, trim: true },

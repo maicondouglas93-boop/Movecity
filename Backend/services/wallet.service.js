@@ -7,6 +7,8 @@ const { getCachedGlobalSetting } = require('./globalSettingCache.service');
 const { sendMessageToSocketId } = require('../socket');
 const notificationService = require('./notification.service');
 const { ACTIVE_PAYOUT_STATUSES } = require('../config/payoutPolicy');
+const globalSettingModel = require('../models/globalSetting.model');
+const { isDriverCreditBlocked } = require('../utils/driverCreditPolicy');
 
 const getWallet = async (captainId) => {
     let wallet = await walletModel.findOne({ captainId });
@@ -102,17 +104,9 @@ const createTransaction = async ({ captainId, rideId, parcelId, type, paymentMet
 
     const [transaction] = await transactionModel.create([payload], { session });
 
-    // Regra de bloqueio de motorista — parte da mesma unidade atômica da movimentação
-    // que a disparou (saldo negativo pode ser resultado direto desta transação).
-    // Auditoria de cache (2026-08-08, A5): singleton cacheado (TTL curto, 120s,
-    // justamente por gatear essa regra financeira) em vez de findOne().session() —
-    // não há escrita concorrente em GlobalSetting dentro desta transação, então não
-    // há risco de leitura inconsistente por sair da session; o único efeito é
-    // aceitar até 120s de atraso numa mudança de regra feita pelo admin, aceito de
-    // propósito no plano de cache.
-    const settings = await getCachedGlobalSetting()
-        || { blockDriverOnNegativeBalance: true, maximumNegativeBalance: 0 };
-    const shouldBlock = settings.blockDriverOnNegativeBalance && wallet.creditBalance < settings.maximumNegativeBalance;
+    // A mesma política do online/presencial/aceite, sem cache de regra financeira.
+    const settings = await globalSettingModel.findOne().session(session || null);
+    const shouldBlock = isDriverCreditBlocked(wallet.creditBalance, settings);
     // Sem `new: true` o retorno é o documento ANTES da escrita — é como sabemos se este
     // lançamento foi o que virou a chave. Avisar só na transição evita repetir a mesma
     // notificação a cada nova comissão de um motorista que já está bloqueado.

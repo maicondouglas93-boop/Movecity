@@ -32,7 +32,8 @@ const globalSettingSchema = new mongoose.Schema({
     // Novas configurações financeiras
     cardFeePercent: { type: Number, default: 0 },
     cardFeeFixed: { type: Number, default: 0 },
-    maximumNegativeBalance: { type: Number, default: -20.0 },
+    // Campo legado. O bloqueio por crédito negativo usa zero em todos os serviços.
+    maximumNegativeBalance: { type: Number, default: 0 },
     blockDriverOnNegativeBalance: { type: Boolean, default: true },
     minimumPayout: { type: Number, default: 50.0 },
     payoutDeadlineDays: { type: Number, default: 2 },

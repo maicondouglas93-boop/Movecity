@@ -15,6 +15,7 @@ import { formatMoney, formatDateTime } from '../utils/format';
 import { PAYOUT_STATUS_LABELS, PAYOUT_STATUS_COLORS, statusLabel, statusColor } from '../utils/statusDictionary';
 import { describeCaptainLedgerTx, ledgerToneClass } from '../utils/captainLedgerDisplay';
 import StatusBadge from '../components/StatusBadge';
+import DriverCreditRule from '../components/DriverCreditRule';
 
 // Auditoria de UX (2026-08-10): a tela misturava dinheiro da plataforma (comissão),
 // dinheiro do motorista (repasses/saldo) e contadores operacionais (rejeitados/
@@ -109,6 +110,8 @@ export default function Finance() {
               <p className="text-sm text-text-muted mt-1">Comissão da plataforma, repasses e saques dos motoristas.</p>
             </div>
           </div>
+
+          <DriverCreditRule />
 
           {isError && (
             <div className="bg-danger/10 border border-danger/30 text-danger rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-3">

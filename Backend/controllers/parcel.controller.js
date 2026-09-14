@@ -248,6 +248,7 @@ module.exports.acceptParcel = async (req, res) => {
         return res.status(200).json(await parcelService.toParcelCaptainDTO(parcel));
     } catch (err) {
         console.error(`[AUDIT][${TRACE_ID}] accept fail:`, err.message);
+        if (err.code === 'DRIVER_CREDIT_BLOCKED') return res.status(403).json({ code: err.code, message: err.message });
         if (err.message === 'PARCEL_ALREADY_ACCEPTED') {
             return res.status(409).json({ message: 'Encomenda já aceita por outro prestador' });
         }

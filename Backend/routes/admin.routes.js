@@ -227,6 +227,9 @@ router.put('/rides/:id/finalize', authAdmin, authorizeRoles('super_admin', 'oper
 router.post('/rides/bulk-action', authAdmin, authorizeRoles('super_admin', 'operador'), adminController.bulkActionRides);
 
 // Finance (Payouts)
+const driverCreditController = require('../controllers/driverCredit.controller');
+router.get('/settings/driver-credit', authAdmin, authorizeRoles('super_admin', 'financeiro'), driverCreditController.getSetting);
+router.put('/settings/driver-credit', authAdmin, authorizeRoles('super_admin'), driverCreditController.updateSetting);
 router.get('/payouts', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.getPayouts);
 router.get('/payouts/:id', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.getPayoutDetails);
 router.put('/payouts/:id/approve', authAdmin, authorizeRoles('super_admin', 'financeiro'), adminController.approvePayout);

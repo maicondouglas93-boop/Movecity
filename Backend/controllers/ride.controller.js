@@ -265,7 +265,7 @@ async function performAcceptRide(rideId, captain, res) {
     // nenhum dos dois impede uma chamada direta a este endpoint com um rideId obtido
     // por outro meio. Checagem redundante de propósito — a regra não pode depender só
     // de o motorista nunca ter sido convidado a aceitar.
-    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked || captain.canReceiveRides === false) {
+    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked) {
         return res.status(403).json({ message: 'Documentação pendente. Envie e aguarde a aprovação dos seus documentos para começar a receber corridas.' });
     }
 
@@ -308,6 +308,8 @@ async function performAcceptRide(rideId, captain, res) {
         return res.status(200).json(rideForCaptain);
     } catch (err) {
         console.error(`[AUDIT][${TRACE_ID}] Falha ao aceitar corrida (Concorrência ou Erro):`, err.message);
+        if (err.code === 'DRIVER_CREDIT_BLOCKED') return res.status(403).json({ code: err.code, message: err.message });
+        if (err.code === 'CAPTAIN_NOT_ALLOWED') return res.status(403).json({ message: 'Motorista não autorizado a aceitar corrida.' });
         // Diagnóstico de push de corrida (2026-08-03), achado 4: antes, cancelada pelo
         // passageiro caía no mesmo 409 de "outro motorista aceitou" — mensagem
         // factualmente errada pro motorista quando a causa real era cancelamento.
@@ -403,6 +405,7 @@ module.exports.createPresentialRide = async (req, res) => {
         if (err.code === 'CAPTAIN_NOT_ALLOWED') {
             return res.status(403).json({ message: 'Motorista não autorizado a iniciar corrida presencial.' });
         }
+        if (err.code === 'DRIVER_CREDIT_BLOCKED') return res.status(403).json({ code: err.code, message: err.message });
         if (err.code === 'INVALID_CAPTAIN_LOCATION') {
             return res.status(400).json({ message: 'Localização GPS do motorista inválida ou indisponível.' });
         }
@@ -548,6 +551,7 @@ module.exports.startRide = async (req, res) => {
         if (err.message === 'Ride not found') {
             return res.status(404).json({ message: 'Corrida não encontrada' });
         }
+        if (err.code === 'DRIVER_CREDIT_BLOCKED') return res.status(403).json({ code: err.code, message: err.message });
         if (err.message === 'Ride not accepted') {
             return res.status(409).json({ message: 'Corrida não está mais num estado que permita iniciar (pode ter sido cancelada).' });
         }

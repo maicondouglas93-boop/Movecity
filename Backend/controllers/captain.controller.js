@@ -365,10 +365,11 @@ module.exports.toggleOnline = async (req, res, next) => {
                 return res.status(403).json({ message: 'Seu cadastro ainda não foi aprovado. Você não pode ficar online até a aprovação.' });
             }
 
-            const walletService = require('../services/wallet.service');
-            const wallet = await walletService.getWallet(req.captain._id);
-            if (wallet.creditBalance < 0) {
-                return res.status(403).json({ message: 'Inadimplente. Saldo negativo não permite ficar online. Recarregue a carteira.' });
+            try {
+                await require('../services/driverCredit.service').assertDriverCreditAllowed(req.captain._id);
+            } catch (error) {
+                if (error.code === 'DRIVER_CREDIT_BLOCKED') return res.status(403).json({ code: error.code, message: error.message });
+                throw error;
             }
         }
 

@@ -7,6 +7,7 @@ const mapService = require('./maps.service');
 const bcrypt = require('bcrypt');
 const PricingEngine = require('./pricingEngine.service');
 const { getElapsedSeconds } = require('./liveRideFare.service');
+const { assertDriverCreditAllowed } = require('./driverCredit.service');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS, toOfferPassengerPreview } = require('../utils/identityPopulate');
 const { haversineKm } = require('./maps/geo.util');
 const { computeOfferExpiresAt } = require('../config/offerPolicy');
@@ -995,7 +996,7 @@ module.exports.createPresentialRide = async ({
     }
     paymentMethod = 'cash';
 
-    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked || captain.canReceiveRides === false) {
+    if (captain.approvalStatus !== 'aprovado' || captain.isBlocked) {
         const err = new Error('CAPTAIN_NOT_ALLOWED');
         err.code = 'CAPTAIN_NOT_ALLOWED';
         throw err;
@@ -1006,12 +1007,13 @@ module.exports.createPresentialRide = async ({
     if (!freshCaptain) {
         throw new Error('Captain not found');
     }
-    if (freshCaptain.approvalStatus !== 'aprovado' || freshCaptain.isBlocked || freshCaptain.canReceiveRides === false) {
+    if (freshCaptain.approvalStatus !== 'aprovado' || freshCaptain.isBlocked) {
         const err = new Error('CAPTAIN_NOT_ALLOWED');
         err.code = 'CAPTAIN_NOT_ALLOWED';
         throw err;
     }
 
+    await assertDriverCreditAllowed(freshCaptain._id);
     const vehicleType = await resolvePresentialVehicleType(freshCaptain, requestedVehicleType);
 
     const origin = resolveCaptainOrigin(freshCaptain, clientLat, clientLng);
@@ -1342,9 +1344,15 @@ module.exports.acceptRideAtomic = async ({
     const [rideToAccept, freshCaptain] = await Promise.all([
         rideModel.findById(rideId).select('vehicleType status'),
         require('../models/captain.model').findById(captain._id)
-            .select('vehicle vehicleAuthorization'),
+            .select('vehicle vehicleAuthorization approvalStatus isBlocked'),
     ]);
     if (!rideToAccept) throw new Error('RIDE_NOT_FOUND');
+    if (!freshCaptain || freshCaptain.approvalStatus !== 'aprovado' || freshCaptain.isBlocked) {
+        const error = new Error('CAPTAIN_NOT_ALLOWED');
+        error.code = 'CAPTAIN_NOT_ALLOWED';
+        throw error;
+    }
+    await assertDriverCreditAllowed(captain._id);
     if (!(await dispatchService.isCaptainAuthorizedForVehicleType(freshCaptain, rideToAccept.vehicleType))) {
         throw new Error('VEHICLE_MISMATCH');
     }
@@ -1450,6 +1458,8 @@ module.exports.startRide = async ({ rideId, captain, occurredAt = null }) => {
     if (!VALID_ORIGINS_BY_TARGET.started.includes(ride.status)) {
         throw new Error('Ride not accepted');
     }
+
+    if (ride.source === 'driver_initiated') await assertDriverCreditAllowed(captain._id);
 
     // Embarque real (o toque do motorista), não o instante em que esta requisição foi
     // processada: um "iniciar corrida" feito sem sinal chega minutos ou horas depois, e

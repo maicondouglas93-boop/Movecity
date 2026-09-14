@@ -5,6 +5,7 @@ const parcelSettingModel = require('../models/parcelSetting.model');
 const globalSettingModel = require('../models/globalSetting.model');
 const mapService = require('./maps.service');
 const dispatchService = require('./dispatch.service');
+const { assertDriverCreditAllowed } = require('./driverCredit.service');
 const userModel = require('../models/user.model');
 const { CAPTAIN_IDENTITY_FIELDS, USER_IDENTITY_FIELDS } = require('../utils/identityPopulate');
 const { getCache, setCache, deleteCache } = require('../cache/cache');
@@ -560,11 +561,12 @@ module.exports.acceptParcelAtomic = async ({ parcelId, captain }) => {
     if (
         freshCaptain.approvalStatus !== 'aprovado'
         || freshCaptain.isBlocked
-        || freshCaptain.canReceiveRides === false
         || freshCaptain.isOnline !== true
     ) {
         throw new Error('CAPTAIN_NOT_ALLOWED');
     }
+
+    await assertDriverCreditAllowed(freshCaptain._id);
 
     // Recovery: busyLock órfão sem trabalho ativo.
     if (freshCaptain.busyLock === true) {

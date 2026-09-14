@@ -1,3 +1,5 @@
+jest.mock('../../models/wallet.model', () => ({ findOne: jest.fn().mockResolvedValue({ creditBalance: 0 }) }));
+
 jest.mock('../../services/maps.service', () => ({
     haversineKm: jest.fn((aLat, aLng, bLat, bLng) => {
         const toRad = (v) => (v * Math.PI) / 180;
@@ -122,6 +124,7 @@ const mapService = require('../../services/maps.service');
 describe('createPresentialRide', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        require('../../models/wallet.model').findOne.mockResolvedValue({ creditBalance: 0 });
         dispatchService.acquireCaptainBusyLock.mockResolvedValue(true);
         dispatchService.captainHasActiveParcel.mockResolvedValue(false);
         rideModel.exists.mockResolvedValue(false);
@@ -243,6 +246,21 @@ describe('createPresentialRide', () => {
             clientLat: -20.15,
             clientLng: -41.62,
         })).rejects.toMatchObject({ code: 'CAPTAIN_NOT_ALLOWED' });
+    });
+
+    test('bloqueia crédito negativo mesmo com canReceiveRides antigo permitindo', async () => {
+        require('../../models/wallet.model').findOne.mockResolvedValue({ creditBalance: -0.01 });
+        await expect(rideService.createPresentialRide({ captain: mockCaptainDoc, destinationPending: true })).rejects.toMatchObject({ code: 'DRIVER_CREDIT_BLOCKED' });
+        expect(rideModel.create).not.toHaveBeenCalled();
+        expect(dispatchService.acquireCaptainBusyLock).not.toHaveBeenCalled();
+    });
+
+    test('permite crédito negativo com regra desativada mesmo com indicador antigo bloqueado', async () => {
+        await require('../../models/globalSetting.model').create({ blockDriverOnNegativeBalance: false });
+        require('../../models/wallet.model').findOne.mockResolvedValue({ creditBalance: -100 });
+        require('../../models/captain.model').findById.mockResolvedValue({ ...mockCaptainDoc, canReceiveRides: false });
+        await rideService.createPresentialRide({ captain: { ...mockCaptainDoc, canReceiveRides: false }, destinationPending: true });
+        expect(rideModel.create).toHaveBeenCalled();
     });
 
     test('bloqueia GPS inválido', async () => {

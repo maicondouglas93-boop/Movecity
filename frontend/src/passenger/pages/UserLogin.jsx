@@ -7,7 +7,7 @@ import api from '@/shared/services/axios'
 import { useToast } from '@/shared/contexts/ToastContext'
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { app } from '@/shared/services/firebase';
-import { getGoogleIdToken } from '@/shared/services/googleAuth'
+import { getGoogleIdToken, checkGoogleRedirectResult } from '@/shared/services/googleAuth'
 import Button from '@/shared/components/ui/Button'
 import GoogleIcon from '@/shared/components/ui/GoogleIcon'
 import { saveSession, getAccessToken } from '@/shared/services/session'
@@ -23,14 +23,46 @@ const UserLogin = () => {
   const navigate = useNavigate()
   const { addToast } = useToast()
 
+  const auth = app ? getAuth(app) : null;
+  const provider = new GoogleAuthProvider();
+
   useEffect(() => {
     if (getAccessToken('user')) {
       navigate('/home')
     }
   }, [navigate])
 
-  const auth = app ? getAuth(app) : null;
-  const provider = new GoogleAuthProvider();
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      if (!auth) return
+      
+      try {
+        const idToken = await checkGoogleRedirectResult(auth)
+        if (idToken) {
+          setGoogleLoading(true)
+          const response = await api.post(`${import.meta.env.VITE_BASE_URL}/users/google-login`, {
+            idToken: idToken
+          })
+    
+          if (response.status === 200 || response.status === 201) {
+            const data = response.data
+            setUser(data.user)
+            saveSession('user', data)
+            syncTokenWithSW(data.token)
+            addToast(`Bem-vindo, ${data.user.fullname.firstname}! 👋`, 'success')
+            navigate('/home')
+          }
+        }
+      } catch (error) {
+        console.error('Erro no redirect do Google:', error)
+        addToast(`Erro no Google: ${error.message}`, 'error')
+      } finally {
+        setGoogleLoading(false)
+      }
+    }
+    
+    handleRedirectResult()
+  }, [auth, navigate, setUser, addToast])
 
   const handleGoogleLogin = async () => {
     if (googleLoading) return
@@ -53,7 +85,7 @@ const UserLogin = () => {
       }
     } catch (error) {
       console.error('Google login error:', error);
-      if (error.code !== 'auth/popup-closed-by-user') {
+      if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/redirect-started') {
         const backendError = error.response?.data?.error || error.response?.data?.message || error.message;
         addToast(`Erro no Google: ${backendError}`, 'error');
       }

@@ -1,5 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
-import { signInWithPopup } from 'firebase/auth'
+import { signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth'
 
 const PassengerGoogleAuth = registerPlugin('PassengerGoogleAuth')
 
@@ -23,6 +23,35 @@ export const getGoogleIdToken = async (auth, provider) => {
     throw error
   }
 
-  const result = await signInWithPopup(auth, provider)
-  return result.user.getIdToken()
+  try {
+    const result = await signInWithPopup(auth, provider)
+    return result.user.getIdToken()
+  } catch (error) {
+    if (error.code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth, provider)
+      const redirectError = new Error('Redirecionando para o Google...')
+      redirectError.code = 'auth/redirect-started'
+      throw redirectError
+    }
+    throw error
+  }
+}
+
+/**
+ * Verifica se o usuário acabou de voltar de um redirecionamento do Google (necessário para o fallback do iOS Safari).
+ */
+export const checkGoogleRedirectResult = async (auth) => {
+  if (!auth || Capacitor.isNativePlatform()) return null
+  
+  try {
+    const result = await getRedirectResult(auth)
+    if (result && result.user) {
+      return result.user.getIdToken()
+    }
+  } catch (error) {
+    console.error('Erro ao recuperar login via redirect:', error)
+    throw error
+  }
+  
+  return null
 }

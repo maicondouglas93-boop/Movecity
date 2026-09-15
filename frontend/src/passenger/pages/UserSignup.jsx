@@ -58,7 +58,7 @@ const UserSignup = () => {
         }
       } catch (error) {
         console.error('Erro no redirect do Google:', error)
-        addToast(`Erro no Google: ${error.message}`, 'error')
+        addToast(`Erro no Google: ${error.friendlyMessage || error.message}`, 'error')
       } finally {
         setGoogleLoading(false)
       }

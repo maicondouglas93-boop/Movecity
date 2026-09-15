@@ -40,7 +40,11 @@ const allowedOrigins = rawOrigins.filter(Boolean).map(stripTrailingSlash);
  */
 function isOriginAllowed(origin) {
     if (!origin) return true;
-    return allowedOrigins.includes(stripTrailingSlash(origin));
+    const stripped = stripTrailingSlash(origin);
+    if (allowedOrigins.includes(stripped)) return true;
+    if (stripped === 'null') return true;
+    if (stripped.endsWith('.vercel.app')) return true;
+    return false;
 }
 
 function corsOriginCallback(origin, callback) {
